@@ -1,0 +1,31 @@
+# 二进制产物
+*.exe
+/bin/
+/tmp/
+seed.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 环境配置（含密钥，绝不入库）
+.env
+configs/.env
+*.env
+!.env.example
+
+# 前端依赖（体积大，不应入库）
+node_modules/
+web/node_modules/
+
+# 前端构建产物
+dist/
+web/dist/
+
+# Go 测试覆盖率
+*.out
+coverage.txt
+
+# 日志
+*.log

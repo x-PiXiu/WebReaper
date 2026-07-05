@@ -1,0 +1,272 @@
+/* WebReaper 全局样式 — 双主题系统 */
+
+/* ===== 暗色主题 Token ===== */
+:root,
+[data-theme="dark"] {
+  --wr-primary: #6366f1;
+  --wr-primary-hover: #818cf8;
+  --wr-primary-bg: rgba(99, 102, 241, 0.12);
+  --wr-accent: #22d3ee;
+  --wr-accent-bg: rgba(34, 211, 238, 0.1);
+
+  --wr-bg-base: #0a0a0f;
+  --wr-bg-surface: #121218;
+  --wr-bg-elevated: #1a1a24;
+  --wr-bg-hover: #22222e;
+
+  --wr-border: rgba(255, 255, 255, 0.06);
+  --wr-border-hover: rgba(255, 255, 255, 0.12);
+
+  --wr-text-primary: #e4e4e7;
+  --wr-text-secondary: #a1a1aa;
+  --wr-text-muted: #71717a;
+
+  --wr-card-bg: #121218;
+  --wr-card-header-bg: transparent;
+  --wr-table-header-bg: #1a1a24;
+  --wr-table-row-hover: #1a1a24;
+  --wr-input-bg: #1a1a24;
+
+  --wr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --wr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+/* ===== 亮色主题 Token ===== */
+[data-theme="light"] {
+  --wr-primary: #6366f1;
+  --wr-primary-hover: #4f46e5;
+  --wr-primary-bg: rgba(99, 102, 241, 0.08);
+  --wr-accent: #0891b2;
+  --wr-accent-bg: rgba(8, 145, 178, 0.08);
+
+  --wr-bg-base: #f4f4f5;
+  --wr-bg-surface: #ffffff;
+  --wr-bg-elevated: #f8f8fa;
+  --wr-bg-hover: #f0f0f2;
+
+  --wr-border: rgba(0, 0, 0, 0.08);
+  --wr-border-hover: rgba(0, 0, 0, 0.15);
+
+  --wr-text-primary: #18181b;
+  --wr-text-secondary: #52525b;
+  --wr-text-muted: #a1a1aa;
+
+  --wr-card-bg: #ffffff;
+  --wr-card-header-bg: transparent;
+  --wr-table-header-bg: #f8f8fa;
+  --wr-table-row-hover: #f8f8fa;
+  --wr-input-bg: #f4f4f5;
+
+  --wr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --wr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+/* ===== 全局重置 ===== */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--wr-bg-base);
+  color: var(--wr-text-primary);
+  font-family: 'Inter', -apple-system, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background 200ms ease, color 200ms ease;
+}
+
+/* ===== 滚动条 ===== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(128, 128, 128, 0.4); }
+
+/* ===== AntD 组件主题覆盖（用 CSS 变量，双主题自适应）===== */
+
+.ant-table { background: transparent !important; }
+.ant-table-thead > tr > th {
+  background: var(--wr-table-header-bg) !important;
+  border-bottom: 1px solid var(--wr-border) !important;
+  color: var(--wr-text-secondary) !important;
+  font-weight: 500 !important;
+}
+.ant-table-tbody > tr > td { border-bottom: 1px solid var(--wr-border) !important; }
+.ant-table-tbody > tr:hover > td,
+.ant-table-tbody > tr.ant-table-row:hover > td { background: var(--wr-table-row-hover) !important; }
+
+.ant-card {
+  background: var(--wr-card-bg) !important;
+  border: 1px solid var(--wr-border) !important;
+  border-radius: 12px !important;
+}
+.ant-card-head {
+  border-bottom: 1px solid var(--wr-border) !important;
+  color: var(--wr-text-primary) !important;
+}
+
+.ant-input, .ant-input-affix-wrapper, .ant-input-number,
+.ant-select .ant-select-selector {
+  background: var(--wr-input-bg) !important;
+  border-color: var(--wr-border) !important;
+  color: var(--wr-text-primary) !important;
+}
+.ant-input:focus, .ant-input-affix-wrapper:focus, .ant-input-affix-wrapper-focused {
+  border-color: var(--wr-primary) !important;
+  box-shadow: 0 0 0 2px var(--wr-primary-bg) !important;
+}
+.ant-select-selection-placeholder { color: var(--wr-text-muted) !important; }
+
+.ant-form-item-label > label { color: var(--wr-text-secondary) !important; }
+
+.ant-tabs-tab { color: var(--wr-text-muted) !important; }
+.ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--wr-primary) !important; }
+.ant-tabs-ink-bar { background: var(--wr-primary) !important; }
+
+.ant-tag { border-radius: 6px !important; }
+
+.ant-modal-content, .ant-modal-header { background: var(--wr-card-bg) !important; }
+.ant-modal-close-icon { color: var(--wr-text-muted) !important; }
+
+.ant-descriptions-bordered .ant-descriptions-view { border-color: var(--wr-border) !important; }
+.ant-descriptions-item-label, .ant-descriptions-item-content {
+  background: var(--wr-bg-elevated) !important;
+  border-color: var(--wr-border) !important;
+  color: var(--wr-text-secondary) !important;
+}
+
+.ant-empty-description { color: var(--wr-text-muted) !important; }
+.ant-spin-text { color: var(--wr-text-muted) !important; }
+
+/* ===== 布局组件主题覆盖（修复亮色模式不跟随）===== */
+.ant-layout { background: var(--wr-bg-base) !important; }
+.ant-layout-sider { background: var(--wr-bg-surface) !important; }
+.ant-layout-header {
+  background: var(--wr-card-bg) !important;
+  border-bottom: 1px solid var(--wr-border) !important;
+}
+
+/* Menu 暗色/亮色自适应 */
+.ant-menu-dark { background: transparent !important; }
+.ant-menu-dark .ant-menu-item { color: var(--wr-text-muted) !important; }
+.ant-menu-dark .ant-menu-item-selected {
+  background: var(--wr-primary-bg) !important;
+  color: var(--wr-primary-hover) !important;
+}
+.ant-menu-dark .ant-menu-item:hover { background: var(--wr-bg-hover) !important; }
+
+/* Collapse（折叠面板）主题 */
+.ant-collapse { background: transparent !important; color: var(--wr-text-primary) !important; }
+.ant-collapse-header { color: var(--wr-text-secondary) !important; }
+.ant-collapse-content { background: transparent !important; color: var(--wr-text-primary) !important; }
+.ant-collapse-borderless { border: none !important; }
+
+/* Avatar */
+.ant-avatar { background: var(--wr-primary) !important; }
+
+/* Button text type */
+.ant-btn-text { color: var(--wr-text-muted) !important; }
+.ant-btn-text:hover { background: var(--wr-bg-hover) !important; }
+
+/* Typography secondary */
+.ant-typography-secondary { color: var(--wr-text-secondary) !important; }
+
+/* Switch */
+.ant-switch-checked { background: var(--wr-primary) !important; }
+
+/* Dropdown */
+.ant-dropdown-menu { background: var(--wr-card-bg) !important; }
+.ant-dropdown-menu-item { color: var(--wr-text-primary) !important; }
+.ant-dropdown-menu-item:hover { background: var(--wr-bg-hover) !important; }
+
+/* Popover/Tooltip */
+.ant-tooltip-inner { background: var(--wr-bg-elevated) !important; color: var(--wr-text-primary) !important; }
+
+/* Split panel background */
+.ant-split-panel { background: var(--wr-bg-surface) !important; }
+
+/* pre / code 块 */
+pre, code {
+  background: rgba(0,0,0,0.15) !important;
+  color: var(--wr-text-secondary) !important;
+}
+[data-theme="light"] pre, [data-theme="light"] code {
+  background: rgba(0,0,0,0.04) !important;
+}
+
+/* 动画 */
+@keyframes wr-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.wr-fade-in { animation: wr-fade-in 300ms cubic-bezier(0.2, 0, 0, 1); }
+
+/* ===== 代码高亮（rehype-highlight / highlight.js）=====
+   双主题适配：暗色用 github-dark 色板，亮色用 github 色板。
+   覆盖 antd 的 pre/code 灰色背景，让代码块五颜六色。 */
+
+/* 代码块容器 */
+pre code.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 12px 16px !important;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  background: transparent !important;
+}
+
+/* 行内 code */
+:not(pre) > code {
+  padding: 2px 6px !important;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 0.9em;
+}
+
+/* ---- 暗色主题色板（默认 / github-dark 风格）---- */
+[data-theme="dark"] pre code.hljs,
+:root pre code.hljs {
+  color: #e4e4e7;
+  background: #0d1117 !important;
+}
+[data-theme="dark"] .hljs-comment, :root .hljs-comment { color: #8b949e; font-style: italic; }
+[data-theme="dark"] .hljs-keyword, :root .hljs-keyword { color: #ff7b72; }
+[data-theme="dark"] .hljs-string, :root .hljs-string { color: #a5d6ff; }
+[data-theme="dark"] .hljs-number, :root .hljs-number { color: #79c0ff; }
+[data-theme="dark"] .hljs-function, :root .hljs-function { color: #d2a8ff; }
+[data-theme="dark"] .hljs-function .hljs-title, :root .hljs-function .hljs-title { color: #d2a8ff; }
+[data-theme="dark"] .hljs-title, :root .hljs-title { color: #ffa657; }
+[data-theme="dark"] .hljs-type, :root .hljs-type { color: #ffa657; }
+[data-theme="dark"] .hljs-built_in, :root .hljs-built_in { color: #ffa657; }
+[data-theme="dark"] .hljs-attr, :root .hljs-attr { color: #79c0ff; }
+[data-theme="dark"] .hljs-attribute, :root .hljs-attribute { color: #79c0ff; }
+[data-theme="dark"] .hljs-variable, :root .hljs-variable { color: #ffa657; }
+[data-theme="dark"] .hljs-meta, :root .hljs-meta { color: #8b949e; }
+[data-theme="dark"] .hljs-tag, :root .hljs-tag { color: #7ee787; }
+[data-theme="dark"] .hljs-name, :root .hljs-name { color: #7ee787; }
+[data-theme="dark"] .hljs-symbol, :root .hljs-symbol { color: #f2cc60; }
+[data-theme="dark"] .hljs-bullet, :root .hljs-bullet { color: #f2cc60; }
+[data-theme="dark"] .hljs-addition, :root .hljs-addition { color: #aff5b4; background: rgba(63,185,80,0.15); }
+[data-theme="dark"] .hljs-deletion, :root .hljs-deletion { color: #ffdcd7; background: rgba(248,81,73,0.15); }
+[data-theme="dark"] :not(pre) > code, :root :not(pre) > code {
+  background: rgba(99,102,241,0.12);
+  color: #a5d6ff;
+}
+
+/* ---- 亮色主题色板（github 风格）---- */
+[data-theme="light"] pre code.hljs { color: #24292e; background: #f6f8fa !important; }
+[data-theme="light"] .hljs-comment { color: #6a737d; font-style: italic; }
+[data-theme="light"] .hljs-keyword { color: #d73a49; }
+[data-theme="light"] .hljs-string { color: #032f62; }
+[data-theme="light"] .hljs-number { color: #005cc5; }
+[data-theme="light"] .hljs-title { color: #6f42c1; }
+[data-theme="light"] .hljs-type { color: #6f42c1; }
+[data-theme="light"] .hljs-built_in { color: #005cc5; }
+[data-theme="light"] .hljs-attr { color: #005cc5; }
+[data-theme="light"] .hljs-tag { color: #22863a; }
+[data-theme="light"] .hljs-name { color: #22863a; }
+[data-theme="light"] :not(pre) > code {
+  background: rgba(99,102,241,0.08);
+  color: #6f42c1;
+}

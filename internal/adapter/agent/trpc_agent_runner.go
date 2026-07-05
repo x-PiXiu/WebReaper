@@ -1,0 +1,208 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"trpc.group/trpc-go/trpc-agent-go/agent"
+	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
+	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent/builtin"
+	"trpc.group/trpc-go/trpc-agent-go/model"
+	"trpc.group/trpc-go/trpc-agent-go/model/openai"
+	"trpc.group/trpc-go/trpc-agent-go/runner"
+
+	llmadapter "webreaper/internal/adapter/llm"
+	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/port"
+)
+
+// 默认 LLM 配置名：Agent 未指定时回退到此配置。
+const defaultLLMConfigName = "default"
+
+// TrpcAgentRunner 是基于 trpc-agent-go 的 Agent 执行器。
+//
+// 它根据 AgentConfig 构建 ReAct Agent（LLM + SystemPrompt + Tools），
+// 执行任务并返回结果。Agent 自主决定调用哪些爬虫工具、怎么调用。
+//
+// LLM 客户端按 AgentConfig.LLMConfigName 从 LLMConfigRepository 解析（空则 default）。
+type TrpcAgentRunner struct {
+	llmCfgRepo   port.LLMConfigRepository
+	registry     *port.ToolRegistry
+	dataItemRepo port.DataItemRepository
+	logger       port.Logger
+}
+
+// 编译期断言：TrpcAgentRunner 同时实现
+//   - port.AgentSyncRunner（供 HTTP /agents/run 同步端点依赖接口）
+//   - task.AgentRunner（供异步 worker 调用 RunTask）
+var _ port.AgentSyncRunner = (*TrpcAgentRunner)(nil)
+
+// NewTrpcAgentRunner 创建 Agent 执行器（注入 LLMConfigRepository 用于按 Agent 选 LLM，
+// 注入 DataItemRepo 用于工具结果落库，注入 Logger 用于工具落库失败日志）。
+func NewTrpcAgentRunner(llmCfgRepo port.LLMConfigRepository, registry *port.ToolRegistry, dataItemRepo port.DataItemRepository, logger port.Logger) *TrpcAgentRunner {
+	return &TrpcAgentRunner{llmCfgRepo: llmCfgRepo, registry: registry, dataItemRepo: dataItemRepo, logger: logger}
+}
+
+// resolveLLM 按 AgentConfig.LLMConfigName 解析 LLM 配置并构建客户端。
+// 空名回退到 "default"；找不到配置时返回错误。
+func (r *TrpcAgentRunner) resolveLLM(ctx context.Context, llmConfigName string) (*openai.Model, error) {
+	name := llmConfigName
+	if name == "" {
+		name = defaultLLMConfigName
+	}
+	cfg, err := r.llmCfgRepo.FindByName(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("LLM 配置 %q 不存在: %w", name, err)
+	}
+	return llmadapter.Build(cfg), nil
+}
+
+// RunInput 是执行 Agent 的输入。
+type RunInput struct {
+	Task       string         // 用户给 Agent 的任务描述（如"采集会话xxx的内容并总结"）
+	AgentConfig entity.AgentConfig // Agent 配置（提示词+工具）
+}
+
+// RunOutput 是 Agent 执行的输出。
+type RunOutput struct {
+	Response   string                  // Agent 的最终回复
+	CrawlResults []entity.DataItem  // Agent 调用爬虫产生的结果（供存储）
+}
+
+// Run 执行 Agent 任务。
+//
+// 流程：
+//  1. 从 ToolRegistry 获取 AgentConfig 允许的工具
+//  2. 构建 trpc-agent-go 的 LLM Agent（带工具 + 系统提示词）
+//  3. 用 runner 执行，Agent 自主 ReAct 循环
+//  4. 收集最终回复 + 工具调用产生的 CrawlResult
+func (r *TrpcAgentRunner) Run(ctx context.Context, in RunInput) (RunOutput, error) {
+	// 1. 获取允许的工具（注入 DataItemRepo 用于落库）
+	crawlers := r.registry.GetByNames(in.AgentConfig.Tools)
+	tools := ConvertTools(crawlers, r.dataItemRepo, r.logger)
+
+	// 2. 按 Agent 引用的 LLMConfigName 解析并构建 LLM 客户端
+	llm, err := r.resolveLLM(ctx, in.AgentConfig.LLMConfigName)
+	if err != nil {
+		return RunOutput{}, fmt.Errorf("resolve llm: %w", err)
+	}
+
+	// 3. 构建 Agent。
+	// 有工具时用 builtin.NewExplorer（支持 ReAct 工具调用循环）；
+	// 无工具时用纯 llmagent（纯 LLM 对话）。
+	var ag agent.Agent
+	maxIter := in.AgentConfig.MaxIterations
+	if maxIter <= 0 {
+		maxIter = 10
+	}
+
+	if len(tools) > 0 {
+		// 有工具：用 explorer（ReAct 循环，LLM 自主决定调用哪个工具）
+		ag = builtin.NewExplorer(
+			builtin.WithModel(llm),
+			builtin.WithTools(tools),
+			builtin.WithLLMAgentOptions(
+				llmagent.WithInstruction(in.AgentConfig.SystemPrompt),
+				llmagent.WithMaxToolIterations(maxIter),
+			),
+		)
+	} else {
+		// 无工具：纯 LLM Agent
+		ag = llmagent.New(in.AgentConfig.Name,
+			llmagent.WithModel(llm),
+			llmagent.WithInstruction(in.AgentConfig.SystemPrompt),
+		)
+	}
+
+	// 4. 用 runner 执行
+	rn := runner.NewRunner("webreaper", ag)
+	events, err := rn.Run(ctx, "agent-user", "default",
+		model.Message{Role: model.RoleUser, Content: in.Task},
+	)
+	if err != nil {
+		return RunOutput{}, fmt.Errorf("agent run: %w", err)
+	}
+
+	// 5. 收集响应（拼接流式输出 + explorer 最终结果）
+	var sb strings.Builder
+	for evt := range events {
+		if evt.IsError() {
+			if evt.Error != nil {
+				return RunOutput{Response: sb.String()}, fmt.Errorf("agent error: %v", evt.Error)
+			}
+			break
+		}
+		// 流式增量
+		if evt.Object == model.ObjectTypeChatCompletionChunk && evt.Response != nil {
+			for _, choice := range evt.Response.Choices {
+				if choice.Delta.Content != "" {
+					sb.WriteString(choice.Delta.Content)
+				}
+			}
+		}
+		// chat completion（含 Message.Content）
+		if evt.Object == model.ObjectTypeChatCompletion && evt.Response != nil {
+			for _, choice := range evt.Response.Choices {
+				if choice.Delta.Content != "" {
+					sb.WriteString(choice.Delta.Content)
+				}
+				if choice.Message.Content != "" && sb.Len() == 0 {
+					sb.WriteString(choice.Message.Content)
+				}
+			}
+		}
+		// runner completion（explorer 工具调用后的最终结果）
+		if evt.Object == model.ObjectTypeRunnerCompletion && evt.Response != nil {
+			for _, choice := range evt.Response.Choices {
+				if choice.Message.Content != "" {
+					sb.WriteString(choice.Message.Content)
+				}
+			}
+		}
+	}
+
+	return RunOutput{Response: sb.String()}, nil
+}
+
+// runSyncInternal 是 Run 的同步便捷方法（直接返回最终文本），供内部和 RunTask 复用。
+func (r *TrpcAgentRunner) runSyncInternal(ctx context.Context, task string, cfg entity.AgentConfig) (string, error) {
+	out, err := r.Run(ctx, RunInput{Task: task, AgentConfig: cfg})
+	if err != nil {
+		return "", err
+	}
+	return out.Response, nil
+}
+
+// RunSync 实现 port.AgentSyncRunner 接口（供 HTTP handler 依赖接口而非具体 struct）。
+// 把 port 层 DTO 转成内部 RunInput，复用 Run。
+func (r *TrpcAgentRunner) RunSync(ctx context.Context, in port.AgentRunInput) (port.AgentRunOutput, error) {
+	prompt := in.SystemPrompt
+	if prompt == "" {
+		prompt = entity.DefaultSystemPrompt
+	}
+	cfg := entity.AgentConfig{
+		Name:          "api-agent",
+		SystemPrompt:  prompt,
+		Tools:         in.Tools,
+		LLMConfigName: in.LLMConfigName,
+	}.FillDefaults()
+	resp, err := r.runSyncInternal(ctx, in.Task, cfg)
+	if err != nil {
+		return port.AgentRunOutput{}, err
+	}
+	return port.AgentRunOutput{Response: resp}, nil
+}
+
+// RunTask 实现 task.AgentRunner 接口（供 AgentHandler 异步调用）。
+func (r *TrpcAgentRunner) RunTask(ctx context.Context, taskStr string, tools []string, systemPrompt string) (string, error) {
+	prompt := systemPrompt
+	if prompt == "" {
+		prompt = entity.DefaultSystemPrompt
+	}
+	return r.runSyncInternal(ctx, taskStr, entity.AgentConfig{
+		Name:          "async-agent",
+		SystemPrompt:  prompt,
+		Tools:         tools,
+	}.FillDefaults())
+}
