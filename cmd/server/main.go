@@ -32,6 +32,7 @@ import (
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
 	"webreaper/internal/usecase/orchestrate"
+	"webreaper/internal/usecase/taskagent"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/process"
@@ -178,16 +179,29 @@ func main() {
 	// 框架内容编排用例（图编排：探查→生成→校验→补生成，落库不推送）。
 	// 仅配了 LLM 时启用（scout/generator 依赖 LLM）；否则降级为 nil，编排端点不注册。
 	var orchestrateUC *orchestrate.OrchestratorUseCase
+	var graphOrchestrator port.ContentOrchestrator
 	if cfg.LLM.IsConfigured() {
-		graphOrchestrator := agentadapter.NewGraphContentOrchestrator(
+		graphOrchestrator = agentadapter.NewGraphContentOrchestrator(
 			aiGenerator,
 			[]string{"static_crawler", "search_crawler", "dynamic_crawler"}, // scout 探查文档用的爬虫
 			logger,
 		)
 		orchestrateUC = orchestrate.NewOrchestratorUseCase(graphOrchestrator, dataItemRepo, logger)
 		log.Info("框架内容编排已启用（图编排模式）")
+		// 把图编排包装成 generate_content 工具，注册进工具池——
+		// 让通用 Agent 能把它当作"子能力"自主调用。
+		toolRegistry.Register(agentadapter.NewContentGenerationTool(graphOrchestrator))
 	} else {
 		log.Info("未配置 LLM，框架内容编排降级禁用")
+	}
+
+	// 通用任务 Agent（任意任务 → LLM 自主规划 → 调工具/子能力 → 直到完成）。
+	// 仅配了 LLM 时启用；否则降级为 nil，该端点不注册。
+	var taskAgentUC *taskagent.TaskAgentUseCase
+	if cfg.LLM.IsConfigured() {
+		taskAgent := agentadapter.NewExplorerTaskAgent(llmConfigRepo, toolRegistry, dataItemRepo, logger)
+		taskAgentUC = taskagent.NewTaskAgentUseCase(taskAgent, logger)
+		log.Info("通用任务 Agent 已启用（Explorer ReAct 模式）")
 	}
 
 	// 注册推送工具为 Agent 可调用工具（装配层做适配，依赖方向合法）
@@ -221,7 +235,7 @@ func main() {
 	// 路由 + HTTP 服务（handler 只依赖 usecase 与 port 接口，不直接持有仓储/具体 adapter struct）
 	router := handler.NewRouter(registerUC, loginUC, tokenParser, aiGenerator, enqueueUC,
 		agentRunner, taskQueryUC, dataItemUC, agentCfgUC, llmCfgUC, conversationUC, crawlCfgUC,
-		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC)
+		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC, taskAgentUC)
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
 
 	go func() {

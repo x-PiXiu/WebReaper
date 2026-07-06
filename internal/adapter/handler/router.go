@@ -16,6 +16,7 @@ import (
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
+	"webreaper/internal/usecase/taskagent"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 )
@@ -44,6 +45,7 @@ type Router struct {
 	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
 	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
 	orchestrateUC    *orchestrate.OrchestratorUseCase // 可为 nil（未配置编排器时该端点 503）
+	taskAgentUC      *taskagent.TaskAgentUseCase       // 可为 nil（未配置通用 Agent 时该端点不注册）
 }
 
 func NewRouter(
@@ -64,6 +66,7 @@ func NewRouter(
 	toolRegistry *port.ToolRegistry,
 	knowledgeSearch port.KnowledgeSearcher,
 	orchestrateUC *orchestrate.OrchestratorUseCase,
+	taskAgentUC *taskagent.TaskAgentUseCase,
 ) *Router {
 	return &Router{
 		authRegister: registerUC, authLogin: loginUC, tokenParser: tokenParser,
@@ -74,6 +77,7 @@ func NewRouter(
 		publishUC: publishUC, sysCfgUC: sysCfgUC,
 		toolRegistry: toolRegistry, knowledgeSearch: knowledgeSearch,
 		orchestrateUC: orchestrateUC,
+		taskAgentUC:   taskAgentUC,
 	}
 }
 
@@ -150,6 +154,11 @@ func (r *Router) Engine() *gin.Engine {
 		if r.orchestrateUC != nil {
 			orchHandler := NewOrchestrationHandler(r.orchestrateUC)
 			api.POST("/orchestrations", orchHandler.HandleOrchestrate)
+		}
+		// 通用任务执行（Agent 自主规划：任意任务→调工具/子能力→直到完成）
+		if r.taskAgentUC != nil {
+			taskAgentHandler := NewTaskAgentHandler(r.taskAgentUC)
+			api.POST("/agents/execute", taskAgentHandler.HandleExecute)
 		}
 	}
 	return e
