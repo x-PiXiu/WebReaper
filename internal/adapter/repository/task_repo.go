@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -80,8 +81,11 @@ func (r *GormTaskRepository) UpdateOutput(ctx context.Context, id string, output
 }
 
 func (r *GormTaskRepository) UpdateProgress(ctx context.Context, id string, progress string) error {
+	// 用 Go 的 time.Now() 而非 gorm.Expr("CURRENT_TIMESTAMP(3)")：
+	// 后者是 MySQL 方言（毫秒精度），SQLite 不支持（语法错）。
+	// 直接赋值跨数据库兼容，且时间由应用控制更可测。
 	result := r.db.WithContext(ctx).Model(&TaskPO{}).Where("id = ?", id).
-		Updates(map[string]any{"progress": progress, "updated_at": gorm.Expr("CURRENT_TIMESTAMP(3)")})
+		Updates(map[string]any{"progress": progress, "updated_at": time.Now()})
 	if result.Error != nil {
 		return result.Error
 	}
