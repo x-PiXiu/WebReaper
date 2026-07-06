@@ -1,4 +1,4 @@
-.PHONY: build-server dev-server dev-web build-web test clean
+.PHONY: build-server dev-server dev-web build-web test e2e clean
 
 # 构建后端 API 服务（纯 API，不含前端——前端由 Nginx 独立部署）
 build-server:
@@ -19,6 +19,10 @@ build-web:
 # 跑全部测试
 test:
 	go test ./...
+
+# 真实闭环联调（采集 arbeitnow → AI 加工 → 推送，需联网；配 LLM_API_KEY 跑完整链路）
+e2e:
+	go run ./cmd/e2e
 
 clean:
 	rm -rf bin/ web/dist/

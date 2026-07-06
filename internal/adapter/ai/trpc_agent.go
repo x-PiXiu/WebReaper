@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"trpc.group/trpc-go/trpc-agent-go/agent"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent/builtin"
@@ -144,6 +145,7 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName strin
 	if err != nil { return "", fmt.Errorf("runner run: %w", err) }
 
 	var sb strings.Builder
+	var promptTokens, completionTokens, totalTokens, llmCalls int
 	for evt := range events {
 		if evt.IsError() {
 			if evt.Error != nil { return sb.String(), fmt.Errorf("llm error: %v", evt.Error) }
@@ -164,7 +166,30 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName strin
 					if onDelta != nil { onDelta(choice.Message.Content) }
 				}
 			}
+			// 累加 token 用量（仅 completion 事件，chunk 事件 usage 为 nil）
+			if evt.Response.Usage != nil {
+				promptTokens += evt.Response.Usage.PromptTokens
+				completionTokens += evt.Response.Usage.CompletionTokens
+				totalTokens += evt.Response.Usage.TotalTokens
+				llmCalls++
+			}
 		}
+	}
+	// 上报 token 消耗到日志 + trace span（ChatStream 是前端对话主路径，烧钱大户需监控）
+	if llmCalls > 0 {
+		g.logger.Info("token 消耗",
+			port.Int("prompt_tokens", promptTokens),
+			port.Int("completion_tokens", completionTokens),
+			port.Int("total_tokens", totalTokens),
+			port.Int("llm_calls", llmCalls),
+			port.String("path", "chat_stream"),
+		)
+		span.SetAttributes(
+			attribute.Int("token.prompt", promptTokens),
+			attribute.Int("token.completion", completionTokens),
+			attribute.Int("token.total", totalTokens),
+			attribute.Int("token.llm_calls", llmCalls),
+		)
 	}
 	return sb.String(), nil
 }

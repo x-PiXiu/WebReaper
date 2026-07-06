@@ -68,8 +68,24 @@ type RunInput struct {
 
 // RunOutput 是 Agent 执行的输出。
 type RunOutput struct {
-	Response   string                  // Agent 的最终回复
-	CrawlResults []entity.DataItem  // Agent 调用爬虫产生的结果（供存储）
+	Response     string            // Agent 的最终回复
+	CrawlResults []entity.DataItem // Agent 调用爬虫产生的结果（供存储）
+	Tokens       TokenUsage        // 本次任务的 token 消耗统计
+}
+
+// TokenUsage 记录一次 Agent 任务的 LLM token 消耗。
+//
+// 设计说明：
+//   - 独立定义（不复用 trpc-agent-go 的 model.Usage），避免把框架类型泄露到上层。
+//   - 从 runner 事件 channel 的 evt.Response.Usage 累加，仅计 ObjectTypeChatCompletion
+//     事件（chunk 事件 usage 为 nil，框架自身也这么做——见 chainagent.go）。
+//   - LLMCalls 反映 ReAct 迭代次数：一次 Agent 任务多次调 LLM 属正常，
+//     若接近 MaxIterations 上限说明 Agent 陷入循环，需告警。
+type TokenUsage struct {
+	PromptTokens     int // 输入 token（含历史上下文，逐轮递增）
+	CompletionTokens int // 输出 token
+	TotalTokens      int // 合计
+	LLMCalls         int // LLM 调用次数（观察 ReAct 迭代深度）
 }
 
 // Run 执行 Agent 任务。
@@ -132,10 +148,12 @@ func (r *TrpcAgentRunner) Run(ctx context.Context, in RunInput) (RunOutput, erro
 
 	// 5. 收集响应（拼接流式输出 + explorer 最终结果）
 	var sb strings.Builder
+	var tokens TokenUsage
 	for evt := range events {
 		if evt.IsError() {
 			if evt.Error != nil {
-				return RunOutput{Response: sb.String()}, fmt.Errorf("agent error: %v", evt.Error)
+				reportTokenUsage(ctx, r.logger, tokens)
+				return RunOutput{Response: sb.String(), Tokens: tokens}, fmt.Errorf("agent error: %v", evt.Error)
 			}
 			break
 		}
@@ -147,7 +165,7 @@ func (r *TrpcAgentRunner) Run(ctx context.Context, in RunInput) (RunOutput, erro
 				}
 			}
 		}
-		// chat completion（含 Message.Content）
+		// chat completion（含 Message.Content + Usage）
 		if evt.Object == model.ObjectTypeChatCompletion && evt.Response != nil {
 			for _, choice := range evt.Response.Choices {
 				if choice.Delta.Content != "" {
@@ -157,6 +175,8 @@ func (r *TrpcAgentRunner) Run(ctx context.Context, in RunInput) (RunOutput, erro
 					sb.WriteString(choice.Message.Content)
 				}
 			}
+			// 累加 token 用量（chunk 事件 usage 为 nil，只在 completion 事件计）
+			tokens = accumulateUsage(tokens, evt.Response.Usage)
 		}
 		// runner completion（explorer 工具调用后的最终结果）
 		if evt.Object == model.ObjectTypeRunnerCompletion && evt.Response != nil {
@@ -168,7 +188,46 @@ func (r *TrpcAgentRunner) Run(ctx context.Context, in RunInput) (RunOutput, erro
 		}
 	}
 
-	return RunOutput{Response: sb.String()}, nil
+	// 上报 token 消耗（日志 + trace span 属性）
+	reportTokenUsage(ctx, r.logger, tokens)
+	span.SetAttributes(
+		attribute.Int("token.prompt", tokens.PromptTokens),
+		attribute.Int("token.completion", tokens.CompletionTokens),
+		attribute.Int("token.total", tokens.TotalTokens),
+		attribute.Int("token.llm_calls", tokens.LLMCalls),
+	)
+
+	return RunOutput{Response: sb.String(), Tokens: tokens}, nil
+}
+
+// reportTokenUsage 通过日志上报 token 消耗，便于成本核算。
+// 即使任务失败也调用（在错误 return 前上报），确保每次实际消耗都被记录。
+func reportTokenUsage(_ context.Context, logger port.Logger, t TokenUsage) {
+	if logger == nil {
+		return
+	}
+	logger.Info("token 消耗",
+		port.Int("prompt_tokens", t.PromptTokens),
+		port.Int("completion_tokens", t.CompletionTokens),
+		port.Int("total_tokens", t.TotalTokens),
+		port.Int("llm_calls", t.LLMCalls),
+	)
+}
+
+// accumulateUsage 把单次 LLM 调用的 usage 累加到累计值。
+// usage 为 nil（chunk 事件或缺失）时跳过，返回原值。
+//
+// 抽成纯函数便于单元测试（事件循环本身依赖 trpc-agent-go 难以单测，
+// 这是谦卑对象模式——把可测的累加逻辑从难测的事件循环中分离）。
+func accumulateUsage(acc TokenUsage, usage *model.Usage) TokenUsage {
+	if usage == nil {
+		return acc
+	}
+	acc.PromptTokens += usage.PromptTokens
+	acc.CompletionTokens += usage.CompletionTokens
+	acc.TotalTokens += usage.TotalTokens
+	acc.LLMCalls++
+	return acc
 }
 
 // runSyncInternal 是 Run 的同步便捷方法（直接返回最终文本），供内部和 RunTask 复用。
