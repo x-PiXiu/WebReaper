@@ -8,6 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"regexp"
+	"strings"
 	"time"
 
 	"webreaper/internal/domain/entity"
@@ -74,11 +77,13 @@ func (uc *ProcessUseCase) ProcessItem(ctx context.Context, itemID string) error 
 	}
 
 	// 2. LLM 提取结构化字段
+	// 先 stripHTML 去标签再截断：避免 HTML 标签浪费 token，且避免截断到半个标签。
+	raw := stripHTML(item.Content + item.RawContent)
 	prompt := fmt.Sprintf(`请分析以下内容，提取结构化信息。返回 JSON 格式：
 {"title":"简洁标题","summary":"一句话摘要","tags":["标签1","标签2"]}
 
 内容：
-%s`, truncate(item.Content+item.RawContent, 6000))
+%s`, truncate(raw, 6000))
 
 	resp, err := uc.ai.ChatStream(ctx, "", []port.ChatMessage{
 		{Role: "system", Content: "你是数据结构化助手。只返回 JSON，不要其他文字。"},
@@ -179,6 +184,51 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// blockTagRe 匹配块级标签（开/闭）——这些标签边界应替换为空格，
+// 避免相邻块级文本粘连（如 <li>Go</li><li>MySQL</li> → "GoMySQL" 而非 "Go MySQL"）。
+var blockTagRe = regexp.MustCompile(`(?i)</?(p|div|li|br|tr|h[1-6]|hr|section|article|header|footer|td|th)\b[^>]*>`)
+
+// scriptRe / styleRe 匹配 script/style 块（连内容一起移除，避免把 JS/CSS 当正文）。
+// 注：Go regexp 是 RE2 语法，不支持反向引用 \1，故 script/style 分两条规则。
+var scriptRe = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`)
+var styleRe = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style>`)
+
+// tagRe 匹配剩余的任何 HTML 标签（清理后直接移除）。
+var tagRe = regexp.MustCompile(`<[^>]*>`)
+
+// stripHTML 去除 HTML 标签，返回纯文本。
+//
+// 动机：采集到的 description/Content 常含 HTML（如 arbeitnow 的 <p>...</p>），
+// 直接喂 LLM 会浪费 token（标签是无意义噪音）。
+//
+// 设计（按需清洗，保留原始数据）：
+//   - 仅在"喂 LLM"前清洗，不修改 DataItem 的 Content/RawContent（原始数据完整保留备查）。
+//   - 三步处理：① 移除 script/style 块 ② 块级标签边界转空格 ③ 移除剩余标签 ④ 解码 HTML 实体。
+//   - 块级标签边界补空格，避免 "GoMySQL" 粘连影响 LLM 理解。
+//   - 无标签符号的纯文本直接返回，跳过正则开销。
+//
+// 放 usecase 层合法：清洗是"为 AI 加工准备输入"的应用逻辑，非框架细节。
+//
+// 注：用正则而非 goquery 遍历——goquery 的 Selection.Contents 对文本节点提取
+// 在不同 HTML 结构下表现不一致，正则方案更稳定可控，对 LLM 输入完全够用。
+func stripHTML(s string) string {
+	if !strings.ContainsAny(s, "<>") {
+		// 无标签符号，纯文本，跳过解析开销
+		return s
+	}
+	// ① 移除 script/style 块（连内容）
+	s = scriptRe.ReplaceAllString(s, " ")
+	s = styleRe.ReplaceAllString(s, " ")
+	// ② 块级标签边界转空格（关键：避免粘连）
+	s = blockTagRe.ReplaceAllString(s, " ")
+	// ③ 移除剩余所有标签
+	s = tagRe.ReplaceAllString(s, "")
+	// ④ 解码 HTML 实体（&amp; → & 等）
+	s = html.UnescapeString(s)
+	// 压缩多余空白为单个空格
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // extractJSON 从可能含 markdown 包裹的文本中提取 JSON 对象。

@@ -88,6 +88,7 @@ type PublishConfig struct {
 	BaseURL      string // 如 https://agentcore.example.com
 	ArticlePath  string // 文章推送路径，如 /api/v1/ingest/article
 	QuestionPath string // 面试题推送路径，如 /api/v1/ingest/question
+	MaxRetries   int    // HTTP 推送失败重试次数（仅对 5xx/429/网络错误），默认 3
 }
 
 // IsConfigured 判断推送平台是否已配置（API Key + BaseURL 非空）。
@@ -224,6 +225,7 @@ func Load() Config {
 			BaseURL:      getenvDefault("INGEST_BASE_URL", ""),
 			ArticlePath:  getenvDefault("INGEST_ARTICLE_PATH", "/api/v1/ingest/article"),
 			QuestionPath: getenvDefault("INGEST_QUESTION_PATH", "/api/v1/ingest/question"),
+			MaxRetries:   getenvInt("PUBLISH_MAX_RETRIES", 3),
 		},
 		AgentCore: AgentCoreConfig{
 			BaseURL:    getenvDefault("AGENTCORE_BASE_URL", "http://localhost:8081"),

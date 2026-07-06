@@ -171,6 +171,7 @@ func main() {
 	// 外部系统推送用例（字段映射 + HTTP 推送 + 推送记录）
 	publishUC := publish.NewPublishUseCase(extSysRepo, pubRecRepo, dataItemRepo, logger)
 	publishUC.SetTracer(tracer)
+	publishUC.SetMaxRetries(cfg.Publish.MaxRetries)
 	sysCfgUC := publish.NewSystemConfigUseCase(extSysRepo)
 
 	// 注册推送工具为 Agent 可调用工具（装配层做适配，依赖方向合法）

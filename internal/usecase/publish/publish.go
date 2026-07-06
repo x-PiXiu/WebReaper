@@ -29,6 +29,7 @@ type PublishUseCase struct {
 	httpClient *http.Client
 	logger     port.Logger
 	tracer     port.Tracer
+	maxRetries int // HTTP 推送失败重试次数（默认 3），仅对可重试错误生效
 }
 
 func NewPublishUseCase(
@@ -44,6 +45,7 @@ func NewPublishUseCase(
 		sysRepo: sysRepo, recRepo: recRepo, itemRepo: itemRepo, logger: logger,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		tracer:    port.NewNopTracer(),
+		maxRetries: 3,
 	}
 }
 
@@ -53,6 +55,12 @@ func (uc *PublishUseCase) SetTracer(t port.Tracer) {
 	if t != nil {
 		uc.tracer = t
 	}
+}
+
+// SetMaxRetries 设置 HTTP 推送重试次数（0 表示不重试）。
+// 仅对可重试错误（网络错误、5xx、429）生效；4xx 等客户端错误不重试。
+func (uc *PublishUseCase) SetMaxRetries(n int) {
+	uc.maxRetries = n
 }
 
 // RecRepo 暴露推送记录仓储（供 handler 查询记录用）。
@@ -132,7 +140,7 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (Publish
 	if method == "" {
 		method = "POST"
 	}
-	extID, pushErr := uc.doHTTP(ctx, sys.Endpoint, method, sys.Headers, payload)
+	extID, pushErr := uc.doHTTPWithRetry(ctx, sys.Endpoint, method, sys.Headers, payload)
 
 	// 6. 记录推送结果
 	now := time.Now()
@@ -245,15 +253,18 @@ func extractJSONString(s string) string {
 	return s[start:]
 }
 
-// doHTTP 执行 HTTP 推送，返回外部系统响应里的 ID（尽力提取）。
-func (uc *PublishUseCase) doHTTP(ctx context.Context, endpoint, method, headersJSON string, payload map[string]any) (string, error) {
+// doHTTP 执行单次 HTTP 推送，返回外部系统响应里的 ID（尽力提取）。
+// 同时透出 status code 和 Retry-After，供重试逻辑判断。
+//
+// 保持纯：单次调用，不含重试逻辑（重试在 doHTTPWithRetry 里）。
+func (uc *PublishUseCase) doHTTP(ctx context.Context, endpoint, method, headersJSON string, payload map[string]any) (extID string, statusCode int, retryAfter string, err error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshal payload: %w", err)
+		return "", 0, "", fmt.Errorf("marshal payload: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
+		return "", 0, "", fmt.Errorf("build request: %w", err)
 	}
 	// 应用自定义请求头
 	if headersJSON != "" {
@@ -270,18 +281,98 @@ func (uc *PublishUseCase) doHTTP(ctx context.Context, endpoint, method, headersJ
 
 	resp, err := uc.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("http request: %w", err)
+		// 网络错误（DNS/连接/超时）：status=0，可重试
+		return "", 0, "", fmt.Errorf("http request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("外部系统返回 %d: %s", resp.StatusCode, string(respBody))
+		// 透出 Retry-After 头（429/503 常见），供重试逻辑尊重服务端建议
+		return "", resp.StatusCode, resp.Header.Get("Retry-After"),
+			fmt.Errorf("外部系统返回 %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	// 尽力从响应里提取 ID（常见格式 {id:"xxx"} 或 {data:{id:"xxx"}}）
-	extID := extractID(respBody)
-	return extID, nil
+	extID = extractID(respBody)
+	return extID, resp.StatusCode, "", nil
+}
+
+// isRetryableError 判断错误是否值得重试。
+//
+// 重试策略（区分技术性临时故障 vs 业务性永久错误）：
+//   - 网络错误（status==0，DNS/连接/超时）：重试
+//   - HTTP 5xx（502/503/504，服务端临时故障）：重试
+//   - HTTP 429（限流）：重试（尊重 Retry-After）
+//   - HTTP 4xx（400/401/403/404，客户端错误）：不重试（重试无意义）
+func isRetryableError(statusCode int) bool {
+	if statusCode == 0 {
+		return true // 网络错误
+	}
+	if statusCode >= 500 {
+		return true // 服务端错误
+	}
+	if statusCode == 429 {
+		return true // 限流
+	}
+	return false
+}
+
+// doHTTPWithRetry 执行带重试的 HTTP 推送。
+//
+// 指数退避：1s → 2s → 4s（与 worker 一致）。
+// 429 时若有 Retry-After 头，用其值覆盖退避（尊重服务端限流建议）。
+// 抽成方法便于单测（mock httpClient 或 httptest.Server）。
+func (uc *PublishUseCase) doHTTPWithRetry(ctx context.Context, endpoint, method, headersJSON string, payload map[string]any) (string, error) {
+	maxRetries := uc.maxRetries
+	if maxRetries < 0 {
+		maxRetries = 0
+	}
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		extID, statusCode, retryAfter, err := uc.doHTTP(ctx, endpoint, method, headersJSON, payload)
+		if err == nil {
+			return extID, nil // 成功
+		}
+		lastErr = err
+		if !isRetryableError(statusCode) {
+			return "", err // 不可重试错误（4xx 等），立即返回
+		}
+		if attempt == maxRetries {
+			break // 重试用尽
+		}
+		// 计算退避：默认指数退避，429/503 优先用 Retry-After
+		backoff := time.Duration(1<<attempt) * time.Second // 1s, 2s, 4s
+		if retryAfter != "" {
+			if secs, parseErr := parseRetryAfter(retryAfter); parseErr == nil && secs >= 0 {
+				backoff = time.Duration(secs) * time.Second
+			}
+		}
+		uc.logger.Warn("推送将重试",
+			port.Int("attempt", attempt+1),
+			port.Int("max", maxRetries+1),
+			port.String("backoff", backoff.String()),
+			port.Int("status", statusCode),
+			port.Err(err))
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return "", ctx.Err() // 被取消，放弃
+		}
+	}
+	return "", lastErr
+}
+
+// parseRetryAfter 解析 Retry-After 头（秒数形式；忽略 HTTP-date 形式）。
+func parseRetryAfter(v string) (int, error) {
+	n := 0
+	for _, c := range v {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("not a number: %q", v)
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, nil
 }
 
 // extractID 从推送响应里尽力提取 ID（兼容几种常见 JSON 格式）。
