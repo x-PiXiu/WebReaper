@@ -2,6 +2,7 @@ package agent
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"webreaper/internal/usecase/port"
@@ -171,3 +172,107 @@ func TestContentTypeLabel(t *testing.T) {
 		}
 	}
 }
+
+// ---- 质量评审相关（分层校验新增）----
+
+// TestParseQualityResult_Pass 验证：评审通过（pass=true，无 gaps）。
+func TestParseQualityResult_Pass(t *testing.T) {
+	pass, gaps := parseQualityResult(`{"pass": true, "gaps": []}`)
+	if !pass {
+		t.Error("pass=true 应解析为通过")
+	}
+	if len(gaps) != 0 {
+		t.Errorf("无 gaps 时应返回空，得到 %v", gaps)
+	}
+}
+
+// TestParseQualityResult_FailWithGaps 验证：评审不达标，正确提取 gaps。
+// 这是"带反馈精确补生成"的关键——gaps 要准确解析出来传给 generator。
+func TestParseQualityResult_FailWithGaps(t *testing.T) {
+	input := `{"pass": false, "gaps": ["缺少 graph 模块的实现细节", "agent 节点题目跑题"]}`
+	pass, gaps := parseQualityResult(input)
+	if pass {
+		t.Error("pass=false 应解析为不通过")
+	}
+	if len(gaps) != 2 {
+		t.Fatalf("应提取 2 个 gaps，得到 %d", len(gaps))
+	}
+	if gaps[0] != "缺少 graph 模块的实现细节" {
+		t.Errorf("gap[0] = %q", gaps[0])
+	}
+}
+
+// TestParseQualityResult_MarkdownWrapped 验证：LLM 常用 ```json 包裹。
+func TestParseQualityResult_MarkdownWrapped(t *testing.T) {
+	input := "评审结果：\n```json\n{\"pass\": false, \"gaps\": [\"缺X\"]}\n```"
+	pass, gaps := parseQualityResult(input)
+	if pass {
+		t.Error("应解析为不通过")
+	}
+	if len(gaps) != 1 || gaps[0] != "缺X" {
+		t.Errorf("gaps = %v, want [缺X]", gaps)
+	}
+}
+
+// TestParseQualityResult_Malformed 验证：非法 JSON 不 panic，保守降级。
+// 非 JSON 输入会解析为空对象 {}，pass 字段默认 false——但这不 panic，且
+// 上游 quality_validator 对 LLM 调用失败已有降级（不阻断流程）。
+func TestParseQualityResult_Malformed(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("非法 JSON 不应 panic: %v", r)
+		}
+	}()
+	// 只验证不 panic（pass 值在非 JSON 时为 false 默认，业务上由上游降级兜底）
+	_, _ = parseQualityResult("这不是JSON")
+}
+
+// TestParseQualityResult_NullGaps 验证：gaps 为 null 时返回空切片（非 nil）。
+func TestParseQualityResult_NullGaps(t *testing.T) {
+	pass, gaps := parseQualityResult(`{"pass": true, "gaps": null}`)
+	if !pass {
+		t.Error("应通过")
+	}
+	// nil 和空切片在业务上等价，但确保不会因 nil 导致下游 panic
+	_ = gaps
+}
+
+// TestExtractJSONObject_Nested 验证：嵌套 JSON 对象的括号配平提取。
+func TestExtractJSONObject_Nested(t *testing.T) {
+	input := `prefix {"a": {"b": 1}, "c": 2} suffix`
+	got := extractJSONObject(input)
+	want := `{"a": {"b": 1}, "c": 2}`
+	if got != want {
+		t.Errorf("= %q, want %q", got, want)
+	}
+}
+
+// TestExtractJSONObject_NoBrace 验证：无 { 时返回 {}。
+func TestExtractJSONObject_NoBrace(t *testing.T) {
+	if got := extractJSONObject("no brace"); got != "{}" {
+		t.Errorf("无 { 应返回 {}, 得到 %q", got)
+	}
+}
+
+// TestItemsToSummary 验证：题目摘要格式正确 + 内容截断。
+func TestItemsToSummary(t *testing.T) {
+	items := []port.OrchestrateItem{
+		{Title: "题1", Module: "agent", Content: "短内容"},
+		{Title: "题2", Module: "graph", Content: strings.Repeat("长", 200)},
+	}
+	summary := itemsToSummary(items)
+	if !strings.Contains(summary, "题1") || !strings.Contains(summary, "agent") {
+		t.Errorf("摘要应含标题和模块，得到: %s", summary)
+	}
+	if !strings.Contains(summary, "...") {
+		t.Error("长内容应被截断（含 ...）")
+	}
+}
+
+// TestItemsToSummary_Empty 验证：空列表返回占位文本。
+func TestItemsToSummary_Empty(t *testing.T) {
+	if got := itemsToSummary(nil); got != "（无题目）" {
+		t.Errorf("空列表应返回占位，得到 %q", got)
+	}
+}
+

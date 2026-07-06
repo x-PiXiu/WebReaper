@@ -118,14 +118,27 @@ func (o *GraphContentOrchestrator) Orchestrate(ctx context.Context, in port.Orch
 // runState 是图编排的运行期共享状态（节点闭包捕获，累积最终结果）。
 // 不放进 graph.State（那是框架内部流转用的），而是 orchestrator 本地持有。
 type runState struct {
-	items    []port.OrchestrateItem // 累积所有生成的条目
-	checklist []string               // scout 提取的模块清单
+	items        []port.OrchestrateItem // 累积所有生成的条目
+	checklist    []string               // scout 提取的模块清单
+	qualityGaps  []string               // LLM 质量评审指出的缺口（供 generator 精确补）
+	qualityPass  bool                   // LLM 质量评审是否通过
 }
 
 // buildGraph 构建并编译流程图。
 //
-// 节点：scout（探查清单）→ generator（生成题目）→ validator（校验完整性）
-// 条件边：validator 校验后决定回 generator（补生成）或结束。
+// 分层校验设计（代码快筛 + LLM 质量评审）：
+//
+//	scout → generator → coverage_validator ─┬─(缺模块)─→ 回 generator（代码判定，免费）
+//	       ↑                                 │
+//	       │                                 └─(全覆盖)─→ quality_validator (LLM，烧 token)
+//	       │                                                  │
+//	       └──────(不达标，带 gaps 反馈)──────────────────────┤
+//	                        (达标或 failCount 超限)──────────→ End
+//
+// 两层校验分工：
+//   - coverage_validator（纯函数）：快筛模块广度覆盖，缺模块→回 generator，确定性免费。
+//   - quality_validator（LLM）：评内容贴切度+需求覆盖度，全覆盖了才跑，省 token。
+//     不达标→回 generator 并带 gaps 反馈，精确补（非盲目重生成）。
 func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress func(string), rs *runState) (*graph.Graph, error) {
 	schema := graph.NewStateSchema().
 		AddField("topic", graph.StateField{Type: reflect.TypeOf(""), Reducer: graph.DefaultReducer}).
@@ -133,7 +146,9 @@ func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress
 		AddField("checklist", graph.StateField{Type: reflect.TypeOf([]string{}), Reducer: graph.StringSliceReducer}).
 		AddField("items", graph.StateField{Type: reflect.TypeOf([]any{}), Reducer: graph.AppendReducer}).
 		AddField("missing", graph.StateField{Type: reflect.TypeOf([]string{}), Reducer: graph.StringSliceReducer}).
-		AddField("fail_count", graph.StateField{Type: reflect.TypeOf(0), Reducer: graph.DefaultReducer})
+		AddField("fail_count", graph.StateField{Type: reflect.TypeOf(0), Reducer: graph.DefaultReducer}).
+		AddField("quality_pass", graph.StateField{Type: reflect.TypeOf(false), Reducer: graph.DefaultReducer}).
+		AddField("quality_gaps", graph.StateField{Type: reflect.TypeOf([]string{}), Reducer: graph.StringSliceReducer})
 
 	sg := graph.NewStateGraph(schema)
 
@@ -172,22 +187,42 @@ func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress
 		}, nil
 	})
 
-	// generator 节点：针对 missing 模块生成题目
+	// generator 节点：针对 missing 模块生成题目，若有质量反馈则精确补缺口
 	sg.AddNode("generator", func(ctx context.Context, state graph.State) (any, error) {
 		topic, _ := state["topic"].(string)
 		contentType, _ := state["content_type"].(string)
 		missing, _ := state["missing"].([]string)
-		if len(missing) == 0 {
+		// 质量评审反馈（来自上一轮 quality_validator 不达标时）
+		qualityGaps, _ := state["quality_gaps"].([]string)
+
+		// 确定本轮要生成什么：优先补质量缺口，否则按 missing 模块生成
+		focus := missing
+		focusLabel := fmt.Sprintf("%d 个缺失模块", len(missing))
+		if len(qualityGaps) > 0 {
+			// 质量不达标：把 LLM 指出的缺口也纳入 focus，精确补
+			focus = append(focus, qualityGaps...)
+			focusLabel = fmt.Sprintf("%d 个模块 + %d 个质量缺口", len(missing), len(qualityGaps))
+		}
+		if len(focus) == 0 {
 			return graph.State{}, nil
 		}
-		progress(fmt.Sprintf("正在为 %d 个模块生成%s...", len(missing), contentTypeLabel(contentType)))
+		progress(fmt.Sprintf("正在为 %s 生成%s...", focusLabel, contentTypeLabel(contentType)))
 
-		prompt := fmt.Sprintf(`为主题 "%s" 生成%s，针对以下模块，每个模块生成 1-2 道，含题目和参考答案：
-模块：%s
+		// 构建 prompt：基础模块 + 质量反馈（若有）
+		prompt := fmt.Sprintf(`为主题 "%s" 生成%s，针对以下重点，每个生成 1-2 道，含题目和参考答案：
+重点：%s
 
 返回 JSON 数组，每项格式：{"title":"题目标题","content":"题目+答案","module":"模块名","tags":["标签"]}
 只返回 JSON 数组，不要其他文字。`,
-			topic, contentTypeLabel(contentType), strings.Join(missing, ", "))
+			topic, contentTypeLabel(contentType), strings.Join(focus, ", "))
+		if len(qualityGaps) > 0 {
+			prompt = fmt.Sprintf(`为主题 "%s" 生成%s。上一轮质量评审发现以下缺口，请重点补全：
+缺口：%s
+
+要求每道题的内容必须真实对应其所标模块。返回 JSON 数组，每项格式：{"title":"题目标题","content":"题目+答案","module":"模块名","tags":["标签"]}
+只返回 JSON 数组。`,
+				topic, contentTypeLabel(contentType), strings.Join(qualityGaps, "; "))
+		}
 		resp, err := o.ai.ChatStream(ctx, "", []port.ChatMessage{
 			{Role: "system", Content: "你是技术面试题生成专家。只返回 JSON 数组。"},
 			{Role: "user", Content: prompt},
@@ -200,24 +235,27 @@ func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress
 		progress(fmt.Sprintf("生成了 %d 条，准备校验完整性", len(newItems)))
 		// 累加到本地 rs.items（这是最终返回的权威结果）
 		rs.items = append(rs.items, newItems...)
-		// 同时写 state.items（供 validator 比对，AppendReducer 累加）
+		// 清空本轮消费的质量反馈（避免重复补），同时写 state.items 供 coverage_validator 比对
+		rs.qualityGaps = nil
 		anySlice := make([]any, 0, len(newItems))
 		for _, it := range newItems {
 			anySlice = append(anySlice, it)
 		}
-		return graph.State{"items": anySlice}, nil
+		return graph.State{
+			"items":        anySlice,
+			"quality_gaps": []string{}, // 清空，下轮重新评
+		}, nil
 	})
 
-	// validator 节点：纯函数，比对 checklist vs items，算 missing + fail_count
-	sg.AddNode("validator", func(ctx context.Context, state graph.State) (any, error) {
-		checklist := rs.checklist // 用本地权威清单（state 里可能因 reducer 类型转换不稳）
+	// coverage_validator 节点：纯函数，比对 checklist vs items，算模块覆盖（第一层快筛，免费）
+	sg.AddNode("coverage_validator", func(ctx context.Context, state graph.State) (any, error) {
+		checklist := rs.checklist
 		failCount, _ := state["fail_count"].(int)
 
-		// 用本地 rs.items 比对（generator 已累积，类型可靠）
 		missing, covered := computeMissing(checklist, rs.items)
-		progress(fmt.Sprintf("校验完成：已覆盖 %d/%d 模块", len(covered), len(checklist)))
+		progress(fmt.Sprintf("覆盖校验：已覆盖 %d/%d 模块", len(covered), len(checklist)))
 
-		// fail_count 语义：若 missing 数量没减少（这轮补生成无效），计数+1
+		// fail_count：若 missing 数量没减少（这轮补生成无效），计数+1
 		newFail := failCount
 		prevMissing, _ := state["missing"].([]string)
 		if len(prevMissing) > 0 && len(missing) >= len(prevMissing) {
@@ -229,29 +267,92 @@ func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress
 		}, nil
 	})
 
-	// 边：scout → generator → validator
-	sg.AddEdge("scout", "generator")
-	sg.AddEdge("generator", "validator")
-
-	// 条件边：validator → 根据完整性决定回 generator 或结束
-	//   missing 空 → End（完成）
-	//   fail_count >= maxFail → End（安全阀，避免死循环）
-	//   否则 → generator（继续补生成）
+	// quality_validator 节点：LLM 评审内容贴切度 + 需求覆盖度（第二层，烧 token）
 	//
-	// pathMap 的 value 必须是已存在节点或 graph.End（"__end__"，框架特殊放行）。
-	sg.AddConditionalEdges("validator", func(ctx context.Context, state graph.State) (graph.ConditionResult, error) {
-		// 用 rs 权威数据判定（state 的 missing 可能因 reducer 时序读不到最新值）。
-		// validator 刚跑完，rs.items / rs.checklist 是最新的。
+	// 只在 coverage_validator 判定模块全覆盖后才执行——避免对明显残缺的内容白烧 token。
+	// 输出结构化：{pass:bool, gaps:[具体缺什么]}，gaps 供 generator 精确补。
+	sg.AddNode("quality_validator", func(ctx context.Context, state graph.State) (any, error) {
+		topic, _ := state["topic"].(string)
+		contentType, _ := state["content_type"].(string)
+		failCount, _ := state["fail_count"].(int)
+
+		progress("质量评审：检查内容贴切度与需求覆盖度...")
+		// 把已生成的题目摘要发给 LLM 评审
+		itemsSummary := itemsToSummary(rs.items)
+		prompt := fmt.Sprintf(`你是面试题质量评审专家。请评审以下为 "%s" 生成的%s 是否满足要求：
+1. 每道题的内容是否真的对应其所标模块（防跑题）
+2. 整体是否覆盖了 "%s" 的核心知识点
+3. 是否有明显遗漏的关键内容
+
+题目清单：
+%s
+
+返回 JSON：{"pass": true/false, "gaps": ["具体缺什么1", "缺什么2"]}
+pass=true 表示质量达标；pass=false 时 gaps 列出具体缺口（供补全）。
+只返回 JSON。`,
+			topic, contentTypeLabel(contentType), topic, itemsSummary)
+		resp, err := o.ai.ChatStream(ctx, "", []port.ChatMessage{
+			{Role: "system", Content: "你是质量评审专家。只返回 JSON。"},
+			{Role: "user", Content: prompt},
+		}, nil)
+		if err != nil {
+			// LLM 评审失败不阻断（降级为通过，让流程继续——已有内容仍有价值）
+			progress(fmt.Sprintf("质量评审 LLM 调用失败，降级通过: %v", err))
+			return graph.State{"quality_pass": true, "quality_gaps": []string{}}, nil
+		}
+
+		pass, gaps := parseQualityResult(resp)
+		rs.qualityPass = pass
+		rs.qualityGaps = gaps
+		if pass {
+			progress("质量评审通过：内容贴切且覆盖需求")
+		} else {
+			progress(fmt.Sprintf("质量评审未通过，发现 %d 个缺口，将补生成", len(gaps)))
+			// 质量不达标计入 fail_count（避免 LLM 反复挑刺死循环）
+			return graph.State{
+				"quality_pass": false,
+				"quality_gaps": gaps,
+				"fail_count":   failCount + 1,
+			}, nil
+		}
+		return graph.State{"quality_pass": true, "quality_gaps": []string{}}, nil
+	})
+
+	// 边：scout → generator → coverage_validator
+	sg.AddEdge("scout", "generator")
+	sg.AddEdge("generator", "coverage_validator")
+
+	// 条件边①：coverage_validator → 缺模块回 generator / 全覆盖进质量评审
+	sg.AddConditionalEdges("coverage_validator", func(ctx context.Context, state graph.State) (graph.ConditionResult, error) {
 		missing, _ := computeMissing(rs.checklist, rs.items)
 		failCount, _ := state["fail_count"].(int)
 		if len(missing) == 0 {
-			progress("全部模块已覆盖，编排完成")
+			// 模块全覆盖 → 进入质量评审（不直接结束）
+			return graph.ConditionResult{NextNodes: []string{"quality_validator"}}, nil
+		}
+		if failCount >= o.maxFail {
+			progress(fmt.Sprintf("连续 %d 轮未能补全模块，强制结束", failCount))
+			return graph.ConditionResult{NextNodes: []string{graph.End}}, nil
+		}
+		return graph.ConditionResult{NextNodes: []string{"generator"}}, nil
+	}, map[string]string{
+		graph.End:           graph.End,
+		"quality_validator": "quality_validator",
+		"generator":         "generator",
+	})
+
+	// 条件边②：quality_validator → 达标结束 / 不达标回 generator（带 gaps） / 超限结束
+	sg.AddConditionalEdges("quality_validator", func(ctx context.Context, state graph.State) (graph.ConditionResult, error) {
+		failCount, _ := state["fail_count"].(int)
+		if rs.qualityPass {
+			progress("编排完成：模块覆盖且质量达标")
 			return graph.ConditionResult{NextNodes: []string{graph.End}}, nil
 		}
 		if failCount >= o.maxFail {
-			progress(fmt.Sprintf("连续 %d 轮未能补全，强制结束（已生成内容仍会返回）", failCount))
+			progress(fmt.Sprintf("质量评审连续 %d 轮未达标，强制结束（已生成内容仍返回）", failCount))
 			return graph.ConditionResult{NextNodes: []string{graph.End}}, nil
 		}
+		// 不达标 → 回 generator，gaps 已在 state.quality_gaps / rs.qualityGaps 里
 		return graph.ConditionResult{NextNodes: []string{"generator"}}, nil
 	}, map[string]string{
 		graph.End:   graph.End,
@@ -361,4 +462,71 @@ func contentTypeLabel(t string) string {
 		}
 		return t
 	}
+}
+
+// itemsToSummary 把题目列表摘要成文本（供质量评审 LLM 看）。
+// 截断每条内容，避免 prompt 过长烧 token。
+func itemsToSummary(items []port.OrchestrateItem) string {
+	var sb strings.Builder
+	for i, it := range items {
+		sb.WriteString(fmt.Sprintf("%d. [模块:%s] %s\n   内容摘要: %s\n",
+			i+1, it.Module, it.Title, truncateStr(it.Content, 150)))
+	}
+	if sb.Len() == 0 {
+		return "（无题目）"
+	}
+	return sb.String()
+}
+
+// truncateStr 截断字符串（节点 helper 用，避免与 graphagent 内部冲突）。
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
+// qualityResult 是 LLM 质量评审的结构化输出。
+type qualityResult struct {
+	Pass bool     `json:"pass"`
+	Gaps []string `json:"gaps"`
+}
+
+// parseQualityResult 解析 LLM 质量评审输出，返回 (是否通过, 缺口列表)。
+//
+// 容错：LLM 可能包裹 markdown 或多余文字，先提取 JSON 对象再解析。
+// 解析失败时保守返回 pass=true（降级通过，不阻断流程——已有内容仍有价值）。
+func parseQualityResult(s string) (bool, []string) {
+	jsonStr := extractJSONObject(s)
+	var qr qualityResult
+	if err := json.Unmarshal([]byte(jsonStr), &qr); err != nil {
+		// 解析失败，保守判通过（避免因 LLM 输出格式问题卡死流程）
+		return true, nil
+	}
+	if qr.Gaps == nil {
+		qr.Gaps = []string{}
+	}
+	return qr.Pass, qr.Gaps
+}
+
+// extractJSONObject 从可能含 markdown/多余文字的文本中提取首个 JSON 对象 {...}。
+func extractJSONObject(s string) string {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return "{}"
+	}
+	// 用括号配平找匹配的 }（处理嵌套）
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return s[start:] // 未配平，返回到最后
 }
