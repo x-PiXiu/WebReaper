@@ -23,7 +23,10 @@ func NewGormSystemSettingRepository(db *gorm.DB) *GormSystemSettingRepository {
 
 func (r *GormSystemSettingRepository) Get(ctx context.Context, key string) (entity.SystemSetting, error) {
 	var po SystemSettingPO
-	err := r.db.WithContext(ctx).First(&po, "key = ?", key).Error
+	// 注意：用 PO 字段名（Key）做条件，让 GORM 自动映射到列 setting_key。
+	// 不能手写 "key = ?"——key 是 MySQL 保留字，且实际列名是 setting_key，
+	// 手写片段不会被 GORM 转译，会生成非法 SQL（Error 1064）。
+	err := r.db.WithContext(ctx).Where(&SystemSettingPO{Key: key}).First(&po).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return entity.SystemSetting{}, pkg.ErrNotFound
 	}
