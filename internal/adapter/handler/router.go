@@ -159,6 +159,7 @@ func (r *Router) Engine() *gin.Engine {
 		if r.taskAgentUC != nil {
 			taskAgentHandler := NewTaskAgentHandler(r.taskAgentUC)
 			api.POST("/agents/execute", taskAgentHandler.HandleExecute)
+			api.POST("/agents/execute/stream", taskAgentHandler.HandleExecuteStream)
 		}
 	}
 	return e

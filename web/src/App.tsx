@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Chat from './pages/Chat'
+import TaskExecute from './pages/TaskExecute'
 import AgentConfigs from './pages/AgentConfigs'
 import DataItems from './pages/DataItems'
 import Tasks from './pages/Tasks'
@@ -18,6 +19,7 @@ export default function App() {
         <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/chat" element={<Chat />} />
+          <Route path="/task-execute" element={<TaskExecute />} />
           <Route path="/agent-configs" element={<AgentConfigs />} />
           <Route path="/data" element={<DataItems />} />
           <Route path="/tasks" element={<Tasks />} />
