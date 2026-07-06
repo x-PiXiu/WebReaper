@@ -146,7 +146,7 @@ func TestEnqueue_Success(t *testing.T) {
 	uc := NewEnqueueUseCase(q, repo)
 
 	out, err := uc.Execute(context.Background(), EnqueueTaskInput{
-		Type:  entity.TaskTypeSummarizeKnowledge,
+		Type:  entity.TaskTypeAgentRun,
 		Input: map[string]any{"raw_text": "hello"},
 	})
 	if err != nil {

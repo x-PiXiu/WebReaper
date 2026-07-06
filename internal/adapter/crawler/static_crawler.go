@@ -60,14 +60,31 @@ func (c *StaticCrawler) Execute(ctx context.Context, argsJSON string) (entity.Da
 	// 用 colly 抓取页面文本（简化版：取整页文本，LLM 再从中提取）
 	collyInst := colly.NewCollector(colly.MaxDepth(1))
 	var content string
+	// 捕获 HTTP 状态码——colly 把 4xx/5xx 作为 Visit 错误返回，但同时会在
+	// OnError 里给出 r.StatusCode。若不捕获，错误信息里会丢失数字状态码
+	// （只剩 "Not Found" 之类文本）。OnError 与 OnResponse 二选一被触发。
+	var statusCode int
 	collyInst.OnHTML("body", func(e *colly.HTMLElement) {
 		content = e.Text
 	})
+	collyInst.OnResponse(func(r *colly.Response) {
+		statusCode = r.StatusCode
+	})
+	collyInst.OnError(func(r *colly.Response, err error) {
+		statusCode = r.StatusCode
+	})
 
 	if err := collyInst.Visit(args.URL); err != nil {
-		return entity.DataItem{}, fmt.Errorf("visit %s: %w", args.URL, err)
+		// colly 把 HTTP 4xx/5xx 也作为 Visit 错误返回（同时触发 OnError 设置 statusCode）。
+		// 用 OnError 捕获到的状态码（若已设置），保留数字状态码到错误信息里。
+		return entity.DataItem{}, crawlErr(args.URL, statusCode, err)
 	}
 	collyInst.Wait()
+
+	// Visit 未报错但仍可能记录了非 2xx 状态码（防御性检查）
+	if statusCode != 0 && (statusCode < 200 || statusCode >= 300) {
+		return entity.DataItem{}, crawlErr(args.URL, statusCode, nil)
+	}
 
 	// 合规检查：不采集需要登录/付费的内容（不绕过认证）
 	if IsLoginRequiredContent(args.URL, content) {

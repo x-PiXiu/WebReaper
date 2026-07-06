@@ -6,18 +6,19 @@ import (
 	"webreaper/internal/domain/valueobject"
 )
 
-// TaskType 表示任务类型（采集 / 生成面试题 / 总结知识点）。
+// TaskType 表示任务类型。
+//
+// 架构演进说明：项目早期设计了「采集/生成面试题/总结知识点」三类独立任务，
+// 后续整体转向「单一 Agent + N 工具」模型——采集、加工都由 Agent 通过工具调用完成，
+// 原有的三类任务无对应 Handler 且不再使用，已移除。当前仅保留 Agent 异步执行任务。
 type TaskType string
 
 const (
-	TaskTypeCollectJobPosts    TaskType = "collect_job_posts"
-	TaskTypeGenerateQuestions  TaskType = "generate_questions"
-	TaskTypeSummarizeKnowledge TaskType = "summarize_knowledge"
-	TaskTypeAgentRun           TaskType = "agent_run"
+	TaskTypeAgentRun TaskType = "agent_run"
 )
 
 // Task 表示一个异步执行的任务。
-// 采集和 AI 加工都是耗时操作，统一抽象为 Task 进入队列异步执行，
+// Agent 执行是耗时操作，统一抽象为 Task 进入队列异步执行，
 // 不阻塞 Web 请求。
 type Task struct {
 	ID        string

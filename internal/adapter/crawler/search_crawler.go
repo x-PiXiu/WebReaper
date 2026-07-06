@@ -91,13 +91,18 @@ func (c *SearchCrawler) Execute(ctx context.Context, argsJSON string) (entity.Da
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return entity.DataItem{}, fmt.Errorf("search request: %w", err)
+		return entity.DataItem{}, crawlErr(searchURL, 0, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return entity.DataItem{}, fmt.Errorf("read body: %w", err)
+	}
+	// 搜索引擎限流/出错（如 429/5xx）时正文可能仍是 HTML，必须显式检查状态码，
+	// 避免把限流页当成空结果返回。
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return entity.DataItem{}, crawlErr(searchURL, resp.StatusCode, nil)
 	}
 
 	// 解析搜索结果（从 HTML 提取链接和标题）

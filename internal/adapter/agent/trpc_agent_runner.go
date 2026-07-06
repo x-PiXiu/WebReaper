@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
 	"trpc.group/trpc-go/trpc-agent-go/agent"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent/builtin"
@@ -13,6 +14,7 @@ import (
 	"trpc.group/trpc-go/trpc-agent-go/runner"
 
 	llmadapter "webreaper/internal/adapter/llm"
+	"webreaper/internal/adapter/telemetry"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
@@ -78,6 +80,10 @@ type RunOutput struct {
 //  3. 用 runner 执行，Agent 自主 ReAct 循环
 //  4. 收集最终回复 + 工具调用产生的 CrawlResult
 func (r *TrpcAgentRunner) Run(ctx context.Context, in RunInput) (RunOutput, error) {
+	ctx, span := telemetry.StartSpan(ctx, "agent.run")
+	defer span.End()
+	span.SetAttributes(attribute.String("agent_name", in.AgentConfig.Name))
+
 	// 1. 获取允许的工具（注入 DataItemRepo 用于落库）
 	crawlers := r.registry.GetByNames(in.AgentConfig.Tools)
 	tools := ConvertTools(crawlers, r.dataItemRepo, r.logger)

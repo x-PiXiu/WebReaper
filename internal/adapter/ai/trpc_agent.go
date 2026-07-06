@@ -172,6 +172,9 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName strin
 // RunWithTools 实现 port.AIGenerator：带工具的流式执行（ReAct 循环）。
 // 所有爬虫工具全局可用（不按 Agent 配置过滤），LLM 自主决定调哪个。
 func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, llmConfigName string, task string, systemPrompt string, _ []string, onEvent func(event port.ToolEvent)) error {
+	ctx, span := telemetry.StartSpan(ctx, "ai.run_with_tools")
+	defer span.End()
+
 	// 解析 LLM 客户端（按 llmConfigName，空则 default）
 	llm, err := g.resolveLLM(ctx, llmConfigName)
 	if err != nil {

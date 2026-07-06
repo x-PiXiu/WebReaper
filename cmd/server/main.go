@@ -41,10 +41,26 @@ func main() {
 	logger := zaplogger.MustNewZapLogger(cfg.Server.Env)
 	defer logger.Sync()
 
-	traceShutdown, _ := telemetry.InitTracer("webreaper", cfg.Server.Env == "development")
+	traceShutdown, tracer, err := telemetry.Init(telemetry.Config{
+		Enabled:      cfg.Telemetry.Enabled,
+		Exporter:     telemetry.ExporterKind(cfg.Telemetry.Exporter),
+		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
+		ServiceName:  "webreaper",
+	})
+	if err != nil {
+		// trace 初始化失败不阻断启动——降级为 no-op tracer，业务照常运行
+		log := zaplogger.MustNewZapLogger(cfg.Server.Env)
+		log.Warn("trace 初始化失败，降级为 no-op", port.Err(err))
+		tracer = port.NewNopTracer()
+	}
 	defer func() { _ = traceShutdown(context.Background()) }()
 
 	log := logger.With(port.String("component", "main"))
+	if cfg.Telemetry.Enabled {
+		log.Info("链路追踪已启用",
+			port.String("exporter", cfg.Telemetry.Exporter),
+			port.String("otlp_endpoint", cfg.Telemetry.OTLPEndpoint))
+	}
 	log.Info("WebReaper 启动中", port.String("env", cfg.Server.Env))
 
 	// 初始化仓储（降级 mock）
@@ -123,6 +139,7 @@ func main() {
 	var knowledgeSearch port.KnowledgeSearcher
 	if embedder != nil && vectorStore != nil {
 		processUC = process.NewProcessUseCase(dataItemRepo, aiGenerator, embedder, vectorStore)
+		processUC.SetTracer(tracer)
 		itemProcessor = processUC
 		knowledgeSearch = processUC
 		// 注册知识检索工具
@@ -153,6 +170,7 @@ func main() {
 
 	// 外部系统推送用例（字段映射 + HTTP 推送 + 推送记录）
 	publishUC := publish.NewPublishUseCase(extSysRepo, pubRecRepo, dataItemRepo, logger)
+	publishUC.SetTracer(tracer)
 	sysCfgUC := publish.NewSystemConfigUseCase(extSysRepo)
 
 	// 注册推送工具为 Agent 可调用工具（装配层做适配，依赖方向合法）

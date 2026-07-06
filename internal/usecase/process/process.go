@@ -20,6 +20,7 @@ type ProcessUseCase struct {
 	ai           port.AIGenerator
 	embedder     port.Embedder
 	vectorStore  port.VectorStore
+	tracer       port.Tracer
 }
 
 // 编译期断言：ProcessUseCase 实现 port.KnowledgeSearcher 和 port.ItemProcessor。
@@ -39,6 +40,14 @@ func NewProcessUseCase(
 		ai:           ai,
 		embedder:     embedder,
 		vectorStore:  vectorStore,
+		tracer:       port.NewNopTracer(),
+	}
+}
+
+// SetTracer 注入链路追踪器（可选，默认 NopTracer 不采集 trace）。
+func (uc *ProcessUseCase) SetTracer(t port.Tracer) {
+	if t != nil {
+		uc.tracer = t
 	}
 }
 
@@ -47,9 +56,14 @@ func NewProcessUseCase(
 // 2. 更新 DataItem
 // 3. 向量化并存入向量库
 func (uc *ProcessUseCase) ProcessItem(ctx context.Context, itemID string) error {
+	ctx, span := uc.tracer.StartSpan(ctx, "process.item")
+	defer span.End()
+	span.SetAttribute("item_id", itemID)
+
 	// 1. 读取数据项
 	item, err := uc.dataItemRepo.FindByID(ctx, itemID)
 	if err != nil {
+		span.RecordError(err)
 		return fmt.Errorf("find item: %w", err)
 	}
 
@@ -140,6 +154,10 @@ func (uc *ProcessUseCase) vectorize(ctx context.Context, item entity.DataItem) e
 
 // SearchKnowledge 语义搜索已采集的知识（供 Agent 工具调用）。
 func (uc *ProcessUseCase) SearchKnowledge(ctx context.Context, query string, topK int) ([]port.VectorSearchResult, error) {
+	ctx, span := uc.tracer.StartSpan(ctx, "process.search_knowledge")
+	defer span.End()
+	span.SetAttribute("top_k", topK)
+
 	if !uc.vectorStore.IsAvailable() {
 		return nil, nil
 	}

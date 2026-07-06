@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 
@@ -32,6 +33,18 @@ type Config struct {
 	Publish    PublishConfig
 	AgentCore  AgentCoreConfig
 	Crawler    CrawlerConfig
+	Telemetry  TelemetryConfig
+}
+
+// TelemetryConfig 链路追踪配置（OpenTelemetry）。
+//
+// Enabled 控制 trace 是否启用（开发默认开、生产可关）。
+// Exporter 选 stdout（控制台，开发）或 otlp（发往 Collector，生产）。
+// OTLPEndpoint 仅 otlp 生效，如 localhost:4318（OTLP/HTTP 默认端口）。
+type TelemetryConfig struct {
+	Enabled      bool
+	Exporter     string // "stdout" | "otlp"
+	OTLPEndpoint string // 如 localhost:4318
 }
 
 // CrawlerConfig 爬虫限流配置（可从 .env 动态调配）。
@@ -221,6 +234,11 @@ func Load() Config {
 			RequestTimeoutMs:  getenvInt("CRAWLER_REQUEST_TIMEOUT_MS", 30000),
 			UserAgent:         getenvDefault("CRAWLER_USER_AGENT", "WebReaper/1.0"),
 		},
+		Telemetry: TelemetryConfig{
+			Enabled:      getenvBool("TELEMETRY_ENABLED", true),
+			Exporter:     getenvDefault("TELEMETRY_EXPORTER", "stdout"),
+			OTLPEndpoint: getenvDefault("TELEMETRY_OTLP_ENDPOINT", ""),
+		},
 	}
 }
 
@@ -238,6 +256,22 @@ func getenvInt(key string, defaultVal int) int {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
+	}
+	return defaultVal
+}
+
+// getenvBool 读取布尔型环境变量，缺失时返回默认值。
+// 接受 1/0、true/false、yes/no（大小写不敏感）。
+func getenvBool(key string, defaultVal bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
 	}
 	return defaultVal
 }

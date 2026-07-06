@@ -23,11 +23,12 @@ import (
 
 // PublishUseCase 推送用例。
 type PublishUseCase struct {
-	sysRepo   port.ExternalSystemRepository
-	recRepo   port.PublishRecordRepository
-	itemRepo  port.DataItemRepository
+	sysRepo    port.ExternalSystemRepository
+	recRepo    port.PublishRecordRepository
+	itemRepo   port.DataItemRepository
 	httpClient *http.Client
-	logger    port.Logger
+	logger     port.Logger
+	tracer     port.Tracer
 }
 
 func NewPublishUseCase(
@@ -42,6 +43,15 @@ func NewPublishUseCase(
 	return &PublishUseCase{
 		sysRepo: sysRepo, recRepo: recRepo, itemRepo: itemRepo, logger: logger,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
+		tracer:    port.NewNopTracer(),
+	}
+}
+
+// SetTracer 注入链路追踪器（可选，默认 NopTracer 不采集 trace）。
+// 采用 setter 而非构造参数，避免改动现有调用方签名。
+func (uc *PublishUseCase) SetTracer(t port.Tracer) {
+	if t != nil {
+		uc.tracer = t
 	}
 }
 
@@ -63,6 +73,11 @@ type PublishOutput struct {
 
 // Publish 执行推送：加载配置 → 去重检查 → 字段映射 → HTTP 发送 → 记录结果。
 func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (PublishOutput, error) {
+	ctx, span := uc.tracer.StartSpan(ctx, "publish.execute")
+	defer span.End()
+	span.SetAttribute("data_item_id", in.DataItemID)
+	span.SetAttribute("system", in.SystemName)
+
 	log := uc.logger.With(port.String("component", "publish"))
 
 	// 1. 去重检查：已成功推送过则跳过
@@ -131,12 +146,15 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (Publish
 		rec.Success = false
 		rec.ErrorMsg = pushErr.Error()
 		out.ErrorMsg = pushErr.Error()
+		span.RecordError(pushErr)
+		span.SetAttribute("publish.success", false)
 		log.Warn("推送失败", port.String("system", in.SystemName), port.Err(pushErr))
 	} else {
 		rec.Success = true
 		rec.ExternalID = extID
 		out.Success = true
 		out.ExternalID = extID
+		span.SetAttribute("publish.success", true)
 		log.Info("推送成功", port.String("system", in.SystemName), port.String("ext_id", extID))
 	}
 	_ = uc.recRepo.Save(ctx, rec)

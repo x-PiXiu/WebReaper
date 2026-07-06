@@ -4,10 +4,12 @@
 // 这是用例层：编排"队列消费 → 按 Type 分派 → 调业务用例 → 更新状态"流程，
 // 只依赖 domain 实体和 port 接口，不依赖任何 HTTP/队列框架实现。
 //
+// 架构演进：项目已转向「单一 Agent + N 工具」模型，采集/加工由 Agent 通过
+// 工具调用完成。当前任务子系统服务于 Agent 异步执行（AgentHandler）。
 // 关键设计（避免循环依赖）：
-// task 包不直接 import collect/generate/summarize 用例（否则耦合所有业务用例）。
-// 而是通过 TaskHandler 接口解耦——每个业务用例注册一个 Handler，
-// dispatch 按 TaskType 查找 Handler。与 SpiderRegistry 完全同构。
+// task 包不直接 import 业务用例，而是通过 TaskHandler 接口解耦——
+// 每种任务类型注册一个 Handler，dispatch 按 TaskType 查找 Handler。
+// 与 SpiderRegistry / ToolRegistry 完全同构（开闭原则）。
 package task
 
 import (
@@ -21,7 +23,7 @@ import (
 )
 
 // TaskHandler 处理一种类型的异步任务。
-// 每个业务用例（采集/生成/总结）实现此接口并注册到 HandlerRegistry。
+// 当前实现：AgentHandler（处理 Agent 异步执行）。
 // inputJSON 是 Task.Input（业务用例 Input 的 JSON 序列化），由 Handler 反序列化。
 type TaskHandler interface {
 	// TaskType 返回本处理器支持的任务类型，用于注册表分派。
