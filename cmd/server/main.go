@@ -31,6 +31,7 @@ import (
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
+	"webreaper/internal/usecase/orchestrate"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/process"
@@ -174,6 +175,21 @@ func main() {
 	publishUC.SetMaxRetries(cfg.Publish.MaxRetries)
 	sysCfgUC := publish.NewSystemConfigUseCase(extSysRepo)
 
+	// 框架内容编排用例（图编排：探查→生成→校验→补生成，落库不推送）。
+	// 仅配了 LLM 时启用（scout/generator 依赖 LLM）；否则降级为 nil，编排端点不注册。
+	var orchestrateUC *orchestrate.OrchestratorUseCase
+	if cfg.LLM.IsConfigured() {
+		graphOrchestrator := agentadapter.NewGraphContentOrchestrator(
+			aiGenerator,
+			[]string{"static_crawler", "search_crawler", "dynamic_crawler"}, // scout 探查文档用的爬虫
+			logger,
+		)
+		orchestrateUC = orchestrate.NewOrchestratorUseCase(graphOrchestrator, dataItemRepo, logger)
+		log.Info("框架内容编排已启用（图编排模式）")
+	} else {
+		log.Info("未配置 LLM，框架内容编排降级禁用")
+	}
+
 	// 注册推送工具为 Agent 可调用工具（装配层做适配，依赖方向合法）
 	// PublisherAdapter 把 publish.PublishUseCase 适配为 crawler.Publisher 接口
 	publisherAdapter := &publisherAdapterImpl{uc: publishUC, sysRepo: extSysRepo}
@@ -205,7 +221,7 @@ func main() {
 	// 路由 + HTTP 服务（handler 只依赖 usecase 与 port 接口，不直接持有仓储/具体 adapter struct）
 	router := handler.NewRouter(registerUC, loginUC, tokenParser, aiGenerator, enqueueUC,
 		agentRunner, taskQueryUC, dataItemUC, agentCfgUC, llmCfgUC, conversationUC, crawlCfgUC,
-		publishUC, sysCfgUC, toolRegistry, knowledgeSearch)
+		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC)
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
 
 	go func() {

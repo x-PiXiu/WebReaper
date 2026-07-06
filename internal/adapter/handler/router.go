@@ -13,6 +13,7 @@ import (
 	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/dataitem"
 	"webreaper/internal/usecase/llmconfig"
+	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
 	taskquery "webreaper/internal/usecase/taskquery"
@@ -42,6 +43,7 @@ type Router struct {
 	sysCfgUC         *publish.SystemConfigUseCase
 	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
 	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
+	orchestrateUC    *orchestrate.OrchestratorUseCase // 可为 nil（未配置编排器时该端点 503）
 }
 
 func NewRouter(
@@ -61,6 +63,7 @@ func NewRouter(
 	sysCfgUC *publish.SystemConfigUseCase,
 	toolRegistry *port.ToolRegistry,
 	knowledgeSearch port.KnowledgeSearcher,
+	orchestrateUC *orchestrate.OrchestratorUseCase,
 ) *Router {
 	return &Router{
 		authRegister: registerUC, authLogin: loginUC, tokenParser: tokenParser,
@@ -70,6 +73,7 @@ func NewRouter(
 		conversationUC: conversationUC, crawlCfgUC: crawlCfgUC,
 		publishUC: publishUC, sysCfgUC: sysCfgUC,
 		toolRegistry: toolRegistry, knowledgeSearch: knowledgeSearch,
+		orchestrateUC: orchestrateUC,
 	}
 }
 
@@ -142,6 +146,11 @@ func (r *Router) Engine() *gin.Engine {
 		api.GET("/data-items/:id/publish-records", publishHandler.HandlePublishRecords)
 		// 知识搜索
 		api.GET("/search", r.handleSearch)
+		// 框架内容编排（图编排：探查→生成→校验→补生成，落库不推送）
+		if r.orchestrateUC != nil {
+			orchHandler := NewOrchestrationHandler(r.orchestrateUC)
+			api.POST("/orchestrations", orchHandler.HandleOrchestrate)
+		}
 	}
 	return e
 }
