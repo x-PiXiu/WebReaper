@@ -93,6 +93,9 @@ export const businessApi = {
   rejectItem: (id: string) =>
     apiClient.post<unknown, unknown>(`/api/v1/data-items/${id}/reject`),
 
+  deleteDataItem: (id: string) =>
+    apiClient.delete<unknown, unknown>(`/api/v1/data-items/${id}`),
+
   // 把 LLM 对话生成的结构化内容落库为 DataItem（打通"对话生成→自动落库"闭环）
   createDataItemFromContent: (data: { content: string; field_mapping?: string; source_url?: string }) =>
     apiClient.post<unknown, DataItem>('/api/v1/data-items/from-content', data),

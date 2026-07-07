@@ -1,5 +1,6 @@
 import { useState, Fragment, type Key } from 'react'
 import { Card, Table, Tag, Typography, Button, Space, message, Modal, Select } from 'antd'
+import { DeleteOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
 import type { DataItem, ExternalSystem } from '../types/api'
@@ -13,6 +14,75 @@ const statusColor: Record<string, string> = {
   pending_review: 'orange', approved: 'green', rejected: 'red',
 }
 
+// tryParseJSON 尝试把字符串解析为 JSON 对象。失败返回 null。
+// 用于智能判断 content 是结构化 JSON 还是纯文本/Markdown。
+function tryParseJSON(s: string): Record<string, unknown> | null {
+  const trimmed = s.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
+  try {
+    const obj = JSON.parse(trimmed)
+    // 只认对象类型（数组不算字段表）
+    if (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) {
+      return obj as Record<string, unknown>
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+// renderValue 渲染字段值（按类型分派）。
+function renderValue(v: unknown): React.ReactNode {
+  if (v === null || v === undefined) return <Text type="secondary">null</Text>
+  if (typeof v === 'string') return <span style={{ wordBreak: 'break-all' }}>{v}</span>
+  if (typeof v === 'number' || typeof v === 'boolean') return <span>{String(v)}</span>
+  if (Array.isArray(v)) {
+    return <span>{v.map((x, i) => <Tag key={i} style={{ marginBottom: 2 }}>{String(x)}</Tag>)}</span>
+  }
+  if (typeof v === 'object') {
+    return <code style={{ fontSize: 12, wordBreak: 'break-all' }}>{JSON.stringify(v)}</code>
+  }
+  return <span>{String(v)}</span>
+}
+
+// ContentRenderer 正文智能渲染：JSON → 字段表；否则 → Markdown。
+function ContentRenderer({ content }: { content: string }) {
+  if (!content) return <Text type="secondary">（无内容）</Text>
+
+  const jsonObj = tryParseJSON(content)
+  if (jsonObj) {
+    // 结构化 JSON：渲染成字段表（键值对），比一堆 JSON 字符串易读
+    const entries = Object.entries(jsonObj)
+    return (
+      <div style={{
+        padding: 16, background: 'rgba(255,255,255,0.03)', borderRadius: 8,
+        display: 'grid', gridTemplateColumns: 'minmax(100px, auto) 1fr',
+        rowGap: 10, columnGap: 16, alignItems: 'start', fontSize: 13,
+      }}>
+        {entries.map(([k, v]) => (
+          <Fragment key={k}>
+            <Text strong style={{ color: 'var(--wr-text-muted)' }}>{k}</Text>
+            <div>{renderValue(v)}</div>
+          </Fragment>
+        ))}
+      </div>
+    )
+  }
+
+  // 纯文本/Markdown：渲染 Markdown，保留换行
+  return (
+    <div style={{
+      padding: 16, background: 'rgba(255,255,255,0.03)', borderRadius: 8,
+      maxHeight: 500, overflowY: 'auto',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.7,
+    }}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
 export default function DataItems() {
   const queryClient = useQueryClient()
   const [publishModal, setPublishModal] = useState<{ open: boolean; itemId?: string; systemName?: string; loading?: boolean }>({ open: false })
@@ -21,7 +91,6 @@ export default function DataItems() {
     queryKey: ['data-items'],
     queryFn: () => businessApi.listDataItems(),
   })
-  // 外部系统列表（推送时选择目标）
   const { data: externalSystems = [] } = useQuery({
     queryKey: ['external-systems'],
     queryFn: () => businessApi.listExternalSystems(),
@@ -34,7 +103,22 @@ export default function DataItems() {
     try { await businessApi.rejectItem(id); message.success('已拒绝'); queryClient.invalidateQueries({ queryKey: ['data-items'] }) } catch {}
   }
 
-  // 推送到外部系统
+  // 删除（带确认弹框）
+  const handleDelete = (record: DataItem) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定删除「${record.title || record.id}」吗？此操作不可恢复。`,
+      okText: '删除', okType: 'danger', cancelText: '取消',
+      onOk: async () => {
+        try {
+          await businessApi.deleteDataItem(record.id)
+          message.success('已删除')
+          queryClient.invalidateQueries({ queryKey: ['data-items'] })
+        } catch {}
+      },
+    })
+  }
+
   const handlePublish = async () => {
     if (!publishModal.itemId || !publishModal.systemName) return
     setPublishModal(p => ({ ...p, loading: true }))
@@ -47,7 +131,6 @@ export default function DataItems() {
       }
       setPublishModal({ open: false })
     } catch {
-      // axios 拦截器已提示
     } finally {
       setPublishModal(p => ({ ...p, loading: false }))
     }
@@ -55,7 +138,10 @@ export default function DataItems() {
 
   const columns = [
     { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
-    { title: '摘要', dataIndex: 'summary', key: 'summary', ellipsis: true },
+    {
+      title: '摘要', dataIndex: 'summary', key: 'summary', ellipsis: true,
+      render: (s: string) => s ? <Text type="secondary" ellipsis={{ tooltip: s }}>{s}</Text> : <Text type="secondary">—</Text>,
+    },
     {
       title: '标签', dataIndex: 'tags', key: 'tags', width: 200,
       render: (tags: string[]) => tags?.slice(0, 4).map(t => <Tag key={t}>{t}</Tag>),
@@ -65,18 +151,21 @@ export default function DataItems() {
       render: (s: string) => <Tag color={statusColor[s]}>{s}</Tag>,
     },
     {
-      title: '操作', key: 'action', width: 180,
+      title: '操作', key: 'action', width: 200,
       render: (_: unknown, record: DataItem) => (
         <Space>
           {record.status === 'pending_review' && (
             <>
-              <Button size="small" type="primary" onClick={() => handleApprove(record.id)}>通过</Button>
-              <Button size="small" danger onClick={() => handleReject(record.id)}>拒绝</Button>
+              <Button size="small" type="primary" onClick={(e) => { e.stopPropagation(); handleApprove(record.id) }}>通过</Button>
+              <Button size="small" danger onClick={(e) => { e.stopPropagation(); handleReject(record.id) }}>拒绝</Button>
             </>
           )}
           {record.status === 'approved' && (
-            <Button size="small" onClick={() => setPublishModal({ open: true, itemId: record.id })}>推送</Button>
+            <Button size="small" onClick={(e) => { e.stopPropagation(); setPublishModal({ open: true, itemId: record.id }) }}>推送</Button>
           )}
+          <Button size="small" type="text" danger icon={<DeleteOutlined />}
+            onClick={(e) => { e.stopPropagation(); handleDelete(record) }}
+            title="删除" />
         </Space>
       ),
     },
@@ -85,7 +174,7 @@ export default function DataItems() {
   return (
     <div>
       <Title level={4}>数据管理</Title>
-      <Text type="secondary">Agent 采集的所有数据项。点击行展开查看详情。待审核项需人工确认。</Text>
+      <Text type="secondary">点击任意一行展开查看详情。支持删除、审核、推送。</Text>
       <Card style={{ marginTop: 16 }}>
         <Button style={{ marginBottom: 16 }} onClick={() => refetch()}>刷新</Button>
         <Table
@@ -97,7 +186,7 @@ export default function DataItems() {
           expandable={{
             expandedRowRender: (record: DataItem) => (
               <div style={{ padding: '16px 24px', maxWidth: 1000 }}>
-                {/* 字段逐一排列，每个字段独立一行/块，清晰分隔 */}
+                {/* 字段逐一排列 */}
                 <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 12, columnGap: 16, alignItems: 'start' }}>
                   <Text strong>标题</Text>
                   <Text>{record.title || '（无）'}</Text>
@@ -119,24 +208,15 @@ export default function DataItems() {
                   <Tag color={statusColor[record.status]}>{record.status}</Tag>
                 </div>
 
-                {/* 正文内容：独立区块，Markdown 渲染，限高滚动 */}
+                {/* 正文内容：智能渲染（JSON 字段表 / Markdown） */}
                 <div style={{ marginTop: 16 }}>
                   <Text strong>正文内容</Text>
-                  <div style={{
-                    marginTop: 8, padding: 16,
-                    background: 'rgba(255,255,255,0.03)', borderRadius: 8,
-                    maxHeight: 500, overflowY: 'auto',
-                    whiteSpace: 'pre-wrap', // 保留换行，避免长文本挤一行
-                    wordBreak: 'break-word',
-                    lineHeight: 1.7,
-                  }}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                      {record.content || '（无内容）'}
-                    </ReactMarkdown>
+                  <div style={{ marginTop: 8 }}>
+                    <ContentRenderer content={record.content} />
                   </div>
                 </div>
 
-                {/* 元数据：键值表格式，而非一行 JSON */}
+                {/* 元数据：键值表 */}
                 {record.metadata && Object.keys(record.metadata).length > 0 && (
                   <div style={{ marginTop: 16 }}>
                     <Text strong>元数据</Text>
@@ -157,9 +237,9 @@ export default function DataItems() {
                 )}
               </div>
             ),
-            // 受控展开：点击整行即展开/收起
             expandedRowKeys: expandedKeys,
             onExpandedRowsChange: (keys: Key[]) => setExpandedKeys(keys as string[]),
+            // 点击行任意位置展开/收起
             onRow: (record: DataItem) => ({
               onClick: () => {
                 setExpandedKeys(prev =>
@@ -184,15 +264,11 @@ export default function DataItems() {
         okButtonProps={{ disabled: !publishModal.systemName }}
       >
         {externalSystems.length === 0 ? (
-          <Text type="secondary">
-            暂无可用外部系统。请先到「外部系统」页面配置目标系统的 API 地址和字段映射。
-          </Text>
+          <Text type="secondary">暂无可用外部系统。请先到「外部系统」页面配置。</Text>
         ) : (
           <>
             <div style={{ marginBottom: 8 }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>
-                选择目标系统。系统会按该系统配置的字段映射，把数据项转换后推送。
-              </Text>
+              <Text type="secondary" style={{ fontSize: 13 }}>选择目标系统。</Text>
             </div>
             <Select
               style={{ width: '100%' }}

@@ -118,6 +118,7 @@ func (r *Router) Engine() *gin.Engine {
 		api.POST("/data-items/:id/approve", r.handleApproveItem)
 		api.POST("/data-items/:id/reject", r.handleRejectItem)
 		api.POST("/data-items/from-content", r.handleCreateFromContent)
+		api.DELETE("/data-items/:id", r.handleDeleteItem)
 		// 采集集合
 		api.GET("/collections", r.handleListCollections)
 		// Agent 配置

@@ -97,6 +97,16 @@ func (r *Router) handleRejectItem(c *gin.Context) {
 	success(c, gin.H{"id": id, "status": "rejected"})
 }
 
+// handleDeleteItem DELETE /api/v1/data-items/:id —— 删除数据项
+func (r *Router) handleDeleteItem(c *gin.Context) {
+	id := c.Param("id")
+	if err := r.dataItemUC.Delete(c.Request.Context(), id); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"deleted": id})
+}
+
 // handleCreateFromContent POST /api/v1/data-items/from-content
 // 把 LLM 对话生成的结构化内容落库为 DataItem（打通"对话生成→自动落库"闭环）。
 func (r *Router) handleCreateFromContent(c *gin.Context) {

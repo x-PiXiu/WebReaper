@@ -15,6 +15,7 @@ type DataItemRepository interface {
 	ListByCollection(ctx context.Context, collectionID string) ([]entity.DataItem, error)
 	ListByStatus(ctx context.Context, status entity.ItemStatus) ([]entity.DataItem, error)
 	UpdateStatus(ctx context.Context, id string, status entity.ItemStatus) error
+	Delete(ctx context.Context, id string) error
 }
 
 // CollectionRepository 采集集合持久化接口。

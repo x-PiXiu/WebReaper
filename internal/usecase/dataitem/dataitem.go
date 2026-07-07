@@ -99,6 +99,11 @@ func (uc *DataItemUseCase) Reject(ctx context.Context, itemID string) error {
 	return uc.dataItemRepo.UpdateStatus(ctx, itemID, entity.ItemStatusRejected)
 }
 
+// Delete 删除数据项。
+func (uc *DataItemUseCase) Delete(ctx context.Context, itemID string) error {
+	return uc.dataItemRepo.Delete(ctx, itemID)
+}
+
 // CreateFromContentInput 从内容创建 DataItem 的输入。
 type CreateFromContentInput struct {
 	Content     string // LLM 返回的原始内容（通常是结构化 JSON）

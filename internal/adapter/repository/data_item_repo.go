@@ -73,3 +73,8 @@ func (r *GormDataItemRepository) ListByStatus(ctx context.Context, status entity
 func (r *GormDataItemRepository) UpdateStatus(ctx context.Context, id string, status entity.ItemStatus) error {
 	return r.db.WithContext(ctx).Model(&DataItemPO{}).Where("id = ?", id).Update("status", string(status)).Error
 }
+
+// Delete 删除数据项。
+func (r *GormDataItemRepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&DataItemPO{}).Error
+}

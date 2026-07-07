@@ -47,6 +47,11 @@ func (f *fakeDataItemRepo) UpdateStatus(_ context.Context, id string, s entity.I
 	f.status[id] = s
 	return nil
 }
+func (f *fakeDataItemRepo) Delete(_ context.Context, id string) error {
+	f.mu.Lock(); defer f.mu.Unlock()
+	delete(f.status, id)
+	return nil
+}
 
 type fakeCollectionRepo struct{}
 func (fakeCollectionRepo) Save(context.Context, entity.Collection) error { return nil }

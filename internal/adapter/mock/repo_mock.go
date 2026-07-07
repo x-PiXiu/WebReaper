@@ -160,6 +160,12 @@ func (r *MockDataItemRepository) UpdateStatus(_ context.Context, id string, stat
 	return nil
 }
 
+func (r *MockDataItemRepository) Delete(_ context.Context, id string) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	delete(r.byID, id)
+	return nil
+}
+
 // ---- Collection 仓储 ----
 
 type MockCollectionRepository struct {
