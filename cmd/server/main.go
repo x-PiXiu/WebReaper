@@ -32,6 +32,7 @@ import (
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
 	"webreaper/internal/usecase/orchestrate"
+	"webreaper/internal/usecase/stats"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/process"
@@ -163,6 +164,8 @@ func main() {
 	// 业务用例装配（handler 只依赖这些 usecase，不直接持有仓储）
 	taskQueryUC := taskquery.NewTaskQueryUseCase(taskRepo)
 	dataItemUC := dataitem.NewDataItemUseCase(dataItemRepo, collectionRepo, itemProcessor, logger)
+	// 仪表盘统计聚合（依赖 DataItemRepo 的聚合查询方法）
+	statsUC := stats.NewStatsUseCase(dataItemRepo)
 	agentCfgUC := agentconfig.NewAgentConfigUseCase(agentConfigRepo)
 	conversationUC := conversation.NewConversationUseCase(convRepo, msgRepo)
 	crawlCfgUC := crawlconfig.NewCrawlConfigUseCase(settingRepo)
@@ -225,7 +228,7 @@ func main() {
 	// 路由 + HTTP 服务（handler 只依赖 usecase 与 port 接口，不直接持有仓储/具体 adapter struct）
 	router := handler.NewRouter(registerUC, loginUC, tokenParser, aiGenerator, enqueueUC,
 		agentRunner, taskQueryUC, dataItemUC, agentCfgUC, llmCfgUC, conversationUC, crawlCfgUC,
-		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC)
+		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC, statsUC)
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
 
 	go func() {

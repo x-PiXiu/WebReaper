@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.16",
+    "@ant-design/charts": "^2.6.7",
     "@tanstack/react-query": "^5.101.2",
     "ai": "^7.0.15",
     "antd": "^5.22.0",

@@ -133,3 +133,12 @@ export interface ToolView {
   description: string
   enabled: boolean
 }
+
+// ---- 仪表盘统计 ----
+export interface StatsView {
+  totals: Record<string, number>            // data_items / pending_review / approved / rejected
+  status_breakdown: Record<string, number>  // 状态分布
+  daily_trend: { date: string; count: number }[]      // 近14天趋势
+  source_distribution: { name: string; count: number }[]  // 数据源分布
+  top_tags: { name: string; count: number }[]             // 标签Top8
+}

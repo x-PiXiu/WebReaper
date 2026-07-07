@@ -52,6 +52,10 @@ func (f *fakeDataItemRepo) Delete(_ context.Context, id string) error {
 	delete(f.status, id)
 	return nil
 }
+func (f *fakeDataItemRepo) CountByStatus(_ context.Context) (map[string]int, error) { return map[string]int{}, nil }
+func (f *fakeDataItemRepo) DailyCounts(_ context.Context, days int) ([]port.DailyCount, error) { return nil, nil }
+func (f *fakeDataItemRepo) GroupByMetaKey(_ context.Context, key string) ([]port.GroupCount, error) { return nil, nil }
+func (f *fakeDataItemRepo) TopTags(_ context.Context, limit int) ([]port.GroupCount, error) { return nil, nil }
 
 type fakeCollectionRepo struct{}
 func (fakeCollectionRepo) Save(context.Context, entity.Collection) error { return nil }

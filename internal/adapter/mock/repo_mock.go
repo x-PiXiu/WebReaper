@@ -2,11 +2,14 @@ package mock
 
 import (
 	"context"
+	"sort"
 	"sync"
+	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/domain/valueobject"
 	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/port"
 )
 
 // ---- User 仓储 ----
@@ -164,6 +167,75 @@ func (r *MockDataItemRepository) Delete(_ context.Context, id string) error {
 	r.mu.Lock(); defer r.mu.Unlock()
 	delete(r.byID, id)
 	return nil
+}
+
+// ---- 统计聚合（mock 实现：在内存数据上计算，不依赖 SQL）----
+
+func (r *MockDataItemRepository) CountByStatus(_ context.Context) (map[string]int, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	m := map[string]int{}
+	for _, item := range r.byID {
+		m[string(item.Status)]++
+	}
+	return m, nil
+}
+
+func (r *MockDataItemRepository) DailyCounts(_ context.Context, days int) ([]port.DailyCount, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	m := map[string]int{}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	for _, item := range r.byID {
+		if item.CreatedAt.After(cutoff) {
+			m[item.CreatedAt.Format("2006-01-02")]++
+		}
+	}
+	result := make([]port.DailyCount, 0, len(m))
+	for d, c := range m {
+		result = append(result, port.DailyCount{Date: d, Count: c})
+	}
+	// 按日期排序
+	sort.Slice(result, func(i, j int) bool { return result[i].Date < result[j].Date })
+	return result, nil
+}
+
+func (r *MockDataItemRepository) GroupByMetaKey(_ context.Context, key string) ([]port.GroupCount, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	m := map[string]int{}
+	for _, item := range r.byID {
+		if v, ok := item.Metadata[key]; ok && v != "" {
+			m[v]++
+		}
+	}
+	result := make([]port.GroupCount, 0, len(m))
+	for name, cnt := range m {
+		result = append(result, port.GroupCount{Name: name, Count: cnt})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Count > result[j].Count })
+	return result, nil
+}
+
+func (r *MockDataItemRepository) TopTags(_ context.Context, limit int) ([]port.GroupCount, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	if limit <= 0 {
+		limit = 8
+	}
+	m := map[string]int{}
+	for _, item := range r.byID {
+		for _, t := range item.Tags {
+			if t != "" {
+				m[t]++
+			}
+		}
+	}
+	result := make([]port.GroupCount, 0, len(m))
+	for tag, cnt := range m {
+		result = append(result, port.GroupCount{Name: tag, Count: cnt})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Count > result[j].Count })
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 // ---- Collection 仓储 ----

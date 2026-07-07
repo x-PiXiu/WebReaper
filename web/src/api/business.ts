@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { TaskView, AgentConfig, LLMConfig, Collection, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ExternalSystem, PublishResult, PublishRecord, ToolView } from '../types/api'
+import type { TaskView, AgentConfig, LLMConfig, Collection, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ExternalSystem, PublishResult, PublishRecord, ToolView, StatsView } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -106,4 +106,8 @@ export const businessApi = {
 
   toggleTool: (name: string, enabled: boolean) =>
     apiClient.put<unknown, { name: string; enabled: boolean }>(`/api/v1/tools/${name}/toggle`, { enabled }),
+
+  // ---- 仪表盘统计 ----
+  getStats: () =>
+    apiClient.get<unknown, StatsView>('/api/v1/stats'),
 }

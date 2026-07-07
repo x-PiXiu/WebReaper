@@ -17,6 +17,7 @@ import (
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
+	"webreaper/internal/usecase/stats"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 )
@@ -45,6 +46,7 @@ type Router struct {
 	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
 	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
 	orchestrateUC    *orchestrate.OrchestratorUseCase // 可为 nil（未配置编排器时该端点 503）
+	statsUC          *stats.StatsUseCase               // 仪表盘统计聚合
 }
 
 func NewRouter(
@@ -65,6 +67,7 @@ func NewRouter(
 	toolRegistry *port.ToolRegistry,
 	knowledgeSearch port.KnowledgeSearcher,
 	orchestrateUC *orchestrate.OrchestratorUseCase,
+	statsUC *stats.StatsUseCase,
 ) *Router {
 	return &Router{
 		authRegister: registerUC, authLogin: loginUC, tokenParser: tokenParser,
@@ -75,6 +78,7 @@ func NewRouter(
 		publishUC: publishUC, sysCfgUC: sysCfgUC,
 		toolRegistry: toolRegistry, knowledgeSearch: knowledgeSearch,
 		orchestrateUC: orchestrateUC,
+		statsUC:       statsUC,
 	}
 }
 
@@ -106,6 +110,8 @@ func (r *Router) Engine() *gin.Engine {
 		api.GET("/tools", r.handleListTools)
 		// 动态启用/禁用工具（工具面板用）
 		api.PUT("/tools/:name/toggle", r.handleToggleTool)
+		// 仪表盘统计聚合（一次返回全量指标）
+		api.GET("/stats", r.handleGetStats)
 		// Agent 任务（同步执行）
 		api.POST("/agents/run", NewAgentHandler(r.agentRunner).HandleRun)
 		// 异步任务
@@ -201,6 +207,15 @@ func (r *Router) handleToggleTool(c *gin.Context) {
 	}
 	r.toolRegistry.SetEnabled(name, req.Enabled)
 	success(c, gin.H{"name": name, "enabled": req.Enabled})
+}
+
+// handleGetStats GET /api/v1/stats —— 仪表盘统计聚合（一次返回全量指标）
+func (r *Router) handleGetStats(c *gin.Context) {
+	if r.statsUC == nil {
+		success(c, gin.H{"totals": map[string]int{}, "status_breakdown": map[string]int{}})
+		return
+	}
+	success(c, r.statsUC.Get(c.Request.Context()))
 }
 
 func corsMiddleware() gin.HandlerFunc {

@@ -16,6 +16,28 @@ type DataItemRepository interface {
 	ListByStatus(ctx context.Context, status entity.ItemStatus) ([]entity.DataItem, error)
 	UpdateStatus(ctx context.Context, id string, status entity.ItemStatus) error
 	Delete(ctx context.Context, id string) error
+
+	// ---- 统计聚合（仪表盘用）----
+	// CountByStatus 按状态分组计数，返回 {status: count}。
+	CountByStatus(ctx context.Context) (map[string]int, error)
+	// DailyCounts 近 days 天每日新增量，按日期升序。
+	DailyCounts(ctx context.Context, days int) ([]DailyCount, error)
+	// GroupByMetaKey 按 metadata 的某个 key 分组计数（如 crawler_type）。
+	GroupByMetaKey(ctx context.Context, key string) ([]GroupCount, error)
+	// TopTags 标签频次 Top N。
+	TopTags(ctx context.Context, limit int) ([]GroupCount, error)
+}
+
+// DailyCount 单日计数（趋势图用）。
+type DailyCount struct {
+	Date  string // YYYY-MM-DD
+	Count int
+}
+
+// GroupCount 分组计数（饼图/条形图用）。
+type GroupCount struct {
+	Name  string
+	Count int
 }
 
 // CollectionRepository 采集集合持久化接口。
