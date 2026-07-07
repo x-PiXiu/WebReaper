@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +17,6 @@ import (
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
-	"webreaper/internal/usecase/taskagent"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 )
@@ -45,7 +45,6 @@ type Router struct {
 	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
 	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
 	orchestrateUC    *orchestrate.OrchestratorUseCase // 可为 nil（未配置编排器时该端点 503）
-	taskAgentUC      *taskagent.TaskAgentUseCase       // 可为 nil（未配置通用 Agent 时该端点不注册）
 }
 
 func NewRouter(
@@ -66,7 +65,6 @@ func NewRouter(
 	toolRegistry *port.ToolRegistry,
 	knowledgeSearch port.KnowledgeSearcher,
 	orchestrateUC *orchestrate.OrchestratorUseCase,
-	taskAgentUC *taskagent.TaskAgentUseCase,
 ) *Router {
 	return &Router{
 		authRegister: registerUC, authLogin: loginUC, tokenParser: tokenParser,
@@ -77,7 +75,6 @@ func NewRouter(
 		publishUC: publishUC, sysCfgUC: sysCfgUC,
 		toolRegistry: toolRegistry, knowledgeSearch: knowledgeSearch,
 		orchestrateUC: orchestrateUC,
-		taskAgentUC:   taskAgentUC,
 	}
 }
 
@@ -105,8 +102,10 @@ func (r *Router) Engine() *gin.Engine {
 	{
 		// AI 对话（SSE 流式）
 		api.POST("/chat", NewChatHandler(r.ai).HandleStream)
-		// 全局工具列表（供前端查看实际可用工具）
+		// 全局工具列表（供前端查看实际可用工具，含启用状态）
 		api.GET("/tools", r.handleListTools)
+		// 动态启用/禁用工具（工具面板用）
+		api.PUT("/tools/:name/toggle", r.handleToggleTool)
 		// Agent 任务（同步执行）
 		api.POST("/agents/run", NewAgentHandler(r.agentRunner).HandleRun)
 		// 异步任务
@@ -155,32 +154,52 @@ func (r *Router) Engine() *gin.Engine {
 			orchHandler := NewOrchestrationHandler(r.orchestrateUC)
 			api.POST("/orchestrations", orchHandler.HandleOrchestrate)
 		}
-		// 通用任务执行（Agent 自主规划：任意任务→调工具/子能力→直到完成）
-		if r.taskAgentUC != nil {
-			taskAgentHandler := NewTaskAgentHandler(r.taskAgentUC)
-			api.POST("/agents/execute", taskAgentHandler.HandleExecute)
-			api.POST("/agents/execute/stream", taskAgentHandler.HandleExecuteStream)
-		}
 	}
 	return e
 }
 
-// handleListTools GET /api/v1/tools —— 返回所有全局可用工具的名称和描述
+// handleListTools GET /api/v1/tools —— 返回所有工具及启用状态（工具面板用）
 func (r *Router) handleListTools(c *gin.Context) {
 	if r.toolRegistry == nil {
 		success(c, []any{})
 		return
 	}
-	tools := r.toolRegistry.All()
-	views := make([]gin.H, 0, len(tools))
-	for _, t := range tools {
-		decl := t.ToolDeclaration()
+	statuses := r.toolRegistry.AllWithStatus()
+	views := make([]gin.H, 0, len(statuses))
+	for _, s := range statuses {
 		views = append(views, gin.H{
-			"name":        decl.Name,
-			"description": decl.Description,
+			"name":        s.Name,
+			"description": s.Description,
+			"enabled":     s.Enabled,
 		})
 	}
 	success(c, views)
+}
+
+// toolToggleRequest PUT /api/v1/tools/:name/toggle
+type toolToggleRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// handleToggleTool PUT /api/v1/tools/:name/toggle —— 动态启用/禁用工具
+func (r *Router) handleToggleTool(c *gin.Context) {
+	if r.toolRegistry == nil {
+		fail(c, fmt.Errorf("工具注册表未初始化"))
+		return
+	}
+	name := c.Param("name")
+	var req toolToggleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	// 校验工具存在
+	if _, ok := r.toolRegistry.Lookup(name); !ok {
+		fail(c, fmt.Errorf("工具 %q 不存在", name))
+		return
+	}
+	r.toolRegistry.SetEnabled(name, req.Enabled)
+	success(c, gin.H{"name": name, "enabled": req.Enabled})
 }
 
 func corsMiddleware() gin.HandlerFunc {

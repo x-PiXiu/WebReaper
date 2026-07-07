@@ -126,3 +126,10 @@ export interface DataItem {
   metadata: Record<string, string>
   created_at: string
 }
+
+// ---- 工具面板 ----
+export interface ToolView {
+  name: string
+  description: string
+  enabled: boolean
+}

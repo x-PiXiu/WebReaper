@@ -354,7 +354,7 @@ export default function Chat() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
-      setConversations(prev => [...prev, newConv])
+      setConversations(prev => [newConv, ...prev])
       setCurrentConvId(convId)
       setLoadedConvMsgs(prev => new Set(prev).add(convId!)) // 新会话无需再加载
       // 后端持久化：创建会话
@@ -583,7 +583,7 @@ export default function Chat() {
           <Button block onClick={newConversation} type="primary" size="small">+ 新对话</Button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
-          {conversations.slice().reverse().map(c => (
+          {conversations.map(c => (
             <div key={c.id} onClick={() => setCurrentConvId(c.id)} style={{
               padding: '8px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer',
               background: c.id === currentConvId ? 'var(--wr-primary-bg)' : 'transparent',

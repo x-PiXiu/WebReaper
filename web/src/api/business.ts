@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { TaskView, AgentConfig, LLMConfig, Collection, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ExternalSystem, PublishResult, PublishRecord } from '../types/api'
+import type { TaskView, AgentConfig, LLMConfig, Collection, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ExternalSystem, PublishResult, PublishRecord, ToolView } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -96,4 +96,11 @@ export const businessApi = {
   // 把 LLM 对话生成的结构化内容落库为 DataItem（打通"对话生成→自动落库"闭环）
   createDataItemFromContent: (data: { content: string; field_mapping?: string; source_url?: string }) =>
     apiClient.post<unknown, DataItem>('/api/v1/data-items/from-content', data),
+
+  // ---- 工具面板 ----
+  listTools: () =>
+    apiClient.get<unknown, ToolView[]>('/api/v1/tools'),
+
+  toggleTool: (name: string, enabled: boolean) =>
+    apiClient.put<unknown, { name: string; enabled: boolean }>(`/api/v1/tools/${name}/toggle`, { enabled }),
 }

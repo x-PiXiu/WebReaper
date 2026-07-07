@@ -32,7 +32,6 @@ import (
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
 	"webreaper/internal/usecase/orchestrate"
-	"webreaper/internal/usecase/taskagent"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/process"
@@ -195,15 +194,6 @@ func main() {
 		log.Info("未配置 LLM，框架内容编排降级禁用")
 	}
 
-	// 通用任务 Agent（任意任务 → LLM 自主规划 → 调工具/子能力 → 直到完成）。
-	// 仅配了 LLM 时启用；否则降级为 nil，该端点不注册。
-	var taskAgentUC *taskagent.TaskAgentUseCase
-	if cfg.LLM.IsConfigured() {
-		taskAgent := agentadapter.NewExplorerTaskAgent(llmConfigRepo, toolRegistry, dataItemRepo, logger)
-		taskAgentUC = taskagent.NewTaskAgentUseCase(taskAgent, logger)
-		log.Info("通用任务 Agent 已启用（Explorer ReAct 模式）")
-	}
-
 	// 注册推送工具为 Agent 可调用工具（装配层做适配，依赖方向合法）
 	// PublisherAdapter 把 publish.PublishUseCase 适配为 crawler.Publisher 接口
 	publisherAdapter := &publisherAdapterImpl{uc: publishUC, sysRepo: extSysRepo}
@@ -235,7 +225,7 @@ func main() {
 	// 路由 + HTTP 服务（handler 只依赖 usecase 与 port 接口，不直接持有仓储/具体 adapter struct）
 	router := handler.NewRouter(registerUC, loginUC, tokenParser, aiGenerator, enqueueUC,
 		agentRunner, taskQueryUC, dataItemUC, agentCfgUC, llmCfgUC, conversationUC, crawlCfgUC,
-		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC, taskAgentUC)
+		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC)
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
 
 	go func() {

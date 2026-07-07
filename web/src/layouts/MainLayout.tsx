@@ -21,10 +21,10 @@ export default function MainLayout() {
   const menuItems = [
     { key: '/dashboard', label: '仪表盘' },
     { key: '/chat', label: 'AI 对话' },
-    { key: '/task-execute', label: '任务执行' },
     { key: '/agent-configs', label: 'Agent 配置' },
     { key: '/data', label: '数据管理' },
     { key: '/tasks', label: '任务监控' },
+    { key: '/tools', label: '工具面板' },
     { key: '/external-systems', label: '外部系统' },
     { key: '/crawl-config', label: '采集配置' },
   ]

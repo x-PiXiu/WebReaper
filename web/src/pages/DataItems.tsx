@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment, type Key } from 'react'
 import { Card, Table, Tag, Typography, Button, Space, message, Modal, Select } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 
-const { Title, Text, Paragraph } = Typography
+const { Title, Text } = Typography
 
 const statusColor: Record<string, string> = {
   pending_review: 'orange', approved: 'green', rejected: 'red',
@@ -16,6 +16,7 @@ const statusColor: Record<string, string> = {
 export default function DataItems() {
   const queryClient = useQueryClient()
   const [publishModal, setPublishModal] = useState<{ open: boolean; itemId?: string; systemName?: string; loading?: boolean }>({ open: false })
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
   const { data: items = [], refetch } = useQuery({
     queryKey: ['data-items'],
     queryFn: () => businessApi.listDataItems(),
@@ -95,27 +96,78 @@ export default function DataItems() {
           size="middle"
           expandable={{
             expandedRowRender: (record: DataItem) => (
-              <div style={{ padding: '8px 24px', maxWidth: 900 }}>
-                <Paragraph><Text strong>来源：</Text><a href={record.source_url} target="_blank" rel="noreferrer">{record.source_url}</a></Paragraph>
-                {record.summary && <Paragraph><Text strong>摘要：</Text>{record.summary}</Paragraph>}
-                {record.tags && record.tags.length > 0 && (
-                  <Paragraph>
-                    <Text strong>标签：</Text>
-                    {record.tags.map(t => <Tag key={t} style={{ marginRight: 4 }}>{t}</Tag>)}
-                  </Paragraph>
-                )}
-                <Text strong>正文内容：</Text>
-                <div style={{ marginTop: 8, padding: 16, background: 'rgba(255,255,255,0.03)', borderRadius: 8, maxHeight: 400, overflowY: 'auto' }}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>{record.content || '（无内容）'}</ReactMarkdown>
+              <div style={{ padding: '16px 24px', maxWidth: 1000 }}>
+                {/* 字段逐一排列，每个字段独立一行/块，清晰分隔 */}
+                <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 12, columnGap: 16, alignItems: 'start' }}>
+                  <Text strong>标题</Text>
+                  <Text>{record.title || '（无）'}</Text>
+
+                  <Text strong>来源</Text>
+                  {record.source_url
+                    ? <a href={record.source_url} target="_blank" rel="noreferrer" style={{ wordBreak: 'break-all' }}>{record.source_url}</a>
+                    : <Text type="secondary">（无）</Text>}
+
+                  <Text strong>摘要</Text>
+                  <Text>{record.summary || <Text type="secondary">（无）</Text>}</Text>
+
+                  <Text strong>标签</Text>
+                  <div>{record.tags && record.tags.length > 0
+                    ? record.tags.map(t => <Tag key={t} style={{ marginBottom: 4 }}>{t}</Tag>)
+                    : <Text type="secondary">（无）</Text>}</div>
+
+                  <Text strong>状态</Text>
+                  <Tag color={statusColor[record.status]}>{record.status}</Tag>
                 </div>
+
+                {/* 正文内容：独立区块，Markdown 渲染，限高滚动 */}
+                <div style={{ marginTop: 16 }}>
+                  <Text strong>正文内容</Text>
+                  <div style={{
+                    marginTop: 8, padding: 16,
+                    background: 'rgba(255,255,255,0.03)', borderRadius: 8,
+                    maxHeight: 500, overflowY: 'auto',
+                    whiteSpace: 'pre-wrap', // 保留换行，避免长文本挤一行
+                    wordBreak: 'break-word',
+                    lineHeight: 1.7,
+                  }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                      {record.content || '（无内容）'}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+
+                {/* 元数据：键值表格式，而非一行 JSON */}
                 {record.metadata && Object.keys(record.metadata).length > 0 && (
-                  <Paragraph style={{ marginTop: 12 }}>
-                    <Text strong>元数据：</Text>
-                    <code style={{ fontSize: 12 }}>{JSON.stringify(record.metadata)}</code>
-                  </Paragraph>
+                  <div style={{ marginTop: 16 }}>
+                    <Text strong>元数据</Text>
+                    <div style={{
+                      marginTop: 8, padding: 12,
+                      background: 'rgba(255,255,255,0.02)', borderRadius: 8,
+                      display: 'grid', gridTemplateColumns: 'auto 1fr', rowGap: 6, columnGap: 16,
+                      fontSize: 13,
+                    }}>
+                      {Object.entries(record.metadata).map(([k, v]) => (
+                        <Fragment key={k}>
+                          <Text type="secondary" style={{ fontWeight: 500 }}>{k}</Text>
+                          <Text style={{ wordBreak: 'break-all' }}>{String(v)}</Text>
+                        </Fragment>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             ),
+            // 受控展开：点击整行即展开/收起
+            expandedRowKeys: expandedKeys,
+            onExpandedRowsChange: (keys: Key[]) => setExpandedKeys(keys as string[]),
+            onRow: (record: DataItem) => ({
+              onClick: () => {
+                setExpandedKeys(prev =>
+                  prev.includes(record.id) ? prev.filter(k => k !== record.id) : [...prev, record.id],
+                )
+              },
+              style: { cursor: 'pointer' },
+            }),
           }}
         />
       </Card>
