@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Input, Button, Spin, Typography, Select, Space, Tag, Tooltip } from 'antd'
+import { Input, Button, Spin, Typography, Select, Space, Tag, Popover, Switch, message as antdMessage } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -7,7 +7,7 @@ import rehypeHighlight from 'rehype-highlight'
 import { getToken, useAuthStore } from '../store/auth'
 import { businessApi } from '../api/business'
 import { useTaskEnqueue } from '../hooks/useTaskEnqueue'
-import type { ChatMessage, AgentConfig } from '../types/api'
+import type { ChatMessage, AgentConfig, ToolView } from '../types/api'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -611,9 +611,54 @@ export default function Chat() {
           <Space>
             <Text type="secondary" style={{ fontSize: 14 }}>角色：</Text>
             <Select style={{ width: 220 }} placeholder="默认 AI" allowClear value={selectedAgent} onChange={setSelectedAgent} options={agentConfigs.map((a: AgentConfig) => ({ value: a.name, label: a.name }))} />
-            <Tooltip title={tools.map((t: { name: string }) => t.name).join('、')}>
-              <Tag color="purple">{tools.length} 个工具可用</Tag>
-            </Tooltip>
+            <Popover
+              trigger="click"
+              placement="bottomLeft"
+              title="工具管理"
+              content={
+                <div style={{ maxWidth: 420 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                    点击开关启用/禁用工具。禁用的工具 Agent 不会调用。
+                  </Typography.Text>
+                  <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                    {tools.length === 0 ? (
+                      <Typography.Text type="secondary">暂无工具</Typography.Text>
+                    ) : tools.map((t: ToolView) => (
+                      <div key={t.name} style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '6px 0', borderBottom: '1px solid var(--wr-border)',
+                      }}>
+                        <div style={{ minWidth: 0, flex: 1, marginRight: 12 }}>
+                          <Typography.Text code style={{ fontSize: 12 }}>{t.name}</Typography.Text>
+                          {t.description && (
+                            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {t.description}
+                            </Typography.Text>
+                          )}
+                        </div>
+                        <Switch
+                          size="small"
+                          checked={t.enabled}
+                          onChange={async (checked) => {
+                            try {
+                              await businessApi.toggleTool(t.name, checked)
+                              antdMessage.success(`${checked ? '启用' : '禁用'}：${t.name}`)
+                              queryClient.invalidateQueries({ queryKey: ['tools'] })
+                            } catch {
+                              // axios 拦截器已提示
+                            }
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              }
+            >
+              <Tag color="purple" style={{ cursor: 'pointer' }}>
+                {tools.filter((t: ToolView) => t.enabled).length}/{tools.length} 个工具可用
+              </Tag>
+            </Popover>
             {currentAgent?.auto_save && <Tag color="green">自动落库</Tag>}
           </Space>
         </div>
