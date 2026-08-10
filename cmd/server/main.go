@@ -23,8 +23,9 @@ import (
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
-	"webreaper/internal/adapter/vectorstore"
 	"webreaper/internal/adapter/telemetry"
+	"webreaper/internal/adapter/urlsubmit"
+	"webreaper/internal/adapter/vectorstore"
 	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/account"
@@ -263,12 +264,14 @@ func main() {
 	structuredUC := structured.NewStructuredDataUseCase()
 	router.SetStructured(structuredUC)
 	// 公开内容站（让 AI 引擎/搜索引擎可爬取已发布内容）——需要 DB（内容仓储）
-	// 收录通知（IndexNow）：发布为 published 时自动通知 Bing/Yandex。
-	// 需配置 INDEXNOW_KEY；未配置则 submitter 为 nil（发布流程不受影响）。
+	// 收录通知（IndexNow + 百度主动推送，多渠道并行、失败互不影响）：
+	// 内容发布为 published 时自动通知搜索引擎收录。
+	// 各渠道独立配置，未配置的渠道不启用（发布流程不受影响）。
 	var indexNowSubmitter port.URLSubmitter
 	if geoRepos != nil {
 		publicHandler := handler.NewPublicHandler(geoRepos.content, structuredUC, cfg.Server.PublicBaseURL)
 		router.SetPublic(publicHandler)
+		var submitters []port.URLSubmitter
 		if cfg.Server.IndexNowKey != "" {
 			publicHandler.SetIndexNowKey(cfg.Server.IndexNowKey)
 			s, sErr := indexnow.NewSubmitter(
@@ -277,10 +280,23 @@ func main() {
 				cfg.Server.PublicBaseURL+"/public/indexnow-key.txt",
 			)
 			if sErr != nil {
-				log.Error("IndexNow 初始化失败，收录通知禁用", port.Err(sErr))
+				log.Error("IndexNow 初始化失败，该渠道禁用", port.Err(sErr))
 			} else {
-				indexNowSubmitter = s
+				submitters = append(submitters, s)
+				log.Info("收录通知渠道已启用：IndexNow（Bing/Yandex/Naver）")
 			}
+		}
+		if cfg.Baidu.IsConfigured() {
+			b, bErr := urlsubmit.NewBaiduSubmitter(cfg.Baidu.Site, cfg.Baidu.Token)
+			if bErr != nil {
+				log.Error("百度推送初始化失败，该渠道禁用", port.Err(bErr))
+			} else {
+				submitters = append(submitters, b)
+				log.Info("收录通知渠道已启用：百度主动推送", port.String("site", cfg.Baidu.Site))
+			}
+		}
+		if len(submitters) > 0 {
+			indexNowSubmitter = urlsubmit.NewMultiSubmitter(submitters...)
 		}
 	}
 	var geoMonitorUCRef *geo.MonitorUseCase

@@ -35,6 +35,7 @@ type Config struct {
 	Crawler    CrawlerConfig
 	Telemetry  TelemetryConfig
 	Tavily     TavilyConfig
+	Baidu      BaiduConfig
 }
 
 // TelemetryConfig 链路追踪配置（OpenTelemetry）。
@@ -199,6 +200,19 @@ type TavilyConfig struct {
 
 func (c TavilyConfig) IsConfigured() bool { return c.APIKey != "" }
 
+// BaiduConfig 百度收录主动推送配置。
+// 参考 https://ziyuan.baidu.com/：在搜索资源平台验证域名后获取准入 token。
+// 配置后内容发布为 published 时自动推送百度（单次 ≤2000 条，日配额约 10 万）。
+type BaiduConfig struct {
+	Site  string // 已验证域名（如 content.example.com）
+	Token string // 准入 token
+}
+
+// IsConfigured 判断百度推送是否已配置（site + token 均非空）。
+func (c BaiduConfig) IsConfigured() bool {
+	return c.Site != "" && c.Token != ""
+}
+
 // JWTConfig 认证配置（本轮预留）。
 type JWTConfig struct {
 	Secret     string
@@ -255,6 +269,10 @@ func Load() Config {
 		},
 		Tavily: TavilyConfig{
 			APIKey: os.Getenv("TAVILY_API_KEY"),
+		},
+		Baidu: BaiduConfig{
+			Site:  os.Getenv("BAIDU_SITE"),
+			Token: os.Getenv("BAIDU_TOKEN"),
 		},
 		JWT: JWTConfig{
 			Secret:     os.Getenv("JWT_SECRET"),

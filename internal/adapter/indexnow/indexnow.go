@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 
 	"webreaper/internal/usecase/port"
@@ -25,21 +26,29 @@ import (
 // indexNowEndpoint IndexNow 提交端点。
 const indexNowEndpoint = "https://api.indexnow.org/indexnow"
 
+// indexNowKeyPattern IndexNow key 格式（文档要求）：
+// 8-128 个十六进制字符（a-z/A-Z/0-9 和 `-`）。提交前校验，格式错直接报错不浪费请求。
+var indexNowKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9-]{8,128}$`)
+
 // Submitter 是 port.URLSubmitter 的 IndexNow 实现。
 type Submitter struct {
-	host       string // 站点域名（不含协议和路径，如 content.example.com）
-	key        string // IndexNow 密钥
+	host        string // 站点域名（不含协议和路径，如 content.example.com）
+	key         string // IndexNow 密钥
 	keyLocation string // 密钥文件 URL（IndexNow 会访问它校验）
-	httpClient *http.Client
+	httpClient  *http.Client
 }
 
 // NewSubmitter 创建 IndexNow 提交器。
 // host 从 PublicBaseURL 解析（去掉协议/路径）；keyLocation 由调用方提供
 // （指向本服务的 /public/indexnow-key.txt 端点）。
+// key 必须符合 IndexNow 格式（8-128 个 a-zA-Z0-9-），否则直接报错。
 func NewSubmitter(baseURL, key, keyLocation string) (*Submitter, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("无效的 PublicBaseURL: %s", baseURL)
+	}
+	if !indexNowKeyPattern.MatchString(key) {
+		return nil, fmt.Errorf("IndexNow key 格式无效（需 8-128 个字母/数字/连字符）: %q", key)
 	}
 	return &Submitter{
 		host:        u.Host,
