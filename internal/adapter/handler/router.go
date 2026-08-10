@@ -46,7 +46,6 @@ type Router struct {
 	conversationUC   *conversation.ConversationUseCase
 	crawlCfgUC       *crawlconfig.CrawlConfigUseCase
 	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
-	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
 	statsUC          *stats.StatsUseCase               // 仪表盘统计聚合
 	// GEO 业务（商户端核心）——通过 SetGEO 延迟注入，可选
 	geoBrandUC   *geo.BrandUseCase
@@ -209,11 +208,6 @@ func (r *Router) SetToolRegistry(reg *port.ToolRegistry) {
 	r.toolRegistry = reg
 }
 
-// SetKnowledgeSearch 注入知识检索器（可选；未配置向量库时降级）。
-func (r *Router) SetKnowledgeSearch(ks port.KnowledgeSearcher) {
-	r.knowledgeSearch = ks
-}
-
 func (r *Router) Engine() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	e := gin.New()
@@ -221,16 +215,20 @@ func (r *Router) Engine() *gin.Engine {
 
 	e.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
-	// 认证（公开）
-	authHandler := NewAuthHandler(r.authRegister, r.authLogin)
-	authGroup := e.Group("/api/v1/auth")
-	{
-		authGroup.POST("/register", authHandler.HandleRegister)
-		authGroup.POST("/login", authHandler.HandleLogin)
+	// 认证（公开）——核心依赖，未注入则认证端点不注册
+	if r.authRegister != nil && r.authLogin != nil {
+		authHandler := NewAuthHandler(r.authRegister, r.authLogin)
+		authGroup := e.Group("/api/v1/auth")
+		{
+			authGroup.POST("/register", authHandler.HandleRegister)
+			authGroup.POST("/login", authHandler.HandleLogin)
+		}
 	}
 
 	// 采集政策（公开，无需认证，让外部可查询合规承诺）
-	e.GET("/api/v1/crawl-policy", NewCrawlConfigHandler(r.crawlCfgUC).HandlePolicy)
+	if r.crawlCfgUC != nil {
+		e.GET("/api/v1/crawl-policy", NewCrawlConfigHandler(r.crawlCfgUC).HandlePolicy)
+	}
 
 	// 公开内容站（无认证——让 AI 引擎/搜索引擎可爬取已发布内容）
 	// 通过 SetPublic 注入；未注入则公开端点不注册。
@@ -248,50 +246,66 @@ func (r *Router) Engine() *gin.Engine {
 	api.Use(middleware.JWTAuth(r.tokenParser))
 	{
 		// AI 对话（SSE 流式）——配额检查在 SSE 头设置前，超限返回 JSON 402
-		chatHandler := NewChatHandler(r.ai)
-		chatHandler.SetQuotaGate(r.quotaGate)
-		api.POST("/chat", chatHandler.HandleStream)
-		// 全局工具列表（供前端查看实际可用工具，含启用状态）
-		api.GET("/tools", r.handleListTools)
-		// 动态启用/禁用工具（工具面板用）
-		api.PUT("/tools/:name/toggle", r.handleToggleTool)
+		if r.ai != nil {
+			chatHandler := NewChatHandler(r.ai)
+			chatHandler.SetQuotaGate(r.quotaGate)
+			api.POST("/chat", chatHandler.HandleStream)
+		}
+		// 工具面板（需 toolRegistry）
+		if r.toolRegistry != nil {
+			api.GET("/tools", r.handleListTools)
+			api.PUT("/tools/:name/toggle", r.handleToggleTool)
+		}
 		// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）
-		api.GET("/notifications", r.HandleListNotifications)
-		api.GET("/notifications/unread-count", r.HandleNotificationUnread)
-		api.POST("/notifications/:id/read", r.HandleMarkNotificationRead)
-		// 仪表盘统计聚合（一次返回全量指标）
-		api.GET("/stats", r.handleGetStats)
-		// Agent 任务（同步执行）
-		api.POST("/agents/run", NewAgentHandler(r.agentRunner).HandleRun)
-		// 异步任务投递（agent_run 后台执行通道——Chat 的"后台采集"用）
-		taskHandler := NewTaskHandler(r.enqueueUC)
-		api.POST("/tasks", taskHandler.HandleEnqueue)
-		// 采集集合
-		// Agent 配置
-		api.GET("/agents", r.handleListAgentConfigs)
-		api.POST("/agents", r.handleCreateAgentConfig)
-		api.PUT("/agents/:name", r.handleUpdateAgentConfig)
-		api.DELETE("/agents/:name", r.handleDeleteAgentConfig)
-		// LLM 配置（独立聚合根）
-		api.GET("/llm-configs", r.handleListLLMConfigs)
-		api.POST("/llm-configs", r.handleCreateLLMConfig)
-		api.PUT("/llm-configs/:name", r.handleUpdateLLMConfig)
-		api.DELETE("/llm-configs/:name", r.handleDeleteLLMConfig)
+		if r.notifyUC != nil {
+			api.GET("/notifications", r.HandleListNotifications)
+			api.GET("/notifications/unread-count", r.HandleNotificationUnread)
+			api.POST("/notifications/:id/read", r.HandleMarkNotificationRead)
+		}
+		// 仪表盘统计聚合
+		if r.statsUC != nil {
+			api.GET("/stats", r.handleGetStats)
+		}
+		// Agent 同步执行 + 异步任务投递
+		if r.agentRunner != nil {
+			api.POST("/agents/run", NewAgentHandler(r.agentRunner).HandleRun)
+		}
+		if r.enqueueUC != nil {
+			taskHandler := NewTaskHandler(r.enqueueUC)
+			api.POST("/tasks", taskHandler.HandleEnqueue)
+		}
+		// Agent 配置管理
+		if r.agentCfgUC != nil {
+			api.GET("/agents", r.handleListAgentConfigs)
+			api.POST("/agents", r.handleCreateAgentConfig)
+			api.PUT("/agents/:name", r.handleUpdateAgentConfig)
+			api.DELETE("/agents/:name", r.handleDeleteAgentConfig)
+		}
+		// LLM 配置管理
+		if r.llmCfgUC != nil {
+			api.GET("/llm-configs", r.handleListLLMConfigs)
+			api.POST("/llm-configs", r.handleCreateLLMConfig)
+			api.PUT("/llm-configs/:name", r.handleUpdateLLMConfig)
+			api.DELETE("/llm-configs/:name", r.handleDeleteLLMConfig)
+		}
 		// 聊天会话（按用户隔离，跨设备持久化）
-		convHandler := NewConversationHandler(r.conversationUC)
-		api.GET("/conversations", convHandler.HandleList)
-		api.POST("/conversations", convHandler.HandleCreate)
-		api.GET("/conversations/:id/messages", convHandler.HandleGetMessages)
-		api.POST("/conversations/:id/messages", convHandler.HandleSaveMessage)
-		api.PUT("/conversations/:id", convHandler.HandleRename)
-		api.DELETE("/conversations/:id", convHandler.HandleDelete)
+		if r.conversationUC != nil {
+			convHandler := NewConversationHandler(r.conversationUC)
+			api.GET("/conversations", convHandler.HandleList)
+			api.POST("/conversations", convHandler.HandleCreate)
+			api.GET("/conversations/:id/messages", convHandler.HandleGetMessages)
+			api.POST("/conversations/:id/messages", convHandler.HandleSaveMessage)
+			api.PUT("/conversations/:id", convHandler.HandleRename)
+			api.DELETE("/conversations/:id", convHandler.HandleDelete)
+		}
 		// 采集配置（运行时可调的速率/robots 开关）
-		crawlCfgHandler := NewCrawlConfigHandler(r.crawlCfgUC)
-		api.GET("/crawl-config", crawlCfgHandler.HandleGet)
-		api.PUT("/crawl-config", crawlCfgHandler.HandleUpdate)
-		// 外部系统推送（动态配置目标系统 + 推送 + 推送记录）
-		// 知识搜索
-		api.GET("/search", r.handleSearch)
+		if r.crawlCfgUC != nil {
+			crawlCfgHandler := NewCrawlConfigHandler(r.crawlCfgUC)
+			api.GET("/crawl-config", crawlCfgHandler.HandleGet)
+			api.PUT("/crawl-config", crawlCfgHandler.HandleUpdate)
+		}
+		// 知识搜索（向量库配置后启用）
+		}
 
 		// GEO 业务路由（商户端核心：品牌/关键词/监测/排行榜/内容）
 		// geoHandler 提升到外层：管理后台的全局管理端点（/admin/brands 等）也复用它。
@@ -389,9 +403,11 @@ func (r *Router) Engine() *gin.Engine {
 					adminGroup.POST("/contents/:id/status", geoHandler.HandleAdminSetContentStatus)
 					adminGroup.DELETE("/contents/:id", geoHandler.HandleAdminDeleteContent)
 				}
-				// Tavily 搜索 API 配置（管理后台用）
-				adminGroup.GET("/tavily-status", r.handleTavilyStatus)
-				adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
+				// Tavily 搜索 API 配置（需 toolRegistry）
+				if r.toolRegistry != nil {
+					adminGroup.GET("/tavily-status", r.handleTavilyStatus)
+					adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
+				}
 			// 平台系统设置（运行时开关）
 			if r.settingsUC != nil {
 				adminGroup.GET("/settings/auto-monitor", r.HandleGetAutoMonitor)
@@ -421,17 +437,16 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.GET("/billing/orders", r.HandleAdminListOrders)
 				adminGroup.GET("/billing/revenue", r.HandleAdminRevenueReport) // 收入概览
 			}
+			// 经济系统——商户端（我的套餐/订阅/订单，多租户隔离）
+			if r.billingUC != nil {
+				api.GET("/billing/plans", r.HandleListActivePlans)
+				api.GET("/billing/my-plan", r.HandleGetMyPlan)
+				api.GET("/billing/usage", r.HandleGetMyUsage) // 配额余量（进度条）
+				api.GET("/billing/orders", r.HandleListMyOrders)
+				api.POST("/billing/orders", r.HandleCreateOrder)              // 下单购买
+				api.POST("/billing/orders/:id/confirm", r.HandleConfirmOrder) // 确认支付（mock 自动/真实回调）
 			}
 		}
-	}
-	// 经济系统——商户端（我的套餐/订阅/订单，多租户隔离）
-	if r.billingUC != nil {
-		api.GET("/billing/plans", r.HandleListActivePlans)
-		api.GET("/billing/my-plan", r.HandleGetMyPlan)
-		api.GET("/billing/usage", r.HandleGetMyUsage) // 配额余量（进度条）
-		api.GET("/billing/orders", r.HandleListMyOrders)
-		api.POST("/billing/orders", r.HandleCreateOrder)              // 下单购买
-		api.POST("/billing/orders/:id/confirm", r.HandleConfirmOrder) // 确认支付（mock 自动/真实回调）
 	}
 	return e
 }

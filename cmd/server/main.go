@@ -19,7 +19,6 @@ import (
 	"webreaper/internal/adapter/bing"
 	"webreaper/internal/adapter/crawler"
 	"webreaper/internal/adapter/crypto"
-	"webreaper/internal/adapter/embedding"
 	"webreaper/internal/adapter/handler"
 	"webreaper/internal/adapter/lock"
 	zaplogger "webreaper/internal/adapter/logger"
@@ -32,7 +31,6 @@ import (
 	"webreaper/internal/adapter/scheduledtask"
 	"webreaper/internal/adapter/telemetry"
 	"webreaper/internal/adapter/urlsubmit"
-	"webreaper/internal/adapter/vectorstore"
 	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/account"
@@ -139,35 +137,6 @@ func main() {
 		})
 	}
 
-	// Embedding + 向量存储（数据闭环：结构化→向量化→检索）
-	var embedder port.Embedder
-	var vectorStore port.VectorStore
-	if cfg.Embedding.APIKey != "" {
-		embedder = embedding.NewOpenAIEmbedder(cfg.Embedding)
-		log.Info("Embedding 已配置", port.String("model", cfg.Embedding.Model))
-	}
-	if cfg.Milvus.IsConfigured() {
-		vs, err := vectorstore.NewMilvusVectorStore(cfg.Milvus.Addr(), cfg.Milvus.CollectionName)
-		if err != nil {
-			log.Warn("Milvus 连接失败，使用内存向量存储", port.Err(err))
-			vectorStore = vectorstore.NewMemoryVectorStore()
-		} else {
-			vectorStore = vs
-			log.Info("Milvus 向量库已连接", port.String("addr", cfg.Milvus.Addr()), port.String("collection", cfg.Milvus.CollectionName))
-		}
-	} else {
-		vectorStore = vectorstore.NewMemoryVectorStore()
-		log.Info("未配置 MILVUS_HOST，使用内存向量存储（重启即丢，仅供开发）")
-	}
-
-	// 知识检索（向量库配置后启用——供知识搜索工具和搜索 API）
-	// 注意：原 process usecase 已删除（属 dataitem 审核后处理链，与 GEO 无关）。
-	// 知识检索能力暂保留为 nil（后续若 GEO 需要可独立实现轻量 KnowledgeSearcher）。
-	var knowledgeSearch port.KnowledgeSearcher
-	if embedder != nil && vectorStore != nil {
-		// 向量库已配置但暂无独立 KnowledgeSearcher 实现——保留 hook 位
-		log.Info("向量库已配置（知识检索能力待独立实现）")
-	}
 
 	// 认证
 	hasher := authadapter.NewBcryptHasher()
@@ -243,7 +212,6 @@ func main() {
 	router.SetConversation(conversationUC)
 	router.SetCrawlConfig(crawlCfgUC)
 	router.SetToolRegistry(toolRegistry)
-	router.SetKnowledgeSearch(knowledgeSearch)
 
 	// GEO 业务装配（商户端核心）。需要 DB + LLM 才启用。
 	geoRepos := initGEORpositories(cfg.DB)

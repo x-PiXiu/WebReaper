@@ -10,12 +10,7 @@ import (
 )
 
 // toolAdapter 把 port.CrawlerTool 适配为 trpc-agent-go 的 tool.CallableTool。
-//
-// 解耦说明（原 dataitem 强耦合已移除）：
-//   - 历史版本每次爬取结果强落库为 DataItem（pending_review），
-//     导致 Agent 链依赖 DataItemRepository，无法独立测试/部署。
-//   - 现在 toolAdapter 只做"执行工具 → 返回结果给 LLM"，不落库。
-//   - 需要落库的场景由专门的 save_data_item 工具按需处理（LLM 主动调用）。
+// 执行工具 → 返回结果给 LLM（不落库——保持 Agent 链纯净，与任何仓储零依赖）。
 type toolAdapter struct {
 	crawler port.CrawlerTool
 }

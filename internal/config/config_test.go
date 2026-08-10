@@ -106,9 +106,6 @@ func TestLoad_EnvOverride(t *testing.T) {
 	if cfg.LLM.Model != "gpt-4o" {
 		t.Errorf("LLM Model = %q, want gpt-4o", cfg.LLM.Model)
 	}
-	if cfg.Redis.DB != 3 {
-		t.Errorf("Redis DB = %d, want 3", cfg.Redis.DB)
-	}
 	if cfg.JWT.Expiration != 7200 {
 		t.Errorf("JWT Expiration = %d, want 7200", cfg.JWT.Expiration)
 	}

@@ -23,19 +23,15 @@ import (
 
 // Config 是应用的全局配置根。
 type Config struct {
-	Server     ServerConfig
-	DB         DBConfig
-	LLM        LLMConfig
-	Embedding  EmbeddingConfig
-	Milvus     MilvusConfig
-	Redis      RedisConfig
-	JWT        JWTConfig
-	Publish    PublishConfig
-	AgentCore  AgentCoreConfig
-	Crawler    CrawlerConfig
-	Telemetry  TelemetryConfig
-	Tavily     TavilyConfig
-	Baidu      BaiduConfig
+	Server    ServerConfig
+	DB        DBConfig
+	LLM       LLMConfig
+	JWT       JWTConfig
+	Publish   PublishConfig
+	Crawler   CrawlerConfig
+	Telemetry TelemetryConfig
+	Tavily    TavilyConfig
+	Baidu     BaiduConfig
 }
 
 // TelemetryConfig 链路追踪配置（OpenTelemetry）。
@@ -84,27 +80,12 @@ func (c AgentCoreConfig) IsConfigured() bool {
 	return c.BaseURL != "" && c.AdminToken != ""
 }
 
-// PublishConfig 推送目标平台配置（真实推送接线用）。
+// PublishConfig 多平台发布相关配置。
 type PublishConfig struct {
-	APIKey        string // 目标平台的 X-API-Key
-	BaseURL       string // 如 https://agentcore.example.com
-	ArticlePath   string // 文章推送路径，如 /api/v1/ingest/article
-	QuestionPath  string // 面试题推送路径，如 /api/v1/ingest/question
-	MaxRetries    int    // HTTP 推送失败重试次数（仅对 5xx/429/网络错误），默认 3
 	CookieSecret  string // 多平台发布 cookie 加密密钥（AES-GCM，从 PUBLISH_COOKIE_SECRET 读取）
 	QRLoginHeaded bool   // 扫码登录是否显示浏览器窗口（调试用，生产保持 false 走灰盒 headless）
 }
 
-// IsConfigured 判断推送平台是否已配置（API Key + BaseURL 非空）。
-func (c PublishConfig) IsConfigured() bool {
-	return c.APIKey != "" && c.BaseURL != ""
-}
-
-// ArticleURL 完整的文章推送 URL。
-func (c PublishConfig) ArticleURL() string { return c.BaseURL + c.ArticlePath }
-
-// QuestionURL 完整的面试题推送 URL。
-func (c PublishConfig) QuestionURL() string { return c.BaseURL + c.QuestionPath }
 
 // ServerConfig 服务配置。
 type ServerConfig struct {
@@ -268,22 +249,6 @@ func Load() Config {
 			BaseURL:  getenvDefault("LLM_BASE_URL", "https://api.minimaxi.com/v1"),
 			Model:    getenvDefault("LLM_MODEL", "MiniMax-M2.5"),
 		},
-		Embedding: EmbeddingConfig{
-			Model:   getenvDefault("EMBEDDING_MODEL", ""),
-			BaseURL: getenvDefault("EMBEDDING_BASE_URL", ""),
-			APIKey:  os.Getenv("EMBEDDING_API_KEY"),
-		},
-		Milvus: MilvusConfig{
-			Host:           getenvDefault("MILVUS_HOST", ""),
-			Port:           getenvDefault("MILVUS_PORT", "19530"),
-			CollectionName: getenvDefault("MILVUS_COLLECTION", "webreaper_vectors"),
-		},
-		Redis: RedisConfig{
-			Host:     getenvDefault("REDIS_HOST", "localhost"),
-			Port:     getenvDefault("REDIS_PORT", "6379"),
-			Password: os.Getenv("REDIS_PASSWORD"),
-			DB:       getenvInt("REDIS_DB", 0),
-		},
 		Tavily: TavilyConfig{
 			APIKey: os.Getenv("TAVILY_API_KEY"),
 		},
@@ -296,17 +261,8 @@ func Load() Config {
 			Expiration: getenvInt("JWT_EXPIRATION", 3600),
 		},
 		Publish: PublishConfig{
-			APIKey:       os.Getenv("INGEST_API_KEY"),
-			BaseURL:      getenvDefault("INGEST_BASE_URL", ""),
-			ArticlePath:  getenvDefault("INGEST_ARTICLE_PATH", "/api/v1/ingest/article"),
-			QuestionPath: getenvDefault("INGEST_QUESTION_PATH", "/api/v1/ingest/question"),
-			MaxRetries:    getenvInt("PUBLISH_MAX_RETRIES", 3),
 			CookieSecret:  os.Getenv("PUBLISH_COOKIE_SECRET"),
 			QRLoginHeaded: getenvBool("QR_LOGIN_HEADED", false),
-		},
-		AgentCore: AgentCoreConfig{
-			BaseURL:    getenvDefault("AGENTCORE_BASE_URL", "http://localhost:8081"),
-			AdminToken: os.Getenv("AGENTCORE_ADMIN_TOKEN"),
 		},
 		Crawler: CrawlerConfig{
 			RequestIntervalMs: getenvInt("CRAWLER_REQUEST_INTERVAL_MS", 1000),

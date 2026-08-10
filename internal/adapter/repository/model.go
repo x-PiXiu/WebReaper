@@ -100,27 +100,7 @@ type SystemSettingPO struct {
 
 func (SystemSettingPO) TableName() string { return "system_settings" }
 
-// ---- ExternalSystemPO / PublishRecordPO（外部推送系统）----
-
-type ExternalSystemPO struct {
-	Name         string    `gorm:"primaryKey;size:64"`
-	Description  string    `gorm:"size:256"`
-	Endpoint     string    `gorm:"size:512"`
-	Method       string    `gorm:"size:8"`
-	Headers      string    `gorm:"type:text"`
-	Mode         string    `gorm:"size:16;default:raw"`
-	FieldMapping string    `gorm:"type:text"`
-	BodyTemplate string    `gorm:"type:text"`
-	ContentType  string    `gorm:"size:32"`
-	Enabled      bool      `gorm:"default:true"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
-func (ExternalSystemPO) TableName() string { return "external_systems" }
-
 // allModels 返回所有需要迁移的 PO。
-// 注：PublishRecordPO 复用 001_init.sql 已建的 publish_records 表，不自动迁移。
 func allModels() []any {
 	return []any{
 		&UserPO{},
@@ -130,7 +110,6 @@ func allModels() []any {
 		&ConversationPO{},
 		&MessagePO{},
 		&SystemSettingPO{},
-		&ExternalSystemPO{},
 		// GEO 表（013_geo_core.sql）
 		&BrandPO{},
 		&KeywordPO{},

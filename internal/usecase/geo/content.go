@@ -488,25 +488,25 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 
 请%s。`, in.BrandInfo, keywordDesc, modeHint)
 
-	// RAG 增强：生成前检索"品牌 + 关键词"真实信息注入 prompt（可选，失败降级为纯 LLM）。
-	// "不编造数据"从口号变能力——LLM 引用真实检索资料创作，权威性维度显著提升。
-	if uc.ragRetriever != nil {
-		ragQuery := keywordDesc
-		if in.BrandInfo != "" {
-			// 取品牌名（BrandInfo 首行通常是品牌描述）
-			ragQuery = strings.SplitN(in.BrandInfo, "\n", 2)[0] + " " + keywordDesc
-		}
-		if ctx2, cancel := context.WithTimeout(ctx, 15*time.Second); true {
-			if ref, rErr := uc.ragRetriever.RetrieveContent(ctx2, ragQuery, 3); rErr == nil && ref != "" {
+		// RAG 增强：生成前检索"品牌 + 关键词"真实信息注入 prompt（可选，失败降级为纯 LLM）。
+		// "不编造数据"从口号变能力——LLM 引用真实检索资料创作，权威性维度显著提升。
+		if uc.ragRetriever != nil {
+			ragQuery := keywordDesc
+			if in.BrandInfo != "" {
+				// 取品牌名（BrandInfo 首行通常是品牌描述）
+				ragQuery = strings.SplitN(in.BrandInfo, "\n", 2)[0] + " " + keywordDesc
+			}
+			ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+			ref, rErr := uc.ragRetriever.RetrieveContent(ctx2, ragQuery, 3)
+			cancel()
+			if rErr == nil && ref != "" {
 				userPrompt += fmt.Sprintf(`
 
 参考资料（来自全网真实检索，可引用其中事实/观点，但需与品牌信息一致）：
 %s
 `, ref)
 			}
-			cancel()
 		}
-	}
 
 	messages := []port.ChatMessage{
 		{Role: "system", Content: systemPrompt},

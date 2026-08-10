@@ -1,11 +1,8 @@
 import { AppShell, type NavItem } from './MainLayout'
 
 // 管理后台布局：菜单按功能域分组（AntD Menu 的 group 类型渲染）。
-// 分组依据（域辨别）：
-//   - 平台管理：SaaS 平台本身的运营（总览 + 商户）
-//   - GEO 内容引擎：改造后新增的 GEO 域（Agent/LLM 配置、AI 对话、工具、收录）
-//   - 数据采集：改造前的"数据采集结构化"域（数据管理 + 任务监控 + 采集配置），
-//     与 GEO 无耦合，独立成组保留——避免混淆且不阻塞演进。
+//   - 平台管理：SaaS 运营（总览/商户/品牌/内容/计费/设置）
+//   - GEO 内容引擎：Agent/LLM 配置、AI 对话、工具面板、收录管理
 const adminMenu: NavItem[] = [
   {
     key: 'platform', label: '平台管理',

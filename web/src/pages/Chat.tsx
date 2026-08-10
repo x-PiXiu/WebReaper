@@ -6,7 +6,6 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { getToken, useAuthStore } from '../store/auth'
 import { businessApi } from '../api/business'
-import { useTaskEnqueue } from '../hooks/useTaskEnqueue'
 import type { ChatMessage, AgentConfig, LLMConfig, ToolView } from '../types/api'
 
 const { Text } = Typography
@@ -257,7 +256,6 @@ export default function Chat() {
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const { username } = useAuthStore()
-  const { enqueue: enqueueTask, loading: enqueueLoading } = useTaskEnqueue()
 
   const { data: agentConfigs = [] } = useQuery({ queryKey: ['agent-configs'], queryFn: () => businessApi.listAgentConfigs() })
   const { data: tools = [] } = useQuery({ queryKey: ['tools'], queryFn: () => businessApi.listTools() })
@@ -545,17 +543,6 @@ export default function Chat() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
-  // 后台采集：把当前输入作为异步任务投递，不阻塞对话
-  const handleBackgroundCrawl = async () => {
-    if (!input.trim()) return
-    const taskDesc = input.trim()
-    await enqueueTask({
-      task: taskDesc,
-      systemPrompt: currentAgent?.system_prompt || '',
-    })
-    setInput('') // 清空输入框，提示用户任务已转后台
-  }
-
   const deleteConv = async (id: string) => {
     setConversations(prev => prev.filter(c => c.id !== id))
     setLoadedConvMsgs(prev => { const n = new Set(prev); n.delete(id); return n })
@@ -700,16 +687,7 @@ export default function Chat() {
             {streaming ? (
               <Button danger onClick={stopGeneration} style={{ height: 'auto', borderRadius: 12, minWidth: 56 }}>停止</Button>
             ) : (
-              <>
-                <Button
-                  onClick={handleBackgroundCrawl}
-                  loading={enqueueLoading}
-                  disabled={!input.trim()}
-                  style={{ height: 'auto', borderRadius: 12 }}
-                  title="把当前输入作为采集任务异步执行，不阻塞对话。结果在「任务监控」页查看。"
-                >后台采集</Button>
-                <Button type="primary" onClick={send} style={{ height: 'auto', borderRadius: 12, minWidth: 56 }}>发送</Button>
-              </>
+              <Button type="primary" onClick={send} style={{ height: 'auto', borderRadius: 12, minWidth: 56 }}>发送</Button>
             )}
           </div>
         </div>
