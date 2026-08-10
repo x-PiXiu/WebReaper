@@ -28,10 +28,10 @@ import (
 // PublicHandler 公开站点处理器。
 // 只依赖 port 仓储 + 结构化用例（纯查询 + 纯生成，无写操作、无认证）。
 type PublicHandler struct {
-	contentRepo        port.OptimizedContentRepository
-	structured         *structured.StructuredDataUseCase
-	baseURL            string // 公开站点根地址（如 https://example.com），生成绝对 URL
-	indexNowKey        string // IndexNow 密钥（静态注入，启动时值）
+	contentRepo         port.OptimizedContentRepository
+	structured          *structured.StructuredDataUseCase
+	baseURL             string                       // 公开站点根地址（如 https://example.com），生成绝对 URL
+	indexNowKey         string                       // IndexNow 密钥（静态注入，启动时值）
 	indexNowKeyProvider func(context.Context) string // 动态读取（运行时可调配置；优先于静态值）
 }
 
@@ -100,11 +100,15 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		title = pkg.ExtractTitle(content.OptimizedText)
 	}
 
+	// 防御性清洗：存量数据（StripThinkTags 上线前生成）正文可能残留 <think> 块，
+	// 公开渲染（正文/描述/JSON-LD/llms.txt）必须保证零泄漏——统一在此清洗一次。
+	cleanText := pkg.StripThinkTags(content.OptimizedText)
+
 	// 生成 JSON-LD（Article/FAQPage 自动推断），内嵌为 <script> 标签。
 	// 标题兜底后仍失败（如正文异常）不阻断页面——JSON-LD 是增强项。
 	sd, _ := h.structured.GenerateJSONLD(c.Request.Context(), structured.StructuredDataInput{
 		Title:   title,
-		Content: content.OptimizedText,
+		Content: cleanText,
 		URL:     h.baseURL + "/public/articles/" + content.ID,
 	})
 	jsonldTag := ""
@@ -121,9 +125,9 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := tpl.Execute(c.Writer, gin.H{
 		"Title":       title,
-		"Description": truncateDescription(content.OptimizedText),
+		"Description": truncateDescription(cleanText),
 		"Meta":        fmt.Sprintf("GEO 优化内容 · 关键词可见度评分 %d", int(content.Score.Total)),
-		"ContentHTML": template.HTML(public.RenderMarkdown(content.OptimizedText)),
+		"ContentHTML": template.HTML(public.RenderMarkdown(cleanText)),
 		"JSONLD":      template.HTML(jsonldTag),
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render error")
@@ -158,7 +162,7 @@ func (h *PublicHandler) GetLLMSTxt(c *gin.Context) {
 		entries = append(entries, entity.LLMSTxtEntry{
 			URL:     h.baseURL + "/public/articles/" + it.ID,
 			Title:   it.Title,
-			Summary: truncateDescription(it.OptimizedText),
+			Summary: truncateDescription(pkg.StripThinkTags(it.OptimizedText)),
 		})
 	}
 	txt, err := h.structured.GenerateLLMSTxt(c.Request.Context(), "WebReaper 内容平台", "AI 搜索引擎友好的结构化内容", entries)

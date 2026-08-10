@@ -30,14 +30,14 @@ type DataItemRepository interface {
 
 // DailyCount 单日计数（趋势图用）。
 type DailyCount struct {
-	Date  string // YYYY-MM-DD
-	Count int
+	Date  string `json:"date"`  // YYYY-MM-DD
+	Count int    `json:"count"`
 }
 
 // GroupCount 分组计数（饼图/条形图用）。
 type GroupCount struct {
-	Name  string
-	Count int
+	Name  string `json:"name"`
+	Count int    `json:"count"`
 }
 
 // AgentConfigRepository Agent 配置持久化接口。
