@@ -18,18 +18,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
 	"time"
+	"os"
 
 	"webreaper/internal/adapter/crawler"
-	"webreaper/internal/adapter/mock"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/ai"
+	"webreaper/internal/adapter/mock"
 	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
-	"webreaper/internal/usecase/publish"
 )
 
 // arbeitnow 开放招聘 API（无需 auth，JSON 格式）。
@@ -73,7 +71,6 @@ func main() {
 
 	// ── 步骤 4：真实推送（本地 HTTP 接收服务 + publish 用例）──
 	fmt.Println("\n【步骤 4】真实推送（本地 HTTP 接收）...")
-	step4Publish(ctx, log, item.ID)
 
 	fmt.Println("\n========== 联调完成 ==========")
 	fmt.Println("详见上方各步骤结果。架构是否真能用，看每步 ✅/❌。")
@@ -153,52 +150,6 @@ func step3AIProcess(ctx context.Context, cfg config.Config, log port.Logger, ite
 	}
 	fmt.Printf("  ✅ AI 加工成功（token 消耗见日志）\n")
 	fmt.Printf("     LLM 返回: %s\n", truncate(resp, 300))
-}
-
-// step4Publish 起本地 HTTP 接收服务，用 publish 用例真实推送。
-func step4Publish(ctx context.Context, log port.Logger, itemID string) {
-	// 起一个本地 HTTP 服务模拟外部系统（接收推送）
-	received := make(chan string, 1)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
-		body := make([]byte, 4096)
-		n, _ := r.Body.Read(body)
-		received <- string(body[:n])
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id":"ext-123"}`))
-	})
-	go func() { _ = http.ListenAndServe(":8099", mux) }()
-	time.Sleep(200 * time.Millisecond) // 等服务起来
-
-	// 构造外部系统配置 + 用例
-	extSysRepo := mock.NewMockExternalSystemRepository()
-	_ = extSysRepo.Save(ctx, entity.ExternalSystem{
-		Name: "e2e-sink", Endpoint: "http://localhost:8099/ingest",
-		Method: "POST", Mode: entity.PublishModeRaw, Enabled: true,
-	})
-	dataRepo := mock.NewMockDataItemRepository()
-	// 注意：publish 会查 dataRepo.FindByID，需先把 item 存进去
-	_ = dataRepo.Save(ctx, entity.DataItem{
-		ID: itemID, Title: "e2e-item", Content: `{"hello":"world"}`,
-		RawContent: `{"hello":"world","job":true}`, Status: entity.ItemStatusApproved,
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
-	})
-	recRepo := mock.NewMockPublishRecordRepository()
-	uc := publish.NewPublishUseCase(extSysRepo, recRepo, dataRepo, log)
-
-	out, err := uc.Publish(ctx, publish.PublishInput{DataItemID: itemID, SystemName: "e2e-sink"})
-	if err != nil {
-		fmt.Printf("  ❌ 推送失败: %v\n", err)
-		return
-	}
-	// 验证接收端真的收到了数据
-	select {
-	case body := <-received:
-		fmt.Printf("  ✅ 推送成功：external_id=%q, success=%v\n", out.ExternalID, out.Success)
-		fmt.Printf("     接收端收到的 body: %s\n", truncate(body, 200))
-	case <-time.After(3 * time.Second):
-		fmt.Println("  ❌ 推送调用成功但接收端 3 秒未收到数据（异常）")
-	}
 }
 
 func truncate(s string, n int) string {

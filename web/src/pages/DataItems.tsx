@@ -1,9 +1,9 @@
 import { useState, Fragment, type Key } from 'react'
-import { Card, Table, Tag, Typography, Button, Space, message, Modal, Select } from 'antd'
+import { Card, Table, Tag, Typography, Button, Space, message, Modal } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
-import type { DataItem, ExternalSystem } from '../types/api'
+import type { DataItem } from '../types/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -85,15 +85,10 @@ function ContentRenderer({ content }: { content: string }) {
 
 export default function DataItems() {
   const queryClient = useQueryClient()
-  const [publishModal, setPublishModal] = useState<{ open: boolean; itemId?: string; systemName?: string; loading?: boolean }>({ open: false })
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
   const { data: items = [], refetch } = useQuery({
     queryKey: ['data-items'],
     queryFn: () => businessApi.listDataItems(),
-  })
-  const { data: externalSystems = [] } = useQuery({
-    queryKey: ['external-systems'],
-    queryFn: () => businessApi.listExternalSystems(),
   })
 
   const handleApprove = async (id: string) => {
@@ -119,23 +114,6 @@ export default function DataItems() {
     })
   }
 
-  const handlePublish = async () => {
-    if (!publishModal.itemId || !publishModal.systemName) return
-    setPublishModal(p => ({ ...p, loading: true }))
-    try {
-      const res = await businessApi.publishToExternal(publishModal.itemId, publishModal.systemName)
-      if (res.success) {
-        message.success(`推送成功${res.external_id ? '（外部ID: ' + res.external_id.slice(0, 16) + '）' : ''}`)
-      } else {
-        message.error(`推送失败：${res.error || '未知错误'}`)
-      }
-      setPublishModal({ open: false })
-    } catch {
-    } finally {
-      setPublishModal(p => ({ ...p, loading: false }))
-    }
-  }
-
   const columns = [
     { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
     {
@@ -159,9 +137,6 @@ export default function DataItems() {
               <Button size="small" type="primary" onClick={(e) => { e.stopPropagation(); handleApprove(record.id) }}>通过</Button>
               <Button size="small" danger onClick={(e) => { e.stopPropagation(); handleReject(record.id) }}>拒绝</Button>
             </>
-          )}
-          {record.status === 'approved' && (
-            <Button size="small" onClick={(e) => { e.stopPropagation(); setPublishModal({ open: true, itemId: record.id }) }}>推送</Button>
           )}
           <Button size="small" type="text" danger icon={<DeleteOutlined />}
             onClick={(e) => { e.stopPropagation(); handleDelete(record) }}
@@ -252,36 +227,6 @@ export default function DataItems() {
       </Card>
 
       {/* 推送 Modal */}
-      <Modal
-        title="推送到外部系统"
-        open={publishModal.open}
-        onCancel={() => setPublishModal({ open: false })}
-        onOk={handlePublish}
-        confirmLoading={publishModal.loading}
-        okText="推送"
-        cancelText="取消"
-        okButtonProps={{ disabled: !publishModal.systemName }}
-      >
-        {externalSystems.length === 0 ? (
-          <Text type="secondary">暂无可用外部系统。请先到「外部系统」页面配置。</Text>
-        ) : (
-          <>
-            <div style={{ marginBottom: 8 }}>
-              <Text type="secondary" style={{ fontSize: 13 }}>选择目标系统。</Text>
-            </div>
-            <Select
-              style={{ width: '100%' }}
-              placeholder="选择目标系统"
-              value={publishModal.systemName}
-              onChange={(v) => setPublishModal(p => ({ ...p, systemName: v }))}
-              options={externalSystems.filter((s: ExternalSystem) => s.enabled !== false).map((s: ExternalSystem) => ({
-                value: s.name,
-                label: `${s.name}${s.description ? '（' + s.description + '）' : ''}`,
-              }))}
-            />
-          </>
-        )}
-      </Modal>
     </div>
   )
 }

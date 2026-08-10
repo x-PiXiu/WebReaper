@@ -7,7 +7,6 @@ import AgentConfigs from './pages/AgentConfigs'
 import DataItems from './pages/DataItems'
 import Tasks from './pages/Tasks'
 import CrawlConfigPage from './pages/CrawlConfig'
-import ExternalSystems from './pages/ExternalSystems'
 import Tools from './pages/Tools'
 // 商户端 GEO 页面
 import MerchantHome from './pages/merchant/Home'
@@ -32,7 +31,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
 
         {/* 商户端路由组（role=merchant）*/}
-        <Route element={<ProtectedRoute role="merchant"><MerchantLayout /></ProtectedRoute>}>
+        <Route element={<ProtectedRoute><MerchantLayout /></ProtectedRoute>}>
           <Route path="/m" element={<MerchantHome />} />
           <Route path="/m/brands" element={<Brands />} />
           <Route path="/m/keywords" element={<Keywords />} />
@@ -51,26 +50,32 @@ export default function App() {
           <Route path="/admin/tasks" element={<Tasks />} />
           <Route path="/admin/tools" element={<Tools />} />
           <Route path="/admin/crawl-config" element={<CrawlConfigPage />} />
-          <Route path="/admin/external-systems" element={<ExternalSystems />} />
           <Route path="/admin/indexing" element={<Indexing />} />
           <Route path="/admin/chat" element={<Chat />} />
         </Route>
 
-        {/* 根路径：按角色跳转（在 ProtectedRoute 外，用轻量判断）*/}
+        {/* 根路径：登录后统一进入用户界面（商户端）*/}
         <Route path="/" element={<RootRedirect />} />
 
-        {/* 兜底：跳登录 */}
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        {/* 未匹配路由兜底：已登录回用户界面（避免"路由缺失→莫名跳登录页"），未登录去登录页 */}
+        <Route path="*" element={<RootFallback />} />
       </Routes>
     </BrowserRouter>
   )
 }
 
-// RootRedirect 根据登录态和角色跳转到对应首页。
+// RootRedirect 登录后统一进入用户界面。
+// 管理后台从用户界面的顶栏入口进入——管理员不再被直接抛进管理后台。
 import { useAuthStore } from './store/auth'
 function RootRedirect() {
   const token = useAuthStore((s) => s.token)
-  const role = useAuthStore((s) => s.role)
   if (!token) return <Navigate to="/login" replace />
-  return <Navigate to={role === 'admin' ? '/admin' : '/m'} replace />
+  return <Navigate to="/m" replace />
+}
+
+// RootFallback 未匹配路由兜底。
+function RootFallback() {
+  const token = useAuthStore((s) => s.token)
+  if (!token) return <Navigate to="/login" replace />
+  return <Navigate to="/m" replace />
 }

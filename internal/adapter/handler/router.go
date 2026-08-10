@@ -21,7 +21,6 @@ import (
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
-	"webreaper/internal/usecase/publish"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
 	taskquery "webreaper/internal/usecase/taskquery"
@@ -47,8 +46,6 @@ type Router struct {
 	llmCfgUC         *llmconfig.LLMConfigUseCase
 	conversationUC   *conversation.ConversationUseCase
 	crawlCfgUC       *crawlconfig.CrawlConfigUseCase
-	publishUC        *publish.PublishUseCase
-	sysCfgUC         *publish.SystemConfigUseCase
 	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
 	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
 	orchestrateUC    *orchestrate.OrchestratorUseCase // 可为 nil（未配置编排器时该端点 503）
@@ -128,8 +125,6 @@ func NewRouter(
 	llmCfgUC *llmconfig.LLMConfigUseCase,
 	conversationUC *conversation.ConversationUseCase,
 	crawlCfgUC *crawlconfig.CrawlConfigUseCase,
-	publishUC *publish.PublishUseCase,
-	sysCfgUC *publish.SystemConfigUseCase,
 	toolRegistry *port.ToolRegistry,
 	knowledgeSearch port.KnowledgeSearcher,
 	orchestrateUC *orchestrate.OrchestratorUseCase,
@@ -141,7 +136,6 @@ func NewRouter(
 		taskQueryUC: taskQueryUC, dataItemUC: dataItemUC,
 		agentCfgUC: agentCfgUC, llmCfgUC: llmCfgUC,
 		conversationUC: conversationUC, crawlCfgUC: crawlCfgUC,
-		publishUC: publishUC, sysCfgUC: sysCfgUC,
 		toolRegistry: toolRegistry, knowledgeSearch: knowledgeSearch,
 		orchestrateUC: orchestrateUC,
 		statsUC:       statsUC,
@@ -225,12 +219,6 @@ func (r *Router) Engine() *gin.Engine {
 		api.GET("/crawl-config", crawlCfgHandler.HandleGet)
 		api.PUT("/crawl-config", crawlCfgHandler.HandleUpdate)
 		// 外部系统推送（动态配置目标系统 + 推送 + 推送记录）
-		publishHandler := NewPublishHandler(r.publishUC, r.sysCfgUC)
-		api.GET("/external-systems", publishHandler.HandleListSystems)
-		api.POST("/external-systems", publishHandler.HandleCreateSystem)
-		api.DELETE("/external-systems/:name", publishHandler.HandleDeleteSystem)
-		api.POST("/external-systems/publish", publishHandler.HandlePublish)
-		api.GET("/data-items/:id/publish-records", publishHandler.HandlePublishRecords)
 		// 知识搜索
 		api.GET("/search", r.handleSearch)
 		// 框架内容编排（图编排：探查→生成→校验→补生成，落库不推送）

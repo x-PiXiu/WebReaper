@@ -40,7 +40,6 @@ import (
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/port"
-	"webreaper/internal/usecase/publish"
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
@@ -77,7 +76,7 @@ func main() {
 	log.Info("WebReaper 启动中", port.String("env", cfg.Server.Env))
 
 	// 初始化仓储（降级 mock）
-	dataItemRepo, collectionRepo, agentConfigRepo, llmConfigRepo, taskRepo, userRepo, convRepo, msgRepo, settingRepo, extSysRepo, pubRecRepo := initRepositories(cfg.DB, logger)
+	dataItemRepo, collectionRepo, agentConfigRepo, llmConfigRepo, taskRepo, userRepo, convRepo, msgRepo, settingRepo := initRepositories(cfg.DB, logger)
 
 	// 爬虫限流策略（从 config 读取，可经 .env 的 CRAWLER_REQUEST_INTERVAL_MS 调配）
 	crawlPolicy := cfg.Crawler.ToPolicy()
@@ -203,12 +202,6 @@ func main() {
 	// 首次启动 seed 默认采集策略
 	_ = crawlCfgUC.EnsureDefault(context.Background())
 
-	// 外部系统推送用例（字段映射 + HTTP 推送 + 推送记录）
-	publishUC := publish.NewPublishUseCase(extSysRepo, pubRecRepo, dataItemRepo, logger)
-	publishUC.SetTracer(tracer)
-	publishUC.SetMaxRetries(cfg.Publish.MaxRetries)
-	sysCfgUC := publish.NewSystemConfigUseCase(extSysRepo)
-
 	// 框架内容编排用例（图编排：探查→生成→校验→补生成，落库不推送）。
 	// 仅配了 LLM 时启用（scout/generator 依赖 LLM）；否则降级为 nil，编排端点不注册。
 	var orchestrateUC *orchestrate.OrchestratorUseCase
@@ -227,12 +220,6 @@ func main() {
 	} else {
 		log.Info("未配置 LLM，框架内容编排降级禁用")
 	}
-
-	// 注册推送工具为 Agent 可调用工具（装配层做适配，依赖方向合法）
-	// PublisherAdapter 把 publish.PublishUseCase 适配为 crawler.Publisher 接口
-	publisherAdapter := &publisherAdapterImpl{uc: publishUC, sysRepo: extSysRepo}
-	toolRegistry.Register(crawler.NewPublishTool(publisherAdapter))
-	toolRegistry.Register(crawler.NewListExternalSystemsTool(publisherAdapter))
 
 	// 注册 save_data_item 工具：让 LLM 自主保存结构化内容为 DataItem
 	// （LLM 生成 JSON → 调此工具保存 → 收到"已保存" → 回复友好总结，不显示 JSON 原文）
@@ -259,7 +246,7 @@ func main() {
 	// 路由 + HTTP 服务（handler 只依赖 usecase 与 port 接口，不直接持有仓储/具体 adapter struct）
 	router := handler.NewRouter(registerUC, loginUC, tokenParser, aiGenerator, enqueueUC,
 		agentRunner, taskQueryUC, dataItemUC, agentCfgUC, llmCfgUC, conversationUC, crawlCfgUC,
-		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC, statsUC)
+		toolRegistry, knowledgeSearch, orchestrateUC, statsUC)
 
 	// GEO 业务装配（商户端核心）。需要 DB + LLM 才启用。
 	geoRepos := initGEORpositories(cfg.DB)
@@ -457,7 +444,6 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 	port.DataItemRepository, port.CollectionRepository, port.AgentConfigRepository,
 	port.LLMConfigRepository, port.TaskRepository, port.UserRepository,
 	port.ConversationRepository, port.MessageRepository, port.SystemSettingRepository,
-	port.ExternalSystemRepository, port.PublishRecordRepository,
 ) {
 	log := logger.With(port.String("component", "repository"))
 	if !dbCfg.IsConfigured() {
@@ -466,8 +452,7 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 			mock.NewMockAgentConfigRepository(), mock.NewMockLLMConfigRepository(),
 			mock.NewMockTaskRepository(), mock.NewMockUserRepository(),
 			mock.NewMockConversationRepository(), mock.NewMockMessageRepository(),
-			mock.NewMockSystemSettingRepository(),
-			mock.NewMockExternalSystemRepository(), mock.NewMockPublishRecordRepository()
+			mock.NewMockSystemSettingRepository()
 	}
 	log.Info("连接 MySQL", port.String("host", dbCfg.Host), port.String("db", dbCfg.Name))
 	db, err := repository.NewMySQLDBFromConfig(dbCfg)
@@ -477,8 +462,7 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 		repository.NewGormAgentConfigRepository(db), repository.NewGormLLMConfigRepository(db),
 		repository.NewGormTaskRepository(db), repository.NewGormUserRepository(db),
 		repository.NewGormConversationRepository(db), repository.NewGormMessageRepository(db),
-		repository.NewGormSystemSettingRepository(db),
-		repository.NewGormExternalSystemRepository(db), repository.NewGormPublishRecordRepository(db)
+		repository.NewGormSystemSettingRepository(db)
 }
 
 // geoRepos 打包 GEO 仓储，避免 initRepositories 返回值过多。
@@ -559,45 +543,6 @@ func startMockSite(log port.Logger) {
 	})
 	log.Info("示例招聘站已启动", port.String("url", "http://localhost:8088/jobs"))
 	_ = http.ListenAndServe(":8088", mux)
-}
-
-// publisherAdapterImpl 把 usecase/publish.PublishUseCase 适配为 crawler.Publisher 接口。
-//
-// 设计动机（依赖倒置）：crawler.Publisher 接口定义在 adapter/crawler 包，
-// publish 用例不能反向依赖 crawler 包（违反依赖方向）。
-// 所以在装配层（main）写适配器，让 publish 用例通过它被 crawler 工具调用，
-// 依赖方向：crawler(工具) → Publisher(接口，crawler包定义) ← adapter(main) → publish(用例)。
-type publisherAdapterImpl struct {
-	uc      *publish.PublishUseCase
-	sysRepo port.ExternalSystemRepository
-}
-
-func (a *publisherAdapterImpl) PublishTo(ctx context.Context, dataItemID, systemName string) (crawler.PublishResult, error) {
-	out, err := a.uc.Publish(ctx, publish.PublishInput{DataItemID: dataItemID, SystemName: systemName})
-	if err != nil {
-		return crawler.PublishResult{}, err
-	}
-	return crawler.PublishResult{
-		Success: out.Success, ExternalID: out.ExternalID, Error: out.ErrorMsg,
-	}, nil
-}
-
-func (a *publisherAdapterImpl) ListSystems(ctx context.Context) ([]crawler.SystemInfo, error) {
-	list, err := a.sysRepo.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]crawler.SystemInfo, 0, len(list))
-	for _, s := range list {
-		if !s.Enabled {
-			continue
-		}
-		result = append(result, crawler.SystemInfo{
-			Name: s.Name, Description: s.Description,
-			ContentType: s.ContentType, Endpoint: s.Endpoint,
-		})
-	}
-	return result, nil
 }
 
 // dataItemSaverAdapter 把 dataitem.DataItemUseCase 适配为 crawler.DataItemSaver 接口。

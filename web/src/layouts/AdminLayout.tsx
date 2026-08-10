@@ -12,7 +12,6 @@ const adminMenu: (NavItem & { group?: string })[] = [
   // 系统配置
   { key: '/admin/tools', label: '工具面板' },
   { key: '/admin/crawl-config', label: '采集配置' },
-  { key: '/admin/external-systems', label: '外部系统' },
   { key: '/admin/indexing', label: '收录管理' },
   // AI 工具
   { key: '/admin/chat', label: 'AI 对话' },

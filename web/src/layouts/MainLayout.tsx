@@ -30,8 +30,14 @@ export function AppShell({
 }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { username, clearAuth } = useAuthStore()
+  const { username, role, clearAuth } = useAuthStore()
   const { mode: themeMode, toggle: toggleTheme } = useThemeStore()
+
+  // 角色切换入口：admin 在用户界面时显示「管理后台」，在管理后台时显示「返回用户界面」
+  const inAdmin = location.pathname.startsWith('/admin')
+  const showRoleSwitch = role === 'admin'
+  const roleSwitchLabel = inAdmin ? '返回用户界面' : '管理后台'
+  const roleSwitchTarget = inAdmin ? '/m' : '/admin'
 
   const handleLogout = () => {
     clearAuth()
@@ -121,6 +127,18 @@ export function AppShell({
           </div>
 
           <Space size={12}>
+            {/* 角色切换入口（仅 admin：用户界面 ↔ 管理后台）*/}
+            {showRoleSwitch && (
+              <Button
+                size="small"
+                type="primary"
+                ghost
+                onClick={() => navigate(roleSwitchTarget)}
+                style={{ fontSize: 13 }}
+              >
+                {roleSwitchLabel}
+              </Button>
+            )}
             {/* 主题切换 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 14 }}>{themeMode === 'dark' ? '深' : '亮'}</span>
