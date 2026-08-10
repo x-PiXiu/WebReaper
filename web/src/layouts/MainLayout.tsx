@@ -167,18 +167,6 @@ export function AppShell({
           style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 12, padding: '0 10px' }}
           items={toMenuItems(menuItems)}
         />
-
-        {/* 底部：版本信息 */}
-        <div style={{
-          position: 'sticky', bottom: 0,
-          padding: '16px 20px', marginTop: 'auto',
-          borderTop: '1px solid var(--wr-border)',
-          fontSize: 11, color: 'var(--wr-text-muted)',
-          display: 'flex', flexDirection: 'column', gap: 2,
-        }}>
-          <span>WebReaper GEO SaaS</span>
-          <span style={{ opacity: 0.7 }}>v2.0 · 深空极光</span>
-        </div>
       </Sider>
 
       <Layout style={{ background: 'var(--wr-bg-base)' }}>
@@ -272,6 +260,22 @@ export function AppShell({
           <div className="wr-aurora-bg" style={{ minHeight: '100%', borderRadius: 0 }}>
             <div className="wr-fade-in">
               <Outlet />
+            </div>
+            {/* 内容区底部：版本信息 */}
+            <div style={{
+              marginTop: 48,
+              paddingTop: 20,
+              borderTop: '1px solid var(--wr-border)',
+              fontSize: 11,
+              color: 'var(--wr-text-muted)',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              opacity: 0.8,
+            }}>
+              <span>WebReaper GEO SaaS</span>
+              <span style={{ opacity: 0.7 }}>v2.0 · 深空极光</span>
             </div>
           </div>
         </Content>
