@@ -19,11 +19,17 @@ import (
 //   - ruleScorer（免费规则评分）：优化前后对比用，零成本、可测。
 //   - scorer（默认 LLM 深评）：最终落库的 Score 用，烧 token 但维度更深。
 //   两套都是 port.GEOScorer，经 SetRuleScorer 注入，未注入时降级为同 scorer。
+//
+// 收录通知（发布副作用）：
+//   - urlSubmitter（IndexNow 等）：内容发布为 published 时自动通知搜索引擎收录。
+//   - 经 SetURLSubmitter 注入；未注入（未配 Key）时静默跳过，发布流程不受影响。
 type ContentUseCase struct {
-	aiGen       port.AIGenerator            // 复用现有 AI 生成器（调 LLM）
-	scorer      port.GEOScorer              // GEO 评分（默认 LLM 深评，落库用）
-	ruleScorer  port.GEOScorer              // 免费规则评分（前后对比用，可注入）
-	contentRepo port.OptimizedContentRepository
+	aiGen         port.AIGenerator            // 复用现有 AI 生成器（调 LLM）
+	scorer        port.GEOScorer              // GEO 评分（默认 LLM 深评，落库用）
+	ruleScorer    port.GEOScorer              // 免费规则评分（前后对比用，可注入）
+	contentRepo   port.OptimizedContentRepository
+	urlSubmitter  port.URLSubmitter           // 收录通知（可选）
+	publicBaseURL string                      // 公开站根地址（拼收录 URL 用）
 }
 
 func NewContentUseCase(ai port.AIGenerator, sc port.GEOScorer, cr port.OptimizedContentRepository) *ContentUseCase {
@@ -36,6 +42,17 @@ func (uc *ContentUseCase) SetRuleScorer(s port.GEOScorer) {
 	if s != nil {
 		uc.ruleScorer = s
 	}
+}
+
+// SetURLSubmitter 注入收录通知器（内容发布为 published 时自动通知搜索引擎）。
+// 未注入（未配 INDEXNOW_KEY）时静默跳过。
+func (uc *ContentUseCase) SetURLSubmitter(s port.URLSubmitter) {
+	uc.urlSubmitter = s
+}
+
+// SetPublicBaseURL 注入公开站根地址（拼收录通知的 URL）。
+func (uc *ContentUseCase) SetPublicBaseURL(baseURL string) {
+	uc.publicBaseURL = baseURL
 }
 
 // OptimizeInput 内容优化的输入。
@@ -115,6 +132,10 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 	if err != nil {
 		return OptimizeResult{}, fmt.Errorf("优化失败: %w", err)
 	}
+	optimized = strings.TrimSpace(optimized)
+	// 过滤模型推理过程的 think 标签（MiniMax 等推理模型输出 think 块，
+	// 必须过滤后再存库/展示——否则会泄漏到公开站、llms.txt、发布内容）
+	optimized = pkg.StripThinkTags(optimized)
 	optimized = strings.TrimSpace(optimized)
 
 	// GEO 评分（用第一个关键词或单关键词评分）
@@ -206,6 +227,12 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 	oc.Status = status
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
+	}
+
+	// 发布副作用：通知搜索引擎收录（IndexNow，尽力而为——失败不影响发布）
+	if status == "published" && uc.urlSubmitter != nil && uc.publicBaseURL != "" {
+		publicURL := strings.TrimRight(uc.publicBaseURL, "/") + "/public/articles/" + oc.ID
+		_ = uc.urlSubmitter.SubmitURLs(ctx, []string{publicURL})
 	}
 	return oc, nil
 }

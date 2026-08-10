@@ -231,6 +231,10 @@ export const businessApi = {
   getPublishJobStatus: (jobId: string) =>
     apiClient.get<unknown, { id: string; status: string; external_url: string; error_msg: string; platform: string }>(`/api/v1/geo/publish-jobs/${jobId}/status`),
 
+  // 发布效果复测：重新触发品牌监测并更新发布后提及率（建议收录周期 1-2 周后使用）
+  reMonitorJob: (jobId: string) =>
+    apiClient.post<unknown, PublishJob>(`/api/v1/geo/publish-jobs/${jobId}/re-monitor`),
+
   // ---- 用户管理（管理端）----
   listUsers: () =>
     apiClient.get<unknown, UserView[]>('/api/v1/admin/users'),

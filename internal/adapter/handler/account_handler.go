@@ -222,3 +222,16 @@ func (h *AccountHandler) HandleGetJobStatus(c *gin.Context) {
 		"platform":     job.Platform,
 	})
 }
+
+// HandleReMonitor POST /api/v1/geo/publish-jobs/:id/re-monitor
+// 发布效果复测：重新触发品牌监测，更新发布后提及率（建议收录周期后使用）。
+func (h *AccountHandler) HandleReMonitor(c *gin.Context) {
+	tenantID := middleware.CurrentTenantID(c)
+	jobID := c.Param("id")
+	job, err := h.publishUC.ReMonitor(c.Request.Context(), tenantID, jobID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, publishJobToView(job))
+}

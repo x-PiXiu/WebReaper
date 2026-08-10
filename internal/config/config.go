@@ -112,6 +112,10 @@ type ServerConfig struct {
 	// PublicBaseURL 公开内容站的根地址（生成 sitemap/llms.txt/JSON-LD 的绝对 URL）。
 	// 生产环境必须是公网可达的地址（如 https://content.example.com）。
 	PublicBaseURL string
+	// IndexNowKey IndexNow 收录提交密钥（可选）。
+	// 配置后：内容发布为 published 时自动通知 Bing/Yandex 收录，替代人工提交 sitemap。
+	// Key 文件由公开站端点 /public/indexnow-key.txt 托管（keyLocation 指向它）。
+	IndexNowKey string
 }
 
 // DBConfig MySQL 数据库配置。
@@ -217,6 +221,7 @@ func Load() Config {
 			Port:          getenvDefault("SERVER_PORT", "8082"),
 			Env:           getenvDefault("APP_ENV", "development"),
 			PublicBaseURL: getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
+			IndexNowKey:   os.Getenv("INDEXNOW_KEY"),
 		},
 		DB: DBConfig{
 			Host:     getenvDefault("DB_HOST", "localhost"),

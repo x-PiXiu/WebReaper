@@ -178,6 +178,18 @@ export default function Publish() {
     } catch {}
   }
 
+  // 发布效果复测（收录周期后：重新监测品牌提及率，验证发布→收录→引用闭环）
+  const handleReMonitor = async (jobId: string) => {
+    try {
+      const job = await businessApi.reMonitorJob(jobId)
+      message.success(`复测完成：提及率 ${(job.pre_mention_rate * 100).toFixed(1)}% → ${(job.post_mention_rate * 100).toFixed(1)}%`)
+      queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
+      queryClient.invalidateQueries({ queryKey: ['geo-monitor-results'] })
+    } catch (e) {
+      message.error('复测失败：' + ((e as Error)?.message || '监测可能未配置'))
+    }
+  }
+
   const jobColumns = [
     {
       title: '标题', dataIndex: 'title', key: 'title',
@@ -229,6 +241,11 @@ export default function Publish() {
           {r.external_url && (
             <Button size="small" type="link" icon={<ExportOutlined />} href={r.external_url} target="_blank">
               跳转
+            </Button>
+          )}
+          {r.status === 'published' && (
+            <Button size="small" type="link" onClick={() => handleReMonitor(r.id)}>
+              复测提及率
             </Button>
           )}
           {r.status === 'pending' && (

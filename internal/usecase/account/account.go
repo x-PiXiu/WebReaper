@@ -15,6 +15,7 @@ package account
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"webreaper/internal/domain/entity"
@@ -180,6 +181,7 @@ type PublishUseCase struct {
 	vault          port.CookieVault       // 全自动模式需要解密 cookie
 	monitorTrigger port.MonitorTrigger    // 可选：发布效果追踪（发布后触发监测对比提及率）
 	accountPool    port.AccountPool       // 可选：账号池调度（自动选最优账号）
+	publicBaseURL  string                 // 公开站根地址（发布内容尾部带公开站链接用）
 }
 
 func NewPublishUseCase(jr port.PublishJobRepository, reg port.PublishChannelRegistry, ar port.AccountRepository, vault port.CookieVault) *PublishUseCase {
@@ -196,6 +198,11 @@ func (uc *PublishUseCase) SetAccountPool(ap port.AccountPool) {
 	uc.accountPool = ap
 }
 
+// SetPublicBaseURL 注入公开站根地址（发布内容尾部带公开站链接，加速爬虫发现）。
+func (uc *PublishUseCase) SetPublicBaseURL(baseURL string) {
+	uc.publicBaseURL = baseURL
+}
+
 // PublishInput 发布请求输入。
 type PublishInput struct {
 	TenantID  string
@@ -206,6 +213,26 @@ type PublishInput struct {
 	Title     string
 	Content   string
 	Mode      string // semi-auto / auto
+}
+
+// appendPublicLink 在发布内容尾部追加公开站链接（纯函数，可单测）。
+//
+// 设计动机（外链加速爬虫发现）：
+//   搜索引擎爬虫通过外链发现新页面——发布到知乎的内容带公开站链接，
+//   知乎页面被索引时爬虫会顺着链接发现公开站文章页。
+//
+// 平台差异（防封号红线）：
+//   - zhihu：追加 markdown 风格链接（知乎支持）
+//   - xiaohongshu 等其他平台：不追加（外部链接触发限流/违规判定）
+func appendPublicLink(content, platform, baseURL, contentID string) string {
+	if contentID == "" || baseURL == "" {
+		return content
+	}
+	if platform != "zhihu" {
+		return content
+	}
+	url := strings.TrimRight(baseURL, "/") + "/public/articles/" + contentID
+	return content + "\n\n---\n> 本文源自：" + url
 }
 
 // Publish 执行发布：按 mode 分流半自动/全自动。
@@ -227,6 +254,8 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 	// 发布前处理：Markdown 转纯文本（社媒平台不渲染 Markdown）。
 	// 先过滤 think 标签（兜底：历史内容可能在生成期未被过滤，防止思考过程泄漏到平台）。
 	publishContent := pkg.MarkdownToPlainText(pkg.StripThinkTags(in.Content))
+	// 公开站链接兜尾（平台差异：知乎加外链加速爬虫发现；小红书加外链易触发限流，不加）
+	publishContent = appendPublicLink(publishContent, in.Platform, uc.publicBaseURL, in.ContentID)
 	// 标题：优先用调用方传入（内容工作台已带标题），空或过短则从正文提取
 	publishTitle := pkg.StripThinkTags(in.Title)
 	if publishTitle == "" || len(publishTitle) < 4 {
@@ -403,6 +432,31 @@ func (uc *PublishUseCase) GetJobStatus(ctx context.Context, tenantID, jobID stri
 		}
 	}
 	return entity.PublishJob{}, fmt.Errorf("job not found: %s", jobID)
+}
+
+// ReMonitor 发布效果复测：重新触发品牌监测，更新发布后提及率。
+//
+// 使用场景（GEO 收录周期）：
+//   内容发布后搜索引擎收录需要数天~数周，发布瞬间的追踪看不到收录效果。
+//   建议发布 1-2 周后点"复测"——重新监测品牌提及率并更新 post_mention_rate，
+//   与 pre_mention_rate（发布前基线）对比验证"发布 → 收录 → 被引用"闭环。
+func (uc *PublishUseCase) ReMonitor(ctx context.Context, tenantID, jobID string) (entity.PublishJob, error) {
+	job, err := uc.GetJobStatus(ctx, tenantID, jobID)
+	if err != nil {
+		return entity.PublishJob{}, err
+	}
+	if uc.monitorTrigger == nil {
+		return entity.PublishJob{}, fmt.Errorf("监测触发器未配置")
+	}
+	postRate, err := uc.monitorTrigger.TriggerMonitor(ctx, job.TenantID, job.BrandID)
+	if err != nil {
+		return entity.PublishJob{}, fmt.Errorf("复测失败: %w", err)
+	}
+	job.PostMentionRate = postRate
+	if err := uc.jobRepo.Save(ctx, job); err != nil {
+		return entity.PublishJob{}, fmt.Errorf("保存复测结果失败: %w", err)
+	}
+	return job, nil
 }
 
 // ListJobs 列出发布任务记录。

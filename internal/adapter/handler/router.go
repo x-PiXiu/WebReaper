@@ -164,6 +164,7 @@ func (r *Router) Engine() *gin.Engine {
 		e.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
 		e.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
 		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
+		e.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
 	}
 
 	// 业务路由（受 JWT 中间件保护）
@@ -288,6 +289,7 @@ func (r *Router) Engine() *gin.Engine {
 			api.GET("/geo/publish-jobs", accountHandler.HandleListPublishJobs)
 			api.POST("/geo/publish-jobs/:id/published", accountHandler.HandleMarkPublished)
 			api.GET("/geo/publish-jobs/:id/status", accountHandler.HandleGetJobStatus)
+			api.POST("/geo/publish-jobs/:id/re-monitor", accountHandler.HandleReMonitor) // 发布效果复测（收录周期后验证提及率爬升）
 		}
 
 		// 管理端路由（仅 admin 角色可访问）

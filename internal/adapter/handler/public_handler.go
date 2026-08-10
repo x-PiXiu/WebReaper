@@ -30,6 +30,7 @@ type PublicHandler struct {
 	contentRepo port.OptimizedContentRepository
 	structured  *structured.StructuredDataUseCase
 	baseURL     string // 公开站点根地址（如 https://example.com），生成绝对 URL
+	indexNowKey string // IndexNow 密钥（托管 key 文件用；空=未启用）
 }
 
 // NewPublicHandler 创建公开站点处理器。
@@ -38,6 +39,11 @@ func NewPublicHandler(repo port.OptimizedContentRepository, structuredUC *struct
 		baseURL = "http://localhost:8082"
 	}
 	return &PublicHandler{contentRepo: repo, structured: structuredUC, baseURL: baseURL}
+}
+
+// SetIndexNowKey 注入 IndexNow 密钥（启用 /public/indexnow-key.txt 托管端点）。
+func (h *PublicHandler) SetIndexNowKey(key string) {
+	h.indexNowKey = key
 }
 
 // articlePageTemplate 文章页模板（自包含内联样式，无外部依赖）。
@@ -155,6 +161,18 @@ func (h *PublicHandler) GetLLMSTxt(c *gin.Context) {
 	}
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.String(http.StatusOK, txt)
+}
+
+// GetIndexNowKeyFile GET /public/indexnow-key.txt —— 托管 IndexNow 密钥文件。
+// IndexNow 验证时会访问 keyLocation 并比对内容（必须与提交的 key 一致）。
+// 未配置 INDEXNOW_KEY 时返回 404（该端点未启用）。
+func (h *PublicHandler) GetIndexNowKeyFile(c *gin.Context) {
+	if h.indexNowKey == "" {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.String(http.StatusOK, h.indexNowKey)
 }
 
 // truncateDescription 截取前 150 字作描述（纯文本，去 markdown 标记）。

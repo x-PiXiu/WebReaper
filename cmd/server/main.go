@@ -18,6 +18,7 @@ import (
 	"webreaper/internal/adapter/embedding"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/handler"
+	"webreaper/internal/adapter/indexnow"
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/qrlogin"
@@ -262,8 +263,25 @@ func main() {
 	structuredUC := structured.NewStructuredDataUseCase()
 	router.SetStructured(structuredUC)
 	// 公开内容站（让 AI 引擎/搜索引擎可爬取已发布内容）——需要 DB（内容仓储）
+	// 收录通知（IndexNow）：发布为 published 时自动通知 Bing/Yandex。
+	// 需配置 INDEXNOW_KEY；未配置则 submitter 为 nil（发布流程不受影响）。
+	var indexNowSubmitter port.URLSubmitter
 	if geoRepos != nil {
-		router.SetPublic(handler.NewPublicHandler(geoRepos.content, structuredUC, cfg.Server.PublicBaseURL))
+		publicHandler := handler.NewPublicHandler(geoRepos.content, structuredUC, cfg.Server.PublicBaseURL)
+		router.SetPublic(publicHandler)
+		if cfg.Server.IndexNowKey != "" {
+			publicHandler.SetIndexNowKey(cfg.Server.IndexNowKey)
+			s, sErr := indexnow.NewSubmitter(
+				cfg.Server.PublicBaseURL,
+				cfg.Server.IndexNowKey,
+				cfg.Server.PublicBaseURL+"/public/indexnow-key.txt",
+			)
+			if sErr != nil {
+				log.Error("IndexNow 初始化失败，收录通知禁用", port.Err(sErr))
+			} else {
+				indexNowSubmitter = s
+			}
+		}
 	}
 	var geoMonitorUCRef *geo.MonitorUseCase
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
@@ -297,6 +315,11 @@ func main() {
 		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
 		// 免费规则评分器：优化前后对比用（不烧 token、可单测）
 		geoContentUC.SetRuleScorer(geo.NewRuleScorer())
+		// 收录通知（IndexNow）：发布为 published 时自动通知搜索引擎
+		if indexNowSubmitter != nil {
+			geoContentUC.SetPublicBaseURL(cfg.Server.PublicBaseURL)
+			geoContentUC.SetURLSubmitter(indexNowSubmitter)
+		}
 		geoDiagnoseUC := geo.NewDiagnoseUseCase(geoRepos.brand, geoRepos.result, aiGenerator)
 			router.SetGEO(geoBrandUC, geoMonitorUC, geoRankUC, geoContentUC, geoDiagnoseUC)
 
@@ -352,6 +375,8 @@ func main() {
 			geoPublishUC = account.NewPublishUseCase(accountRepos.job, channelRegistry, accountRepos.account, vault)
 			// 注入发布效果追踪（发布成功后自动触发监测对比提及率）
 			geoPublishUC.SetMonitorTrigger(geoMonitorUCRef)
+			// 注入公开站根地址（发布内容尾部带公开站链接，加速爬虫发现）
+			geoPublishUC.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 			// 注入账号池（全自动发布时自动选最优账号——最久未使用优先）
 			geoPublishUC.SetAccountPool(repository.NewGormAccountPool(accountRepos.account))
 

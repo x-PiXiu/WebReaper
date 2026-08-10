@@ -72,3 +72,67 @@ func TestContentUseCase_SetStatus(t *testing.T) {
 		}
 	})
 }
+
+// mockURLSubmitter 记录提交的 URL（验证发布副作用触发）。
+type mockURLSubmitter struct {
+	submitted []string
+}
+
+func (m *mockURLSubmitter) SubmitURLs(_ context.Context, urls []string) error {
+	m.submitted = append(m.submitted, urls...)
+	return nil
+}
+
+// SetStatus 发布时应触发收录通知（IndexNow），下线不触发。
+func TestContentUseCase_SetStatus_TriggersURLSubmit(t *testing.T) {
+	ctx := context.Background()
+	repo := mockrepo.NewMockOptimizedContentRepository()
+	submitter := &mockURLSubmitter{}
+	uc := NewContentUseCase(nil, nil, repo)
+	uc.SetURLSubmitter(submitter)
+	uc.SetPublicBaseURL("https://content.example.com")
+
+	oc := entity.OptimizedContent{
+		ID: "oc-submit", TenantID: "tenant-A", BrandID: "brand-1",
+		Title: "测试", OptimizedText: "正文", Status: "draft",
+		CreatedAt: time.Now(),
+	}
+	_ = repo.Save(ctx, oc)
+
+	// 发布 → 触发提交，URL 正确
+	if _, err := uc.SetStatus(ctx, "tenant-A", "oc-submit", "published"); err != nil {
+		t.Fatalf("SetStatus error: %v", err)
+	}
+	if len(submitter.submitted) != 1 {
+		t.Fatalf("应提交 1 个 URL，实际 %d", len(submitter.submitted))
+	}
+	want := "https://content.example.com/public/articles/oc-submit"
+	if submitter.submitted[0] != want {
+		t.Errorf("提交 URL = %s, want %s", submitter.submitted[0], want)
+	}
+
+	// 下线 → 不触发
+	if _, err := uc.SetStatus(ctx, "tenant-A", "oc-submit", "draft"); err != nil {
+		t.Fatalf("SetStatus error: %v", err)
+	}
+	if len(submitter.submitted) != 1 {
+		t.Errorf("下线不应触发提交，实际提交 %d 次", len(submitter.submitted))
+	}
+}
+
+// 未注入 submitter（未配 INDEXNOW_KEY）时发布不 panic。
+func TestContentUseCase_SetStatus_NoSubmitter(t *testing.T) {
+	ctx := context.Background()
+	repo := mockrepo.NewMockOptimizedContentRepository()
+	uc := NewContentUseCase(nil, nil, repo) // 未 SetURLSubmitter
+
+	oc := entity.OptimizedContent{
+		ID: "oc-nosub", TenantID: "tenant-A", BrandID: "brand-1",
+		Title: "测试", OptimizedText: "正文", Status: "draft",
+		CreatedAt: time.Now(),
+	}
+	_ = repo.Save(ctx, oc)
+	if _, err := uc.SetStatus(ctx, "tenant-A", "oc-nosub", "published"); err != nil {
+		t.Errorf("无 submitter 时发布不应报错: %v", err)
+	}
+}
