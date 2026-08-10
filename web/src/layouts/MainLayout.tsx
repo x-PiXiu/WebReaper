@@ -261,7 +261,7 @@ export function AppShell({
             <div className="wr-fade-in">
               <Outlet />
             </div>
-            {/* 内容区底部：版本信息 */}
+            {/* 内容区底部：品牌信息 */}
             <div style={{
               marginTop: 48,
               paddingTop: 20,
@@ -269,13 +269,9 @@ export function AppShell({
               fontSize: 11,
               color: 'var(--wr-text-muted)',
               textAlign: 'center',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
               opacity: 0.8,
             }}>
-              <span>WebReaper GEO SaaS</span>
-              <span style={{ opacity: 0.7 }}>v2.0 · 深空极光</span>
+              WebReaper GEO SaaS
             </div>
           </div>
         </Content>
