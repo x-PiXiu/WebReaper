@@ -75,11 +75,13 @@ type QRLoginSession interface {
 }
 
 // MonitorTrigger 监测触发接口（发布效果追踪用）。
-// PublishUseCase 通过此接口在发布成功后触发 AI 监测，对比前后提及率。
+// PublishUseCase 通过此接口在发布前取基线、发布后触发监测，对比前后提及率。
 // 避免 usecase 之间直接依赖（PublishUseCase 不 import geo 包）。
 type MonitorTrigger interface {
 	// TriggerMonitor 触发一次品牌监测，返回监测后的平均提及率（0~1）。
 	TriggerMonitor(ctx context.Context, tenantID, brandID string) (float64, error)
+	// BaselineRate 取品牌最近一次监测的平均提及率（发布前基线；无监测记录返回 0）。
+	BaselineRate(ctx context.Context, tenantID, brandID string) (float64, error)
 }
 
 // CookieVault cookie 加密存储接口（敏感数据隔离）。

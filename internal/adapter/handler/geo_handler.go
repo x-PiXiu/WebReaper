@@ -121,6 +121,7 @@ func optimizedContentToView(c entity.OptimizedContent) gin.H {
 		"tenant_id":      c.TenantID,
 		"brand_id":       c.BrandID,
 		"keyword_id":     c.KeywordID,
+		"title":          c.Title,
 		"original_text":  c.OriginalText,
 		"optimized_text": c.OptimizedText,
 		"version":        c.Version,
@@ -343,6 +344,7 @@ func (h *GEOHandler) HandleOptimizeContent(c *gin.Context) {
 		OriginalText  string `json:"original_text" binding:"required"`
 		Keyword       string `json:"keyword" binding:"required"`
 		LLMConfigName string `json:"llm_config_name"`
+		TargetEngine  string `json:"target_engine"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -355,12 +357,17 @@ func (h *GEOHandler) HandleOptimizeContent(c *gin.Context) {
 		OriginalText:  req.OriginalText,
 		Keyword:       req.Keyword,
 		LLMConfigName: req.LLMConfigName,
+		TargetEngine:  req.TargetEngine,
 	})
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	success(c, optimizedContentToView(oc))
+	// 优化结果视图：原字段向后兼容 + 新增前后对比反馈
+	view := optimizedContentToView(oc.Content)
+	view["score_before"] = geoScoreToView(oc.ScoreBefore)
+	view["recommendations"] = oc.Recommendations
+	success(c, view)
 }
 
 func (h *GEOHandler) HandleListContents(c *gin.Context) {
@@ -373,6 +380,25 @@ func (h *GEOHandler) HandleListContents(c *gin.Context) {
 	success(c, optimizedContentsToView(ocs))
 }
 
+// HandleSetContentStatus POST /api/v1/geo/brands/:id/contents/:contentId/status
+// 内容状态流转：draft ↔ published（published 后公开站点可访问，AI 引擎可爬取）。
+func (h *GEOHandler) HandleSetContentStatus(c *gin.Context) {
+	contentID := c.Param("contentId")
+	var req struct {
+		Status string `json:"status" binding:"required"` // draft / published
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	oc, err := h.contentUC.SetStatus(c.Request.Context(), middleware.CurrentTenantID(c), contentID, req.Status)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, optimizedContentToView(oc))
+}
+
 // HandleGenerateContent POST /api/v1/geo/brands/:id/contents/generate
 // 从零生成内容：根据品牌信息 + 关键词（单个或多个组合），AI 原创一篇 GEO 优化文章。
 func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
@@ -381,6 +407,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		Keywords      []string `json:"keywords" binding:"required"`
 		BrandInfo     string   `json:"brand_info"`
 		LLMConfigName string   `json:"llm_config_name"`
+		TargetEngine  string   `json:"target_engine"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -392,6 +419,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		Keywords:      req.Keywords,
 		BrandInfo:     req.BrandInfo,
 		LLMConfigName: req.LLMConfigName,
+		TargetEngine:  req.TargetEngine,
 	})
 	if err != nil {
 		fail(c, err)
@@ -409,6 +437,7 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 		Keywords      []string `json:"keywords" binding:"required"`
 		BrandInfo     string   `json:"brand_info"`
 		LLMConfigName string   `json:"llm_config_name"`
+		TargetEngine  string   `json:"target_engine"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -431,6 +460,7 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 		Keywords:      req.Keywords,
 		BrandInfo:     req.BrandInfo,
 		LLMConfigName: req.LLMConfigName,
+		TargetEngine:  req.TargetEngine,
 	}, func(delta string) {
 		// 只推正文 content delta（AI SDK text-delta 格式）
 		writeSSE(c.Writer, map[string]any{"type": "text-delta", "textDelta": delta})

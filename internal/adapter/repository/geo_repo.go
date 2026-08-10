@@ -277,3 +277,33 @@ func (r *GormOptimizedContentRepository) FindMaxVersion(ctx context.Context, ten
 	}
 	return maxVersion, nil
 }
+
+// FindPublishedByID 公开查询：按 ID 查已发布内容（不限定租户、不限定 status 之外的任何条件）。
+// 未发布（draft）内容对公网不可见——返回 pkg.ErrNotFound。
+func (r *GormOptimizedContentRepository) FindPublishedByID(ctx context.Context, id string) (entity.OptimizedContent, error) {
+	var po OptimizedContentPO
+	err := r.db.WithContext(ctx).Where("id = ? AND status = ?", id, "published").First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.OptimizedContent{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.OptimizedContent{}, err
+	}
+	return optimizedContentFromPO(po), nil
+}
+
+// ListPublished 公开查询：列出全部已发布内容（sitemap/llms.txt 用）。
+func (r *GormOptimizedContentRepository) ListPublished(ctx context.Context) ([]entity.OptimizedContent, error) {
+	var pos []OptimizedContentPO
+	if err := r.db.WithContext(ctx).
+		Where("status = ?", "published").
+		Order("created_at DESC").
+		Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.OptimizedContent, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, optimizedContentFromPO(p))
+	}
+	return out, nil
+}

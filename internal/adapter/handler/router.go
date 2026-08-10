@@ -3,11 +3,13 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/handler/middleware"
+	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/agentconfig"
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/auth"
@@ -20,6 +22,7 @@ import (
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
 	"webreaper/internal/usecase/stats"
+	"webreaper/internal/usecase/structured"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 )
@@ -56,6 +59,10 @@ type Router struct {
 	geoContentUC *geo.ContentUseCase
 	geoDiagnoseUC *geo.DiagnoseUseCase
 	geoDistillUC *geo.KeywordDistillUseCase // 关键词蒸馏用例（可选）
+	// 结构化数据用例（JSON-LD/llms.txt）——通过 SetStructured 注入，可选
+	structuredUC *structured.StructuredDataUseCase
+	// 公开内容站处理器——通过 SetPublic 注入，可选
+	publicHandler *PublicHandler
 	// 多平台发布账号域（扫码绑定 + 半自动发布）——通过 SetAccount 延迟注入，可选
 	accountUC *account.AccountUseCase
 	publishSemiUC *account.PublishUseCase
@@ -66,6 +73,18 @@ type Router struct {
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
 func (r *Router) SetKeywordDistill(uc *geo.KeywordDistillUseCase) {
 	r.geoDistillUC = uc
+}
+
+// SetStructured 注入结构化数据用例（可选；未注入则结构化端点不注册）。
+// 纯逻辑零依赖，无 DB/LLM 也能用。
+func (r *Router) SetStructured(uc *structured.StructuredDataUseCase) {
+	r.structuredUC = uc
+}
+
+// SetPublic 注入公开内容站处理器（可选；未注入则公开端点不注册）。
+// 公开站需要内容仓储（查已发布内容）+ 结构化用例（JSON-LD/llms.txt 生成）。
+func (r *Router) SetPublic(h *PublicHandler) {
+	r.publicHandler = h
 }
 
 // SetGEO 注入 GEO 业务用例（可选；未注入则 GEO 端点不注册）。
@@ -138,6 +157,14 @@ func (r *Router) Engine() *gin.Engine {
 
 	// 采集政策（公开，无需认证，让外部可查询合规承诺）
 	e.GET("/api/v1/crawl-policy", NewCrawlConfigHandler(r.crawlCfgUC).HandlePolicy)
+
+	// 公开内容站（无认证——让 AI 引擎/搜索引擎可爬取已发布内容）
+	// 通过 SetPublic 注入；未注入则公开端点不注册。
+	if r.publicHandler != nil {
+		e.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
+		e.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
+		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
+	}
 
 	// 业务路由（受 JWT 中间件保护）
 	api := e.Group("/api/v1")
@@ -231,6 +258,7 @@ func (r *Router) Engine() *gin.Engine {
 			api.GET("/geo/brands/:id/contents", geoHandler.HandleListContents)
 			api.POST("/geo/brands/:id/contents/generate", geoHandler.HandleGenerateContent)
 			api.POST("/geo/brands/:id/contents/generate-stream", geoHandler.HandleGenerateContentStream) // SSE 流式生成
+			api.POST("/geo/brands/:id/contents/:contentId/status", geoHandler.HandleSetContentStatus) // 状态流转 draft↔published
 			// GEO 诊断
 			api.POST("/geo/brands/:id/diagnose", geoHandler.HandleDiagnose)
 			// 关键词蒸馏（按来源：品牌/文本/种子/文件/网络）
@@ -238,6 +266,12 @@ func (r *Router) Engine() *gin.Engine {
 			// 关键词管理（跨品牌聚合列表 + 删除）
 			api.GET("/geo/keywords", geoHandler.HandleListAllKeywords)
 			api.DELETE("/geo/keywords/:id", geoHandler.HandleDeleteKeyword)
+		}
+
+		// 结构化数据端点（JSON-LD 生成 / llms.txt 生成）——纯逻辑，无 DB/LLM 依赖
+		if r.structuredUC != nil {
+			api.POST("/geo/structured/jsonld", r.handleGenerateJSONLD)
+			api.POST("/geo/structured/llms-txt", r.handleGenerateLLMSTxt)
 		}
 
 		// 多平台发布账号域路由（扫码绑定 + 半自动发布）——通过 SetAccount 延迟注入，可选
@@ -272,6 +306,83 @@ func (r *Router) Engine() *gin.Engine {
 		}
 	}
 	return e
+}
+
+// jsonldRequest POST /api/v1/geo/structured/jsonld 的请求体
+type jsonldRequest struct {
+	Title       string `json:"title" binding:"required"`
+	Content     string `json:"content" binding:"required"`
+	URL         string `json:"url"`
+	Author      string `json:"author"`
+	BrandName   string `json:"brand_name"`
+	PublishDate string `json:"publish_date"` // 可选：2006-01-02
+}
+
+// handleGenerateJSONLD POST /api/v1/geo/structured/jsonld —— 内容 → JSON-LD 结构化数据。
+// 类型自动推断（FAQPage/Product/HowTo/Organization/Article）。
+func (r *Router) handleGenerateJSONLD(c *gin.Context) {
+	if r.structuredUC == nil {
+		fail(c, fmt.Errorf("结构化用例未初始化"))
+		return
+	}
+	var req jsonldRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	var publishDate time.Time
+	if req.PublishDate != "" {
+		if t, err := time.Parse("2006-01-02", req.PublishDate); err == nil {
+			publishDate = t
+		}
+	}
+	sd, err := r.structuredUC.GenerateJSONLD(c.Request.Context(), structured.StructuredDataInput{
+		Title:       req.Title,
+		Content:     req.Content,
+		URL:         req.URL,
+		Author:      req.Author,
+		BrandName:   req.BrandName,
+		PublishDate: publishDate,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"type": sd.Type, "jsonld": sd.JSONLD})
+}
+
+// llmsTxtRequest POST /api/v1/geo/structured/llms-txt 的请求体
+type llmsTxtRequest struct {
+	SiteTitle   string `json:"site_title" binding:"required"`
+	SiteSummary string `json:"site_summary"`
+	Entries     []struct {
+		URL     string `json:"url" binding:"required"`
+		Title   string `json:"title"`
+		Summary string `json:"summary"`
+	} `json:"entries"`
+}
+
+// handleGenerateLLMSTxt POST /api/v1/geo/structured/llms-txt —— 站点内容索引 → llms.txt 全文。
+func (r *Router) handleGenerateLLMSTxt(c *gin.Context) {
+	if r.structuredUC == nil {
+		fail(c, fmt.Errorf("结构化用例未初始化"))
+		return
+	}
+	var req llmsTxtRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	entries := make([]entity.LLMSTxtEntry, 0, len(req.Entries))
+	for _, e := range req.Entries {
+		entries = append(entries, entity.LLMSTxtEntry{URL: e.URL, Title: e.Title, Summary: e.Summary})
+	}
+	txt, err := r.structuredUC.GenerateLLMSTxt(c.Request.Context(), req.SiteTitle, req.SiteSummary, entries)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"llms_txt": txt})
 }
 
 // handleListTools GET /api/v1/tools —— 返回所有工具及启用状态（工具面板用）

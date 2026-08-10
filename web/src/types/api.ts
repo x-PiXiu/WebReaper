@@ -199,22 +199,28 @@ export interface BrandOverview {
 }
 
 // ---- GEO：优化内容 ----
+export interface GeoScore {
+  total: number
+  authority: number
+  specificity: number
+  structure: number
+  uniqueness: number
+  recency: number
+}
+
 export interface OptimizedContent {
   id: string
   tenant_id: string
   brand_id: string
   keyword_id: string
+  title: string             // 内容标题（发布到平台用）
   original_text: string
   optimized_text: string
   version: number
-  score: {
-    total: number
-    authority: number
-    specificity: number
-    structure: number
-    uniqueness: number
-    recency: number
-  }
+  score: GeoScore
+  // 优化模式下的前后对比反馈（optimize 接口返回；generate 无）
+  score_before?: GeoScore
+  recommendations?: string[]
   status: string
   created_at: string
 }

@@ -38,6 +38,7 @@ import (
 	"webreaper/internal/usecase/publish"
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/stats"
+	"webreaper/internal/usecase/structured"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/process"
@@ -257,6 +258,13 @@ func main() {
 
 	// GEO 业务装配（商户端核心）。需要 DB + LLM 才启用。
 	geoRepos := initGEORpositories(cfg.DB)
+	// 结构化数据用例（JSON-LD/llms.txt 生成）——纯逻辑零依赖，无 DB/LLM 也可用
+	structuredUC := structured.NewStructuredDataUseCase()
+	router.SetStructured(structuredUC)
+	// 公开内容站（让 AI 引擎/搜索引擎可爬取已发布内容）——需要 DB（内容仓储）
+	if geoRepos != nil {
+		router.SetPublic(handler.NewPublicHandler(geoRepos.content, structuredUC, cfg.Server.PublicBaseURL))
+	}
 	var geoMonitorUCRef *geo.MonitorUseCase
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
 		geoScorer := ai.NewLLMGEOScorer(aiGenerator)
@@ -273,13 +281,22 @@ func main() {
 		//   真实引擎（豆包/Kimi）= Agent 自主搜索 + LLM 综合
 		//   AgentProbe           = Agent 自主调 search_crawler + LLM 综合
 		// 小众品牌只要网上有内容，搜索工具就能爬到，Agent 综合回答时就会提及。
-		geoProbe := ai.NewAgentProbe(aiGenerator)
-		log.Info("GEO 监测引擎：AgentProbe（Agent 自主搜索模式，最接近真实 AI 搜索）")
+		// 监测引擎：RoutingProbe 按 EngineName 路由——
+		//   选了真实引擎（LLMConfig 存在，如豆包/Kimi）→ DirectProbe 真实直测
+		//   未选/配置不存在 → AgentProbe 模拟引擎（Agent 自主搜索兜底）
+		geoProbe := ai.NewRoutingProbe(
+			ai.NewAgentProbe(aiGenerator),
+			ai.NewDirectProbe(aiGenerator),
+			llmConfigRepo,
+		)
+		log.Info("GEO 监测引擎：RoutingProbe（真实引擎直测 + Agent 模拟兜底）")
 
 		geoMonitorUC := geo.NewMonitorUseCase(geoRepos.brand, geoRepos.keyword, geoRepos.result, geoProbe)
 		geoMonitorUCRef = geoMonitorUC
 		geoRankUC := geo.NewRankUseCase(geoRepos.result)
 		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
+		// 免费规则评分器：优化前后对比用（不烧 token、可单测）
+		geoContentUC.SetRuleScorer(geo.NewRuleScorer())
 		geoDiagnoseUC := geo.NewDiagnoseUseCase(geoRepos.brand, geoRepos.result, aiGenerator)
 			router.SetGEO(geoBrandUC, geoMonitorUC, geoRankUC, geoContentUC, geoDiagnoseUC)
 

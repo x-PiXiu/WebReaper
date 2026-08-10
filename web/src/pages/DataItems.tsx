@@ -183,6 +183,14 @@ export default function DataItems() {
           rowKey="id"
           pagination={{ pageSize: 20 }}
           size="middle"
+          onRow={(record: DataItem) => ({
+            onClick: () => {
+              setExpandedKeys(prev =>
+                prev.includes(record.id) ? prev.filter(k => k !== record.id) : [...prev, record.id],
+              )
+            },
+            style: { cursor: 'pointer' },
+          })}
           expandable={{
             expandedRowRender: (record: DataItem) => (
               <div style={{ padding: '16px 24px', maxWidth: 1000 }}>
@@ -238,16 +246,7 @@ export default function DataItems() {
               </div>
             ),
             expandedRowKeys: expandedKeys,
-            onExpandedRowsChange: (keys: Key[]) => setExpandedKeys(keys as string[]),
-            // 点击行任意位置展开/收起
-            onRow: (record: DataItem) => ({
-              onClick: () => {
-                setExpandedKeys(prev =>
-                  prev.includes(record.id) ? prev.filter(k => k !== record.id) : [...prev, record.id],
-                )
-              },
-              style: { cursor: 'pointer' },
-            }),
+            onExpandedRowsChange: (keys: readonly Key[]) => setExpandedKeys(keys as string[]),
           }}
         />
       </Card>

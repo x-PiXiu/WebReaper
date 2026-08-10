@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Spin, Switch } from 'antd'
+import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch } from 'antd'
 import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -127,7 +127,7 @@ export default function Publish() {
             platform,
             content_id: selectedContent.id,
             brand_id: selectedBrand,
-            title: selectedContent.optimized_text.slice(0, 50),
+            title: selectedContent.title || '', // 用内容标题；空则后端从正文提取
             content: selectedContent.optimized_text,
             mode: publishMode,
           })
@@ -143,7 +143,7 @@ export default function Publish() {
             platform: acc.platform,
             content_id: selectedContent.id,
             brand_id: selectedBrand,
-            title: selectedContent.optimized_text.slice(0, 50),
+            title: selectedContent.title || '', // 用内容标题；空则后端从正文提取
             content: selectedContent.optimized_text,
             mode: publishMode,
           })

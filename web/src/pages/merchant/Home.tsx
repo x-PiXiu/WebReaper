@@ -1,4 +1,4 @@
-import { Card, Typography, Row, Col, Spin, Tag, Empty } from 'antd'
+import { Card, Typography, Row, Col, Spin, Tag } from 'antd'
 import { RocketOutlined } from '@ant-design/icons'
 import { Line } from '@ant-design/charts'
 import { useQuery } from '@tanstack/react-query'

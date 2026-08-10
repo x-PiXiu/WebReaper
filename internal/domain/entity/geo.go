@@ -77,19 +77,6 @@ func (m MonitoringResult) MentionRateLabel() string {
 	}
 }
 
-// ComputeConfidence 根据采样次数计算置信度（兼容旧调用）。
-// 5 次以上 = 1.0（满置信），线性递减。
-// 注意：sampleSize=1 时返回 0.2，这不理想——新代码应改用 ComputeConfidenceEx。
-func ComputeConfidence(sampleCount int) float64 {
-	if sampleCount >= 5 {
-		return 1.0
-	}
-	if sampleCount <= 0 {
-		return 0
-	}
-	return float64(sampleCount) / 5.0
-}
-
 // ComputeConfidenceEx 基于实际信息量计算置信度（推荐使用）。
 // 不再只看采样次数——而是看这次监测的"证据强度"：
 //   - 回答长度（长回答 = Agent 搜索到了足够内容 = 可信）
@@ -154,11 +141,12 @@ type OptimizedContent struct {
 	TenantID      string
 	BrandID       string
 	KeywordID     string
-	OriginalText  string // 原始素材
-	OptimizedText string // AI 优化后的内容
-	Version       int    // 版本号
+	Title         string   // 内容标题（AI 生成/优化时从正文提取，发布到平台用）
+	OriginalText  string   // 原始素材
+	OptimizedText string   // AI 优化后的内容
+	Version       int      // 版本号
 	Score         GEOScore
-	Status        string // draft/approved/published
+	Status        string   // draft/approved/published
 	CreatedAt     time.Time
 }
 

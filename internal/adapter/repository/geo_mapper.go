@@ -52,7 +52,7 @@ func monitoringResultFromPO(p MonitoringResultPO) entity.MonitoringResult {
 
 func optimizedContentToPO(e entity.OptimizedContent) OptimizedContentPO {
 	return OptimizedContentPO{
-		ID: e.ID, TenantID: e.TenantID, BrandID: e.BrandID, KeywordID: e.KeywordID,
+		ID: e.ID, Title: e.Title, TenantID: e.TenantID, BrandID: e.BrandID, KeywordID: e.KeywordID,
 		OriginalText: e.OriginalText, OptimizedText: e.OptimizedText, Version: e.Version,
 		ScoreTotal: e.Score.Total, Authority: e.Score.Authority, Specificity: e.Score.Specificity,
 		Structure: e.Score.Structure, Uniqueness: e.Score.Uniqueness, Recency: e.Score.Recency,
@@ -62,7 +62,7 @@ func optimizedContentToPO(e entity.OptimizedContent) OptimizedContentPO {
 
 func optimizedContentFromPO(p OptimizedContentPO) entity.OptimizedContent {
 	return entity.OptimizedContent{
-		ID: p.ID, TenantID: p.TenantID, BrandID: p.BrandID, KeywordID: p.KeywordID,
+		ID: p.ID, Title: p.Title, TenantID: p.TenantID, BrandID: p.BrandID, KeywordID: p.KeywordID,
 		OriginalText: p.OriginalText, OptimizedText: p.OptimizedText, Version: p.Version,
 		Score: entity.GEOScore{
 			Total: p.ScoreTotal, Authority: p.Authority, Specificity: p.Specificity,

@@ -58,6 +58,7 @@ func (MonitoringResultPO) TableName() string { return "geo_monitoring_results" }
 // OptimizedContentPO 优化内容。
 type OptimizedContentPO struct {
 	ID            string    `gorm:"primaryKey;size:64"`
+	Title         string    `gorm:"size:256"` // 内容标题（发布用；迁移 019 新增）
 	TenantID      string    `gorm:"size:64;index"`
 	BrandID       string    `gorm:"size:64;index"`
 	KeywordID     string    `gorm:"size:64"`

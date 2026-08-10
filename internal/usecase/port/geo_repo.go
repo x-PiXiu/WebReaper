@@ -45,4 +45,9 @@ type OptimizedContentRepository interface {
 	ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.OptimizedContent, error)
 	FindByID(ctx context.Context, tenantID, id string) (entity.OptimizedContent, error)
 	FindMaxVersion(ctx context.Context, tenantID, brandID, keywordID string) (int, error)
+	// FindPublishedByID 公开查询：按 ID 查已发布内容（公开站点用，不限定租户，
+	// 仅返回 status=published——未发布内容对公网不可见）。
+	FindPublishedByID(ctx context.Context, id string) (entity.OptimizedContent, error)
+	// ListPublished 公开查询：列出全部已发布内容（sitemap/llms.txt 用）。
+	ListPublished(ctx context.Context) ([]entity.OptimizedContent, error)
 }

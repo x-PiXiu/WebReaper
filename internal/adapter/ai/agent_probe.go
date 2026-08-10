@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/port"
 )
 
@@ -72,11 +73,13 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		if answer == "" {
 			continue
 		}
+		// 过滤模型推理过程的 think 标签（展示与解析都不应看到思考过程）
+		answer = pkg.StripThinkTags(answer)
 		totalSamples++
 		allAnswers = append(allAnswers, fmt.Sprintf("【搜索：%s】\n%s", in.Keyword, answer))
 
 		// P2-③：解析用 default 引擎（固定），搜索用用户选的引擎——分离避免自判
-		analysis := p.llmAnalyzeMention(ctx, answer, in.BrandName, allBrandNames, in.Competitors, "")
+		analysis := analyzeMention(ctx, p.aiGen, answer, in.BrandName, allBrandNames, in.Competitors, "")
 		if analysis.Mentioned {
 			mentionCount++
 			if analysis.Position > 0 {
@@ -136,14 +139,14 @@ func (p *AgentProbe) buildSearchContext(keyword string) string {
 	return fmt.Sprintf("搜索并介绍「%s」相关的内容。先搜索了解这个话题，然后根据搜索到的信息做个介绍。", keyword)
 }
 
-// llmAnalyzeMention 分析回答里的品牌提及——消除"确认偏误"。
+// analyzeMention 分析回答里的品牌提及——消除"确认偏误"（包级函数：AgentProbe/DirectProbe 共用）。
 //
 // 关键设计（修复提及率100%问题）：
 //   不告诉解析 LLM "找品牌X"（那会导致确认偏误——它知道你要找什么就偏向说找到了）。
 //   而是让 LLM 客观列出"回答里提到了哪些品牌/产品/平台"，然后在 Go 代码里检查目标品牌是否在列表中。
 //
 // 解析 LLM 用 default 引擎（P2-③：与搜索引擎分离，避免自判）。
-func (p *AgentProbe) llmAnalyzeMention(ctx context.Context, answer, brandName string, aliases, competitors []string, llmConfigName string) mentionAnalysis {
+func analyzeMention(ctx context.Context, aiGen port.AIGenerator, answer, brandName string, aliases, competitors []string, llmConfigName string) mentionAnalysis {
 	systemPrompt := "你是内容分析专家。阅读一段文字，客观列出其中提到的所有品牌名、产品名、平台名、网站名。只返回 JSON。"
 	userPrompt := fmt.Sprintf(`阅读以下内容，列出其中提到的所有品牌/产品/平台/工具的名称（不要遗漏，不要添加未提及的）。
 
@@ -164,24 +167,24 @@ sentiment：文中对该品牌的评价倾向（positive/neutral/negative）。�
 		{Role: "user", Content: userPrompt},
 	}
 	convID := fmt.Sprintf("agent-analyze-%d", time.Now().UnixNano())
-	resp, err := p.aiGen.ChatStream(ctx, convID, llmConfigName, messages, nil)
+	resp, err := aiGen.ChatStream(ctx, convID, llmConfigName, messages, nil)
 	if err != nil {
-		return p.fallbackStringMatch(answer, brandName, aliases, competitors)
+		return fallbackStringMatch(answer, brandName, aliases, competitors)
 	}
 
 	// 在 Go 代码里检查目标品牌是否在 LLM 列出的品牌列表中（而非让 LLM 判断"是否提到X"）
-	return p.matchBrandFromList(resp, brandName, aliases, competitors)
+	return matchBrandFromList(resp, brandName, aliases, competitors)
 }
 
 // matchBrandFromList 从 LLM 返回的品牌列表 JSON 中，检查目标品牌是否被提及。
 // 这是消除确认偏误的关键——LLM 不知道你在找哪个品牌，它只是客观列出所有提到的名字。
-func (p *AgentProbe) matchBrandFromList(resp, brandName string, aliases, competitors []string) mentionAnalysis {
+func matchBrandFromList(resp, brandName string, aliases, competitors []string) mentionAnalysis {
 	ma := mentionAnalysis{CompetitorMentions: make(map[string]int)}
 
 	// 解析 LLM 返回的品牌列表
 	type brandEntry struct {
-		Name     string `json:"name"`
-		Position int    `json:"position"`
+		Name      string `json:"name"`
+		Position  int    `json:"position"`
 		Sentiment string `json:"sentiment"`
 	}
 
@@ -208,7 +211,7 @@ func (p *AgentProbe) matchBrandFromList(resp, brandName string, aliases, competi
 	}
 	if err := json.Unmarshal([]byte(jsonBlock), &parsed); err != nil {
 		// JSON 解析失败，降级到字符串匹配
-		return p.fallbackStringMatch(resp, brandName, aliases, competitors)
+		return fallbackStringMatch(resp, brandName, aliases, competitors)
 	}
 
 	// 在品牌列表中查找目标品牌（模糊匹配：包含即可，不区分大小写）
@@ -251,7 +254,7 @@ func (p *AgentProbe) matchBrandFromList(resp, brandName string, aliases, competi
 	return ma
 }
 
-func (p *AgentProbe) fallbackStringMatch(answer, brandName string, aliases, competitors []string) mentionAnalysis {
+func fallbackStringMatch(answer, brandName string, aliases, competitors []string) mentionAnalysis {
 	ma := mentionAnalysis{CompetitorMentions: make(map[string]int)}
 	lower := strings.ToLower(answer)
 	for _, name := range append([]string{brandName}, aliases...) {
@@ -269,3 +272,35 @@ func (p *AgentProbe) fallbackStringMatch(answer, brandName string, aliases, comp
 }
 
 var _ port.AIEngineProbe = (*AgentProbe)(nil)
+
+// mentionAnalysis LLM 解析出的提及分析结果。
+// （定义在本文件：llmAnalyzeMention/matchBrandFromList 与 probe 共用。）
+type mentionAnalysis struct {
+	Mentioned             bool
+	Position              int
+	Sentiment             string
+	CompetitorMentions    map[string]int
+	SourceAppearanceCount int // 品牌在检索源里出现的文章数
+}
+
+// extractJSONBlock 从字符串中提取第一个 {...} JSON 块（括号配平，处理嵌套）。
+// （通用解析辅助：同包 geo_probe.go 的 parseGeoScoreJSON 也复用。）
+func extractJSONBlock(s string) string {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	for i := start; i < len(s); i++ {
+		if s[i] == '{' {
+			depth++
+		}
+		if s[i] == '}' {
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return s[start:] // 不完整的 JSON，尽力返回
+}

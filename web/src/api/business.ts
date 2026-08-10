@@ -188,15 +188,19 @@ export const businessApi = {
     apiClient.get<unknown, BrandOverview>(`/api/v1/geo/brands/${brandId}/overview${name ? '?name=' + encodeURIComponent(name) : ''}`),
 
   // ---- GEO 内容优化 ----
-  optimizeContent: (data: { brand_id: string; keyword_id?: string; original_text: string; keyword: string; llm_config_name?: string }) =>
+  optimizeContent: (data: { brand_id: string; keyword_id?: string; original_text: string; keyword: string; llm_config_name?: string; target_engine?: string }) =>
     apiClient.post<unknown, OptimizedContent>('/api/v1/geo/optimize', data),
 
   listContents: (brandId: string) =>
     apiClient.get<unknown, OptimizedContent[]>(`/api/v1/geo/brands/${brandId}/contents`),
 
   // 从零生成内容（根据品牌信息+关键词，AI原创一篇 GEO 文章；支持单/多关键词组合）
-  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string }) =>
+  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string }) =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/generate`, data),
+
+  // 内容状态流转：draft ↔ published（published 后公开站可访问，AI 引擎可爬取）
+  setContentStatus: (brandId: string, contentId: string, status: 'draft' | 'published') =>
+    apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/${contentId}/status`, { status }),
 
   // ---- GEO 平台账号（扫码绑定）----
   listAccounts: () =>
@@ -215,7 +219,7 @@ export const businessApi = {
     apiClient.delete<unknown, unknown>(`/api/v1/geo/accounts/${id}`),
 
   // ---- GEO 内容发布（半自动）----
-  publishContent: (data: { account_id?: string; platform: string; content_id?: string; title?: string; content?: string; mode?: string }) =>
+  publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string }) =>
     apiClient.post<unknown, PublishJob>('/api/v1/geo/publish', data),
 
   listPublishJobs: () =>

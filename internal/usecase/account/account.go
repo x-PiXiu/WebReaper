@@ -224,10 +224,11 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		return entity.PublishJob{}, fmt.Errorf("获取发布通道失败: %w", err)
 	}
 
-	// 发布前处理：Markdown 转纯文本（社媒平台不渲染 Markdown）
-	publishContent := pkg.MarkdownToPlainText(in.Content)
-	// 标题：如果前端没传或太短，从正文提取
-	publishTitle := in.Title
+	// 发布前处理：Markdown 转纯文本（社媒平台不渲染 Markdown）。
+	// 先过滤 think 标签（兜底：历史内容可能在生成期未被过滤，防止思考过程泄漏到平台）。
+	publishContent := pkg.MarkdownToPlainText(pkg.StripThinkTags(in.Content))
+	// 标题：优先用调用方传入（内容工作台已带标题），空或过短则从正文提取
+	publishTitle := pkg.StripThinkTags(in.Title)
 	if publishTitle == "" || len(publishTitle) < 4 {
 		publishTitle = pkg.ExtractTitle(publishContent)
 	}
@@ -245,6 +246,13 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		Mode:      mode,
 		Status:    entity.PublishStatusPending,
 		CreatedAt: now,
+	}
+
+	// 发布前基线：取品牌最近一次监测的平均提及率（真实历史数据；无记录保持 0）
+	if in.BrandID != "" && uc.monitorTrigger != nil {
+		if base, bErr := uc.monitorTrigger.BaselineRate(ctx, in.TenantID, in.BrandID); bErr == nil {
+			job.PreMentionRate = base
+		}
 	}
 
 	if mode == entity.PublishModeAuto {
@@ -359,21 +367,22 @@ func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob
 }
 
 // trackPublishEffect 发布效果追踪：延迟触发监测，对比发布前后提及率。
+// trackPublishEffect 发布效果追踪：触发监测，对比发布前后提及率。
+//
+// 说明：不等待"收录延迟"——AgentProbe 是实时搜索+综合（Agent 现场爬取全网），
+// 不依赖真实 AI 引擎的索引收录，发布即可测；若未来接 DirectProbe（真实引擎直测），
+// 再按引擎收录周期引入延迟。
 func (uc *PublishUseCase) trackPublishEffect(ctx context.Context, job entity.PublishJob) {
 	if job.BrandID == "" {
-		return
-	}
-
-	// 延迟 30 秒等 AI 引擎收录
-	select {
-	case <-time.After(30 * time.Second):
-	case <-ctx.Done():
 		return
 	}
 
 	// 触发监测，获取发布后提及率
 	postRate, err := uc.monitorTrigger.TriggerMonitor(ctx, job.TenantID, job.BrandID)
 	if err != nil {
+		// 失败不静默：记录到 job，前端发布记录可见
+		_ = uc.jobRepo.UpdateStatus(ctx, job.TenantID, job.ID, entity.PublishStatusPublished,
+			job.ExternalURL, "效果追踪失败: "+err.Error())
 		return
 	}
 

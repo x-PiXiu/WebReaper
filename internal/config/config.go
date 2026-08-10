@@ -109,6 +109,9 @@ func (c PublishConfig) QuestionURL() string { return c.BaseURL + c.QuestionPath 
 type ServerConfig struct {
 	Port string // 监听端口，默认 8082
 	Env  string // 运行环境：development / production
+	// PublicBaseURL 公开内容站的根地址（生成 sitemap/llms.txt/JSON-LD 的绝对 URL）。
+	// 生产环境必须是公网可达的地址（如 https://content.example.com）。
+	PublicBaseURL string
 }
 
 // DBConfig MySQL 数据库配置。
@@ -211,8 +214,9 @@ func Load() Config {
 
 	return Config{
 		Server: ServerConfig{
-			Port: getenvDefault("SERVER_PORT", "8082"),
-			Env:  getenvDefault("APP_ENV", "development"),
+			Port:          getenvDefault("SERVER_PORT", "8082"),
+			Env:           getenvDefault("APP_ENV", "development"),
+			PublicBaseURL: getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
 		},
 		DB: DBConfig{
 			Host:     getenvDefault("DB_HOST", "localhost"),

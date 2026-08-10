@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin } from 'antd'
-import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { getToken } from '../../store/auth'
@@ -33,6 +33,15 @@ const DIMENSIONS: { label: string; key: keyof OptimizedContent['score'] }[] = [
   { label: '时效性', key: 'recency' },
 ]
 
+// 目标 AI 引擎偏好（GEO 优化侧差异：按引擎偏好调整内容格式，提高被引用概率）
+const ENGINE_OPTIONS = [
+  { value: '', label: '通用（不指定）' },
+  { value: 'chatgpt', label: 'ChatGPT' },
+  { value: 'perplexity', label: 'Perplexity' },
+  { value: 'kimi', label: 'Kimi' },
+  { value: 'doubao', label: '豆包' },
+]
+
 export default function Content() {
   const queryClient = useQueryClient()
   const [selectedBrand, setSelectedBrand] = useState<string | undefined>()
@@ -40,6 +49,7 @@ export default function Content() {
   const [optimizing, setOptimizing] = useState(false)
   const [result, setResult] = useState<OptimizedContent | null>(null)
   const [genKeywords, setGenKeywords] = useState<string[]>([])
+  const [targetEngine, setTargetEngine] = useState<string>('') // 目标 AI 引擎偏好
   const [generating, setGenerating] = useState(false)
   const [drafting, setDrafting] = useState(false)
 
@@ -71,6 +81,7 @@ export default function Content() {
         brand_id: selectedBrand,
         keyword: genKeywords[0],
         original_text: originalText,
+        target_engine: targetEngine || undefined,
       })
       setResult(res)
       message.success('优化完成')
@@ -101,6 +112,7 @@ export default function Content() {
         body: JSON.stringify({
           keywords: genKeywords,
           brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
+          target_engine: targetEngine || undefined,
         }),
       })
       if (res.status === 401) { message.error('登录已过期'); setGenerating(false); return }
@@ -140,6 +152,18 @@ export default function Content() {
     }
   }
 
+  // 内容状态流转：发布到公开站 / 下线
+  const handleSetStatus = async (c: OptimizedContent, status: 'draft' | 'published') => {
+    try {
+      await businessApi.setContentStatus(selectedBrand!, c.id, status)
+      message.success(status === 'published' ? `「${c.title || c.id}」已发布到公开站` : '已下线')
+      queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
+      if (result?.id === c.id) setResult({ ...result, status })
+    } catch (e) {
+      message.error('状态变更失败：' + ((e as Error)?.message || ''))
+    }
+  }
+
   const score = result?.score
 
   // AI 生成原始素材（填入编辑区，用户可编辑后再优化）
@@ -154,6 +178,7 @@ export default function Content() {
       const res = await businessApi.generateContent(selectedBrand, {
         keywords: [genKeywords[0]],
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
+        target_engine: targetEngine || undefined,
       })
       setOriginalText(res.optimized_text || '')
       message.success('素材已生成，你可以编辑后点击优化')
@@ -166,7 +191,6 @@ export default function Content() {
 
   const busy = optimizing || generating
   const hasContent = originalText.trim().length > 0
-  const charCount = originalText.length
 
   // 统一操作
   const handleAction = () => {
@@ -235,6 +259,24 @@ export default function Content() {
                     options={keywords.map((k: Keyword) => ({ value: k.term, label: k.term }))}
                     disabled={!selectedBrand}
                     maxTagCount={5}
+                  />
+                </div>
+
+                {/* 目标引擎偏好选择 */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text strong>目标 AI 引擎</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      按引擎偏好优化格式，提高被引用概率
+                    </Text>
+                  </div>
+                  <Select
+                    style={{ width: '100%' }}
+                    value={targetEngine || undefined}
+                    onChange={(v) => setTargetEngine(v || '')}
+                    options={ENGINE_OPTIONS}
+                    allowClear
+                    placeholder="选择目标引擎（空=通用优化）"
                   />
                 </div>
 
@@ -360,9 +402,94 @@ export default function Content() {
                       </Row>
                     </div>
                   )}
+
+                  {/* 前后对比反馈（仅优化模式：后端返回 score_before + recommendations） */}
+                  {result.score_before && (
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                        <Text strong style={{ fontSize: 14 }}>优化前后对比</Text>
+                        <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>
+                          {result.score_before.total?.toFixed(0)} → {score?.total?.toFixed(0)}
+                        </Tag>
+                      </div>
+                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        {DIMENSIONS.map((d) => {
+                          const before = result.score_before?.[d.key] ?? 0
+                          const after = score?.[d.key] ?? 0
+                          const diff = after - before
+                          const diffColor = diff > 5 ? 'var(--wr-success)' : diff < -5 ? 'var(--wr-danger)' : 'var(--wr-text-muted)'
+                          return (
+                            <div key={d.key}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                                <Text type="secondary">{d.label}</Text>
+                                <Text style={{ fontSize: 12 }}>
+                                  <Text type="secondary" style={{ fontSize: 12 }}>{before.toFixed(0)}</Text>
+                                  <Text strong style={{ color: diffColor, fontSize: 12 }}> → {after.toFixed(0)}</Text>
+                                </Text>
+                              </div>
+                              {/* 双条对比：before 灰条 + after 彩条 */}
+                              <div style={{ position: 'relative', height: 6, background: 'var(--wr-bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{
+                                  position: 'absolute', top: 0, left: 0, bottom: 0,
+                                  width: `${Math.max(0, Math.min(100, before))}%`,
+                                  background: 'var(--wr-text-muted)',
+                                  opacity: 0.35,
+                                }} />
+                                <div style={{
+                                  position: 'absolute', top: 0, left: 0, bottom: 0,
+                                  width: `${Math.max(0, Math.min(100, after))}%`,
+                                  background: scoreColor(after),
+                                  borderRadius: 3,
+                                  transition: 'width 600ms cubic-bezier(0.2, 0, 0, 1)',
+                                }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </Space>
+
+                      {/* 改进建议 */}
+                      {result.recommendations && result.recommendations.length > 0 && (
+                        <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--wr-primary-bg)', borderRadius: 10 }}>
+                          <Text strong style={{ fontSize: 13, color: 'var(--wr-primary)' }}>改进建议</Text>
+                          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, lineHeight: 1.8, color: 'var(--wr-text-secondary)' }}>
+                            {result.recommendations.map((r, i) => (
+                              <li key={i}>{r}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <Paragraph style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, margin: 0 }}>
                     {result.optimized_text}
                   </Paragraph>
+
+                  {/* 公开链接（AI 引擎可爬取的公开文章页——发布为 published 后生效） */}
+                  {result.id && (
+                    <div style={{ marginTop: 16, padding: '10px 14px', background: 'var(--wr-bg-elevated)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {result.status === 'published' ? (
+                        <>
+                          <Tag color="success" style={{ margin: 0 }}>已发布</Tag>
+                          <Text code style={{ fontSize: 12 }}>/public/articles/{result.id}</Text>
+                          <Button size="small" type="link" icon={<ExportOutlined />} href={`/public/articles/${result.id}`} target="_blank" style={{ fontSize: 12 }}>
+                            查看公开页
+                          </Button>
+                          <Button size="small" type="text" danger style={{ fontSize: 12 }} onClick={() => handleSetStatus(result, 'draft')}>
+                            下线
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Text type="secondary" style={{ fontSize: 12 }}>草稿——发布后 AI 引擎可爬取此内容</Text>
+                          <Button size="small" type="primary" style={{ fontSize: 12 }} onClick={() => handleSetStatus(result, 'published')}>
+                            发布到公开站
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <Empty
@@ -395,11 +522,19 @@ export default function Content() {
                             GEO {total.toFixed(0)}
                           </Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>{scoreLevel(total)}</Text>
+                          {c.status === 'published' ? (
+                            <Tag color="success" style={{ margin: 0, fontSize: 11 }}>已发布</Tag>
+                          ) : (
+                            <Tag style={{ margin: 0, fontSize: 11 }}>草稿</Tag>
+                          )}
                         </Space>
                         <Text type="secondary" style={{ fontSize: 12 }}>v{c.version}</Text>
                       </div>
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         {new Date(c.created_at).toLocaleString()}
+                      </Text>
+                      <Text strong ellipsis style={{ fontSize: 13 }}>
+                        {c.title || '(无标题)'}
                       </Text>
                       <Paragraph
                         ellipsis={{ rows: 2 }}
@@ -407,6 +542,22 @@ export default function Content() {
                       >
                         {c.optimized_text}
                       </Paragraph>
+                      <div style={{ display: 'flex', gap: 4, marginTop: 'auto', paddingTop: 4 }}>
+                        {c.status === 'published' ? (
+                          <>
+                            <Button size="small" type="link" icon={<ExportOutlined />} href={`/public/articles/${c.id}`} target="_blank" style={{ fontSize: 12 }}>
+                              公开页
+                            </Button>
+                            <Button size="small" type="text" danger style={{ fontSize: 12 }} onClick={() => handleSetStatus(c, 'draft')}>
+                              下线
+                            </Button>
+                          </>
+                        ) : (
+                          <Button size="small" type="primary" ghost style={{ fontSize: 12 }} onClick={() => handleSetStatus(c, 'published')}>
+                            发布到公开站
+                          </Button>
+                        )}
+                      </div>
                     </Card>
                   </Col>
                 )

@@ -316,3 +316,21 @@ func (uc *MonitorUseCase) TriggerMonitor(ctx context.Context, tenantID, brandID 
 	}
 	return total / float64(len(results)), nil
 }
+
+// BaselineRate 实现 port.MonitorTrigger 接口。
+// 发布前基线：取品牌最近一次监测结果的平均提及率（不触发新监测，免费）。
+// 无监测记录时返回 0——前端展示"无基线"而非误导性的 0%。
+func (uc *MonitorUseCase) BaselineRate(ctx context.Context, tenantID, brandID string) (float64, error) {
+	results, err := uc.resultRepo.LatestByBrand(ctx, tenantID, brandID)
+	if err != nil {
+		return 0, err
+	}
+	if len(results) == 0 {
+		return 0, nil
+	}
+	total := 0.0
+	for _, r := range results {
+		total += r.MentionRate
+	}
+	return total / float64(len(results)), nil
+}

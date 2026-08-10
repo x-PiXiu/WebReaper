@@ -4,28 +4,33 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
+	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/port"
 )
 
-// DirectProbe 是 port.AIEngineProbe 的"真实 AI 直测"实现。
+// DirectProbe 是 port.AIEngineProbe 的"真实 AI 引擎直测"实现。
 //
-// 核心区别（vs RagProbe）：
-//   - RagProbe：自己爬全网→自建RAG→自己综合回答→解析（自问自答，模拟性质）
-//   - DirectProbe：直接调真实 AI 引擎问问题→收集真实回答→解析（真实测量）
+// 核心区别（vs AgentProbe）：
+//   - AgentProbe：Agent 自主搜索全网→综合回答→解析（模拟引擎行为，估算引用率）
+//   - DirectProbe：直接调真实 AI 引擎 API 问问题→收集真实回答→解析（真实测量）
 //
-// DirectProbe 才是真正的 GEO 监测——它测量的是"真实 AI 引擎（豆包/Kimi/文心/DeepSeek）
-// 在被问到这个关键词时，会不会提到你的品牌"。
+// DirectProbe 才是"真实引用率"——它测量的是：真实 AI 引擎（豆包/Kimi/文心/DeepSeek）
+// 在被问到这个关键词时，会不会提到你的品牌。
 //
-// 流程极简（无爬虫无RAG）：
-//   循环采样 N 次 → 直接问 AI 引擎 → 收集回答 → LLM 解析每条回答的提及情况 → 聚合
+// 引擎接入的关键事实：豆包/Kimi/文心/DeepSeek 均提供 OpenAI 兼容 API，
+// 项目已支持在 LLMConfig 中配置任意 OpenAI 兼容端点。因此：
+//   - llm_configs 表就是"引擎注册表"（EngineName = LLMConfigName）
+//   - 复用 port.AIGenerator.ChatStream（按 llmConfigName 选引擎 + TTL 缓存），
+//     无需为每个引擎写专属 SDK 适配器
 //
-// 采样问法多样化：不只用原关键词，还用同义改写，避免 AI 因缓存返回相同答案。
+// 解析复用 analyzeMention（LLM 客观列品牌 + Go 代码匹配，消除确认偏误），
+// 解析用 default 引擎（与直测引擎分离，避免自判）。
 type DirectProbe struct {
 	aiGen port.AIGenerator
 }
 
+// NewDirectProbe 创建真实引擎直测适配器。
 func NewDirectProbe(ai port.AIGenerator) *DirectProbe {
 	return &DirectProbe{aiGen: ai}
 }
@@ -34,11 +39,11 @@ func NewDirectProbe(ai port.AIGenerator) *DirectProbe {
 func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeResult, error) {
 	sampleSize := in.SampleSize
 	if sampleSize <= 0 {
-		sampleSize = 5 // 真实直测比 RAG 快（不爬网），可以多采样
+		sampleSize = 3 // 真实直测比 Agent 搜索快（不爬网），可多采样
 	}
 
-	// 多样化问法（避免 AI 缓存返回相同答案，提高统计有效性）
-	questions := p.generateQuestions(in.Keyword, sampleSize)
+	// 多样化问法（避免 AI 因缓存返回相同答案，提高统计有效性）
+	questions := generateProbeQuestions(in.Keyword, sampleSize)
 
 	// 所有品牌名（主品牌 + 别名）
 	allBrandNames := append([]string{in.BrandName}, in.Aliases...)
@@ -48,6 +53,7 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 	sentimentPos, sentimentNeg := 0, 0
 	competitorMentions := make(map[string]int)
 	var allAnswers []string
+	totalSamples := 0
 
 	for i := 0; i < sampleSize; i++ {
 		question := questions[i%len(questions)] // 轮换问法
@@ -58,12 +64,19 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		}
 		answer, err := p.aiGen.ChatStream(ctx, "", in.EngineName, messages, nil)
 		if err != nil || strings.TrimSpace(answer) == "" {
+			continue // 单次失败降级跳过
+		}
+		answer = strings.TrimSpace(answer)
+		// 过滤模型推理过程的 think 标签（展示与解析都不应看到思考过程）
+		answer = pkg.StripThinkTags(answer)
+		if strings.TrimSpace(answer) == "" {
 			continue
 		}
+		totalSamples++
 		allAnswers = append(allAnswers, fmt.Sprintf("【问：%s】\n%s", question, answer))
 
-		// LLM 解析这条回答里的品牌提及
-		analysis := p.llmAnalyzeMention(ctx, answer, in.BrandName, allBrandNames, in.Competitors, in.EngineName)
+		// 解析提及（用 default 引擎解析，与直测引擎分离——避免自判）
+		analysis := analyzeMention(ctx, p.aiGen, answer, in.BrandName, allBrandNames, in.Competitors, "")
 		if analysis.Mentioned {
 			mentionCount++
 			if analysis.Position > 0 {
@@ -80,10 +93,10 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		}
 	}
 
-	// 聚合统计
+	// 聚合统计（与 AgentProbe 同口径）
 	mentionRate := 0.0
-	if sampleSize > 0 {
-		mentionRate = float64(mentionCount) / float64(sampleSize)
+	if totalSamples > 0 {
+		mentionRate = float64(mentionCount) / float64(totalSamples)
 	}
 	avgPos := 0
 	if mentionCount > 0 {
@@ -102,84 +115,49 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 	}
 
 	return port.ProbeResult{
-		SampleCount:          sampleSize,
+		SampleCount:          totalSamples,
 		MentionCount:         mentionCount,
 		MentionRate:          mentionRate,
 		AvgPosition:          avgPos,
 		Sentiment:            sentiment,
 		Competitors:          competitorMentions,
 		RawSample:            rawSample,
-		SourceCount:          0, // 真实直测不爬网，无检索源
+		SourceCount:          totalSamples,
 		BrandAppearanceCount: mentionCount,
+		Confidence:           computeProbeConfidence(rawSample, totalSamples),
 	}, nil
 }
 
-// generateQuestions 生成多样化的问法（避免 AI 因缓存返回相同答案）。
-// 用不同角度问同一个意图，让 AI 展现真实理解能力。
-func (p *DirectProbe) generateQuestions(keyword string, count int) []string {
-	// 基础问法 + 多角度变体
-	templates := []string{
-		keyword,                                   // 原始关键词直接问
-		fmt.Sprintf("推荐%s", keyword),             // 推荐角度
-		fmt.Sprintf("%s哪个好？", keyword),          // 比较角度
-		fmt.Sprintf("我想了解%s，有什么推荐？", keyword), // 咨询角度
-		fmt.Sprintf("%s相关的平台或工具有哪些？", keyword), // 列举角度
+// computeProbeConfidence 按信息量计算置信度（真实直测：回答长度 + 采样成功率）。
+func computeProbeConfidence(rawSample string, sampleCount int) float64 {
+	answerLen := len([]rune(rawSample))
+	// 复用 entity 层算法（回答长度 + 采样成功数）
+	score := 0.6
+	if answerLen > 500 {
+		score += 0.3
+	} else if answerLen > 0 {
+		score += 0.3 * float64(answerLen) / 500.0
 	}
-	// 如果要的次数比模板多，循环用
-	result := make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		result = append(result, templates[i%len(templates)])
+	if sampleCount > 0 {
+		score += 0.1
 	}
-	return result
+	if score > 1.0 {
+		score = 1.0
+	}
+	return score
 }
 
-// llmAnalyzeMention 用 LLM 解析回答里的品牌提及情况（复用 RagProbe 的同款逻辑）。
-// 为了 DirectProbe 自包含，这里独立实现一份（与 RagProbe 的解析逻辑一致）。
-func (p *DirectProbe) llmAnalyzeMention(ctx context.Context, answer, brandName string, aliases, competitors []string, llmConfigName string) mentionAnalysis {
-	brandNames := strings.Join(append([]string{brandName}, aliases...), "、")
-	compNames := strings.Join(competitors, "、")
-	systemPrompt := "你是品牌可见度分析专家。分析一段 AI 回答里指定品牌的提及情况。只返回 JSON，不要解释。"
-	userPrompt := fmt.Sprintf(`分析以下 AI 回答，评估品牌「%s」的可见度：
-
-1. mentioned：回答里是否提到该品牌（含简称/别名/指代）
-2. position：如果 AI 给出了推荐/列举，该品牌排第几？未被提及则填0。
-3. sentiment：回答对该品牌的整体评价倾向（positive/neutral/negative）
-4. competitors：回答里提到了哪些竞品（从列表里匹配：%s）
-
-AI 回答内容：
-%s
-
-只返回 JSON：{"mentioned":true,"position":1,"sentiment":"positive","competitors":["竞品A"]}`, brandNames, compNames, answer)
-
-	messages := []port.ChatMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
+// generateProbeQuestions 生成多样化问法（原词 + 同义改写），避免缓存重复答案。
+func generateProbeQuestions(keyword string, count int) []string {
+	base := []string{
+		keyword,
+		"推荐一些" + keyword,
+		keyword + "哪家好",
+		"有了解过" + keyword + "吗",
+		"关于" + keyword + "，你有什么推荐的",
 	}
-	convID := fmt.Sprintf("direct-analyze-%d", time.Now().UnixNano())
-	resp, err := p.aiGen.ChatStream(ctx, convID, llmConfigName, messages, nil)
-	if err != nil {
-		return p.fallbackStringMatch(answer, brandName, aliases, competitors)
+	if count <= len(base) {
+		return base[:count]
 	}
-	return parseMentionJSON(resp, brandName, competitors)
+	return base
 }
-
-// fallbackStringMatch LLM 解析失败时的降级：字符串匹配。
-func (p *DirectProbe) fallbackStringMatch(answer, brandName string, aliases, competitors []string) mentionAnalysis {
-	ma := mentionAnalysis{CompetitorMentions: make(map[string]int)}
-	lower := strings.ToLower(answer)
-	for _, name := range append([]string{brandName}, aliases...) {
-		if name != "" && strings.Contains(lower, strings.ToLower(name)) {
-			ma.Mentioned = true
-			break
-		}
-	}
-	for _, comp := range competitors {
-		if comp != "" && strings.Contains(lower, strings.ToLower(comp)) {
-			ma.CompetitorMentions[comp]++
-		}
-	}
-	return ma
-}
-
-// 编译期断言：实现 port.AIEngineProbe。
-var _ port.AIEngineProbe = (*DirectProbe)(nil)

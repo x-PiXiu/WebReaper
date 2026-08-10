@@ -9,7 +9,7 @@ const { Title, Text } = Typography
 // 禁用的工具不会被 Agent 拿到（后端 ToolRegistry.All/GetByNames 自动过滤）。
 export default function Tools() {
   const queryClient = useQueryClient()
-  const { data: tools = [], refetch } = useQuery({
+  const { data: tools = [] } = useQuery({
     queryKey: ['tools'],
     queryFn: () => businessApi.listTools(),
   })

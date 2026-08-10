@@ -552,3 +552,75 @@ func (r *MockPublishRecordRepository) FindDedup(_ context.Context, contentID, sy
 	}
 	return entity.PublishRecord{}, pkg.ErrNotFound
 }
+
+// ---- GEO 内容仓储 mock（公开站点查询支持）----
+
+// MockOptimizedContentRepository 是 port.OptimizedContentRepository 的内存实现。
+type MockOptimizedContentRepository struct {
+	mu   sync.Mutex
+	recs map[string]entity.OptimizedContent
+}
+
+func NewMockOptimizedContentRepository() *MockOptimizedContentRepository {
+	return &MockOptimizedContentRepository{recs: make(map[string]entity.OptimizedContent)}
+}
+
+func (r *MockOptimizedContentRepository) Save(_ context.Context, c entity.OptimizedContent) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	r.recs[c.ID] = c
+	return nil
+}
+
+func (r *MockOptimizedContentRepository) ListByBrand(_ context.Context, tenantID, brandID string) ([]entity.OptimizedContent, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	var out []entity.OptimizedContent
+	for _, c := range r.recs {
+		if c.TenantID == tenantID && c.BrandID == brandID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (r *MockOptimizedContentRepository) FindByID(_ context.Context, tenantID, id string) (entity.OptimizedContent, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	c, ok := r.recs[id]
+	if !ok || c.TenantID != tenantID {
+		return entity.OptimizedContent{}, pkg.ErrNotFound
+	}
+	return c, nil
+}
+
+func (r *MockOptimizedContentRepository) FindMaxVersion(_ context.Context, tenantID, brandID, keywordID string) (int, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	maxV := 0
+	for _, c := range r.recs {
+		if c.TenantID == tenantID && c.BrandID == brandID &&
+			(keywordID == "" || c.KeywordID == keywordID) && c.Version > maxV {
+			maxV = c.Version
+		}
+	}
+	return maxV, nil
+}
+
+// FindPublishedByID 公开查询：仅返回已发布内容。
+func (r *MockOptimizedContentRepository) FindPublishedByID(_ context.Context, id string) (entity.OptimizedContent, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	c, ok := r.recs[id]
+	if !ok || c.Status != "published" {
+		return entity.OptimizedContent{}, pkg.ErrNotFound
+	}
+	return c, nil
+}
+
+// ListPublished 公开查询：全部已发布内容。
+func (r *MockOptimizedContentRepository) ListPublished(_ context.Context) ([]entity.OptimizedContent, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	var out []entity.OptimizedContent
+	for _, c := range r.recs {
+		if c.Status == "published" {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
