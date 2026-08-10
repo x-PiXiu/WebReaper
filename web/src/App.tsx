@@ -13,8 +13,7 @@ import MerchantHome from './pages/merchant/Home'
 import Brands from './pages/merchant/Brands'
 import Content from './pages/merchant/Content'
 import Keywords from './pages/merchant/Keywords'
-import Accounts from './pages/merchant/Accounts'
-import Publish from './pages/merchant/Publish'
+import Distribution from './pages/merchant/Distribution'
 import VideoWorkbench from './pages/merchant/Video'
 // 管理端额外页面
 import AdminUsers from './pages/admin/Users'
@@ -40,8 +39,7 @@ export default function App() {
           <Route path="/m/keywords" element={<Keywords />} />
           <Route path="/m/content" element={<Content />} />
           <Route path="/m/video" element={<VideoWorkbench />} />
-          <Route path="/m/accounts" element={<Accounts />} />
-          <Route path="/m/publish" element={<Publish />} />
+          <Route path="/m/distribution" element={<Distribution />} />
           <Route path="/m/chat" element={<Chat />} />
         </Route>
 

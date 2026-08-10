@@ -37,6 +37,7 @@ export default function Keywords() {
   const [monitoringKwId, setMonitoringKwId] = useState<string | null>(null) // 正在监测的关键词
   const [monitoringAll, setMonitoringAll] = useState(false) // 一键监测全部
   const [selectedEngine, setSelectedEngine] = useState<string>('') // 监测用的 LLM 引擎（空=default）
+  const [intentFilter, setIntentFilter] = useState<string>('') // 意图筛选（空=全部）
 
   const { data: brands = [] } = useQuery({ queryKey: ['geo-brands'], queryFn: () => businessApi.listBrands() })
   const { data: llmConfigs = [] } = useQuery({ queryKey: ['llm-configs'], queryFn: () => businessApi.listLLMConfigs() })
@@ -56,10 +57,11 @@ export default function Keywords() {
     monitorByKeyword.set(r.keyword_id, arr)
   })
 
-  // 过滤关键词（按选中的品牌）
-  const displayedKeywords = selectedBrandForMonitor
-    ? allKeywords.filter((k: Keyword) => k.brand_id === selectedBrandForMonitor)
-    : allKeywords
+  // 过滤关键词（按选中的品牌 + 意图）
+  const displayedKeywords = allKeywords.filter((k: Keyword) =>
+    (!selectedBrandForMonitor || k.brand_id === selectedBrandForMonitor) &&
+    (!intentFilter || k.intent === intentFilter)
+  )
 
   // 蒸馏
   const handleDistill = async () => {
@@ -338,6 +340,18 @@ export default function Keywords() {
                         value={selectedEngine || undefined}
                         onChange={(v) => setSelectedEngine(v || '')}
                         options={llmConfigs.map((l: LLMConfig) => ({ value: l.name, label: `${l.name}（${l.model}）` }))}
+                      />
+                      <Select
+                        style={{ width: 140 }}
+                        placeholder="意图筛选"
+                        allowClear
+                        value={intentFilter || undefined}
+                        onChange={(v) => setIntentFilter(v || '')}
+                        options={[
+                          { value: 'informational', label: '信息型' },
+                          { value: 'transactional', label: '交易型' },
+                          { value: 'local', label: '本地型' },
+                        ]}
                       />
                     </Space>
                     <Button

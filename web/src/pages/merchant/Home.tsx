@@ -261,6 +261,17 @@ export default function MerchantHome() {
                       ))}
                     </div>
                   )}
+
+                  <div style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>GEO 可见度</Text>
+                    <Button
+                      size="small" type="text"
+                      style={{ fontSize: 12, color: 'var(--wr-primary)' }}
+                      onClick={(e) => { e.stopPropagation(); navigate('/m/keywords') }}
+                    >
+                      查看关键词与监测 →
+                    </Button>
+                  </div>
                 </div>
               </Col>
             )

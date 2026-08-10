@@ -1,7 +1,10 @@
-import { Layout, Menu, Button, Space, Avatar, Switch } from 'antd'
+import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input } from 'antd'
+import { SearchOutlined } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
+import { businessApi } from '../api/business'
 
 const { Header, Sider, Content } = Layout
 
@@ -82,6 +85,38 @@ export function AppShell({
 
   const noPadding = noPaddingKeys.includes(selectedKey)
 
+  // 全局资产搜索（品牌/关键词快速跳转；数据来自租户级接口，缓存 60s）
+  const { data: brands = [] } = useQuery({
+    queryKey: ['global-search-brands'],
+    queryFn: () => businessApi.listBrands(),
+    staleTime: 60_000,
+    enabled: !inAdmin,
+  })
+  const { data: keywords = [] } = useQuery({
+    queryKey: ['global-search-keywords'],
+    queryFn: () => businessApi.listAllKeywords(),
+    staleTime: 60_000,
+    enabled: !inAdmin,
+  })
+
+  const searchOptions = [
+    ...brands.map((b: { id: string; name: string }) => ({
+      value: `品牌 · ${b.name}`,
+      label: `品牌 · ${b.name}`,
+      target: '/m/brands',
+    })),
+    ...keywords.slice(0, 30).map((k: { id: string; term: string }) => ({
+      value: `关键词 · ${k.term}`,
+      label: `关键词 · ${k.term}`,
+      target: '/m/keywords',
+    })),
+  ]
+
+  const handleSearchSelect = (val: string) => {
+    const hit = searchOptions.find(o => o.value === val)
+    if (hit) navigate(hit.target)
+  }
+
   return (
     <Layout style={{ minHeight: '100vh', background: '#0a0a0f' }}>
       {/* 侧边栏 */}
@@ -97,6 +132,8 @@ export function AppShell({
           top: 0,
           height: '100vh',
           overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
         {/* Logo 区 */}
@@ -128,6 +165,18 @@ export function AppShell({
           style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 12, padding: '0 10px' }}
           items={toMenuItems(menuItems)}
         />
+
+        {/* 底部：版本信息 */}
+        <div style={{
+          position: 'sticky', bottom: 0,
+          padding: '16px 20px', marginTop: 'auto',
+          borderTop: '1px solid var(--wr-border)',
+          fontSize: 11, color: 'var(--wr-text-muted)',
+          display: 'flex', flexDirection: 'column', gap: 2,
+        }}>
+          <span>WebReaper GEO SaaS</span>
+          <span style={{ opacity: 0.7 }}>v2.0 · 深空极光</span>
+        </div>
       </Sider>
 
       <Layout style={{ background: 'var(--wr-bg-base)' }}>
@@ -152,6 +201,23 @@ export function AppShell({
             <span style={{ color: 'var(--wr-text-primary)', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>
               {findMenuLabel(menuItems, selectedKey) || '控制台'}
             </span>
+            {/* 全局资产搜索（商户端）*/}
+            {!inAdmin && (
+              <AutoComplete
+                options={searchOptions}
+                onSelect={handleSearchSelect}
+                style={{ width: 240, marginLeft: 16 }}
+                popupMatchSelectWidth={280}
+              >
+                <Input
+                  size="small"
+                  prefix={<SearchOutlined style={{ color: 'var(--wr-text-muted)', fontSize: 13 }} />}
+                  placeholder="搜索品牌 / 关键词"
+                  variant="borderless"
+                  style={{ background: 'var(--wr-input-bg)', borderRadius: 8 }}
+                />
+              </AutoComplete>
+            )}
           </div>
 
           <Space size={12}>

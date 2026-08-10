@@ -5,7 +5,6 @@ import {
   SearchOutlined,
   EditOutlined,
   VideoCameraOutlined,
-  UserOutlined,
   ExportOutlined,
   MessageOutlined,
 } from '@ant-design/icons'
@@ -36,8 +35,7 @@ const merchantMenu: NavItem[] = [
   {
     key: 'distribution', label: '分发',
     children: [
-      { key: '/m/accounts', label: '账号管理', icon: <UserOutlined /> },
-      { key: '/m/publish', label: '内容发布', icon: <ExportOutlined /> },
+      { key: '/m/distribution', label: '分发中心', icon: <ExportOutlined /> },
     ],
   },
   {
