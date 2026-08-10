@@ -55,6 +55,43 @@ func (uc *LLMConfigUseCase) List(ctx context.Context) ([]entity.LLMConfig, error
 	return uc.repo.List(ctx)
 }
 
+// UpdateInput 修改 LLM 配置的输入（部分更新语义：nil = 保留原值）。
+type UpdateInput struct {
+	Provider *string
+	APIKey   *string
+	BaseURL  *string
+	Model    *string
+}
+
+// Update 修改 LLM 配置：先取原值，应用部分更新，校验后持久化。
+// 注意：修改 LLM 配置后，已缓存的 LLM 客户端不会自动失效——
+// 调用方（handler 装配层）负责触发缓存清理，或依赖 LLM 缓存的 TTL 过期。
+func (uc *LLMConfigUseCase) Update(ctx context.Context, name string, in UpdateInput) (entity.LLMConfig, error) {
+	old, err := uc.repo.FindByName(ctx, name)
+	if err != nil {
+		return entity.LLMConfig{}, fmt.Errorf("llm config %q 不存在: %w", name, err)
+	}
+	if in.Provider != nil {
+		old.Provider = *in.Provider
+	}
+	if in.APIKey != nil {
+		old.APIKey = *in.APIKey
+	}
+	if in.BaseURL != nil {
+		old.BaseURL = *in.BaseURL
+	}
+	if in.Model != nil {
+		old.Model = *in.Model
+	}
+	if !old.IsValid() {
+		return entity.LLMConfig{}, fmt.Errorf("llm config 无效：name / api_key / model 不能为空")
+	}
+	if err := uc.repo.Save(ctx, old); err != nil {
+		return entity.LLMConfig{}, fmt.Errorf("update llm config: %w", err)
+	}
+	return old, nil
+}
+
 // Delete 删除 LLM 配置。
 func (uc *LLMConfigUseCase) Delete(ctx context.Context, name string) error {
 	return uc.repo.Delete(ctx, name)

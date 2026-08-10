@@ -3,7 +3,6 @@ package vectorstore
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"webreaper/internal/usecase/port"
@@ -124,38 +123,4 @@ func sqrt(x float64) float64 {
 // 确保实现接口
 var _ port.VectorStore = (*NopVectorStore)(nil)
 var _ port.VectorStore = (*MemoryVectorStore)(nil)
-
-// MilvusVectorStore 占位（真实 Milvus 接入尚未实现）。
-//
-// 设计说明（诚实降级原则）：
-// 真实 Milvus SDK（github.com/milvus-io/milvus-sdk-go/v2）尚未接入。
-// 为避免「装作成功却静默丢弃数据」的反模式，NewMilvusVectorStore 返回显式 error，
-// 让 main.go 的「失败则降级内存向量存储」分支真正可达、可被日志感知。
-// 这符合项目 ADR-002「双实现降级」——降级必须诚实，不能装成功。
-//
-// 后续接入步骤：
-//  1. go get github.com/milvus-io/milvus-sdk-go/v2
-//  2. 实现 Store/Search/Delete/IsAvailable（参考 MemoryVectorStore 的余弦相似度）
-//  3. NewMilvusVectorStore 真正建连，连不上才返回 error 走降级
-type MilvusVectorStore struct {
-	*nopFallback
-}
-
-type nopFallback struct{}
-
-func (nopFallback) Store(context.Context, string, []float32, map[string]string) error { return nil }
-func (nopFallback) Search(context.Context, []float32, int) ([]port.VectorSearchResult, error) { return nil, nil }
-func (nopFallback) Delete(context.Context, string) error { return nil }
-func (nopFallback) IsAvailable() bool { return false }
-
-// NewMilvusVectorStore 创建 Milvus 向量存储。
-//
-// 当前真实 SDK 未接入，始终返回 error，提示调用方降级到内存向量存储。
-// 等真实实现就位后，本函数改为真正建连（连不上才 error）。
-func NewMilvusVectorStore(host, port string) (*MilvusVectorStore, error) {
-	_ = host
-	_ = port
-	return nil, fmt.Errorf("Milvus 真实实现尚未接入（SDK 未引入），请使用内存向量存储；配置已忽略")
-}
-
-var _ = fmt.Sprintf // 防止 fmt 未使用
+// MilvusVectorStore 的真实实现见 milvus_store.go（已接入 SDK）

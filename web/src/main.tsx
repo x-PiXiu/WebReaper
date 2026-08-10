@@ -31,7 +31,7 @@ const darkThemeConfig = {
     colorBorderSecondary: 'rgba(255,255,255,0.04)',
   },
   components: {
-    Layout: { siderBg: '#0d0d14', headerBg: 'rgba(18,18,24,0.8)', headerHeight: 56, bodyBg: '#0a0a0f' },
+    Layout: { siderBg: '#0d0d14', headerBg: 'rgba(18,18,24,0.8)', headerHeight: 60, bodyBg: '#0a0a0f' },
     Menu: {
       darkItemBg: 'transparent', darkSubMenuItemBg: 'transparent',
       darkItemSelectedBg: 'rgba(99,102,241,0.15)', darkItemHoverBg: 'rgba(255,255,255,0.04)',
@@ -44,24 +44,38 @@ const darkThemeConfig = {
   },
 }
 
-// 亮色主题配置
+// 亮色主题配置（B2B SaaS 数据驾驶舱风格——参考 Stripe/Vercel Analytics）
 const lightThemeConfig = {
   algorithm: antdTheme.defaultAlgorithm,
   token: {
     colorPrimary: '#6366f1',
     colorInfo: '#6366f1',
-    colorSuccess: '#0891b2',
+    colorSuccess: '#10b981',
+    colorWarning: '#f59e0b',
+    colorError: '#ef4444',
     borderRadius: 10,
     borderRadiusLG: 14,
     fontFamily: "'Inter', -apple-system, 'Segoe UI', 'Noto Sans SC', sans-serif",
     fontSize: 15,
     controlHeight: 38,
     controlHeightLG: 44,
+    colorBgBase: '#f6f7f9',
+    colorBgContainer: '#ffffff',
+    colorBgElevated: '#ffffff',
+    colorBgSpotlight: '#f0f1f3',
+    colorBorder: 'rgba(0,0,0,0.08)',
+    colorBorderSecondary: 'rgba(0,0,0,0.04)',
   },
   components: {
-    Layout: { headerBg: '#ffffff', headerHeight: 56, bodyBg: '#f4f4f5' },
-    Card: { headerBg: 'transparent' },
-    Table: { rowHoverBg: '#f4f4f5' },
+    Layout: { siderBg: '#ffffff', headerBg: '#ffffff', headerHeight: 60, bodyBg: '#f6f7f9' },
+    Menu: {
+      itemBg: 'transparent', subMenuItemBg: 'transparent',
+      itemSelectedBg: 'rgba(99,102,241,0.08)', itemHoverBg: 'rgba(0,0,0,0.03)',
+      itemColor: '#71717a', itemSelectedColor: '#6366f1',
+      itemBorderRadius: 8, itemMarginInline: 8,
+    },
+    Card: { colorBgContainer: '#ffffff', headerBg: 'transparent' },
+    Table: { headerBg: '#f6f7f9', headerColor: '#52525b', rowHoverBg: '#f6f7f9', borderColor: 'rgba(0,0,0,0.06)' },
     Button: { fontWeight: 500 },
   },
 }

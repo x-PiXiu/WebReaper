@@ -6,12 +6,14 @@ import (
 	"gorm.io/datatypes"
 )
 
-// ---- UserPO（认证用，保留不改）----
+// ---- UserPO（认证用，多租户）----
 
 type UserPO struct {
 	ID           string    `gorm:"primaryKey;size:64"`
 	Username     string    `gorm:"size:64;uniqueIndex"`
 	PasswordHash string    `gorm:"size:128"`
+	Role         string    `gorm:"size:32;index"`       // admin / merchant
+	TenantID     string    `gorm:"size:64;index"`       // 归属租户（admin 可空）
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -167,5 +169,13 @@ func allModels() []any {
 		&MessagePO{},
 		&SystemSettingPO{},
 		&ExternalSystemPO{},
+		// GEO 表（013_geo_core.sql）
+		&BrandPO{},
+		&KeywordPO{},
+		&MonitoringResultPO{},
+		&OptimizedContentPO{},
+		// 发布账号/发布任务表（014_publish_accounts.sql）
+		&AccountPO{},
+		&PublishJobPO{},
 	}
 }

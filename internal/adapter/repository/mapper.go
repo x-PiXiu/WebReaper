@@ -48,11 +48,17 @@ func metadataFromJSON(j datatypes.JSON) map[string]string {
 // ---- User ----
 
 func userToPO(e entity.User) UserPO {
-	return UserPO{ID: e.ID, Username: e.Username, PasswordHash: e.PasswordHash, CreatedAt: e.CreatedAt}
+	return UserPO{
+		ID: e.ID, Username: e.Username, PasswordHash: e.PasswordHash,
+		Role: e.Role, TenantID: e.TenantID, CreatedAt: e.CreatedAt,
+	}
 }
 
 func userFromPO(p UserPO) entity.User {
-	return entity.User{ID: p.ID, Username: p.Username, PasswordHash: p.PasswordHash, CreatedAt: p.CreatedAt}
+	return entity.User{
+		ID: p.ID, Username: p.Username, PasswordHash: p.PasswordHash,
+		Role: p.Role, TenantID: p.TenantID, CreatedAt: p.CreatedAt,
+	}
 }
 
 // ---- Task ----

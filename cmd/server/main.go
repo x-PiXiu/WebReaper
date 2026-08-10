@@ -14,20 +14,25 @@ import (
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
 	"webreaper/internal/adapter/crawler"
+	"webreaper/internal/adapter/crypto"
 	"webreaper/internal/adapter/embedding"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/handler"
 	"webreaper/internal/adapter/mock"
+	"webreaper/internal/adapter/publisher"
+	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/vectorstore"
 	"webreaper/internal/adapter/telemetry"
 	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/agentconfig"
 	"webreaper/internal/usecase/auth"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/dataitem"
+	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
@@ -90,6 +95,16 @@ func main() {
 	registerLimited(crawler.NewStaticCrawler())
 	registerLimited(crawler.NewDynamicCrawler())
 	registerLimited(crawler.NewSearchCrawler())
+	// Tavily 搜索（专为 AI 设计的高质量搜索源）
+	// 无论有没有 Key 都注册实例（管理后台可运行时配 Key），Key 空时禁用
+	tavilyCrawler := crawler.NewTavilyCrawler(cfg.Tavily.APIKey)
+	registerLimited(tavilyCrawler)
+	if cfg.Tavily.IsConfigured() {
+		log.Info("Tavily 搜索工具已就绪（tavily_search）")
+	} else {
+		toolRegistry.SetEnabled("tavily_search", false) // 无 Key 时禁用
+		log.Info("Tavily 搜索工具已注册但未启用（需在管理后台配置 API Key）")
+	}
 	// 3 种装饰器爬虫（包装基础爬虫，增加能力）
 	// 注意：装饰器需要指定被包装的基础爬虫，这里用 static_crawler 作为默认基础
 	staticCrawler := crawler.NewStaticCrawler()
@@ -98,7 +113,7 @@ func main() {
 	registerLimited(crawler.NewDeepCrawler(staticCrawler))
 
 	// AI 生成器（注入 LLMConfigRepository 用于运行时按配置选 LLM，注入 ToolRegistry 让 LLM 调用全部爬虫）
-	aiGenerator := initAIGenerator(cfg.LLM, llmConfigRepo, toolRegistry, logger)
+	aiGenerator := initAIGenerator(cfg.LLM, llmConfigRepo, toolRegistry, msgRepo, logger)
 
 	// LLM 配置管理用例（封装 LLMConfig CRUD + seed default）
 	llmCfgUC := llmconfig.NewLLMConfigUseCase(llmConfigRepo)
@@ -120,17 +135,18 @@ func main() {
 		embedder = embedding.NewOpenAIEmbedder(cfg.Embedding)
 		log.Info("Embedding 已配置", port.String("model", cfg.Embedding.Model))
 	}
-	if cfg.Milvus.Host != "" {
-		vs, err := vectorstore.NewMilvusVectorStore(cfg.Milvus.Host, cfg.Milvus.Port)
+	if cfg.Milvus.IsConfigured() {
+		vs, err := vectorstore.NewMilvusVectorStore(cfg.Milvus.Addr(), cfg.Milvus.CollectionName)
 		if err != nil {
 			log.Warn("Milvus 连接失败，使用内存向量存储", port.Err(err))
 			vectorStore = vectorstore.NewMemoryVectorStore()
 		} else {
 			vectorStore = vs
+			log.Info("Milvus 向量库已连接", port.String("addr", cfg.Milvus.Addr()), port.String("collection", cfg.Milvus.CollectionName))
 		}
 	} else {
 		vectorStore = vectorstore.NewMemoryVectorStore()
-		log.Info("未配置 Milvus，使用内存向量存储")
+		log.Info("未配置 MILVUS_HOST，使用内存向量存储（重启即丢，仅供开发）")
 	}
 
 	// 结构化处理用例（审核通过后：LLM提取→向量化→存向量库）
@@ -156,6 +172,15 @@ func main() {
 	if cfg.JWT.Secret != "" { tokenParser = tokenGen.(*authadapter.JWTGenerator) }
 	registerUC := auth.NewRegisterUseCase(userRepo, hasher)
 	loginUC := auth.NewLoginUseCase(userRepo, hasher, tokenGen)
+
+	// 首次启动 seed 默认管理员账号（多租户改造后需要至少一个 admin）
+	// 用固定用户名 admin / admin123，已存在则忽略。生产环境部署后请立即改密。
+	_, seedErr := registerUC.Execute(context.Background(), auth.RegisterInput{
+		Username: "admin", Password: "admin123", Role: entity.RoleAdmin,
+	})
+	if seedErr == nil {
+		log.Info("已 seed 默认管理员账号 admin/admin123（请立即修改密码）")
+	}
 
 	// Agent 执行器（注入 LLMConfigRepository 用于按 Agent 选 LLM，
 	// 注入 DataItemRepo 用于工具采集结果落库，注入 Logger 用于工具落库日志）
@@ -229,7 +254,122 @@ func main() {
 	router := handler.NewRouter(registerUC, loginUC, tokenParser, aiGenerator, enqueueUC,
 		agentRunner, taskQueryUC, dataItemUC, agentCfgUC, llmCfgUC, conversationUC, crawlCfgUC,
 		publishUC, sysCfgUC, toolRegistry, knowledgeSearch, orchestrateUC, statsUC)
+
+	// GEO 业务装配（商户端核心）。需要 DB + LLM 才启用。
+	geoRepos := initGEORpositories(cfg.DB)
+	var geoMonitorUCRef *geo.MonitorUseCase
+	if geoRepos != nil && cfg.LLM.IsConfigured() {
+		geoScorer := ai.NewLLMGEOScorer(aiGenerator)
+		geoBrandUC := geo.NewBrandUseCase(geoRepos.brand, geoRepos.keyword)
+		geoBrandUC.SetAIGenerator(aiGenerator) // 关键词生成用
+
+		// WebFetcher 供 RAG 监测 + 关键词发现的 RAG 增强共用
+		webFetcher := ai.NewWebFetcher()
+		// 关键词生成 RAG 增强：结合全网内容生成更准的关键词
+		geoBrandUC.SetWebSearcher(ai.NewBrandWebSearcher(webFetcher))
+
+		// 监测引擎：AgentProbe 为首选（Agent 自主搜索——把搜索工具交给 LLM Agent，让它自主搜索+综合回答）。
+		// 这是最接近真实 AI 搜索引擎的监测方式：
+		//   真实引擎（豆包/Kimi）= Agent 自主搜索 + LLM 综合
+		//   AgentProbe           = Agent 自主调 search_crawler + LLM 综合
+		// 小众品牌只要网上有内容，搜索工具就能爬到，Agent 综合回答时就会提及。
+		geoProbe := ai.NewAgentProbe(aiGenerator)
+		log.Info("GEO 监测引擎：AgentProbe（Agent 自主搜索模式，最接近真实 AI 搜索）")
+
+		geoMonitorUC := geo.NewMonitorUseCase(geoRepos.brand, geoRepos.keyword, geoRepos.result, geoProbe)
+		geoMonitorUCRef = geoMonitorUC
+		geoRankUC := geo.NewRankUseCase(geoRepos.result)
+		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
+		geoDiagnoseUC := geo.NewDiagnoseUseCase(geoRepos.brand, geoRepos.result, aiGenerator)
+			router.SetGEO(geoBrandUC, geoMonitorUC, geoRankUC, geoContentUC, geoDiagnoseUC)
+
+			// 关键词蒸馏引擎：五种来源策略（策略模式 + 工厂）
+			brandWebSearcher := ai.NewBrandWebSearcher(webFetcher)
+			geoDistillUC := geo.NewKeywordDistillUseCase(
+				ai.NewBrandSource(aiGenerator, geoRepos.brand, brandWebSearcher), // 品牌信息+全网
+				ai.NewTextSource(aiGenerator),                                     // 用户文本
+				ai.NewSeedSource(aiGenerator),                                     // 种子词拓展
+				ai.NewFileSource(aiGenerator),                                     // 文件内容
+				ai.NewWebSource(aiGenerator, webFetcher),                          // 网络爬取
+			)
+			router.SetKeywordDistill(geoDistillUC)
+			log.Info("GEO 业务已启用（品牌监测/排行榜/内容优化/关键词生成/诊断/关键词蒸馏引擎）")
+	} else {
+		log.Info("GEO 业务未启用（需配置 DB + LLM_API_KEY）")
+	}
+
+	// 多平台发布账号域装配（扫码绑定 + 半自动/全自动发布）。需要 DB 才启用。
+	var geoAccountUC *account.AccountUseCase
+	var geoPublishUC *account.PublishUseCase
+	if geoRepos != nil {
+		accountRepos := initAccountRepositories(cfg.DB)
+		if accountRepos != nil {
+			// cookie 加密保险库（需要 PUBLISH_COOKIE_SECRET）
+			var vault port.CookieVault
+			if cfg.Publish.CookieSecret != "" {
+				v, err := crypto.NewAESCookieVault(cfg.Publish.CookieSecret)
+				if err != nil {
+					log.Error("cookie 加密保险库初始化失败，扫码登录将不可用", port.Err(err))
+				} else {
+					vault = v
+				}
+			} else {
+				log.Warn("PUBLISH_COOKIE_SECRET 未配置，扫码登录不可用（cookie 无法加密存储）")
+			}
+
+			// 扫码登录（浏览器自动化，需要 vault 才有意义）
+			// QR_LOGIN_HEADED=true 时显示浏览器窗口（调试用），默认 false 走灰盒 headless
+			var qrSession port.QRLoginSession
+			if vault != nil {
+				qrSession = qrlogin.NewChromedpQRLogin(cfg.Publish.QRLoginHeaded)
+				if cfg.Publish.QRLoginHeaded {
+					log.Info("扫码登录运行在「显示模式」（QR_LOGIN_HEADED=true，浏览器窗口可见，仅供调试）")
+				} else {
+					log.Info("扫码登录运行在「灰盒模式」（headless 无头，生产默认）")
+				}
+			}
+
+			geoAccountUC = account.NewAccountUseCase(accountRepos.account, qrSession, vault)
+			// 发布通道注册表（工厂模式，已注册知乎/小红书全自动通道——同时支持半自动+全自动）
+			channelRegistry := publisher.NewChannelRegistry()
+			geoPublishUC = account.NewPublishUseCase(accountRepos.job, channelRegistry, accountRepos.account, vault)
+			// 注入发布效果追踪（发布成功后自动触发监测对比提及率）
+			geoPublishUC.SetMonitorTrigger(geoMonitorUCRef)
+			// 注入账号池（全自动发布时自动选最优账号——最久未使用优先）
+			geoPublishUC.SetAccountPool(repository.NewGormAccountPool(accountRepos.account))
+
+			router.SetAccount(geoAccountUC, geoPublishUC)
+			log.Info("多平台发布已启用（账号绑定 + 半自动/全自动发布：知乎/小红书）")
+		}
+	} else {
+		log.Info("多平台发布未启用（需配置 DB）")
+	}
+
+	// 管理端装配（用户管理，仅 admin）
+	router.SetAdmin(userRepo)
+
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// 账号健康度定时检查：每 10 分钟检查所有账号的 cookie 过期状态
+	if geoAccountUC != nil {
+		go func() {
+			ticker := time.NewTicker(10 * time.Minute)
+			defer ticker.Stop()
+			healthCtx := context.Background()
+			log.Info("账号健康度检查定时任务已启动（每 10 分钟）")
+			for {
+				select {
+				case <-ticker.C:
+					geoAccountUC.CheckAccountHealth(healthCtx)
+				case <-quit:
+					return
+				}
+			}
+		}()
+	}
 
 	go func() {
 		log.Info("HTTP 服务已启动", port.String("port", cfg.Server.Port))
@@ -239,8 +379,6 @@ func main() {
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Info("正在关闭服务...")
 	workerCancel()
@@ -279,18 +417,66 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 		repository.NewGormExternalSystemRepository(db), repository.NewGormPublishRecordRepository(db)
 }
 
-func initAIGenerator(llmCfg config.LLMConfig, llmCfgRepo port.LLMConfigRepository, toolRegistry *port.ToolRegistry, logger port.Logger) port.AIGenerator {
+// geoRepos 打包 GEO 仓储，避免 initRepositories 返回值过多。
+type geoRepos struct {
+	brand   port.BrandRepository
+	keyword port.KeywordRepository
+	result  port.MonitoringResultRepository
+	content port.OptimizedContentRepository
+}
+
+// initGEORpositories 初始化 GEO 仓储（需要数据库；未配置 DB 时返回 nil，GEO 功能降级禁用）。
+func initGEORpositories(dbCfg config.DBConfig) *geoRepos {
+	if !dbCfg.IsConfigured() {
+		return nil // 无 DB，GEO 端点不注册
+	}
+	db, err := repository.NewMySQLDBFromConfig(dbCfg)
+	if err != nil {
+		return nil
+	}
+	return &geoRepos{
+		brand:   repository.NewGormBrandRepository(db),
+		keyword: repository.NewGormKeywordRepository(db),
+		result:  repository.NewGormMonitoringResultRepository(db),
+		content: repository.NewGormOptimizedContentRepository(db),
+	}
+}
+
+// accountRepos 打包发布账号域仓储。
+type accountRepos struct {
+	account port.AccountRepository
+	job     port.PublishJobRepository
+}
+
+// initAccountRepositories 初始化发布账号域仓储（需要数据库；未配置 DB 时返回 nil）。
+func initAccountRepositories(dbCfg config.DBConfig) *accountRepos {
+	if !dbCfg.IsConfigured() {
+		return nil
+	}
+	db, err := repository.NewMySQLDBFromConfig(dbCfg)
+	if err != nil {
+		return nil
+	}
+	return &accountRepos{
+		account: repository.NewGormAccountRepository(db),
+		job:     repository.NewGormPublishJobRepository(db),
+	}
+}
+
+func initAIGenerator(llmCfg config.LLMConfig, llmCfgRepo port.LLMConfigRepository, toolRegistry *port.ToolRegistry, msgRepo port.MessageRepository, logger port.Logger) port.AIGenerator {
 	log := logger.With(port.String("component", "ai"))
 	if !llmCfg.IsConfigured() {
 		log.Info("未配置 LLM_API_KEY，使用 mock AI")
 		return mock.NewMockAIGenerator()
 	}
-	gen, err := ai.NewTrpcAgentGenerator(llmCfgRepo, toolRegistry, logger)
+	// 会话记忆：从 DB 读历史，重启后旧会话续聊仍带上下文
+	memory := ai.NewDBConversationMemory(msgRepo)
+	gen, err := ai.NewTrpcAgentGenerator(llmCfgRepo, toolRegistry, memory, logger)
 	if err != nil {
 		log.Error("LLM 初始化失败，降级 mock", port.Err(err))
 		return mock.NewMockAIGenerator()
 	}
-	log.Info("trpc-agent-go LLM 就绪（按 LLMConfig 动态选择）")
+	log.Info("trpc-agent-go LLM 就绪（按 LLMConfig 动态选择 + 会话历史恢复）")
 	return gen
 }
 

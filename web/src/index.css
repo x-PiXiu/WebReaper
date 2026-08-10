@@ -1,48 +1,23 @@
-/* WebReaper 全局样式 — 双主题系统 */
+/* GEO SaaS 平台全局样式 — 双主题系统
+   设计语言：B2B 数据驾驶舱（亮色为主）+ 暗色可选
+   参考：Stripe Dashboard / Vercel Analytics / Linear */
 
-/* ===== 暗色主题 Token ===== */
+/* ===== 亮色主题 Token（默认主题——B2B SaaS 数据可读性优先）===== */
 :root,
-[data-theme="dark"] {
-  --wr-primary: #6366f1;
-  --wr-primary-hover: #818cf8;
-  --wr-primary-bg: rgba(99, 102, 241, 0.12);
-  --wr-accent: #22d3ee;
-  --wr-accent-bg: rgba(34, 211, 238, 0.1);
-
-  --wr-bg-base: #0a0a0f;
-  --wr-bg-surface: #121218;
-  --wr-bg-elevated: #1a1a24;
-  --wr-bg-hover: #22222e;
-
-  --wr-border: rgba(255, 255, 255, 0.06);
-  --wr-border-hover: rgba(255, 255, 255, 0.12);
-
-  --wr-text-primary: #e4e4e7;
-  --wr-text-secondary: #a1a1aa;
-  --wr-text-muted: #71717a;
-
-  --wr-card-bg: #121218;
-  --wr-card-header-bg: transparent;
-  --wr-table-header-bg: #1a1a24;
-  --wr-table-row-hover: #1a1a24;
-  --wr-input-bg: #1a1a24;
-
-  --wr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --wr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-/* ===== 亮色主题 Token ===== */
 [data-theme="light"] {
   --wr-primary: #6366f1;
   --wr-primary-hover: #4f46e5;
   --wr-primary-bg: rgba(99, 102, 241, 0.08);
   --wr-accent: #0891b2;
   --wr-accent-bg: rgba(8, 145, 178, 0.08);
+  --wr-success: #10b981;
+  --wr-warning: #f59e0b;
+  --wr-danger: #ef4444;
 
-  --wr-bg-base: #f4f4f5;
+  --wr-bg-base: #f6f7f9;
   --wr-bg-surface: #ffffff;
-  --wr-bg-elevated: #f8f8fa;
-  --wr-bg-hover: #f0f0f2;
+  --wr-bg-elevated: #f0f1f3;
+  --wr-bg-hover: #eceef0;
 
   --wr-border: rgba(0, 0, 0, 0.08);
   --wr-border-hover: rgba(0, 0, 0, 0.15);
@@ -53,12 +28,47 @@
 
   --wr-card-bg: #ffffff;
   --wr-card-header-bg: transparent;
-  --wr-table-header-bg: #f8f8fa;
-  --wr-table-row-hover: #f8f8fa;
-  --wr-input-bg: #f4f4f5;
+  --wr-table-header-bg: #f6f7f9;
+  --wr-table-row-hover: #f6f7f9;
+  --wr-input-bg: #ffffff;
 
   --wr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --wr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --wr-shadow-glow: 0 0 24px rgba(99, 102, 241, 0.08);
+}
+
+/* ===== 暗色主题 Token ===== */
+[data-theme="dark"] {
+  --wr-primary: #6366f1;
+  --wr-primary-hover: #818cf8;
+  --wr-primary-bg: rgba(99, 102, 241, 0.12);
+  --wr-accent: #22d3ee;
+  --wr-accent-bg: rgba(34, 211, 238, 0.1);
+  --wr-success: #34d399;
+  --wr-warning: #fbbf24;
+  --wr-danger: #f87171;
+
+  --wr-bg-base: #08080c;
+  --wr-bg-surface: #0f0f17;
+  --wr-bg-elevated: #16161f;
+  --wr-bg-hover: #1d1d28;
+
+  --wr-border: rgba(255, 255, 255, 0.06);
+  --wr-border-hover: rgba(255, 255, 255, 0.12);
+
+  --wr-text-primary: #f4f4f5;
+  --wr-text-secondary: #a1a1aa;
+  --wr-text-muted: #71717a;
+
+  --wr-card-bg: #0f0f17;
+  --wr-card-header-bg: transparent;
+  --wr-table-header-bg: #16161f;
+  --wr-table-row-hover: #16161f;
+  --wr-input-bg: #16161f;
+
+  --wr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --wr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --wr-shadow-glow: 0 0 24px rgba(99, 102, 241, 0.15);
 }
 
 /* ===== 全局重置 ===== */
@@ -200,6 +210,12 @@ pre, code {
 }
 .wr-fade-in { animation: wr-fade-in 300ms cubic-bezier(0.2, 0, 0, 1); }
 
+/* 脉冲动画（扫码等待指示器用）*/
+@keyframes wr-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.3); }
+}
+
 /* ===== 代码高亮（rehype-highlight / highlight.js）=====
    双主题适配：暗色用 github-dark 色板，亮色用 github 色板。
    覆盖 antd 的 pre/code 灰色背景，让代码块五颜六色。 */
@@ -269,4 +285,132 @@ pre code.hljs {
 [data-theme="light"] :not(pre) > code {
   background: rgba(99,102,241,0.08);
   color: #6f42c1;
+}
+
+/* ===== GEO SaaS 视觉增强 ===== */
+
+/* 渐变文字（标题/数字强调用）*/
+.wr-gradient-text {
+  background: linear-gradient(135deg, var(--wr-primary) 0%, var(--wr-accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 玻璃质感卡片（数据驾驶舱/重点区块用）*/
+.wr-glass-card {
+  background: var(--wr-card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--wr-border);
+  border-radius: 16px;
+  box-shadow: var(--wr-shadow-md);
+  transition: transform 200ms cubic-bezier(0.2, 0, 0, 1), box-shadow 200ms ease;
+}
+.wr-glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--wr-shadow-md), var(--wr-shadow-glow);
+  border-color: var(--wr-border-hover);
+}
+
+/* 数据指标卡（提及率/排名等核心指标）*/
+.wr-metric-card {
+  background: var(--wr-card-bg);
+  border: 1px solid var(--wr-border);
+  border-radius: 14px;
+  padding: 20px 24px;
+  transition: border-color 200ms ease, transform 200ms ease;
+}
+.wr-metric-card:hover {
+  border-color: var(--wr-border-hover);
+  transform: translateY(-1px);
+}
+.wr-metric-value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+.wr-metric-label {
+  font-size: 13px;
+  color: var(--wr-text-muted);
+  margin-top: 4px;
+}
+
+/* 渐变背景装饰（页面顶部光晕）*/
+.wr-aurora-bg {
+  position: relative;
+  overflow: hidden;
+}
+.wr-aurora-bg::before {
+  content: '';
+  position: absolute;
+  top: -200px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 400px;
+  background: radial-gradient(ellipse, var(--wr-primary-bg) 0%, transparent 70%);
+  filter: blur(40px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 进度环（提及率展示用）*/
+.wr-rate-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* 提及率等级标签 */
+.wr-rate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 侧边栏菜单项增强（更精致的选中态）*/
+.ant-menu-dark .ant-menu-item-selected {
+  background: linear-gradient(90deg, var(--wr-primary-bg) 0%, transparent 100%) !important;
+  border-left: 2px solid var(--wr-primary);
+  position: relative;
+}
+
+/* 按钮 hover 微交互 */
+.ant-btn-primary:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--wr-primary-bg);
+}
+.ant-btn-primary:not(:disabled):active {
+  transform: translateY(0);
+}
+
+/* 交错淡入动画（页面加载）*/
+@keyframes wr-stagger-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.wr-stagger > * {
+  opacity: 0;
+  animation: wr-stagger-in 400ms cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+.wr-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.wr-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.wr-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.wr-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.wr-stagger > *:nth-child(5) { animation-delay: 240ms; }
+.wr-stagger > *:nth-child(6) { animation-delay: 300ms; }
+
+/* 内容区 padding 增强（更通透的呼吸感）*/
+.wr-page-content {
+  max-width: 1280px;
+  margin: 0 auto;
 }

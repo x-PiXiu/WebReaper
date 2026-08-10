@@ -133,7 +133,7 @@ func step3AIProcess(ctx context.Context, cfg config.Config, log port.Logger, ite
 		BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model,
 	})
 	toolRegistry := port.NewToolRegistry()
-	gen, err := ai.NewTrpcAgentGenerator(llmCfgRepo, toolRegistry, log)
+	gen, err := ai.NewTrpcAgentGenerator(llmCfgRepo, toolRegistry, nil, log) // e2e 不启用历史恢复
 	if err != nil {
 		fmt.Printf("  ❌ LLM 初始化失败: %v\n", err)
 		return
@@ -143,7 +143,7 @@ func step3AIProcess(ctx context.Context, cfg config.Config, log port.Logger, ite
 
 内容：
 %s`, truncate(item.Content, 2000))
-	resp, err := gen.ChatStream(ctx, "", []port.ChatMessage{
+	resp, err := gen.ChatStream(ctx, "", "", []port.ChatMessage{
 		{Role: "system", Content: "你是招聘信息结构化助手。只返回 JSON。"},
 		{Role: "user", Content: prompt},
 	}, nil)

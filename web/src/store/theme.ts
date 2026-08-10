@@ -14,7 +14,7 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
-      mode: 'dark', // 默认暗色（项目设计调性）
+      mode: 'light', // 默认亮色（B2B SaaS 数据可读性优先）
       toggle: () => set((s) => ({ mode: s.mode === 'dark' ? 'light' : 'dark' })),
       setMode: (mode) => set({ mode }),
     }),

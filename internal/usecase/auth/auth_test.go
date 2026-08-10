@@ -7,6 +7,7 @@ import (
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/port"
 )
 
 // ---- 假实现 ----
@@ -29,11 +30,35 @@ func (r *fakeUserRepo) FindByUsername(_ context.Context, username string) (entit
 	}
 	return u, nil
 }
+func (r *fakeUserRepo) FindByID(_ context.Context, id string) (entity.User, error) {
+	for _, u := range r.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return entity.User{}, pkg.ErrNotFound
+}
+func (r *fakeUserRepo) List(_ context.Context) ([]entity.User, error) {
+	out := make([]entity.User, 0, len(r.users))
+	for _, u := range r.users {
+		out = append(out, u)
+	}
+	return out, nil
+}
+func (r *fakeUserRepo) Delete(_ context.Context, id string) error {
+	for k, u := range r.users {
+		if u.ID == id {
+			delete(r.users, k)
+			return nil
+		}
+	}
+	return nil
+}
 
 // fakeHasher 简单的哈希：加前缀 "hash:"，Compare 直接字符串比较。
 type fakeHasher struct{}
 
-func (fakeHasher) Hash(p string) (string, error)                  { return "hash:" + p, nil }
+func (fakeHasher) Hash(p string) (string, error) { return "hash:" + p, nil }
 func (fakeHasher) Compare(hash, p string) error {
 	if hash != "hash:"+p {
 		return errors.New("mismatch")
@@ -44,8 +69,8 @@ func (fakeHasher) Compare(hash, p string) error {
 // fakeTokenGen 假的 token 生成器。
 type fakeTokenGen struct{}
 
-func (fakeTokenGen) Generate(userID, username string) (string, error) {
-	return "token-" + username, nil
+func (fakeTokenGen) Generate(c port.TokenClaims) (string, error) {
+	return "token-" + c.Username, nil
 }
 
 // ---- 注册测试 ----

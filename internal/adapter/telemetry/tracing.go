@@ -75,6 +75,10 @@ func Init(cfg Config) (shutdown func(context.Context) error, tracer port.Tracer,
 	if err != nil {
 		return nil, nil, fmt.Errorf("build trace exporter: %w", err)
 	}
+	// exporter 为 nil（无 OTLP endpoint）：降级为 no-op tracer
+	if exporter == nil {
+		return func(context.Context) error { return nil }, port.NewNopTracer(), nil
+	}
 
 	res, err := resource.Merge(
 		resource.Default(),
@@ -107,8 +111,8 @@ func buildExporter(cfg Config) (sdktrace.SpanExporter, error) {
 			return nil, errors.New("OTLP exporter 需要配置 OTLPEndpoint")
 		}
 		if cfg.OTLPEndpoint == "" {
-			// 无 endpoint 退回 stdout，避免初始化失败
-			return stdoutExporter()
+			// 无 endpoint：返回 nil（降级为 no-op），不用 stdout 避免污染 SSE 输出
+			return nil, nil
 		}
 		host, port := parseOTLPEndpoint(cfg.OTLPEndpoint)
 		opts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(host + ":" + port)}

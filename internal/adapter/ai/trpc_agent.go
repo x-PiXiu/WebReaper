@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"trpc.group/trpc-go/trpc-agent-go/agent"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
+	"trpc.group/trpc-go/trpc-agent-go/event"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent/builtin"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
@@ -35,59 +36,101 @@ const DefaultLLMConfigName = "default"
 //
 // LLM 客户端不再在启动时固定创建，而是按请求的 llmConfigName
 // 从 LLMConfigRepository 取配置、经工厂创建（带缓存，避免重复建）。
+// llmCacheEntry 是 LLM 客户端缓存项（带过期时间）。
+// 设计动机：LLM 配置（API Key/BaseURL/Model）可被用户随时修改，
+// 缓存若不过期，改了配置要重启才生效——违反"运行时可调"。
+// 用 TTL 兜底（30s），避免跨对象耦合（无需 handler 改完后回调通知）。
+type llmCacheEntry struct {
+	llm      *openai.Model
+	cachedAt time.Time
+}
+
+// llmCacheTTL LLM 客户端缓存有效期。过期后重新从 DB 取配置构建。
+// 30s：兼顾性能（热点模型不重复建连）与配置生效时效。
+const llmCacheTTL = 30 * time.Second
+
 type TrpcAgentGenerator struct {
 	llmCfgRepo   port.LLMConfigRepository
 	mu           sync.RWMutex
 	runners      map[string]runner.Runner
 	sessionSvc   *inmemory.SessionService
-	toolRegistry *port.ToolRegistry // 全局工具注册表（所有爬虫）
-	llmCache     sync.Map           // map[string]*openai.Model（按 LLMConfigName 缓存客户端）
-	logger       port.Logger        // 日志（注入给 toolAdapter 替代 fmt.Printf）
+	toolRegistry *port.ToolRegistry    // 全局工具注册表（所有爬虫）
+	llmCache     sync.Map              // map[string]*llmCacheEntry（按 LLMConfigName 缓存，带 TTL）
+	memory       port.ConversationMemory // 会话历史（重启后从 DB 恢复上下文）；nil 则不 seed 历史
+	logger       port.Logger           // 日志（注入给 toolAdapter 替代 fmt.Printf）
 }
 
 // 编译期断言：实现 port.AIGenerator。
 var _ port.AIGenerator = (*TrpcAgentGenerator)(nil)
 
-// NewTrpcAgentGenerator 创建生成器（注入 LLMConfigRepository 用于运行时解析 LLM 配置）。
-func NewTrpcAgentGenerator(llmCfgRepo port.LLMConfigRepository, toolRegistry *port.ToolRegistry, logger port.Logger) (*TrpcAgentGenerator, error) {
+// NewTrpcAgentGenerator 创建生成器。
+// memory 可为 nil（不启用历史恢复）；非 nil 时首次创建会话 runner 会从 DB seed 历史。
+func NewTrpcAgentGenerator(llmCfgRepo port.LLMConfigRepository, toolRegistry *port.ToolRegistry, memory port.ConversationMemory, logger port.Logger) (*TrpcAgentGenerator, error) {
 	g := &TrpcAgentGenerator{
 		llmCfgRepo:   llmCfgRepo,
 		runners:      make(map[string]runner.Runner),
 		toolRegistry: toolRegistry,
+		memory:       memory,
 		logger:       logger,
 	}
 	g.sessionSvc = inmemory.NewSessionService()
 	return g, nil
 }
 
-// resolveLLM 按 llmConfigName 解析并（带缓存地）构建 LLM 客户端。
+// SetMemory 注入会话记忆（支持后装配，用于解决循环依赖或延迟初始化）。
+func (g *TrpcAgentGenerator) SetMemory(m port.ConversationMemory) {
+	g.memory = m
+}
+
+// resolveLLM 按 llmConfigName 解析并（带 TTL 缓存地）构建 LLM 客户端。
 // 空名回退到 "default"；找不到配置时返回错误。
+// 缓存 TTL 30s：用户改了 LLM 配置后，最多 30s 内旧客户端被淘汰、新配置生效。
 func (g *TrpcAgentGenerator) resolveLLM(ctx context.Context, llmConfigName string) (*openai.Model, error) {
 	name := llmConfigName
 	if name == "" {
 		name = DefaultLLMConfigName
 	}
-	// 缓存命中
+	// 缓存命中且未过期
 	if v, ok := g.llmCache.Load(name); ok {
-		return v.(*openai.Model), nil
+		entry := v.(*llmCacheEntry)
+		if time.Since(entry.cachedAt) < llmCacheTTL {
+			return entry.llm, nil
+		}
+		// 过期：删除旧条目，走重建
+		g.llmCache.Delete(name)
 	}
 	cfg, err := g.llmCfgRepo.FindByName(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("LLM 配置 %q 不存在: %w", name, err)
 	}
 	llm := llmadapter.Build(cfg)
-	g.llmCache.Store(name, llm)
+	g.llmCache.Store(name, &llmCacheEntry{llm: llm, cachedAt: time.Now()})
 	return llm, nil
+}
+
+// InvalidateLLMCache 显式失效指定 LLM 配置的缓存（name 空则清空全部）。
+// 当前 TTL 已能保证最终一致，此方法留作未来"配置改完即时生效"的扩展点。
+func (g *TrpcAgentGenerator) InvalidateLLMCache(name string) {
+	if name == "" {
+		g.llmCache.Range(func(k, _ any) bool {
+			g.llmCache.Delete(k)
+			return true
+		})
+		return
+	}
+	g.llmCache.Delete(name)
 }
 
 // getOrCreateRunner 获取或创建指定 sessionID 的 runner。
 // 同一个 sessionID 的多次调用共享对话历史（多轮对话）。
-// 注意：不同 LLM 的 runner 不应共享 sessionID，因此把 llm 纳入 sessionID 计算。
-func (g *TrpcAgentGenerator) getOrCreateRunner(sessionID string, systemPrompt string, llm *openai.Model) runner.Runner {
+// 会话隔离：sessionID 即 conversationID，不同会话天然隔离。
+// 注意：同一会话若中途切换 LLM，会复用已有 runner（带旧 LLM）。
+// 这是有意为之——一个会话的对话历史应连续，不应因换模型而断开。
+func (g *TrpcAgentGenerator) getOrCreateRunner(sessionID string, systemPrompt string, llm *openai.Model) (runner.Runner, bool) {
 	g.mu.RLock()
 	if r, ok := g.runners[sessionID]; ok {
 		g.mu.RUnlock()
-		return r
+		return r, false // 已存在，非新建
 	}
 	g.mu.RUnlock()
 
@@ -95,7 +138,7 @@ func (g *TrpcAgentGenerator) getOrCreateRunner(sessionID string, systemPrompt st
 	defer g.mu.Unlock()
 	// double check
 	if r, ok := g.runners[sessionID]; ok {
-		return r
+		return r, false
 	}
 
 	// 为这个 session 创建带系统提示词的 Agent
@@ -110,12 +153,12 @@ func (g *TrpcAgentGenerator) getOrCreateRunner(sessionID string, systemPrompt st
 		runner.WithSessionService(g.sessionSvc),
 	)
 	g.runners[sessionID] = r
-	return r
+	return r, true // 新建
 }
 
 // ChatStream 实现 port.AIGenerator：流式对话（支持多轮上下文）。
-// sessionID 由调用方传入，同一 sessionID 共享对话历史。
-func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName string, messages []port.ChatMessage, onDelta func(delta string)) (string, error) {
+// conversationID 是会话隔离的关键：直接作为 sessionID，根治"会话间记忆串台"。
+func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, conversationID string, llmConfigName string, messages []port.ChatMessage, onDelta func(delta string)) (string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "ai.chat_stream")
 	defer span.End()
 
@@ -134,15 +177,53 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName strin
 		}
 	}
 
-	// 用消息内容的 hash + LLM 名 作为 sessionID（同一对话流、同一 LLM 复用 runner）
-	sessionID := fmt.Sprintf("chat-%d", hashString(systemPrompt+":"+llmConfigName))
+	// 会话隔离：sessionID 直接用 conversationID（根治串台）。
+	// 后台编排路径（conversationID 为空）退化为按内容 hash，保持原行为。
+	sessionID := conversationID
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("adhoc-%d", hashString(systemPrompt+":"+llmConfigName))
+	}
 
-	r := g.getOrCreateRunner(sessionID, systemPrompt, llm)
+	r, isNew := g.getOrCreateRunner(sessionID, systemPrompt, llm)
+
+	// 记忆恢复：新建会话 runner 时，若注入了 memory，从 DB 取历史 seed 进框架。
+	// 框架的 seedSessionHistory 只在空 session 时执行（isNew=true 即首次），
+	// 后续多轮走内存累积，不重复 seed。system 消息已通过 Instruction 注入，这里不传。
+	// 如此实现"重启后旧会话续聊仍带历史上下文"。
+	if isNew && g.memory != nil && conversationID != "" {
+		if history, hErr := g.memory.History(ctx, conversationID); hErr == nil && len(history) > 0 {
+			seedMsgs := make([]model.Message, 0, len(history)+1)
+			for _, hm := range history {
+				role := model.RoleUser
+				if hm.Role == "assistant" {
+					role = model.RoleAssistant
+				}
+				seedMsgs = append(seedMsgs, model.Message{Role: role, Content: hm.Content})
+			}
+			// 本次 user 消息放最后，框架会合并去重（mergeCurrentTurnMessagesIntoSeed）
+			seedMsgs = append(seedMsgs, model.Message{Role: model.RoleUser, Content: lastUser.Content})
+			events, err := runner.RunWithMessages(ctx, r, "webreaper-user", sessionID, seedMsgs)
+			if err != nil {
+				return "", fmt.Errorf("runner run with messages: %w", err)
+			}
+			return g.drainChatStreamEvents(ctx, events, onDelta)
+		}
+	}
 
 	events, err := r.Run(ctx, "webreaper-user", sessionID,
 		model.Message{Role: model.RoleUser, Content: lastUser.Content},
 	)
 	if err != nil { return "", fmt.Errorf("runner run: %w", err) }
+	return g.drainChatStreamEvents(ctx, events, onDelta)
+}
+
+// drainChatStreamEvents 消费 runner 的事件流，把文本增量回调出去，并统计 token 用量。
+// 抽出为独立方法，避免 ChatStream 在 seed/非 seed 两条路径上重复事件消费逻辑。
+// （谦卑对象模式：事件循环依赖框架难单测，但可测的累加逻辑已在 accumulateUsage 等
+// 纯函数中；此处只是 IO 编排。）
+func (g *TrpcAgentGenerator) drainChatStreamEvents(ctx context.Context, events <-chan *event.Event, onDelta func(delta string)) (string, error) {
+	_, span := telemetry.StartSpan(ctx, "ai.chat_stream.drain")
+	defer span.End()
 
 	var sb strings.Builder
 	var promptTokens, completionTokens, totalTokens, llmCalls int
@@ -166,7 +247,6 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName strin
 					if onDelta != nil { onDelta(choice.Message.Content) }
 				}
 			}
-			// 累加 token 用量（仅 completion 事件，chunk 事件 usage 为 nil）
 			if evt.Response.Usage != nil {
 				promptTokens += evt.Response.Usage.PromptTokens
 				completionTokens += evt.Response.Usage.CompletionTokens
@@ -175,7 +255,6 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName strin
 			}
 		}
 	}
-	// 上报 token 消耗到日志 + trace span（ChatStream 是前端对话主路径，烧钱大户需监控）
 	if llmCalls > 0 {
 		g.logger.Info("token 消耗",
 			port.Int("prompt_tokens", promptTokens),
@@ -196,7 +275,8 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, llmConfigName strin
 
 // RunWithTools 实现 port.AIGenerator：带工具的流式执行（ReAct 循环）。
 // 所有爬虫工具全局可用（不按 Agent 配置过滤），LLM 自主决定调哪个。
-func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, llmConfigName string, task string, systemPrompt string, _ []string, onEvent func(event port.ToolEvent)) error {
+// conversationID 作为 sessionID 实现会话隔离（带工具模式也按会话隔离，根治串台）。
+func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, conversationID string, llmConfigName string, task string, systemPrompt string, toolNames []string, onEvent func(event port.ToolEvent)) error {
 	ctx, span := telemetry.StartSpan(ctx, "ai.run_with_tools")
 	defer span.End()
 
@@ -207,11 +287,17 @@ func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, llmConfigName str
 		return err
 	}
 
-	// 构建工具（全部注册，不再按 toolNames 过滤——工具全局化）
+	// 构建工具：按调用方指定的 toolNames 过滤。
+	// 如果 toolNames 为空（前端聊天），用全部工具；如果非空（GEO 监测），只用指定工具。
 	var tools []tool.Tool
 	if g.toolRegistry != nil {
-		allCrawlers := g.toolRegistry.All()
-		adapterTools := agentadapter.ConvertTools(allCrawlers, nil, g.logger) // nil = 聊天模式不落库
+		var selectedCrawlers []port.CrawlerTool
+		if len(toolNames) == 0 {
+			selectedCrawlers = g.toolRegistry.All() // 聊天模式：全部工具
+		} else {
+			selectedCrawlers = g.toolRegistry.GetByNames(toolNames) // 监测模式：只用搜索工具
+		}
+		adapterTools := agentadapter.ConvertTools(selectedCrawlers, nil, g.logger)
 		tools = adapterTools
 	}
 
@@ -234,7 +320,13 @@ func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, llmConfigName str
 		runner.WithSessionService(g.sessionSvc),
 	)
 
-	events, err := r.Run(ctx, "chat-user", "chat-tools", model.Message{Role: model.RoleUser, Content: task})
+	// 会话隔离：sessionID 用 conversationID（带工具模式也按会话隔离）。
+	// 后台编排路径（conversationID 为空）退化为一次性 session，避免串台。
+	sessionID := conversationID
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("adhoc-tools-%d", hashString(task+":"+llmConfigName))
+	}
+	events, err := r.Run(ctx, "chat-user", sessionID, model.Message{Role: model.RoleUser, Content: task})
 	if err != nil { return fmt.Errorf("runner run: %w", err) }
 
 	for evt := range events {

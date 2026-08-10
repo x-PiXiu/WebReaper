@@ -34,6 +34,7 @@ type Config struct {
 	AgentCore  AgentCoreConfig
 	Crawler    CrawlerConfig
 	Telemetry  TelemetryConfig
+	Tavily     TavilyConfig
 }
 
 // TelemetryConfig 链路追踪配置（OpenTelemetry）。
@@ -84,11 +85,13 @@ func (c AgentCoreConfig) IsConfigured() bool {
 
 // PublishConfig 推送目标平台配置（真实推送接线用）。
 type PublishConfig struct {
-	APIKey       string // 目标平台的 X-API-Key
-	BaseURL      string // 如 https://agentcore.example.com
-	ArticlePath  string // 文章推送路径，如 /api/v1/ingest/article
-	QuestionPath string // 面试题推送路径，如 /api/v1/ingest/question
-	MaxRetries   int    // HTTP 推送失败重试次数（仅对 5xx/429/网络错误），默认 3
+	APIKey        string // 目标平台的 X-API-Key
+	BaseURL       string // 如 https://agentcore.example.com
+	ArticlePath   string // 文章推送路径，如 /api/v1/ingest/article
+	QuestionPath  string // 面试题推送路径，如 /api/v1/ingest/question
+	MaxRetries    int    // HTTP 推送失败重试次数（仅对 5xx/429/网络错误），默认 3
+	CookieSecret  string // 多平台发布 cookie 加密密钥（AES-GCM，从 PUBLISH_COOKIE_SECRET 读取）
+	QRLoginHeaded bool   // 扫码登录是否显示浏览器窗口（调试用，生产保持 false 走灰盒 headless）
 }
 
 // IsConfigured 判断推送平台是否已配置（API Key + BaseURL 非空）。
@@ -151,10 +154,25 @@ type EmbeddingConfig struct {
 	APIKey  string
 }
 
-// MilvusConfig 向量数据库配置（本轮预留）。
+// MilvusConfig 向量数据库配置。
 type MilvusConfig struct {
-	Host string
-	Port string
+	Host           string
+	Port           string
+	CollectionName string // 集合名（默认 webreaper_vectors）
+}
+
+// IsConfigured 判断 Milvus 是否已配置（Host 非空）。
+func (c MilvusConfig) IsConfigured() bool {
+	return c.Host != ""
+}
+
+// Addr 返回 host:port 形式的地址。
+func (c MilvusConfig) Addr() string {
+	port := c.Port
+	if port == "" {
+		port = "19530"
+	}
+	return c.Host + ":" + port
 }
 
 // RedisConfig Redis 配置（本轮预留）。
@@ -164,6 +182,15 @@ type RedisConfig struct {
 	Password string
 	DB       int
 }
+
+// TavilyConfig Tavily 搜索 API 配置（GEO 监测的高质量搜索源）。
+// Tavily 是专为 AI 设计的搜索 API，返回结构化的干净内容（不需自己抓正文）。
+// 不配置则降级到 Bing（WebFetcher）。
+type TavilyConfig struct {
+	APIKey string
+}
+
+func (c TavilyConfig) IsConfigured() bool { return c.APIKey != "" }
 
 // JWTConfig 认证配置（本轮预留）。
 type JWTConfig struct {
@@ -207,14 +234,18 @@ func Load() Config {
 			APIKey:  os.Getenv("EMBEDDING_API_KEY"),
 		},
 		Milvus: MilvusConfig{
-			Host: getenvDefault("MILVUS_HOST", "127.0.0.1"),
-			Port: getenvDefault("MILVUS_PORT", "19530"),
+			Host:           getenvDefault("MILVUS_HOST", ""),
+			Port:           getenvDefault("MILVUS_PORT", "19530"),
+			CollectionName: getenvDefault("MILVUS_COLLECTION", "webreaper_vectors"),
 		},
 		Redis: RedisConfig{
 			Host:     getenvDefault("REDIS_HOST", "localhost"),
 			Port:     getenvDefault("REDIS_PORT", "6379"),
 			Password: os.Getenv("REDIS_PASSWORD"),
 			DB:       getenvInt("REDIS_DB", 0),
+		},
+		Tavily: TavilyConfig{
+			APIKey: os.Getenv("TAVILY_API_KEY"),
 		},
 		JWT: JWTConfig{
 			Secret:     os.Getenv("JWT_SECRET"),
@@ -225,7 +256,9 @@ func Load() Config {
 			BaseURL:      getenvDefault("INGEST_BASE_URL", ""),
 			ArticlePath:  getenvDefault("INGEST_ARTICLE_PATH", "/api/v1/ingest/article"),
 			QuestionPath: getenvDefault("INGEST_QUESTION_PATH", "/api/v1/ingest/question"),
-			MaxRetries:   getenvInt("PUBLISH_MAX_RETRIES", 3),
+			MaxRetries:    getenvInt("PUBLISH_MAX_RETRIES", 3),
+			CookieSecret:  os.Getenv("PUBLISH_COOKIE_SECRET"),
+			QRLoginHeaded: getenvBool("QR_LOGIN_HEADED", false),
 		},
 		AgentCore: AgentCoreConfig{
 			BaseURL:    getenvDefault("AGENTCORE_BASE_URL", "http://localhost:8081"),

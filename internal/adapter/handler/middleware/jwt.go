@@ -17,7 +17,7 @@ import (
 // 行为：
 //   - tokenGenerator 为 nil 时（未启用认证），中间件直接放行（开发环境友好）
 //   - 从 Authorization: Bearer <token> 提取 token
-//   - 验证通过后，把 user_id/username 注入 gin.Context 供后续 handler 使用
+//   - 验证通过后，把 user_id/username/role/tenant_id 注入 gin.Context 供后续 handler 使用
 //   - 验证失败返回 401
 func JWTAuth(tokenParser *authadapter.JWTGenerator) gin.HandlerFunc {
 	// 未启用认证（secret 为空），中间件放行
@@ -45,9 +45,57 @@ func JWTAuth(tokenParser *authadapter.JWTGenerator) gin.HandlerFunc {
 			return
 		}
 
-		// 注入用户信息供后续 handler 使用
+		// 注入用户身份信息供后续 handler 使用
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
+		c.Set("role", claims.Role)
+		c.Set("tenant_id", claims.TenantID)
 		c.Next()
 	}
+}
+
+// RequireRole 返回一个角色校验中间件（RBAC）。
+// 仅允许指定角色通过，否则返回 403。
+// 用法：api.Group("/admin").Use(middleware.RequireRole("admin"))
+func RequireRole(roles ...string) gin.HandlerFunc {
+	allowed := make(map[string]bool, len(roles))
+	for _, r := range roles {
+		allowed[r] = true
+	}
+	return func(c *gin.Context) {
+		role, _ := c.Get("role")
+		roleStr, _ := role.(string)
+		// 未启用认证时（role 为空），放行（开发环境友好）
+		if roleStr == "" {
+			c.Next()
+			return
+		}
+		if !allowed[roleStr] {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 40300, "msg": "权限不足"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// CurrentTenantID 从 gin.Context 取当前请求的租户 ID。
+// merchant 返回其 tenant_id；admin 返回空（看全局，仓储层据此跳过过滤）。
+// 供 handler 传给用例做数据隔离。
+func CurrentTenantID(c *gin.Context) string {
+	v, ok := c.Get("tenant_id")
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
+// CurrentRole 从 gin.Context 取当前请求的角色。
+func CurrentRole(c *gin.Context) string {
+	v, ok := c.Get("role")
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
 }

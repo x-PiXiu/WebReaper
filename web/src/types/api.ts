@@ -9,9 +9,15 @@ export interface ApiEnvelope<T> {
 
 // ---- 认证 ----
 export interface LoginRequest { username: string; password: string }
-export interface RegisterRequest { username: string; password: string }
-export interface LoginResponse { token: string }
-export interface RegisterResponse { user_id: string }
+export interface RegisterRequest { username: string; password: string; role?: string; tenant_id?: string }
+// 登录响应含用户身份（前端据此分流到商户端/管理端）
+export interface LoginResponse {
+  token: string
+  role: 'admin' | 'merchant'
+  tenant_id: string
+  username: string
+}
+export interface RegisterResponse { user_id: string; role: string; tenant_id: string }
 
 // ---- 任务 ----
 export interface EnqueueTaskRequest { type: string; input: unknown }
@@ -142,3 +148,113 @@ export interface StatsView {
   source_distribution: { name: string; count: number }[]  // 数据源分布
   top_tags: { name: string; count: number }[]             // 标签Top8
 }
+
+// ---- GEO：品牌资产 ----
+export interface Brand {
+  id: string
+  tenant_id: string
+  name: string
+  positioning: string
+  core_selling: string[]
+  competitors: string[]
+  created_at: string
+}
+
+// ---- GEO：关键词 ----
+export interface Keyword {
+  id: string
+  tenant_id: string
+  brand_id: string
+  term: string
+  intent: string
+  created_at: string
+}
+
+// ---- GEO：监测结果 ----
+export interface MonitoringResult {
+  id: string
+  tenant_id: string
+  brand_id: string
+  keyword_id: string
+  engine_name: string
+  sample_count: number
+  mention_count: number
+  mention_rate: number       // 0~1
+  avg_position: number
+  sentiment: string          // positive/neutral/negative
+  competitors: string[]
+  confidence: number
+  probed_at: string
+  raw_sample: string
+}
+
+// ---- GEO：品牌监测总览 ----
+export interface BrandOverview {
+  brand_id: string
+  brand_name: string
+  avg_mention_rate: number
+  keyword_count: number
+  last_probed_at: string
+  trend: MonitoringResult[]
+}
+
+// ---- GEO：优化内容 ----
+export interface OptimizedContent {
+  id: string
+  tenant_id: string
+  brand_id: string
+  keyword_id: string
+  original_text: string
+  optimized_text: string
+  version: number
+  score: {
+    total: number
+    authority: number
+    specificity: number
+    structure: number
+    uniqueness: number
+    recency: number
+  }
+  status: string
+  created_at: string
+}
+
+// ---- GEO：平台账号（扫码绑定）----
+export interface Account {
+  id: string
+  tenant_id: string
+  platform: string         // zhihu / xiaohongshu / ...
+  display_name: string
+  health: string           // active / expired / banned
+  login_method: string     // zhihu / wechat / qq / weibo
+  expires_at: string       // cookie 过期时间
+  bound_at: string
+  last_used_at: string
+}
+
+// ---- GEO：发布任务 ----
+export interface PublishJob {
+  id: string
+  account_id: string
+  platform: string
+  content_id: string
+  brand_id: string
+  title: string
+  mode: string             // semi-auto / auto
+  status: string           // pending / running / published / failed
+  external_url: string
+  error_msg: string
+  created_at: string
+  published_at: string     // 发布成功时间
+  pre_mention_rate: number  // 发布前提及率
+  post_mention_rate: number // 发布后提及率
+}
+
+// ---- 用户管理（管理端）----
+export interface UserView {
+  id: string
+  username: string
+  role: string
+  tenant_id: string
+}
+

@@ -9,10 +9,12 @@ import (
 	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/usecase/agentconfig"
+	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/auth"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/dataitem"
+	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
@@ -47,6 +49,43 @@ type Router struct {
 	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
 	orchestrateUC    *orchestrate.OrchestratorUseCase // 可为 nil（未配置编排器时该端点 503）
 	statsUC          *stats.StatsUseCase               // 仪表盘统计聚合
+	// GEO 业务（商户端核心）——通过 SetGEO 延迟注入，可选
+	geoBrandUC   *geo.BrandUseCase
+	geoMonitorUC *geo.MonitorUseCase
+	geoRankUC    *geo.RankUseCase
+	geoContentUC *geo.ContentUseCase
+	geoDiagnoseUC *geo.DiagnoseUseCase
+	geoDistillUC *geo.KeywordDistillUseCase // 关键词蒸馏用例（可选）
+	// 多平台发布账号域（扫码绑定 + 半自动发布）——通过 SetAccount 延迟注入，可选
+	accountUC *account.AccountUseCase
+	publishSemiUC *account.PublishUseCase
+	// 用户管理（管理端）——通过 SetAdmin 延迟注入，可选
+	userRepo port.UserRepository
+}
+
+// SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
+func (r *Router) SetKeywordDistill(uc *geo.KeywordDistillUseCase) {
+	r.geoDistillUC = uc
+}
+
+// SetGEO 注入 GEO 业务用例（可选；未注入则 GEO 端点不注册）。
+func (r *Router) SetGEO(brand *geo.BrandUseCase, monitor *geo.MonitorUseCase, rank *geo.RankUseCase, content *geo.ContentUseCase, diagnose *geo.DiagnoseUseCase) {
+	r.geoBrandUC = brand
+	r.geoMonitorUC = monitor
+	r.geoRankUC = rank
+	r.geoContentUC = content
+	r.geoDiagnoseUC = diagnose
+}
+
+// SetAdmin 注入用户管理能力（可选；未注入则管理端用户端点不注册）。
+func (r *Router) SetAdmin(userRepo port.UserRepository) {
+	r.userRepo = userRepo
+}
+
+// SetAccount 注入多平台发布账号域用例（可选；未注入则账号/发布端点不注册）。
+func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCase) {
+	r.accountUC = au
+	r.publishSemiUC = pu
 }
 
 func NewRouter(
@@ -130,10 +169,12 @@ func (r *Router) Engine() *gin.Engine {
 		// Agent 配置
 		api.GET("/agents", r.handleListAgentConfigs)
 		api.POST("/agents", r.handleCreateAgentConfig)
+		api.PUT("/agents/:name", r.handleUpdateAgentConfig)
 		api.DELETE("/agents/:name", r.handleDeleteAgentConfig)
 		// LLM 配置（独立聚合根）
 		api.GET("/llm-configs", r.handleListLLMConfigs)
 		api.POST("/llm-configs", r.handleCreateLLMConfig)
+		api.PUT("/llm-configs/:name", r.handleUpdateLLMConfig)
 		api.DELETE("/llm-configs/:name", r.handleDeleteLLMConfig)
 		// 聊天会话（按用户隔离，跨设备持久化）
 		convHandler := NewConversationHandler(r.conversationUC)
@@ -160,6 +201,74 @@ func (r *Router) Engine() *gin.Engine {
 		if r.orchestrateUC != nil {
 			orchHandler := NewOrchestrationHandler(r.orchestrateUC)
 			api.POST("/orchestrations", orchHandler.HandleOrchestrate)
+		}
+
+		// GEO 业务路由（商户端核心：品牌/关键词/监测/排行榜/内容）
+		if r.geoBrandUC != nil {
+			geoHandler := NewGEOHandler(r.geoBrandUC, r.geoMonitorUC, r.geoRankUC, r.geoContentUC, r.geoDiagnoseUC)
+			// 注入关键词蒸馏能力（可选）
+			if r.geoDistillUC != nil {
+				geoHandler.SetDistillUC(r.geoDistillUC)
+			}
+			// 品牌 CRUD（Gin 同层 wildcard 参数名必须统一，全部用 :id）
+			api.GET("/geo/brands", geoHandler.HandleListBrands)
+			api.POST("/geo/brands", geoHandler.HandleCreateBrand)
+			api.DELETE("/geo/brands/:id", geoHandler.HandleDeleteBrand)
+			// 关键词（:id 即 brandId，handler 内用 c.Param("id") 取）
+			api.GET("/geo/brands/:id/keywords", geoHandler.HandleListKeywords)
+			api.POST("/geo/brands/:id/keywords", geoHandler.HandleAddKeyword)
+			api.POST("/geo/brands/:id/keywords/generate", geoHandler.HandleGenerateKeywords)
+			// 监测
+			api.POST("/geo/monitor", geoHandler.HandleMonitor)
+			api.POST("/geo/monitor-keyword", geoHandler.HandleMonitorKeyword) // 单关键词即时监测
+			api.POST("/geo/monitor-multi", geoHandler.HandleMonitorMultiEngine) // 多引擎批量监测
+			api.GET("/geo/monitor/:keywordId", geoHandler.HandleLatestMonitor)
+			api.GET("/geo/brands/:id/monitor-results", geoHandler.HandleLatestMonitorByBrand) // 品牌批量结果
+			api.GET("/geo/monitor-results", geoHandler.HandleAllMonitorResults) // 租户全部监测结果（关键词一览页用）
+			api.GET("/geo/brands/:id/overview", geoHandler.HandleBrandOverview)
+			// 内容优化
+			api.POST("/geo/optimize", geoHandler.HandleOptimizeContent)
+			api.GET("/geo/brands/:id/contents", geoHandler.HandleListContents)
+			api.POST("/geo/brands/:id/contents/generate", geoHandler.HandleGenerateContent)
+			api.POST("/geo/brands/:id/contents/generate-stream", geoHandler.HandleGenerateContentStream) // SSE 流式生成
+			// GEO 诊断
+			api.POST("/geo/brands/:id/diagnose", geoHandler.HandleDiagnose)
+			// 关键词蒸馏（按来源：品牌/文本/种子/文件/网络）
+			api.POST("/geo/keywords/distill", geoHandler.HandleDistillKeywords)
+			// 关键词管理（跨品牌聚合列表 + 删除）
+			api.GET("/geo/keywords", geoHandler.HandleListAllKeywords)
+			api.DELETE("/geo/keywords/:id", geoHandler.HandleDeleteKeyword)
+		}
+
+		// 多平台发布账号域路由（扫码绑定 + 半自动发布）——通过 SetAccount 延迟注入，可选
+		if r.accountUC != nil {
+			accountHandler := NewAccountHandler(r.accountUC, r.publishSemiUC)
+			// 账号管理
+			api.GET("/geo/accounts", accountHandler.HandleListAccounts)
+			api.POST("/geo/accounts/qr-login", accountHandler.HandleStartQRLogin)
+			api.GET("/geo/accounts/qr-login/:sessionId", accountHandler.HandlePollQRLogin)
+			api.DELETE("/geo/accounts/qr-login/:sessionId", accountHandler.HandleCancelQRLogin)
+			api.DELETE("/geo/accounts/:id", accountHandler.HandleDeleteAccount)
+			// 发布管理
+			api.POST("/geo/publish", accountHandler.HandlePublish)
+			api.GET("/geo/publish-jobs", accountHandler.HandleListPublishJobs)
+			api.POST("/geo/publish-jobs/:id/published", accountHandler.HandleMarkPublished)
+			api.GET("/geo/publish-jobs/:id/status", accountHandler.HandleGetJobStatus)
+		}
+
+		// 管理端路由（仅 admin 角色可访问）
+		if r.userRepo != nil {
+			adminGroup := api.Group("/admin")
+			adminGroup.Use(middleware.RequireRole("admin"))
+			{
+				userHandler := NewUserHandler(r.authRegister, r.userRepo)
+				adminGroup.GET("/users", userHandler.HandleListUsers)
+				adminGroup.POST("/users", userHandler.HandleCreateMerchant)
+				adminGroup.DELETE("/users/:id", userHandler.HandleDeleteUser)
+				// Tavily 搜索 API 配置（管理后台用）
+				adminGroup.GET("/tavily-status", r.handleTavilyStatus)
+				adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
+			}
 		}
 	}
 	return e
@@ -233,4 +342,51 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// handleTavilyStatus GET /api/v1/admin/tavily-status —— 查看 Tavily 搜索配置状态
+func (r *Router) handleTavilyStatus(c *gin.Context) {
+	enabled := false
+	hasKey := false
+	if t, ok := r.toolRegistry.Lookup("tavily_search"); ok {
+		// 透过 RateLimitCrawler 装饰器拿到内层的 TavilyCrawler
+		// RateLimitCrawler 透传了 inner，但 Lookup 返回的是包装后的实例
+		// 这里通过 AllWithStatus 查启用状态
+		statuses := r.toolRegistry.AllWithStatus()
+		for _, s := range statuses {
+			if s.Name == "tavily_search" {
+				enabled = s.Enabled
+			}
+		}
+		_ = t
+		hasKey = true // 能 Lookup 到说明注册了
+	}
+	success(c, gin.H{
+		"registered": hasKey,
+		"enabled":    enabled,
+	})
+}
+
+// handleUpdateTavilyKey PUT /api/v1/admin/tavily-key —— 更新 Tavily API Key
+// 注意：由于 TavilyCrawler 被 RateLimitCrawler 包装，这里只更新启用状态。
+// Key 本身需要在 .env 里配置（TAVILY_API_KEY），运行时改 Key 需重启。
+// 这个端点主要用于启用/禁用工具。
+type tavilyKeyRequest struct {
+	Enabled bool   `json:"enabled"`
+	APIKey  string `json:"api_key"` // 可选：传入新 Key（后续版本支持）
+}
+
+func (r *Router) handleUpdateTavilyKey(c *gin.Context) {
+	var req tavilyKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	// 更新启用状态
+	r.toolRegistry.SetEnabled("tavily_search", req.Enabled)
+	success(c, gin.H{
+		"name":    "tavily_search",
+		"enabled": req.Enabled,
+		"note":    "API Key 请在 .env 文件配置 TAVILY_API_KEY，修改后重启生效",
+	})
 }

@@ -39,3 +39,31 @@ func (r *GormUserRepository) FindByUsername(ctx context.Context, username string
 	}
 	return userFromPO(po), nil
 }
+
+func (r *GormUserRepository) FindByID(ctx context.Context, id string) (entity.User, error) {
+	var po UserPO
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.User{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.User{}, err
+	}
+	return userFromPO(po), nil
+}
+
+func (r *GormUserRepository) List(ctx context.Context) ([]entity.User, error) {
+	var pos []UserPO
+	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	result := make([]entity.User, 0, len(pos))
+	for _, p := range pos {
+		result = append(result, userFromPO(p))
+	}
+	return result, nil
+}
+
+func (r *GormUserRepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&UserPO{}).Error
+}

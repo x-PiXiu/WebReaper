@@ -24,10 +24,12 @@ func NewChatHandler(ai port.AIGenerator) *ChatHandler {
 
 // chatRequest 对应前端聊天请求。
 type chatRequest struct {
-	Messages      []port.ChatMessage `json:"messages"`
-	SystemMessage string             `json:"system_message"`
-	Tools         []string           `json:"tools"`          // 可选：带工具时走 ReAct Agent
-	LLMConfigName string             `json:"llm_config_name"` // 可选：指定 LLM 配置，留空用 default
+	Messages       []port.ChatMessage `json:"messages"`
+	SystemMessage  string             `json:"system_message"`
+	Tools          []string           `json:"tools"`            // 工具名列表（空=使用全部已启用工具）
+	UseTools       bool               `json:"use_tools"`        // 是否启用工具模式（true=走 RunWithTools）
+	LLMConfigName  string             `json:"llm_config_name"`
+	ConversationID string             `json:"conversation_id"`
 }
 
 // HandleStream POST /api/v1/chat —— SSE 流式响应
@@ -66,10 +68,10 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 		if msg.Role == "user" { lastUser = msg.Content }
 	}
 
-	// 分流：有 tools → RunWithTools（ReAct + 工具调用事件）；无 tools → ChatStream（纯对话）
-	if len(req.Tools) > 0 && lastUser != "" {
+	// 分流：use_tools=true 或指定了工具名 → RunWithTools（ReAct + 工具调用事件）；否则 → ChatStream（纯对话）
+	if (req.UseTools || len(req.Tools) > 0) && lastUser != "" {
 		// 带工具模式：通过 SSE 推送所有事件类型
-		runErr := h.ai.RunWithTools(ctx, req.LLMConfigName, lastUser, req.SystemMessage, req.Tools, func(evt port.ToolEvent) {
+		runErr := h.ai.RunWithTools(ctx, req.ConversationID, req.LLMConfigName, lastUser, req.SystemMessage, req.Tools, func(evt port.ToolEvent) {
 			// 把 ToolEvent 直接序列化为 SSE 推送
 			writeSSE(c.Writer, evt)
 			if flusher != nil { flusher.Flush() }
@@ -88,7 +90,7 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 		messages = append([]port.ChatMessage{systemMsg}, req.Messages...)
 	}
 
-	_, streamErr := h.ai.ChatStream(ctx, req.LLMConfigName, messages, func(delta string) {
+	_, streamErr := h.ai.ChatStream(ctx, req.ConversationID, req.LLMConfigName, messages, func(delta string) {
 		writeSSEDelta(c.Writer, delta)
 		if flusher != nil { flusher.Flush() }
 	})

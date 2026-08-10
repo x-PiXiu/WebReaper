@@ -85,7 +85,7 @@ func (uc *ProcessUseCase) ProcessItem(ctx context.Context, itemID string) error 
 内容：
 %s`, truncate(raw, 6000))
 
-	resp, err := uc.ai.ChatStream(ctx, "", []port.ChatMessage{
+	resp, err := uc.ai.ChatStream(ctx, "", "", []port.ChatMessage{
 		{Role: "system", Content: "你是数据结构化助手。只返回 JSON，不要其他文字。"},
 		{Role: "user", Content: prompt},
 	}, nil)

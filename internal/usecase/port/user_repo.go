@@ -13,4 +13,10 @@ type UserRepository interface {
 	Save(ctx context.Context, user entity.User) error
 	// FindByUsername 按用户名查用户（登录时用）。不存在返回 ErrNotFound。
 	FindByUsername(ctx context.Context, username string) (entity.User, error)
+	// FindByID 按 ID 查用户。不存在返回 ErrNotFound。
+	FindByID(ctx context.Context, id string) (entity.User, error)
+	// List 列出全部用户（管理端用）。
+	List(ctx context.Context) ([]entity.User, error)
+	// Delete 删除用户。
+	Delete(ctx context.Context, id string) error
 }

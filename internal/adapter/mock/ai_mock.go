@@ -14,7 +14,7 @@ type MockAIGenerator struct{}
 func NewMockAIGenerator() *MockAIGenerator { return &MockAIGenerator{} }
 
 // ChatStream 模拟流式对话（降级用），逐字返回示例回复。
-func (m *MockAIGenerator) ChatStream(_ context.Context, _ string, messages []port.ChatMessage, onDelta func(delta string)) (string, error) {
+func (m *MockAIGenerator) ChatStream(_ context.Context, _ string, _ string, messages []port.ChatMessage, onDelta func(delta string)) (string, error) {
 	lastUser := ""
 	if len(messages) > 0 {
 		lastUser = messages[len(messages)-1].Content
@@ -29,7 +29,7 @@ func (m *MockAIGenerator) ChatStream(_ context.Context, _ string, messages []por
 }
 
 // RunWithTools Mock 实现：模拟工具调用过程。
-func (m *MockAIGenerator) RunWithTools(_ context.Context, _ string, task string, _ string, _ []string, onEvent func(event port.ToolEvent)) error {
+func (m *MockAIGenerator) RunWithTools(_ context.Context, _ string, _ string, task string, _ string, _ []string, onEvent func(event port.ToolEvent)) error {
 	if onEvent != nil {
 		onEvent(port.ToolEvent{Type: "tool-call", ToolName: "search_crawler", ToolArgs: fmt.Sprintf(`{"query":"%s"}`, task)})
 		onEvent(port.ToolEvent{Type: "tool-result", ToolResult: "Mock 搜索结果：找到 3 条相关链接"})

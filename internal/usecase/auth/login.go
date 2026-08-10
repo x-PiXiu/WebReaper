@@ -19,14 +19,17 @@ type LoginInput struct {
 
 // LoginOutput 登录输出。
 type LoginOutput struct {
-	Token string // 认证令牌（JWT 等，由 TokenGenerator 生成）
+	Token    string // 认证令牌（JWT 等，由 TokenGenerator 生成）
+	Role     string // 用户角色（前端据此渲染不同界面）
+	TenantID string // 归属租户（前端/后续请求据此隔离数据）
+	Username string
 }
 
 // LoginUseCase 用户登录用例。
 type LoginUseCase struct {
-	repo      port.UserRepository
-	hasher    port.PasswordHasher
-	tokenGen  port.TokenGenerator
+	repo     port.UserRepository
+	hasher   port.PasswordHasher
+	tokenGen port.TokenGenerator
 }
 
 func NewLoginUseCase(repo port.UserRepository, hasher port.PasswordHasher, tokenGen port.TokenGenerator) *LoginUseCase {
@@ -51,11 +54,21 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 		return LoginOutput{}, fmt.Errorf("%w: invalid username or password", pkg.ErrInvalidArgument)
 	}
 
-	// 3. 生成 token（用例不关心 JWT 实现，通过 port 接口）
-	token, err := uc.tokenGen.Generate(user.ID, user.Username)
+	// 3. 生成 token（把 role/tenant_id 一并写入令牌）
+	token, err := uc.tokenGen.Generate(port.TokenClaims{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+		TenantID: user.TenantID,
+	})
 	if err != nil {
 		return LoginOutput{}, fmt.Errorf("generate token: %w", err)
 	}
 
-	return LoginOutput{Token: token}, nil
+	return LoginOutput{
+		Token:    token,
+		Role:     user.Role,
+		TenantID: user.TenantID,
+		Username: user.Username,
+	}, nil
 }

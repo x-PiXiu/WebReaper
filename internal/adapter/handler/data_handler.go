@@ -218,6 +218,37 @@ func (r *Router) handleDeleteAgentConfig(c *gin.Context) {
 	success(c, gin.H{"deleted": name})
 }
 
+// handleUpdateAgentConfig PUT /api/v1/agents/:name —— 部分更新 Agent 配置。
+// 只需传要改的字段，未传字段保留原值。
+func (r *Router) handleUpdateAgentConfig(c *gin.Context) {
+	name := c.Param("name")
+	// 全部字段都是指针类型 + 无 binding:"required"，实现"部分更新"
+	var req struct {
+		SystemPrompt  *string  `json:"system_prompt"`
+		Tools         []string `json:"tools"`
+		LLMConfigName *string  `json:"llm_config_name"`
+		MaxIterations *int     `json:"max_iterations"`
+		AutoSave      *bool    `json:"auto_save"`
+		FieldMapping  *string  `json:"field_mapping"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	cfg, err := r.agentCfgUC.Update(c.Request.Context(), name, agentconfig.UpdateInput{
+		SystemPrompt:  req.SystemPrompt,
+		LLMConfigName: req.LLMConfigName,
+		MaxIterations: req.MaxIterations,
+		AutoSave:      req.AutoSave,
+		FieldMapping:  req.FieldMapping,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, agentConfigToView(cfg))
+}
+
 // ---- LLM 配置（薄 handler：DTO 转换 + 调用 llmCfgUC）----
 
 func llmConfigToView(cfg entity.LLMConfig) gin.H {
@@ -273,4 +304,32 @@ func (r *Router) handleDeleteLLMConfig(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"deleted": name})
+}
+
+// handleUpdateLLMConfig PUT /api/v1/llm-configs/:name —— 部分更新 LLM 配置。
+// 只需传要改的字段，未传字段保留原值。
+// 注意：缓存的 LLM 客户端有 30s TTL，改完最多 30s 后新配置生效。
+func (r *Router) handleUpdateLLMConfig(c *gin.Context) {
+	name := c.Param("name")
+	var req struct {
+		Provider *string `json:"provider"`
+		APIKey   *string `json:"api_key"`
+		BaseURL  *string `json:"base_url"`
+		Model    *string `json:"model"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	cfg, err := r.llmCfgUC.Update(c.Request.Context(), name, llmconfig.UpdateInput{
+		Provider: req.Provider,
+		APIKey:   req.APIKey,
+		BaseURL:  req.BaseURL,
+		Model:    req.Model,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, llmConfigToView(cfg))
 }

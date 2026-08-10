@@ -11,7 +11,7 @@ import type { ApiEnvelope } from '../types/api'
 
 export const apiClient = axios.create({
   baseURL: '/', // 走 Vite proxy，/api/* 被转发到后端
-  timeout: 30000,
+  timeout: 120000, // GEO 的 RAG 操作（爬全网+LLM）耗时较长，给 2 分钟
 })
 
 // 请求拦截：附 JWT token

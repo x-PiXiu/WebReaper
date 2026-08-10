@@ -13,9 +13,10 @@ export default function Login() {
     setLoading(true)
     try {
       const res = await authApi.login(values)
-      setAuth(res.token, values.username)
+      setAuth(res.token, res.username || values.username, res.role, res.tenant_id)
       message.success('登录成功')
-      navigate('/dashboard', { replace: true })
+      const home = res.role === 'admin' ? '/admin' : '/m'
+      navigate(home, { replace: true })
     } catch {
     } finally {
       setLoading(false)
@@ -57,66 +58,50 @@ export default function Login() {
       alignItems: 'center',
       position: 'relative',
       overflow: 'hidden',
-      background: '#0a0a0f',
+      background: 'var(--wr-bg-base)',
     }}>
-      {/* 背景光晕效果 */}
+      {/* 背景光晕效果 —— 双色极光 */}
       <div style={{
-        position: 'absolute',
-        top: '20%',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: 600,
-        height: 600,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 60%)',
-        filter: 'blur(60px)',
-        pointerEvents: 'none',
+        position: 'absolute', top: '10%', left: '50%', transform: 'translateX(-50%)',
+        width: 700, height: 700, borderRadius: '50%',
+        background: 'radial-gradient(circle, var(--wr-primary-bg) 0%, transparent 60%)',
+        filter: 'blur(80px)', pointerEvents: 'none',
       }} />
       <div style={{
-        position: 'absolute',
-        bottom: '10%',
-        right: '15%',
-        width: 400,
-        height: 400,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(34,211,238,0.1) 0%, transparent 60%)',
-        filter: 'blur(60px)',
-        pointerEvents: 'none',
+        position: 'absolute', bottom: '5%', right: '10%',
+        width: 500, height: 500, borderRadius: '50%',
+        background: 'radial-gradient(circle, var(--wr-accent-bg) 0%, transparent 60%)',
+        filter: 'blur(80px)', pointerEvents: 'none',
       }} />
 
-      {/* 登录卡片 */}
+      {/* 登录卡片 —— 玻璃质感 */}
       <div
         className="wr-fade-in"
         style={{
-          width: 400,
-          maxWidth: '90vw',
-          padding: '40px 32px',
-          background: 'rgba(18,18,24,0.6)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          borderRadius: 16,
-          boxShadow: '0 24px 48px rgba(0,0,0,0.4)',
-          position: 'relative',
-          zIndex: 1,
+          width: 420, maxWidth: '90vw', padding: '48px 36px',
+          background: 'var(--wr-bg-surface)',
+          backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+          border: '1px solid var(--wr-border)',
+          borderRadius: 20,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+          position: 'relative', zIndex: 1,
         }}
       >
         {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+        <div style={{ textAlign: 'center', marginBottom: 36 }}>
           <div style={{
-            width: 48, height: 48, borderRadius: 12,
-            background: 'linear-gradient(135deg, #6366f1, #22d3ee)',
-            margin: '0 auto 16px',
+            width: 56, height: 56, borderRadius: 16,
+            background: 'linear-gradient(135deg, var(--wr-primary), var(--wr-accent))',
+            margin: '0 auto 18px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 24, fontWeight: 800, color: '#fff',
-            boxShadow: '0 0 24px rgba(99,102,241,0.4)',
-          }}>W</div>
-          <h1 style={{
-            fontSize: 22, fontWeight: 700, margin: 0,
-            color: '#e4e4e7', letterSpacing: '-0.02em',
-          }}>WebReaper</h1>
-          <p style={{ fontSize: 13, color: '#71717a', margin: '4px 0 0' }}>
-            数据采集与智能加工平台
+            fontSize: 28, fontWeight: 800, color: '#fff',
+            boxShadow: 'var(--wr-shadow-glow)',
+          }}>G</div>
+          <h1 className="wr-gradient-text" style={{
+            fontSize: 26, fontWeight: 800, margin: 0, letterSpacing: '-0.03em',
+          }}>GEO 平台</h1>
+          <p style={{ fontSize: 14, color: 'var(--wr-text-muted)', margin: '6px 0 0' }}>
+            AI 搜索时代 · 生成式引擎优化
           </p>
         </div>
 

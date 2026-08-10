@@ -7,7 +7,7 @@ import rehypeHighlight from 'rehype-highlight'
 import { getToken, useAuthStore } from '../store/auth'
 import { businessApi } from '../api/business'
 import { useTaskEnqueue } from '../hooks/useTaskEnqueue'
-import type { ChatMessage, AgentConfig, ToolView } from '../types/api'
+import type { ChatMessage, AgentConfig, LLMConfig, ToolView } from '../types/api'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -152,7 +152,7 @@ function ToolCallBlock({ tool }: { tool: ToolRecord }) {
             调用中...
           </span>
         ) : (
-          <span style={{ fontSize: 11, color: '#52c41a' }}>✓ 已完成</span>
+          <span style={{ fontSize: 11, color: 'var(--wr-success)' }}>✓ 已完成</span>
         )}
       </div>
       {/* 参数 + 结果（可展开/收起） */}
@@ -252,6 +252,7 @@ export default function Chat() {
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>(undefined)
+  const [selectedLLM, setSelectedLLM] = useState<string | undefined>(undefined) // 聊天界面临时覆盖 LLM（空则用 Agent 默认）
   const [loadedConvMsgs, setLoadedConvMsgs] = useState<Set<string>>(new Set()) // 已加载消息的会话
   const endRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -260,6 +261,8 @@ export default function Chat() {
 
   const { data: agentConfigs = [] } = useQuery({ queryKey: ['agent-configs'], queryFn: () => businessApi.listAgentConfigs() })
   const { data: tools = [] } = useQuery({ queryKey: ['tools'], queryFn: () => businessApi.listTools() })
+  // LLM 配置列表：供聊天界面动态切换模型（覆盖 Agent 的默认 LLM）
+  const { data: llmConfigs = [] } = useQuery({ queryKey: ['llm-configs'], queryFn: () => businessApi.listLLMConfigs() })
   const currentAgent = agentConfigs.find((a: AgentConfig) => a.name === selectedAgent)
 
   // 拉取会话列表（后端持久化，按当前用户隔离）
@@ -393,10 +396,12 @@ export default function Chat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
+          conversation_id: convId, // 会话隔离的关键：后端据此区分 sessionID，根治记忆串台
           messages: hist.map(({ id: _, tools: _t, blocks: _b, ...r }) => r),
           system_message: currentAgent?.system_prompt || '',
-          tools: ['_all'], // 全局工具：后端会注册所有爬虫
-          llm_config_name: currentAgent?.llm_config_name || '', // 按 Agent 选 LLM，空则 default
+          tools: [], // 空数组=后端使用全部已启用的工具（toolRegistry.All()）
+          use_tools: true, // 启用工具模式（ReAct Agent + 爬虫工具调用）
+          llm_config_name: selectedLLM || currentAgent?.llm_config_name || '', // 聊天界面可临时覆盖 Agent 默认 LLM
         }),
         signal: controller.signal,
       })
@@ -611,6 +616,16 @@ export default function Chat() {
           <Space>
             <Text type="secondary" style={{ fontSize: 14 }}>角色：</Text>
             <Select style={{ width: 220 }} placeholder="默认 AI" allowClear value={selectedAgent} onChange={setSelectedAgent} options={agentConfigs.map((a: AgentConfig) => ({ value: a.name, label: a.name }))} />
+            <Text type="secondary" style={{ fontSize: 14 }}>模型：</Text>
+            <Select
+              style={{ width: 200 }}
+              placeholder="用 Agent 默认"
+              allowClear
+              value={selectedLLM}
+              onChange={setSelectedLLM}
+              options={llmConfigs.map((l: LLMConfig) => ({ value: l.name, label: `${l.model}${l.provider ? ' · ' + l.provider : ''}` }))}
+              title={selectedLLM ? `当前强制使用 ${selectedLLM}（覆盖 Agent 默认）` : '留空则使用所选 Agent 配置的默认模型'}
+            />
             <Popover
               trigger="click"
               placement="bottomLeft"

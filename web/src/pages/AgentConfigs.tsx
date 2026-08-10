@@ -10,6 +10,9 @@ export default function AgentConfigs() {
   const queryClient = useQueryClient()
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [llmModalOpen, setLlmModalOpen] = useState(false)
+  // 编辑模式：记录正在编辑的配置名（null = 新建模式）
+  const [editingAgent, setEditingAgent] = useState<string | null>(null)
+  const [editingLLM, setEditingLLM] = useState<string | null>(null)
   const [agentForm] = Form.useForm()
   const [llmForm] = Form.useForm()
 
@@ -29,20 +32,51 @@ export default function AgentConfigs() {
   }
 
   // ---- Agent 配置 CRUD ----
-  const handleCreateAgent = async (values: { name: string; system_prompt: string; llm_config_name?: string; auto_save?: boolean; field_mapping?: string }) => {
+  // 新建/编辑统一入口：editingAgent 为 null 时是新建，否则是编辑该 name
+  const openEditAgent = (record: { name: string; system_prompt: string; llm_config_name?: string; auto_save?: boolean; field_mapping?: string }) => {
+    setEditingAgent(record.name)
+    agentForm.setFieldsValue({
+      name: record.name,
+      system_prompt: record.system_prompt,
+      llm_config_name: record.llm_config_name || undefined,
+      auto_save: record.auto_save || false,
+      field_mapping: record.field_mapping || '',
+    })
+    setAgentModalOpen(true)
+  }
+
+  const openCreateAgent = () => {
+    setEditingAgent(null)
+    agentForm.resetFields()
+    setAgentModalOpen(true)
+  }
+
+  const handleSubmitAgent = async (values: { name: string; system_prompt: string; llm_config_name?: string; auto_save?: boolean; field_mapping?: string }) => {
     try {
-      await businessApi.createAgentConfig({
-        name: values.name,
-        system_prompt: values.system_prompt,
-        tools: [],
-        llm_config_name: values.llm_config_name || '',
-        max_iterations: 10,
-        auto_save: values.auto_save || false,
-        field_mapping: values.field_mapping || '',
-      })
-      message.success(`Agent ${values.name} 创建成功`)
+      if (editingAgent) {
+        // 编辑模式：部分更新（name 不可改）
+        await businessApi.updateAgentConfig(editingAgent, {
+          system_prompt: values.system_prompt,
+          llm_config_name: values.llm_config_name || '',
+          auto_save: values.auto_save || false,
+          field_mapping: values.field_mapping || '',
+        })
+        message.success(`Agent ${editingAgent} 已更新`)
+      } else {
+        await businessApi.createAgentConfig({
+          name: values.name,
+          system_prompt: values.system_prompt,
+          tools: [],
+          llm_config_name: values.llm_config_name || '',
+          max_iterations: 10,
+          auto_save: values.auto_save || false,
+          field_mapping: values.field_mapping || '',
+        })
+        message.success(`Agent ${values.name} 创建成功`)
+      }
       setAgentModalOpen(false)
       agentForm.resetFields()
+      setEditingAgent(null)
       invalidateAll()
     } catch {}
   }
@@ -63,12 +97,43 @@ export default function AgentConfigs() {
   }
 
   // ---- LLM 配置 CRUD ----
-  const handleCreateLLM = async (values: LLMConfig) => {
+  // 新建/编辑统一入口
+  const openEditLLM = (record: LLMConfig) => {
+    setEditingLLM(record.name)
+    llmForm.setFieldsValue({
+      name: record.name,
+      provider: record.provider,
+      api_key: record.api_key,
+      base_url: record.base_url,
+      model: record.model,
+    })
+    setLlmModalOpen(true)
+  }
+
+  const openCreateLLM = () => {
+    setEditingLLM(null)
+    llmForm.resetFields()
+    setLlmModalOpen(true)
+  }
+
+  const handleSubmitLLM = async (values: LLMConfig) => {
     try {
-      await businessApi.createLLMConfig(values)
-      message.success(`LLM 配置 ${values.name} 创建成功`)
+      if (editingLLM) {
+        // 编辑模式：部分更新（name 不可改）
+        await businessApi.updateLLMConfig(editingLLM, {
+          provider: values.provider,
+          api_key: values.api_key,
+          base_url: values.base_url,
+          model: values.model,
+        })
+        message.success(`LLM 配置 ${editingLLM} 已更新`)
+      } else {
+        await businessApi.createLLMConfig(values)
+        message.success(`LLM 配置 ${values.name} 创建成功`)
+      }
       setLlmModalOpen(false)
       llmForm.resetFields()
+      setEditingLLM(null)
       invalidateAll()
     } catch {}
   }
@@ -106,8 +171,8 @@ export default function AgentConfigs() {
     }
     const tpl = templates[template]
     if (tpl) {
+      openCreateAgent()
       agentForm.setFieldsValue(tpl)
-      setAgentModalOpen(true)
       message.info('已加载模板，确认或修改后点击保存')
     }
   }
@@ -139,9 +204,12 @@ export default function AgentConfigs() {
       },
     },
     {
-      title: '', key: 'action', width: 60,
-      render: (_: unknown, record: { name: string }) => (
-        <Button size="small" type="text" danger onClick={() => handleDeleteAgent(record.name)}>删除</Button>
+      title: '', key: 'action', width: 110,
+      render: (_: unknown, record: AgentConfig) => (
+        <Space size="small">
+          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => openEditAgent(record)}>编辑</Button>
+          <Button size="small" type="text" danger onClick={() => handleDeleteAgent(record.name)}>删除</Button>
+        </Space>
       ),
     },
   ]
@@ -168,9 +236,12 @@ export default function AgentConfigs() {
       render: (k: string) => <Text type="secondary" style={{ fontSize: 12, fontFamily: 'monospace' }}>{k}</Text>,
     },
     {
-      title: '', key: 'action', width: 60,
-      render: (_: unknown, record: { name: string }) => (
-        <Button size="small" type="text" danger onClick={() => handleDeleteLLM(record.name)}>删除</Button>
+      title: '', key: 'action', width: 110,
+      render: (_: unknown, record: LLMConfig) => (
+        <Space size="small">
+          <Button size="small" type="link" style={{ padding: 0 }} onClick={() => openEditLLM(record)}>编辑</Button>
+          <Button size="small" type="text" danger onClick={() => handleDeleteLLM(record.name)}>删除</Button>
+        </Space>
       ),
     },
   ]
@@ -184,8 +255,8 @@ export default function AgentConfigs() {
           <Text type="secondary" style={{ fontSize: 13 }}>管理 Agent 与 LLM 配置；工具已全局可用，无需为 Agent 单独配置</Text>
         </div>
         <Space>
-          <Button onClick={() => setLlmModalOpen(true)}>新建 LLM 配置</Button>
-          <Button type="primary" onClick={() => setAgentModalOpen(true)}>创建 Agent</Button>
+          <Button onClick={openCreateLLM}>新建 LLM 配置</Button>
+          <Button type="primary" onClick={openCreateAgent}>创建 Agent</Button>
         </Space>
       </div>
 
@@ -222,17 +293,22 @@ export default function AgentConfigs() {
         </Space>
       </Card>
 
-      {/* 创建 Agent 弹窗 */}
+      {/* Tavily 搜索配置 */}
+      <Card title="Tavily 搜索配置" style={{ marginTop: 16 }}>
+        <TavilyConfigSection />
+      </Card>
+
+      {/* 创建/编辑 Agent 弹窗 */}
       <Modal
-        title="创建 Agent 配置"
+        title={editingAgent ? `编辑 Agent「${editingAgent}」` : '创建 Agent 配置'}
         open={agentModalOpen}
-        onCancel={() => setAgentModalOpen(false)}
+        onCancel={() => { setAgentModalOpen(false); setEditingAgent(null); agentForm.resetFields() }}
         footer={null}
         width={640}
       >
-        <Form form={agentForm} layout="vertical" onFinish={handleCreateAgent} requiredMark={false}>
+        <Form form={agentForm} layout="vertical" onFinish={handleSubmitAgent} requiredMark={false}>
           <Form.Item label="Agent 名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
-            <Input placeholder="如 tech-blog-agent" style={{ fontFamily: 'monospace' }} />
+            <Input placeholder="如 tech-blog-agent" style={{ fontFamily: 'monospace' }} disabled={!!editingAgent} />
           </Form.Item>
           <Form.Item label="系统提示词" name="system_prompt" rules={[{ required: true, message: '请输入提示词' }]}>
             <Input.TextArea
@@ -279,30 +355,32 @@ export default function AgentConfigs() {
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit">保存配置</Button>
-              <Button onClick={() => setAgentModalOpen(false)}>取消</Button>
+              <Button type="primary" htmlType="submit">{editingAgent ? '保存修改' : '保存配置'}</Button>
+              <Button onClick={() => { setAgentModalOpen(false); setEditingAgent(null); agentForm.resetFields() }}>取消</Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
 
-      {/* 新建 LLM 配置弹窗 */}
+      {/* 新建/编辑 LLM 配置弹窗 */}
       <Modal
-        title="新建 LLM 配置"
+        title={editingLLM ? `编辑 LLM 配置「${editingLLM}」` : '新建 LLM 配置'}
         open={llmModalOpen}
-        onCancel={() => setLlmModalOpen(false)}
+        onCancel={() => { setLlmModalOpen(false); setEditingLLM(null); llmForm.resetFields() }}
         footer={null}
         width={600}
       >
         <div style={{ marginBottom: 12 }}>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            配置一个 LLM 厂商/模型。所有厂商均使用 OpenAI 兼容协议，只需填对 BaseURL 和 API Key。
+            {editingLLM
+              ? '修改 LLM 配置。留空的字段保持原值不变（API Key 留空则不修改）。配置生效有最多 30 秒缓存延迟。'
+              : '配置一个 LLM 厂商/模型。所有厂商均使用 OpenAI 兼容协议，只需填对 BaseURL 和 API Key。'}
           </Text>
         </div>
-        <Form form={llmForm} layout="vertical" onFinish={handleCreateLLM} requiredMark={false}>
+        <Form form={llmForm} layout="vertical" onFinish={handleSubmitLLM} requiredMark={false}>
           <Form.Item label="配置名称" name="name" rules={[{ required: true, message: '请输入名称' }]}
             tooltip="唯一标识，如 default、minimax-m2、deepseek-chat">
-            <Input placeholder="如 deepseek-chat" style={{ fontFamily: 'monospace' }} />
+            <Input placeholder="如 deepseek-chat" style={{ fontFamily: 'monospace' }} disabled={!!editingLLM} />
           </Form.Item>
           <Form.Item label="厂商" name="provider"
             tooltip="仅作展示标签，不影响协议（统一 OpenAI 兼容）">
@@ -318,24 +396,85 @@ export default function AgentConfigs() {
               ]}
             />
           </Form.Item>
-          <Form.Item label="API Key" name="api_key" rules={[{ required: true, message: '请输入 API Key' }]}>
-            <Input.Password placeholder="sk-..." style={{ fontFamily: 'monospace' }} />
+          <Form.Item label="API Key" name="api_key" rules={editingLLM ? [] : [{ required: true, message: '请输入 API Key' }]}
+            tooltip={editingLLM ? '留空则不修改原 Key' : undefined}>
+            <Input.Password placeholder={editingLLM ? '留空则不修改' : 'sk-...'} style={{ fontFamily: 'monospace' }} />
           </Form.Item>
           <Form.Item label="Base URL" name="base_url"
             tooltip="OpenAI 兼容的 API 端点">
             <Input placeholder="如 https://api.minimaxi.com/v1" />
           </Form.Item>
-          <Form.Item label="模型名" name="model" rules={[{ required: true, message: '请输入模型名' }]}>
-            <Input placeholder="如 MiniMax-M2.5、deepseek-chat、gpt-4o-mini" style={{ fontFamily: 'monospace' }} />
+          <Form.Item label="模型名" name="model" rules={editingLLM ? [] : [{ required: true, message: '请输入模型名' }]}>
+            <Input placeholder={editingLLM ? '留空则不修改' : '如 MiniMax-M2.5、deepseek-chat、gpt-4o-mini'} style={{ fontFamily: 'monospace' }} />
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit">保存配置</Button>
-              <Button onClick={() => setLlmModalOpen(false)}>取消</Button>
+              <Button type="primary" htmlType="submit">{editingLLM ? '保存修改' : '保存配置'}</Button>
+              <Button onClick={() => { setLlmModalOpen(false); setEditingLLM(null); llmForm.resetFields() }}>取消</Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
+    </div>
+  )
+}
+
+// Tavily 搜索配置区（管理后台用）
+function TavilyConfigSection() {
+  const queryClient = useQueryClient()
+  const { data: status, isLoading } = useQuery({
+    queryKey: ['tavily-status'],
+    queryFn: () => businessApi.getTavilyStatus(),
+  })
+
+  const handleToggle = async (enabled: boolean) => {
+    try {
+      await businessApi.updateTavilyKey({ enabled })
+      message.success(enabled ? 'Tavily 已启用' : 'Tavily 已禁用')
+      queryClient.invalidateQueries({ queryKey: ['tavily-status'] })
+    } catch {}
+  }
+
+  if (isLoading) return <Text type="secondary">加载中...</Text>
+
+  const registered = status?.registered
+  const enabled = status?.enabled
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <Tag color={enabled ? 'success' : 'default'}>
+          {enabled ? '已启用' : '未启用'}
+        </Tag>
+        <Text type="secondary" style={{ fontSize: 13 }}>
+          Tavily 是专为 AI 设计的高质量搜索 API。配置后，GEO 监测的 Agent 会使用它搜索全网，
+          返回比普通搜索引擎更干净、更适合 AI 分析的内容。
+        </Text>
+      </div>
+      <Space direction="vertical" size={8}>
+        <div>
+          <Text type="secondary" style={{ fontSize: 13 }}>配置方式：</Text>
+          <Text code style={{ fontSize: 12 }}>在 .env 文件设置 TAVILY_API_KEY=tvly-xxxxx</Text>
+        </div>
+        <div>
+          <Text type="secondary" style={{ fontSize: 13 }}>获取 Key：</Text>
+          <a href="https://tavily.com" target="_blank" rel="noopener" style={{ fontSize: 13 }}>tavily.com</a>
+          <Text type="secondary" style={{ fontSize: 13 }}>（免费 1000 次/月）</Text>
+        </div>
+        {registered && (
+          <div style={{ marginTop: 8 }}>
+            <Switch checked={enabled} onChange={handleToggle} />
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+              {enabled ? 'Agent 监测时使用 Tavily 搜索' : 'Agent 监测时使用 Bing 搜索（降级）'}
+            </Text>
+          </div>
+        )}
+        {!registered && (
+          <Text type="warning" style={{ fontSize: 13 }}>
+            Tavily 工具未注册，请在 .env 配置 TAVILY_API_KEY 后重启服务
+          </Text>
+        )}
+      </Space>
     </div>
   )
 }

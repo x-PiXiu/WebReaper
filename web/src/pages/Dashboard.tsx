@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { businessApi } from '../api/business'
-import type { DataItem, StatsView } from '../types/api'
 
 const { Text } = Typography
 
@@ -21,16 +20,16 @@ function StatCard({ label, value, sublabel, gradient, onClick }: {
 }) {
   return (
     <div onClick={onClick} style={{
-      position: 'relative', padding: 24, background: 'var(--wr-bg-surface, #121218)',
-      border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14,
+      position: 'relative', padding: 24, background: 'var(--wr-card-bg)',
+      border: '1px solid var(--wr-border)', borderRadius: 14,
       cursor: onClick ? 'pointer' : 'default', transition: 'all 200ms', overflow: 'hidden',
     }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'; e.currentTarget.style.transform = 'translateY(0)' }}>
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--wr-border-hover)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--wr-border)'; e.currentTarget.style.transform = 'translateY(0)' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: gradient }} />
-      <Text style={{ color: '#71717a', fontSize: 13, display: 'block', marginBottom: 8 }}>{label}</Text>
-      <div style={{ fontSize: 32, fontWeight: 700, color: '#e4e4e7', letterSpacing: '-0.03em' }}>{value}</div>
-      {sublabel && <Text style={{ color: '#52525b', fontSize: 11 }}>{sublabel}</Text>}
+      <Text style={{ color: 'var(--wr-text-muted)', fontSize: 13, display: 'block', marginBottom: 8 }}>{label}</Text>
+      <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--wr-text-primary)', letterSpacing: '-0.03em' }}>{value}</div>
+      {sublabel && <Text style={{ color: 'var(--wr-text-secondary)', fontSize: 11 }}>{sublabel}</Text>}
     </div>
   )
 }
@@ -70,17 +69,17 @@ export default function Dashboard() {
   const sourceData = (stats?.source_distribution || []).map(s => ({ type: s.name, value: s.count }))
   const tagData = (stats?.top_tags || []).map(t => ({ name: t.name, value: t.count }))
 
-  // 暗色主题图表通用配置
-  const darkTheme = {
-    color: '#e4e4e7',
-    axis: { common: { labelFill: '#71717a', lineStroke: 'rgba(255,255,255,0.08)' } },
+  // 图表通用配置（用 CSS 变量适配双主题）
+  const chartTheme = {
+    color: 'var(--wr-text-primary)',
+    axis: { common: { labelFill: 'var(--wr-text-muted)', lineStroke: 'var(--wr-border)' } },
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+    <div className="wr-page-content">
       {/* 标题 */}
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: '-0.02em', color: 'var(--wr-text-primary)' }}>
           数据中心{username ? ` · ${username}` : ''}
         </h1>
         <Text type="secondary" style={{ fontSize: 14 }}>
@@ -115,7 +114,7 @@ export default function Dashboard() {
               xField="date" yField="value"
               smooth
               height={240}
-              theme={darkTheme as any}
+              theme={chartTheme as any}
               color="#6366f1"
               areaStyle={{ fill: 'l(270) 0:#6366f180 1:#6366f105' }}
               point={{ size: 3, shape: 'circle' }}
@@ -132,8 +131,8 @@ export default function Dashboard() {
                 height={240}
                 radius={0.8} innerRadius={0.5}
                 color={['#f59e0b', '#10b981', '#ef4444']}
-                label={{ text: 'type', position: 'outside', fill: '#a1a1aa' }}
-                theme={darkTheme as any}
+                label={{ text: 'type', position: 'outside', fill: 'var(--wr-text-secondary)' }}
+                theme={chartTheme as any}
               />
             ) : <div style={{ textAlign: 'center', paddingTop: 80 }}><Text type="secondary">暂无数据</Text></div>}
           </ChartCard>
@@ -150,8 +149,8 @@ export default function Dashboard() {
                 angleField="value" colorField="type"
                 height={240}
                 radius={0.8}
-                label={{ text: 'type', position: 'outside', fill: '#a1a1aa' }}
-                theme={darkTheme as any}
+                label={{ text: 'type', position: 'outside', fill: 'var(--wr-text-secondary)' }}
+                theme={chartTheme as any}
               />
             ) : <div style={{ textAlign: 'center', paddingTop: 80 }}><Text type="secondary">暂无数据</Text></div>}
           </ChartCard>
@@ -164,8 +163,8 @@ export default function Dashboard() {
                 xField="value" yField="name"
                 height={240}
                 color="#22d3ee"
-                theme={darkTheme as any}
-                axis={{ y: { labelFill: '#a1a1aa' }, x: { labelFill: '#71717a' } } as any}
+                theme={chartTheme as any}
+                axis={{ y: { labelFill: 'var(--wr-text-secondary)' }, x: { labelFill: 'var(--wr-text-muted)' } } as any}
               />
             ) : <div style={{ textAlign: 'center', paddingTop: 80 }}><Text type="secondary">暂无标签</Text></div>}
           </ChartCard>

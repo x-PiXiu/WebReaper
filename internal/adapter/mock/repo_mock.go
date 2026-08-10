@@ -36,6 +36,29 @@ func (r *MockUserRepository) FindByUsername(_ context.Context, username string) 
 	return u, nil
 }
 
+func (r *MockUserRepository) FindByID(_ context.Context, id string) (entity.User, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	for _, u := range r.byUN {
+		if u.ID == id { return u, nil }
+	}
+	return entity.User{}, pkg.ErrNotFound
+}
+
+func (r *MockUserRepository) List(_ context.Context) ([]entity.User, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	out := make([]entity.User, 0, len(r.byUN))
+	for _, u := range r.byUN { out = append(out, u) }
+	return out, nil
+}
+
+func (r *MockUserRepository) Delete(_ context.Context, id string) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	for k, u := range r.byUN {
+		if u.ID == id { delete(r.byUN, k); return nil }
+	}
+	return nil
+}
+
 // ---- Task 仓储 ----
 
 type MockTaskRepository struct {

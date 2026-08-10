@@ -161,7 +161,7 @@ func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress
 		task := fmt.Sprintf(`分析框架 "%s" 的结构。先爬取其官方文档/README，然后列出该框架所有核心模块（如 agent、tool、model、graph 等）。
 返回 JSON 数组，每项是一个模块名（字符串），如 ["agent","tool","model"]。只返回 JSON，不要其他文字。`, topic)
 		var sb strings.Builder
-		err := o.ai.RunWithTools(ctx, "", task,
+		err := o.ai.RunWithTools(ctx, "", "", task,
 			"你是框架结构分析助手。用爬虫工具获取真实文档后，提取模块清单。只返回 JSON 数组。",
 			o.tools,
 			func(e port.ToolEvent) {
@@ -223,7 +223,7 @@ func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress
 只返回 JSON 数组。`,
 				topic, contentTypeLabel(contentType), strings.Join(qualityGaps, "; "))
 		}
-		resp, err := o.ai.ChatStream(ctx, "", []port.ChatMessage{
+		resp, err := o.ai.ChatStream(ctx, "", "", []port.ChatMessage{
 			{Role: "system", Content: "你是技术面试题生成专家。只返回 JSON 数组。"},
 			{Role: "user", Content: prompt},
 		}, nil)
@@ -291,7 +291,7 @@ func (o *GraphContentOrchestrator) buildGraph(in port.OrchestrateInput, progress
 pass=true 表示质量达标；pass=false 时 gaps 列出具体缺口（供补全）。
 只返回 JSON。`,
 			topic, contentTypeLabel(contentType), topic, itemsSummary)
-		resp, err := o.ai.ChatStream(ctx, "", []port.ChatMessage{
+		resp, err := o.ai.ChatStream(ctx, "", "", []port.ChatMessage{
 			{Role: "system", Content: "你是质量评审专家。只返回 JSON。"},
 			{Role: "user", Content: prompt},
 		}, nil)

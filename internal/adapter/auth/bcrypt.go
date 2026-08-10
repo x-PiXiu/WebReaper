@@ -41,6 +41,8 @@ func (BcryptHasher) Compare(hash string, password string) error {
 type JWTClaims struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
+	Role     string `json:"role"`      // admin / merchant
+	TenantID string `json:"tenant_id"` // 归属租户（admin 可空）
 	jwt.RegisteredClaims
 }
 
@@ -62,11 +64,13 @@ func NewJWTGenerator(secret string, expirationSec int) *JWTGenerator {
 	}
 }
 
-func (g *JWTGenerator) Generate(userID string, username string) (string, error) {
+func (g *JWTGenerator) Generate(c port.TokenClaims) (string, error) {
 	now := time.Now()
 	claims := JWTClaims{
-		UserID:   userID,
-		Username: username,
+		UserID:   c.UserID,
+		Username: c.Username,
+		Role:     c.Role,
+		TenantID: c.TenantID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(g.expiration)),
 			IssuedAt:  jwt.NewNumericDate(now),

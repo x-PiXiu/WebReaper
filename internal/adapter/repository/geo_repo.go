@@ -1,0 +1,279 @@
+package repository
+
+import (
+	"context"
+	"errors"
+
+	"gorm.io/gorm"
+
+	"webreaper/internal/domain/entity"
+	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/port"
+)
+
+// ---- GEO 仓储的 GORM 实现 ----
+// 所有查询强制带 tenant_id 过滤（多租户隔离）。
+// tenantID 为空时（admin 看全局）跳过过滤。
+
+func applyTenantScope(db *gorm.DB, tenantID string) *gorm.DB {
+	if tenantID == "" {
+		return db
+	}
+	return db.Where("tenant_id = ?", tenantID)
+}
+
+// ============ BrandRepository ============
+
+type GormBrandRepository struct{ db *gorm.DB }
+
+var _ port.BrandRepository = (*GormBrandRepository)(nil)
+
+func NewGormBrandRepository(db *gorm.DB) *GormBrandRepository {
+	return &GormBrandRepository{db: db}
+}
+
+func (r *GormBrandRepository) Save(ctx context.Context, b entity.Brand) error {
+	po := brandToPO(b)
+	return r.db.WithContext(ctx).Save(&po).Error
+}
+
+func (r *GormBrandRepository) FindByID(ctx context.Context, tenantID, id string) (entity.Brand, error) {
+	var po BrandPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	err := q.Where("id = ?", id).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.Brand{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.Brand{}, err
+	}
+	return brandFromPO(po), nil
+}
+
+func (r *GormBrandRepository) ListByTenant(ctx context.Context, tenantID string) ([]entity.Brand, error) {
+	var pos []BrandPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if err := q.Order("created_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.Brand, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, brandFromPO(p))
+	}
+	return out, nil
+}
+
+func (r *GormBrandRepository) Delete(ctx context.Context, tenantID, id string) error {
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	return q.Where("id = ?", id).Delete(&BrandPO{}).Error
+}
+
+// ============ KeywordRepository ============
+
+type GormKeywordRepository struct{ db *gorm.DB }
+
+var _ port.KeywordRepository = (*GormKeywordRepository)(nil)
+
+func NewGormKeywordRepository(db *gorm.DB) *GormKeywordRepository {
+	return &GormKeywordRepository{db: db}
+}
+
+func (r *GormKeywordRepository) Save(ctx context.Context, k entity.Keyword) error {
+	po := keywordToPO(k)
+	return r.db.WithContext(ctx).Save(&po).Error
+}
+
+// FindByID 直接按 ID 查关键词（带租户隔离）。
+func (r *GormKeywordRepository) FindByID(ctx context.Context, tenantID, id string) (entity.Keyword, error) {
+	var po KeywordPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	err := q.Where("id = ?", id).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.Keyword{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.Keyword{}, err
+	}
+	return keywordFromPO(po), nil
+}
+
+func (r *GormKeywordRepository) ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.Keyword, error) {
+	var pos []KeywordPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if err := q.Where("brand_id = ?", brandID).Order("created_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.Keyword, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, keywordFromPO(p))
+	}
+	return out, nil
+}
+
+// ListByTenant 跨品牌查租户所有关键词（关键词管理页用）。
+func (r *GormKeywordRepository) ListByTenant(ctx context.Context, tenantID string) ([]entity.Keyword, error) {
+	var pos []KeywordPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if err := q.Order("created_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.Keyword, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, keywordFromPO(p))
+	}
+	return out, nil
+}
+
+func (r *GormKeywordRepository) Delete(ctx context.Context, tenantID, id string) error {
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	return q.Where("id = ?", id).Delete(&KeywordPO{}).Error
+}
+
+// ============ MonitoringResultRepository ============
+
+type GormMonitoringResultRepository struct{ db *gorm.DB }
+
+var _ port.MonitoringResultRepository = (*GormMonitoringResultRepository)(nil)
+
+func NewGormMonitoringResultRepository(db *gorm.DB) *GormMonitoringResultRepository {
+	return &GormMonitoringResultRepository{db: db}
+}
+
+func (r *GormMonitoringResultRepository) Save(ctx context.Context, m entity.MonitoringResult) error {
+	po := monitoringResultToPO(m)
+	return r.db.WithContext(ctx).Save(&po).Error
+}
+
+// LatestByKeyword 取某关键词在各引擎的最新监测结果。
+// 每个 engine_name 取最新一条（子查询取最大 probed_at）。
+func (r *GormMonitoringResultRepository) LatestByKeyword(ctx context.Context, tenantID, keywordID string) ([]entity.MonitoringResult, error) {
+	var pos []MonitoringResultPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	// 取该关键词全部结果，按引擎+时间倒序，Go 层去重保留每个引擎最新一条
+	if err := q.Where("keyword_id = ?", keywordID).Order("engine_name, probed_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var out []entity.MonitoringResult
+	for _, p := range pos {
+		if seen[p.EngineName] {
+			continue
+		}
+		seen[p.EngineName] = true
+		out = append(out, monitoringResultFromPO(p))
+	}
+	return out, nil
+}
+
+// LatestByBrand 取某品牌下所有关键词的最新监测结果（关键词一览页用）。
+// 每个关键词 × 每个引擎只保留最新一条。
+func (r *GormMonitoringResultRepository) LatestByBrand(ctx context.Context, tenantID, brandID string) ([]entity.MonitoringResult, error) {
+	var pos []MonitoringResultPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if err := q.Where("brand_id = ?", brandID).Order("keyword_id, engine_name, probed_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	// 去重：key = keywordID + engineName，保留最新（已按时间倒序，第一条即最新）
+	seen := make(map[string]bool)
+	var out []entity.MonitoringResult
+	for _, p := range pos {
+		key := p.KeywordID + "|" + p.EngineName
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, monitoringResultFromPO(p))
+	}
+	return out, nil
+}
+
+// LatestByTenant 取租户下所有关键词的最新监测结果（关键词一览页用）。
+// 每个关键词 × 每个引擎只保留最新一条。不依赖品牌筛选。
+func (r *GormMonitoringResultRepository) LatestByTenant(ctx context.Context, tenantID string) ([]entity.MonitoringResult, error) {
+	var pos []MonitoringResultPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if err := q.Order("keyword_id, engine_name, probed_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var out []entity.MonitoringResult
+	for _, p := range pos {
+		key := p.KeywordID + "|" + p.EngineName
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, monitoringResultFromPO(p))
+	}
+	return out, nil
+}
+func (r *GormMonitoringResultRepository) Trend(ctx context.Context, tenantID, brandID string, limit int) ([]entity.MonitoringResult, error) {
+	var pos []MonitoringResultPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if limit <= 0 {
+		limit = 30
+	}
+	if err := q.Where("brand_id = ?", brandID).Order("probed_at DESC").Limit(limit).Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.MonitoringResult, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, monitoringResultFromPO(p))
+	}
+	return out, nil
+}
+
+// ============ OptimizedContentRepository ============
+
+type GormOptimizedContentRepository struct{ db *gorm.DB }
+
+var _ port.OptimizedContentRepository = (*GormOptimizedContentRepository)(nil)
+
+func NewGormOptimizedContentRepository(db *gorm.DB) *GormOptimizedContentRepository {
+	return &GormOptimizedContentRepository{db: db}
+}
+
+func (r *GormOptimizedContentRepository) Save(ctx context.Context, c entity.OptimizedContent) error {
+	po := optimizedContentToPO(c)
+	return r.db.WithContext(ctx).Save(&po).Error
+}
+
+func (r *GormOptimizedContentRepository) ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.OptimizedContent, error) {
+	var pos []OptimizedContentPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if err := q.Where("brand_id = ?", brandID).Order("created_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.OptimizedContent, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, optimizedContentFromPO(p))
+	}
+	return out, nil
+}
+
+func (r *GormOptimizedContentRepository) FindByID(ctx context.Context, tenantID, id string) (entity.OptimizedContent, error) {
+	var po OptimizedContentPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	err := q.Where("id = ?", id).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.OptimizedContent{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.OptimizedContent{}, err
+	}
+	return optimizedContentFromPO(po), nil
+}
+
+func (r *GormOptimizedContentRepository) FindMaxVersion(ctx context.Context, tenantID, brandID, keywordID string) (int, error) {
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	q = q.Where("brand_id = ?", brandID)
+	if keywordID != "" {
+		q = q.Where("keyword_id = ?", keywordID)
+	}
+	var maxVersion int
+	err := q.Model(&OptimizedContentPO{}).Select("COALESCE(MAX(version), 0)").Scan(&maxVersion).Error
+	if err != nil {
+		return 0, err
+	}
+	return maxVersion, nil
+}
