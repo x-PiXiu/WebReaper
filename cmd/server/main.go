@@ -26,6 +26,7 @@ import (
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/provider"
 	"webreaper/internal/adapter/publisher"
+	"webreaper/internal/adapter/payment"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
@@ -453,6 +454,7 @@ func main() {
 			log.Warn("seed 默认套餐失败（将无在售套餐）", port.Err(seedErr))
 		}
 		billingUC := billing.NewBillingUseCase(planRepo, subRepo, orderRepo)
+		billingUC.SetPaymentGateway(payment.NewMockPaymentGateway(cfg.Server.PublicBaseURL))
 		router.SetBilling(billingUC)
 
 		// 配额检查门（计数派生型：plan 配额 vs usages 表当月用量）

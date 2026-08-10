@@ -8,6 +8,7 @@ import (
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/billing"
 )
 
 // ---- 经济系统 handler（admin + 商户端）----
@@ -144,4 +145,72 @@ func (r *Router) HandleListMyOrders(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"orders": orders})
+}
+
+// ---- 商户端下单 + 确认 ----
+
+// HandleCreateOrder POST /billing/orders —— 商户下单购买套餐。
+// 创建 pending 订单，返回支付页 URL（前端跳转拉起支付）。
+func (r *Router) HandleCreateOrder(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	var req struct {
+		PlanID string `json:"plan_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plan_id 必填"})
+		return
+	}
+	tenantID := middleware.CurrentTenantID(c)
+	if tenantID == "" {
+		fail(c, pkg.ErrInvalidArgument)
+		return
+	}
+	result, err := r.billingUC.CreateOrder(c.Request.Context(), billing.CreateOrderInput{
+		TenantID: tenantID, PlanID: req.PlanID,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"order": result.Order, "payment_url": result.PaymentURL})
+}
+
+// HandleConfirmOrder POST /billing/orders/:id/confirm —— 确认支付完成（mock 自动确认 / 真实回调）。
+func (r *Router) HandleConfirmOrder(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	sub, err := r.billingUC.ConfirmPayment(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"subscription": sub})
+}
+
+// ---- admin 手动开通 ----
+
+// HandleAdminAssignPlan PUT /admin/billing/subscriptions/:tenant —— 手动给租户开通套餐（线下收款）。
+func (r *Router) HandleAdminAssignPlan(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	var req struct {
+		PlanID string `json:"plan_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "plan_id 必填"})
+		return
+	}
+	sub, err := r.billingUC.AssignPlan(c.Request.Context(), c.Param("tenant"), req.PlanID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"subscription": sub})
 }
