@@ -2,6 +2,7 @@ package geo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -24,16 +25,24 @@ import (
 //   - urlSubmitter（IndexNow 等）：内容发布为 published 时自动通知搜索引擎收录。
 //   - 经 SetURLSubmitter 注入；未注入（未配 Key）时静默跳过，发布流程不受影响。
 type ContentUseCase struct {
-	aiGen         port.AIGenerator            // 复用现有 AI 生成器（调 LLM）
-	scorer        port.GEOScorer              // GEO 评分（默认 LLM 深评，落库用）
-	ruleScorer    port.GEOScorer              // 免费规则评分（前后对比用，可注入）
+	aiGen         port.AIGenerator // 复用现有 AI 生成器（调 LLM）
+	scorer        port.GEOScorer   // GEO 评分（默认 LLM 深评，落库用）
+	ruleScorer    port.GEOScorer   // 免费规则评分（前后对比用，可注入）
 	contentRepo   port.OptimizedContentRepository
-	urlSubmitter  port.URLSubmitter           // 收录通知（可选）
-	publicBaseURL string                      // 公开站根地址（拼收录 URL 用）
+	urlSubmitter  port.URLSubmitter // 收录通知（可选）
+	publicBaseURL string            // 公开站根地址（拼收录 URL 用）
+	logger        port.Logger       // 日志（标题兜底等告警用）
 }
 
 func NewContentUseCase(ai port.AIGenerator, sc port.GEOScorer, cr port.OptimizedContentRepository) *ContentUseCase {
-	return &ContentUseCase{aiGen: ai, scorer: sc, contentRepo: cr, ruleScorer: sc}
+	return &ContentUseCase{aiGen: ai, scorer: sc, contentRepo: cr, ruleScorer: sc, logger: port.NopLogger{}}
+}
+
+// SetLogger 注入日志（可选；标题兜底等告警输出）。
+func (uc *ContentUseCase) SetLogger(l port.Logger) {
+	if l != nil {
+		uc.logger = l
+	}
 }
 
 // SetRuleScorer 注入免费规则评分器（前后对比用）。
@@ -53,6 +62,75 @@ func (uc *ContentUseCase) SetURLSubmitter(s port.URLSubmitter) {
 // SetPublicBaseURL 注入公开站根地址（拼收录通知的 URL）。
 func (uc *ContentUseCase) SetPublicBaseURL(baseURL string) {
 	uc.publicBaseURL = baseURL
+}
+
+// ---- 生成器调用（结构化输出增强）----
+
+// generatedArticle 结构化输出契约：标题 + 正文（引擎强制 JSON，标题零解析成本）。
+type generatedArticle struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+// callGenerator 调用 AI 生成器，优先使用结构化输出（OptionsAwareGenerator 可选接口）。
+//
+// 策略（开闭原则 + 渐进增强）：
+//   - onDelta != nil（流式路径）：保持纯文本——json 模式下流式增量是 JSON 片段，
+//     会污染前端 SSE 渲染；流式走提示词约束 + StripThinkTags。
+//   - onDelta == nil（非流式）：尝试 json 结构化输出（引擎强制 {title, content}）：
+//     解析成功 → 标题/正文零解析成本；失败 → 降级为原始输出
+//     （提示词硬约束路径，ExtractTitle 兜底）——支持方受益、不支持方行为不变。
+func (uc *ContentUseCase) callGenerator(ctx context.Context, convID, llmConfigName string, messages []port.ChatMessage, onDelta func(string)) (string, error) {
+	if onDelta != nil {
+		return uc.aiGen.ChatStream(ctx, convID, llmConfigName, messages, onDelta)
+	}
+
+	gen, ok := uc.aiGen.(port.OptionsAwareGenerator)
+	if !ok {
+		return uc.aiGen.ChatStream(ctx, convID, llmConfigName, messages, nil)
+	}
+
+	out, err := gen.ChatStreamWithOptions(ctx, port.ChatStreamInput{
+		ConversationID: convID,
+		LLMConfigName:  llmConfigName,
+		Messages:       messages,
+		Options: port.ChatOptions{
+			ResponseFormat:    "json",
+			SchemaExample:     &generatedArticle{},
+			SchemaDescription: "文章标题与正文（title=标题，content=正文）",
+			DisableThinking:   true, // 请求层关闭思考（适配器按厂商映射，不支持则提示词兜底）
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	// 解析结构化 JSON；失败降级为原始输出（提示词硬约束仍保证格式，ExtractTitle 兜底）
+	var art generatedArticle
+	if jsonBlock := extractJSONFromOutput(out); json.Unmarshal([]byte(jsonBlock), &art) == nil && art.Content != "" {
+		title := strings.TrimSpace(art.Title)
+		if title != "" {
+			return "# " + title + "\n\n" + art.Content, nil
+		}
+		return art.Content, nil
+	}
+	return out, nil
+}
+
+// extractJSONFromOutput 从生成输出中提取 JSON 块（引擎强制 JSON 时一般直接可用；
+// 个别模型带 ```json 包裹时去包裹）。返回空串表示未找到。
+func extractJSONFromOutput(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		lines := strings.Split(s, "\n")
+		if len(lines) >= 2 {
+			lines = lines[1:]
+			if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+				lines = lines[:len(lines)-1]
+			}
+			return strings.TrimSpace(strings.Join(lines, "\n"))
+		}
+	}
+	return s
 }
 
 // OptimizeInput 内容优化的输入。
@@ -108,7 +186,7 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 		title = keywordDesc
 	}
 
-	systemPrompt := `你是一个 GEO（生成式引擎优化）内容优化专家。
+	systemPrompt := `你是一个 GEO（生成式内容优化）专家。
 目标：把给定内容优化得更可能被 AI 搜索引擎引用。
 优化方向：
 1. 增强权威性：补充具体数据、案例、资质（不可编造）
@@ -119,7 +197,10 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 
 ` + entity.BuildEnginePrefInstruction(in.TargetEngine) + `
 
-只输出优化后的内容，不要解释。`
+硬性要求：
+- 严禁输出任何思考过程、推理过程或 <think> 内容——只输出最终文章
+- 第一行必须输出标题，以 # 开头（如 # 北京装修公司哪家好？10 年老牌真实对比）
+- 只输出优化后的内容，不要解释`
 
 	userPrompt := fmt.Sprintf("目标关键词：%s\n\n原始内容：\n%s", keywordDesc, in.OriginalText)
 
@@ -128,7 +209,7 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 		{Role: "user", Content: userPrompt},
 	}
 	convID := fmt.Sprintf("content-opt-%d", time.Now().UnixNano())
-	optimized, err := uc.aiGen.ChatStream(ctx, convID, in.LLMConfigName, messages, nil)
+	optimized, err := uc.callGenerator(ctx, convID, in.LLMConfigName, messages, nil)
 	if err != nil {
 		return OptimizeResult{}, fmt.Errorf("优化失败: %w", err)
 	}
@@ -300,7 +381,7 @@ type GenerateInput struct {
 	Keywords      []string // 一个或多个关键词（组合模式）
 	BrandInfo     string   // 品牌定位/卖点摘要（供 LLM 参考，让内容贴合品牌）
 	LLMConfigName string
-	TargetEngine  string   // 目标 AI 引擎偏好（chatgpt/perplexity/kimi/doubao；空=通用）
+	TargetEngine  string // 目标 AI 引擎偏好（chatgpt/perplexity/kimi/doubao；空=通用）
 }
 
 // Generate 从零生成内容：根据品牌信息 + 关键词，AI 原创一篇 GEO 优化文章。
@@ -331,7 +412,10 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 
 ` + entity.BuildEnginePrefInstruction(in.TargetEngine) + `
 
-只输出文章正文（含标题），不要解释。`
+硬性要求：
+- 严禁输出任何思考过程、推理过程或 <think> 内容——只输出最终文章
+- 第一行必须输出标题，以 # 开头（如 # 北京装修公司哪家好？10 年老牌真实对比）
+- 只输出文章正文（含标题），不要解释`
 
 	modeHint := "围绕这个关键词创作一篇文章"
 	if isMulti {
@@ -347,7 +431,7 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 		{Role: "user", Content: userPrompt},
 	}
 	convID := fmt.Sprintf("content-gen-%d", time.Now().UnixNano())
-	content, err := uc.aiGen.ChatStream(ctx, convID, in.LLMConfigName, messages, onDelta)
+	content, err := uc.callGenerator(ctx, convID, in.LLMConfigName, messages, onDelta)
 	if err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("生成内容失败: %w", err)
 	}
@@ -355,8 +439,14 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 	content = pkg.StripThinkTags(content)
 	content = strings.TrimSpace(content)
 
-	// 提取标题：AI 生成的文章通常以 markdown 标题开头，取首个标题行作发布标题
+	// 提取标题：AI 生成的文章通常以 markdown 标题开头，取首个标题行作发布标题。
+	// 标题非空校验（P0）：LLM 未按格式输出标题时用关键词兜底，保证发布字段完整。
 	title := pkg.ExtractTitle(content)
+	if len(title) < 4 {
+		title = keywordDesc // 兜底：用关键词作标题
+		uc.logger.Warn("生成内容缺少标题，已用关键词兜底",
+			port.String("brand", in.BrandID), port.String("keyword", keywordDesc))
+	}
 
 	// GEO 评分
 	score, sErr := uc.scorer.Score(ctx, content, in.Keywords[0])

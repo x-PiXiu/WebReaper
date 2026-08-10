@@ -159,29 +159,54 @@ func (g *TrpcAgentGenerator) getOrCreateRunner(sessionID string, systemPrompt st
 // ChatStream 实现 port.AIGenerator：流式对话（支持多轮上下文）。
 // conversationID 是会话隔离的关键：直接作为 sessionID，根治"会话间记忆串台"。
 func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, conversationID string, llmConfigName string, messages []port.ChatMessage, onDelta func(delta string)) (string, error) {
+	return g.ChatStreamWithOptions(ctx, port.ChatStreamInput{
+		ConversationID: conversationID,
+		LLMConfigName:  llmConfigName,
+		Messages:       messages,
+		OnDelta:        onDelta,
+	})
+}
+
+// ChatStreamWithOptions 实现 port.OptionsAwareGenerator：带控制选项的对话。
+//
+// 选项映射（适配器层职责——业务零感知厂商差异）：
+//   - ResponseFormat=json + SchemaExample：注入框架原生结构化输出
+//     （agent.WithStructuredOutputJSON → OpenAI response_format json_schema；
+//     DeepSeek 变体由框架自动降级为 json_object）
+//   - DisableThinking：厂商专属请求参数（如 DeepSeek enable_thinking=false）——
+//     框架 Request.ExtraFields 已预留字段（model/request.go），但当前版本无
+//     per-request 入口；降级为提示词层禁令（在 system prompt 追加），
+//     待框架暴露 RequestOption 后一行接入请求参数层（纵深防御第二层）。
+func (g *TrpcAgentGenerator) ChatStreamWithOptions(ctx context.Context, in port.ChatStreamInput) (string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "ai.chat_stream")
 	defer span.End()
 
-	if len(messages) == 0 { return "", fmt.Errorf("no messages") }
+	if len(in.Messages) == 0 { return "", fmt.Errorf("no messages") }
 
 	// 解析 LLM 客户端（按 llmConfigName，空则 default）
-	llm, err := g.resolveLLM(ctx, llmConfigName)
+	llm, err := g.resolveLLM(ctx, in.LLMConfigName)
 	if err != nil { return "", err }
 
 	// 提取 system prompt（如果有）和最后一条 user 消息
 	var systemPrompt string
-	lastUser := messages[len(messages)-1]
-	for _, msg := range messages {
+	lastUser := in.Messages[len(in.Messages)-1]
+	for _, msg := range in.Messages {
 		if msg.Role == "system" {
 			systemPrompt = msg.Content
 		}
 	}
 
+	// DisableThinking 降级：提示词层禁令（模型无关兜底——请求参数层待框架
+	// RequestOption 暴露后接入厂商专属字段，届时此处删除）
+	if in.Options.DisableThinking {
+		systemPrompt = "严禁输出任何思考过程、推理过程或 <think> 内容，只输出最终结果。\n" + systemPrompt
+	}
+
 	// 会话隔离：sessionID 直接用 conversationID（根治串台）。
 	// 后台编排路径（conversationID 为空）退化为按内容 hash，保持原行为。
-	sessionID := conversationID
+	sessionID := in.ConversationID
 	if sessionID == "" {
-		sessionID = fmt.Sprintf("adhoc-%d", hashString(systemPrompt+":"+llmConfigName))
+		sessionID = fmt.Sprintf("adhoc-%d", hashString(systemPrompt+":"+in.LLMConfigName))
 	}
 
 	r, isNew := g.getOrCreateRunner(sessionID, systemPrompt, llm)
@@ -190,8 +215,8 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, conversationID stri
 	// 框架的 seedSessionHistory 只在空 session 时执行（isNew=true 即首次），
 	// 后续多轮走内存累积，不重复 seed。system 消息已通过 Instruction 注入，这里不传。
 	// 如此实现"重启后旧会话续聊仍带历史上下文"。
-	if isNew && g.memory != nil && conversationID != "" {
-		if history, hErr := g.memory.History(ctx, conversationID); hErr == nil && len(history) > 0 {
+	if isNew && g.memory != nil && in.ConversationID != "" {
+		if history, hErr := g.memory.History(ctx, in.ConversationID); hErr == nil && len(history) > 0 {
 			seedMsgs := make([]model.Message, 0, len(history)+1)
 			for _, hm := range history {
 				role := model.RoleUser
@@ -202,19 +227,35 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, conversationID stri
 			}
 			// 本次 user 消息放最后，框架会合并去重（mergeCurrentTurnMessagesIntoSeed）
 			seedMsgs = append(seedMsgs, model.Message{Role: model.RoleUser, Content: lastUser.Content})
-			events, err := runner.RunWithMessages(ctx, r, "webreaper-user", sessionID, seedMsgs)
+			events, err := runner.RunWithMessages(ctx, r, "webreaper-user", sessionID, seedMsgs, g.structuredOutputRunOption(in.Options)...)
 			if err != nil {
 				return "", fmt.Errorf("runner run with messages: %w", err)
 			}
-			return g.drainChatStreamEvents(ctx, events, onDelta)
+			return g.drainChatStreamEvents(ctx, events, in.OnDelta)
 		}
 	}
 
 	events, err := r.Run(ctx, "webreaper-user", sessionID,
 		model.Message{Role: model.RoleUser, Content: lastUser.Content},
+		g.structuredOutputRunOption(in.Options)...,
 	)
 	if err != nil { return "", fmt.Errorf("runner run: %w", err) }
-	return g.drainChatStreamEvents(ctx, events, onDelta)
+	return g.drainChatStreamEvents(ctx, events, in.OnDelta)
+}
+
+// structuredOutputRunOption 按选项构造框架结构化输出 RunOption（无则返回空）。
+// 框架原生：agent.WithStructuredOutputJSON 自动推断 schema（DeepSeek 变体自动降级 json_object）。
+func (g *TrpcAgentGenerator) structuredOutputRunOption(opts port.ChatOptions) []agent.RunOption {
+	if opts.ResponseFormat != "json" {
+		return nil
+	}
+	if opts.SchemaExample != nil {
+		return []agent.RunOption{agent.WithStructuredOutputJSON(opts.SchemaExample, true, opts.SchemaDescription)}
+	}
+	if opts.JSONSchema != nil {
+		return []agent.RunOption{agent.WithStructuredOutputJSONSchema("wr_output", opts.JSONSchema, true, opts.SchemaDescription)}
+	}
+	return nil
 }
 
 // drainChatStreamEvents 消费 runner 的事件流，把文本增量回调出去，并统计 token 用量。

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"webreaper/internal/domain/entity"
 	mockrepo "webreaper/internal/adapter/mock"
+	"webreaper/internal/domain/entity"
 )
 
 // SetStatus 测试：状态白名单 / 租户隔离 / 幂等。
