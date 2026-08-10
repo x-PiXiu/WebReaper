@@ -59,8 +59,12 @@ func (uc *StructuredDataUseCase) InferSchemaType(content string) entity.SchemaTy
 	return inferSchemaType(content)
 }
 
-// GenerateLLMSTxt 生成 llms.txt 全文（llmstxt.org 规范：Markdown 格式，
-// 一行一条 "URL: 标题 - 摘要"，让 AI 爬虫快速了解站点结构）。
+// GenerateLLMSTxt 生成 llms.txt 全文（llmstxt.org 规范）。
+//
+// 格式（对齐 llmstxt.org）：
+//   # 站点名（H1，唯一必需）
+//   > 一句话摘要（blockquote）
+//   [标题](URL): 一句话描述    ← 条目必须是 Markdown 链接格式
 func (uc *StructuredDataUseCase) GenerateLLMSTxt(ctx context.Context, siteTitle, siteSummary string, entries []entity.LLMSTxtEntry) (string, error) {
 	var sb strings.Builder
 	sb.WriteString("# " + siteTitle + "\n\n")
@@ -68,12 +72,13 @@ func (uc *StructuredDataUseCase) GenerateLLMSTxt(ctx context.Context, siteTitle,
 		sb.WriteString("> " + siteSummary + "\n\n")
 	}
 	for _, e := range entries {
-		line := e.URL
-		if e.Title != "" {
-			line += ": " + e.Title
+		title := e.Title
+		if title == "" {
+			title = e.URL
 		}
+		line := "[" + title + "](" + e.URL + ")"
 		if e.Summary != "" {
-			line += " - " + e.Summary
+			line += ": " + e.Summary
 		}
 		sb.WriteString(line + "\n")
 	}

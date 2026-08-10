@@ -192,7 +192,11 @@ func TestGenerateLLMSTxt(t *testing.T) {
 	if !strings.Contains(out, "# 装修公司官网") {
 		t.Errorf("缺少站点标题: %s", out)
 	}
-	if !strings.Contains(out, "https://example.com/faq: 常见问题") {
-		t.Errorf("条目格式错误: %s", out)
+	// 规范格式：Markdown 链接 [标题](URL): 描述
+	if !strings.Contains(out, "[首页](https://example.com/): 装修公司推荐总览") {
+		t.Errorf("条目应为 [标题](URL): 描述 格式: %s", out)
+	}
+	if !strings.Contains(out, "[常见问题](https://example.com/faq)") {
+		t.Errorf("无摘要条目也应输出链接格式: %s", out)
 	}
 }
