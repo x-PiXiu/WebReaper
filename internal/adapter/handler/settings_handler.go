@@ -2,10 +2,12 @@ package handler
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"webreaper/internal/adapter/handler/middleware"
+	"webreaper/internal/domain/entity"
 )
 
 // HandleGetAutoMonitor GET /api/v1/admin/settings/auto-monitor —— 读自动盯盘开关。
@@ -87,4 +89,48 @@ func (r *Router) HandleSetTenantAutoMonitor(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"tenant_enabled": req.Enabled})
+}
+
+// ---- 提示词模板管理（admin）----
+
+// HandleListPromptTemplates GET /api/v1/admin/prompt-templates —— 全部模板列表。
+func (r *Router) HandleListPromptTemplates(c *gin.Context) {
+	if r.promptTemplateRepo == nil {
+		fail(c, errNotConfigured("提示词模板"))
+		return
+	}
+	list, err := r.promptTemplateRepo.List(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"templates": list})
+}
+
+// HandleUpdatePromptTemplate PUT /api/v1/admin/prompt-templates/:key —— 更新模板内容
+// （保存后版本 +1，内容生成即时生效——热更新，无需发版）。
+func (r *Router) HandleUpdatePromptTemplate(c *gin.Context) {
+	if r.promptTemplateRepo == nil {
+		fail(c, errNotConfigured("提示词模板"))
+		return
+	}
+	key := c.Param("key")
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "content 必填"})
+		return
+	}
+	// 读取当前版本（不存在则从 0 起）——版本递增由仓储 Save 处理
+	if err := r.promptTemplateRepo.Save(c.Request.Context(), entity.PromptTemplate{Key: key, Content: req.Content}); err != nil {
+		fail(c, err)
+		return
+	}
+	t, err := r.promptTemplateRepo.Get(c.Request.Context(), key)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, t)
 }

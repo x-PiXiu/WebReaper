@@ -168,5 +168,7 @@ func allModels() []any {
 		// 视频生成工作台（生成任务 + 发布任务）
 		&VideoTaskPO{},
 		&VideoJobPO{},
+		// 提示词模板仓库（内容生成/优化提示词可管理）
+		&PromptTemplatePO{},
 	}
 }

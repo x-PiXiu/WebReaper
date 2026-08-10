@@ -347,6 +347,13 @@ func main() {
 		// RAG 增强：原创生成前检索"品牌+关键词"真实信息注入 prompt（"不编造数据"变能力）
 		geoContentUC.SetRAGRetriever(ai.NewWebContentRetriever(webFetcher))
 		geoContentUC.SetLogger(log)
+		// 提示词模板仓库：内容生成/优化系统提示词可管理、可热更新（seed 内置默认模板）
+		promptTemplateRepo := repository.NewGormPromptTemplateRepository(geoRepos.db)
+		if seedErr := seedPromptTemplates(promptTemplateRepo); seedErr != nil {
+			log.Warn("seed 提示词模板失败（将使用内置默认）", port.Err(seedErr))
+		}
+		geoContentUC.SetPromptTemplateRepo(promptTemplateRepo)
+		router.SetPromptTemplates(promptTemplateRepo) // admin 管理端点（列表/热更新）
 		// 收录通知（IndexNow）：发布为 published 时自动通知搜索引擎
 		if indexNowSubmitter != nil {
 			geoContentUC.SetPublicBaseURL(cfg.Server.PublicBaseURL)
@@ -571,6 +578,20 @@ type geoRepos struct {
 	keyword port.KeywordRepository
 	result  port.MonitoringResultRepository
 	content port.OptimizedContentRepository
+}
+
+// seedPromptTemplates 首次启动写入内置默认提示词模板（已存在则跳过，保留运营修改）。
+func seedPromptTemplates(repo *repository.GormPromptTemplateRepository) error {
+	ctx := context.Background()
+	for _, t := range geo.DefaultPromptTemplates() {
+		if _, err := repo.Get(ctx, t.Key); err == nil {
+			continue // 已存在（可能被管理后台改过）——不覆盖
+		}
+		if err := repo.Save(ctx, t); err != nil {
+			return fmt.Errorf("seed 提示词模板 %s: %w", t.Key, err)
+		}
+	}
+	return nil
 }
 
 // initGEORpositories 初始化 GEO 仓储（需要数据库；未配置 DB 时返回 nil，GEO 功能降级禁用）。

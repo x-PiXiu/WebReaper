@@ -77,6 +77,8 @@ type Router struct {
 	notifyUC *notification.NotifyUseCase
 	// 视频生成工作台——通过 SetVideo 注入，可选
 	videoUC *video.VideoUseCase
+	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
+	promptTemplateRepo port.PromptTemplateRepository
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -140,6 +142,11 @@ func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCa
 // SetVideo 注入视频生成工作台用例（可选；未注入则视频端点不注册）。
 func (r *Router) SetVideo(uc *video.VideoUseCase) {
 	r.videoUC = uc
+}
+
+// SetPromptTemplates 注入提示词模板仓库（可选；admin 管理内容生成/优化提示词）。
+func (r *Router) SetPromptTemplates(repo port.PromptTemplateRepository) {
+	r.promptTemplateRepo = repo
 }
 
 func NewRouter(
@@ -361,11 +368,16 @@ func (r *Router) Engine() *gin.Engine {
 				// Tavily 搜索 API 配置（管理后台用）
 				adminGroup.GET("/tavily-status", r.handleTavilyStatus)
 				adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
-				// 平台系统设置（运行时开关）
-				if r.settingsUC != nil {
-					adminGroup.GET("/settings/auto-monitor", r.HandleGetAutoMonitor)
-					adminGroup.PUT("/settings/auto-monitor", r.HandleSetAutoMonitor)
-				}
+			// 平台系统设置（运行时开关）
+			if r.settingsUC != nil {
+				adminGroup.GET("/settings/auto-monitor", r.HandleGetAutoMonitor)
+				adminGroup.PUT("/settings/auto-monitor", r.HandleSetAutoMonitor)
+			}
+			// 提示词模板管理（内容生成/优化系统提示词可管理、可热更新）
+			if r.promptTemplateRepo != nil {
+				adminGroup.GET("/prompt-templates", r.HandleListPromptTemplates)
+				adminGroup.PUT("/prompt-templates/:key", r.HandleUpdatePromptTemplate)
+			}
 			// 收录管理（运行时配置/提交日志/手动补提交）
 			if r.indexingUC != nil {
 				adminGroup.GET("/indexing/config", r.HandleGetIndexingConfig)

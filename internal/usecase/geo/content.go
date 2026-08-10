@@ -33,6 +33,68 @@ type ContentUseCase struct {
 	publicBaseURL string                      // 公开站根地址（拼收录 URL 用）
 	logger        port.Logger                 // 日志（标题兜底等告警用）
 	ragRetriever  port.ContentRAGRetriever    // RAG 检索（可选；nil=纯 LLM 推断）
+	templateRepo  port.PromptTemplateRepository // 提示词模板（可选；nil=内置默认）
+}
+
+// 内置默认提示词模板（模板仓库无记录时的兜底，与 seed 内容一致）。
+const (
+	// defaultOptimizePrompt 内容优化系统提示词（GEO 改写）。
+	defaultOptimizePrompt = `你是一个 GEO（生成式内容优化）专家。
+目标：把给定内容优化得更可能被 AI 搜索引擎引用。
+优化方向：
+1. 增强权威性：补充具体数据、案例、资质（不可编造）
+2. 增强具体性：用数字、细节、可验证信息替代模糊表述
+3. 结构化：使用标题层级、列表、FAQ 格式
+4. 自然融入关键词：避免堆砌
+5. 保持真实性：绝不编造虚假信息
+
+硬性要求：
+- 严禁输出任何思考过程、推理过程或 <think> 内容——只输出最终文章
+- 第一行必须输出标题，以 # 开头（如 # 北京装修公司哪家好？10 年老牌真实对比）
+- 只输出优化后的内容，不要解释`
+
+	// defaultGeneratePrompt 内容原创生成系统提示词。
+	defaultGeneratePrompt = `你是一个 GEO（生成式引擎优化）内容创作专家。
+目标：根据品牌信息和关键词，创作一篇容易被 AI 搜索引擎引用的高质量文章。
+要求：
+1. 围绕关键词展开，自然融入（不堆砌）
+2. 结构化：标题层级清晰、有列表/小标题
+3. 有权威性：包含具体观点、方法论、可操作建议
+4. 真实可信：不编造数据，基于品牌真实信息创作
+5. 字数 800-1500 字
+
+硬性要求：
+- 严禁输出任何思考过程、推理过程或 <think> 内容——只输出最终文章
+- 第一行必须输出标题，以 # 开头（如 # 北京装修公司哪家好？10 年老牌真实对比）
+- 只输出文章正文（含标题），不要解释`
+)
+
+// DefaultPromptTemplates 返回内置默认提示词模板（seed 用）。
+// 与 usecase 内部 fallback 同源——模板仓库清空/未 seed 时行为一致，不会漂移。
+func DefaultPromptTemplates() []entity.PromptTemplate {
+	now := time.Now()
+	return []entity.PromptTemplate{
+		{Key: entity.PromptKeyContentGenerate, Version: 1, Content: defaultGeneratePrompt, UpdatedAt: now},
+		{Key: entity.PromptKeyContentOptimize, Version: 1, Content: defaultOptimizePrompt, UpdatedAt: now},
+	}
+}
+
+// systemPrompt 取系统提示词：模板仓库有记录用模板（可管理/可热更新），
+// 否则用内置默认。引擎偏好指令始终由代码拼接（业务规则不被模板绕过）。
+func (uc *ContentUseCase) systemPrompt(ctx context.Context, key, fallback, targetEngine string) string {
+	if uc.templateRepo != nil {
+		if t, err := uc.templateRepo.Get(ctx, key); err == nil && t.Content != "" {
+			return t.Content + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine)
+		}
+	}
+	return fallback + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine)
+}
+
+// SetPromptTemplateRepo 注入提示词模板仓库（可选；未注入时用内置默认提示词）。
+func (uc *ContentUseCase) SetPromptTemplateRepo(r port.PromptTemplateRepository) {
+	if r != nil {
+		uc.templateRepo = r
+	}
 }
 
 // SetRAGRetriever 注入内容生成 RAG 检索器（可选）。
@@ -179,21 +241,7 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 		title = keywordDesc
 	}
 
-	systemPrompt := `你是一个 GEO（生成式内容优化）专家。
-目标：把给定内容优化得更可能被 AI 搜索引擎引用。
-优化方向：
-1. 增强权威性：补充具体数据、案例、资质（不可编造）
-2. 增强具体性：用数字、细节、可验证信息替代模糊表述
-3. 结构化：使用标题层级、列表、FAQ 格式
-4. 自然融入关键词：避免堆砌
-5. 保持真实性：绝不编造虚假信息
-
-` + entity.BuildEnginePrefInstruction(in.TargetEngine) + `
-
-硬性要求：
-- 严禁输出任何思考过程、推理过程或 <think> 内容——只输出最终文章
-- 第一行必须输出标题，以 # 开头（如 # 北京装修公司哪家好？10 年老牌真实对比）
-- 只输出优化后的内容，不要解释`
+	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentOptimize, defaultOptimizePrompt, in.TargetEngine)
 
 	userPrompt := fmt.Sprintf("目标关键词：%s\n\n原始内容：\n%s", keywordDesc, in.OriginalText)
 
@@ -406,21 +454,7 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 	keywordDesc := strings.Join(in.Keywords, "、")
 	isMulti := len(in.Keywords) > 1
 
-	systemPrompt := `你是一个 GEO（生成式引擎优化）内容创作专家。
-目标：根据品牌信息和关键词，创作一篇容易被 AI 搜索引擎引用的高质量文章。
-要求：
-1. 围绕关键词展开，自然融入（不堆砌）
-2. 结构化：标题层级清晰、有列表/小标题
-3. 有权威性：包含具体观点、方法论、可操作建议
-4. 真实可信：不编造数据，基于品牌真实信息创作
-5. 字数 800-1500 字
-
-` + entity.BuildEnginePrefInstruction(in.TargetEngine) + `
-
-硬性要求：
-- 严禁输出任何思考过程、推理过程或 <think> 内容——只输出最终文章
-- 第一行必须输出标题，以 # 开头（如 # 北京装修公司哪家好？10 年老牌真实对比）
-- 只输出文章正文（含标题），不要解释`
+	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentGenerate, defaultGeneratePrompt, in.TargetEngine)
 
 	modeHint := "围绕这个关键词创作一篇文章"
 	if isMulti {
