@@ -14,11 +14,13 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/port"
 )
 
@@ -30,17 +32,64 @@ type keywordDistiller struct {
 	aiGen port.AIGenerator
 }
 
+// distilledKeyword 结构化输出契约：关键词 + 意图（引擎强制 JSON，防随机化）。
+type distilledKeyword struct {
+	Term   string `json:"term"`
+	Intent string `json:"intent"`
+}
+
+// keywordList 结构化输出外层。
+type keywordList struct {
+	Keywords []distilledKeyword `json:"keywords"`
+}
+
 // distillWithLLM 把 contextText 喂给 LLM，让它提取/生成关键词。
 // prompt 指导 LLM 如何蒸馏（不同来源的指导语不同）。
+//
+// 结构化输出（防随机化）：优先走 OptionsAwareGenerator JSON schema
+// （{"keywords":[{"term","intent"}]}）——引擎强制 JSON，数量/格式稳定；
+// 解析失败或生成器不支持时降级为原纯文本路径（parseKeywordResponse 兜底）。
 func (d *keywordDistiller) distillWithLLM(ctx context.Context, prompt, contextText, llmCfg string) ([]string, error) {
 	systemPrompt := "你是 GEO（生成式引擎优化）关键词蒸馏专家。" +
-		"从给定内容中提取/生成用户在 AI 搜索引擎里最可能搜索的关键词。每行一个，不要编号，不要解释。"
+		"从给定内容中提取/生成用户在 AI 搜索引擎里最可能搜索的关键词。只输出 JSON。"
 	userPrompt := fmt.Sprintf("%s\n\n内容：\n%s", prompt, contextText)
 	messages := []port.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 	convID := fmt.Sprintf("kw-distill-%d", time.Now().UnixNano())
+
+	// 结构化输出路径（渐进增强：支持方受益，不支持方降级）
+	if gen, ok := d.aiGen.(port.OptionsAwareGenerator); ok {
+		out, err := gen.ChatStreamWithOptions(ctx, port.ChatStreamInput{
+			ConversationID: convID,
+			LLMConfigName:  llmCfg,
+			Messages:       messages,
+			Options: port.ChatOptions{
+				ResponseFormat:    "json",
+				SchemaExample:     &port.KeywordList{},
+				SchemaDescription: "关键词列表（term=关键词，intent=搜索意图）",
+				DisableThinking:   true,
+			},
+		})
+		if err == nil {
+			var kl port.KeywordList
+			if jsonBlock := pkg.ExtractJSONBlock(out); json.Unmarshal([]byte(jsonBlock), &kl) == nil && len(kl.Keywords) > 0 {
+				terms := make([]string, 0, len(kl.Keywords))
+				for _, k := range kl.Keywords {
+					term := strings.TrimSpace(k.Term)
+					if term != "" {
+						terms = append(terms, term)
+					}
+				}
+				if len(terms) > 0 {
+					return terms, nil
+				}
+			}
+		}
+	}
+
+	// 降级路径：纯文本蒸馏（原行为）
 	resp, err := d.aiGen.ChatStream(ctx, convID, llmCfg, messages, nil)
 	if err != nil {
 		return nil, fmt.Errorf("蒸馏 LLM 调用失败: %w", err)

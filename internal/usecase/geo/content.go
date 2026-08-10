@@ -25,13 +25,22 @@ import (
 //   - urlSubmitter（IndexNow 等）：内容发布为 published 时自动通知搜索引擎收录。
 //   - 经 SetURLSubmitter 注入；未注入（未配 Key）时静默跳过，发布流程不受影响。
 type ContentUseCase struct {
-	aiGen         port.AIGenerator // 复用现有 AI 生成器（调 LLM）
-	scorer        port.GEOScorer   // GEO 评分（默认 LLM 深评，落库用）
-	ruleScorer    port.GEOScorer   // 免费规则评分（前后对比用，可注入）
+	aiGen         port.AIGenerator            // 复用现有 AI 生成器（调 LLM）
+	scorer        port.GEOScorer              // GEO 评分（默认 LLM 深评，落库用）
+	ruleScorer    port.GEOScorer              // 免费规则评分（前后对比用，可注入）
 	contentRepo   port.OptimizedContentRepository
-	urlSubmitter  port.URLSubmitter // 收录通知（可选）
-	publicBaseURL string            // 公开站根地址（拼收录 URL 用）
-	logger        port.Logger       // 日志（标题兜底等告警用）
+	urlSubmitter  port.URLSubmitter           // 收录通知（可选）
+	publicBaseURL string                      // 公开站根地址（拼收录 URL 用）
+	logger        port.Logger                 // 日志（标题兜底等告警用）
+	ragRetriever  port.ContentRAGRetriever    // RAG 检索（可选；nil=纯 LLM 推断）
+}
+
+// SetRAGRetriever 注入内容生成 RAG 检索器（可选）。
+// 注入后原创生成前检索"品牌+关键词"真实信息注入 prompt——"不编造数据"从口号变能力。
+func (uc *ContentUseCase) SetRAGRetriever(r port.ContentRAGRetriever) {
+	if r != nil {
+		uc.ragRetriever = r
+	}
 }
 
 func NewContentUseCase(ai port.AIGenerator, sc port.GEOScorer, cr port.OptimizedContentRepository) *ContentUseCase {
@@ -106,7 +115,7 @@ func (uc *ContentUseCase) callGenerator(ctx context.Context, convID, llmConfigNa
 	}
 	// 解析结构化 JSON；失败降级为原始输出（提示词硬约束仍保证格式，ExtractTitle 兜底）
 	var art generatedArticle
-	if jsonBlock := extractJSONFromOutput(out); json.Unmarshal([]byte(jsonBlock), &art) == nil && art.Content != "" {
+	if jsonBlock := pkg.ExtractJSONBlock(out); json.Unmarshal([]byte(jsonBlock), &art) == nil && art.Content != "" {
 		title := strings.TrimSpace(art.Title)
 		if title != "" {
 			return "# " + title + "\n\n" + art.Content, nil
@@ -114,23 +123,6 @@ func (uc *ContentUseCase) callGenerator(ctx context.Context, convID, llmConfigNa
 		return art.Content, nil
 	}
 	return out, nil
-}
-
-// extractJSONFromOutput 从生成输出中提取 JSON 块（引擎强制 JSON 时一般直接可用；
-// 个别模型带 ```json 包裹时去包裹）。返回空串表示未找到。
-func extractJSONFromOutput(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		lines := strings.Split(s, "\n")
-		if len(lines) >= 2 {
-			lines = lines[1:]
-			if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
-				lines = lines[:len(lines)-1]
-			}
-			return strings.TrimSpace(strings.Join(lines, "\n"))
-		}
-	}
-	return s
 }
 
 // OptimizeInput 内容优化的输入。
@@ -428,6 +420,26 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 目标关键词：%s
 
 请%s。`, in.BrandInfo, keywordDesc, modeHint)
+
+	// RAG 增强：生成前检索"品牌 + 关键词"真实信息注入 prompt（可选，失败降级为纯 LLM）。
+	// "不编造数据"从口号变能力——LLM 引用真实检索资料创作，权威性维度显著提升。
+	if uc.ragRetriever != nil {
+		ragQuery := keywordDesc
+		if in.BrandInfo != "" {
+			// 取品牌名（BrandInfo 首行通常是品牌描述）
+			ragQuery = strings.SplitN(in.BrandInfo, "\n", 2)[0] + " " + keywordDesc
+		}
+		if ctx2, cancel := context.WithTimeout(ctx, 15*time.Second); true {
+			if ref, rErr := uc.ragRetriever.RetrieveContent(ctx2, ragQuery, 3); rErr == nil && ref != "" {
+				userPrompt += fmt.Sprintf(`
+
+参考资料（来自全网真实检索，可引用其中事实/观点，但需与品牌信息一致）：
+%s
+`, ref)
+			}
+			cancel()
+		}
+	}
 
 	messages := []port.ChatMessage{
 		{Role: "system", Content: systemPrompt},

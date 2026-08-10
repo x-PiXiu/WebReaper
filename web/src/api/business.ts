@@ -260,6 +260,12 @@ export const businessApi = {
   adminDeleteContent: (contentId: string) =>
     apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/contents/${contentId}`),
 
+  // ---- 平台系统设置（管理端：运行时开关）----
+  getAutoMonitor: () =>
+    apiClient.get<unknown, { auto_monitor_enabled: boolean }>('/api/v1/admin/settings/auto-monitor'),
+  setAutoMonitor: (enabled: boolean) =>
+    apiClient.put<unknown, { auto_monitor_enabled: boolean }>('/api/v1/admin/settings/auto-monitor', { enabled }),
+
   // ---- Tavily 搜索配置（管理端）----
   getTavilyStatus: () =>
     apiClient.get<unknown, { registered: boolean; enabled: boolean }>('/api/v1/admin/tavily-status'),

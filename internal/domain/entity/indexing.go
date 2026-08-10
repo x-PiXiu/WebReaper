@@ -71,3 +71,9 @@ type IndexingSubmitLog struct {
 	ErrorMsg    string          // 失败原因（成功为空）
 	SubmittedAt time.Time
 }
+
+// ---- 平台设置键（system_settings 通用键值）----
+
+// SettingKeyAutoMonitor 每日自动监测开关（"true"/"false"）。
+// 管理后台运行时开关——开启后调度器每日对全平台品牌自动监测（趋势自动生长）。
+const SettingKeyAutoMonitor = "auto_monitor_enabled"

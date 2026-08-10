@@ -420,6 +420,39 @@ export default function Keywords() {
                                   </div>
                                 )
                               })()}
+
+                              {/* 多引擎对比（付费卖点：豆包推荐你 vs Kimi 不推荐你——一眼看清差异）*/}
+                              {results.length > 1 && (() => {
+                                const engines = [...new Set(results.map((r: MonitoringResult) => r.engine_name || 'default'))]
+                                return (
+                                  <div style={{ marginBottom: 12, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 10 }}>
+                                    <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>AI 引擎提及率对比</Text>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      {engines.map((eng) => {
+                                        const r = results.filter((x) => (x.engine_name || 'default') === eng)
+                                          .sort((a, b) => new Date(b.probed_at).getTime() - new Date(a.probed_at).getTime())[0]
+                                        const rate = r?.mention_rate || 0
+                                        return (
+                                          <div key={eng} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                            <Text style={{ fontSize: 12, minWidth: 90, fontWeight: 600 }}>{eng}</Text>
+                                            <div style={{ flex: 1, height: 10, borderRadius: 5, background: 'var(--wr-bg-hover)', overflow: 'hidden' }}>
+                                              <div style={{
+                                                width: `${Math.min(100, rate * 100)}%`, height: '100%',
+                                                background: rate >= 0.5 ? 'var(--wr-gradient)' : rate >= 0.2 ? 'linear-gradient(90deg,#f59e0b,#fbbf24)' : 'linear-gradient(90deg,#fb7185,#f87171)',
+                                                borderRadius: 5, transition: 'width 400ms ease',
+                                              }} />
+                                            </div>
+                                            <Text style={{ fontSize: 12, minWidth: 56, textAlign: 'right', fontWeight: 700, color: rate >= 0.5 ? 'var(--wr-success)' : rate >= 0.2 ? 'var(--wr-warning)' : 'var(--wr-danger)' }}>
+                                              {(rate * 100).toFixed(0)}%
+                                            </Text>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )
+                              })()}
+
                               <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>各 AI 引擎检测详情</Text>
                               {results.map((r: MonitoringResult) => {
                                 // 竞品对比（坐标系：我 X% vs 竞品 Y%——付费说服力核心）

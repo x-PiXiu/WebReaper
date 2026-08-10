@@ -22,6 +22,7 @@ import (
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/stats"
+	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/structured"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
@@ -68,6 +69,8 @@ type Router struct {
 	publishSemiUC *account.PublishUseCase
 	// 用户管理（管理端）——通过 SetAdmin 延迟注入，可选
 	userRepo port.UserRepository
+	// 平台系统设置（运行时开关）——通过 SetSystemSettings 注入，可选
+	settingsUC *systemsettings.SystemSettingsUseCase
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -110,6 +113,11 @@ func (r *Router) SetAdmin(userRepo port.UserRepository) {
 // 未注入时 /stats 返回 null（前端降级隐藏）。
 func (r *Router) SetStats(uc *stats.StatsUseCase) {
 	r.statsUC = uc
+}
+
+// SetSystemSettings 注入平台系统设置用例（可选；未注入则设置端点不注册）。
+func (r *Router) SetSystemSettings(uc *systemsettings.SystemSettingsUseCase) {
+	r.settingsUC = uc
 }
 
 // SetAccount 注入多平台发布账号域用例（可选；未注入则账号/发布端点不注册）。
@@ -315,9 +323,14 @@ func (r *Router) Engine() *gin.Engine {
 					adminGroup.POST("/contents/:id/status", geoHandler.HandleAdminSetContentStatus)
 					adminGroup.DELETE("/contents/:id", geoHandler.HandleAdminDeleteContent)
 				}
-			// Tavily 搜索 API 配置（管理后台用）
-			adminGroup.GET("/tavily-status", r.handleTavilyStatus)
-			adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
+				// Tavily 搜索 API 配置（管理后台用）
+				adminGroup.GET("/tavily-status", r.handleTavilyStatus)
+				adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
+				// 平台系统设置（运行时开关）
+				if r.settingsUC != nil {
+					adminGroup.GET("/settings/auto-monitor", r.HandleGetAutoMonitor)
+					adminGroup.PUT("/settings/auto-monitor", r.HandleSetAutoMonitor)
+				}
 			// 收录管理（运行时配置/提交日志/手动补提交）
 			if r.indexingUC != nil {
 				adminGroup.GET("/indexing/config", r.HandleGetIndexingConfig)

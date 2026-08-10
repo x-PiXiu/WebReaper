@@ -47,6 +47,7 @@ import (
 	"webreaper/internal/usecase/scheduler"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
+	"webreaper/internal/usecase/systemsettings"
 	taskuc "webreaper/internal/usecase/task"
 	taskquery "webreaper/internal/usecase/taskquery"
 )
@@ -339,6 +340,9 @@ func main() {
 		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
 		// 免费规则评分器：优化前后对比用（不烧 token、可单测）
 		geoContentUC.SetRuleScorer(geo.NewRuleScorer())
+		// RAG 增强：原创生成前检索"品牌+关键词"真实信息注入 prompt（"不编造数据"变能力）
+		geoContentUC.SetRAGRetriever(ai.NewWebContentRetriever(webFetcher))
+		geoContentUC.SetLogger(log)
 		// 收录通知（IndexNow）：发布为 published 时自动通知搜索引擎
 		if indexNowSubmitter != nil {
 			geoContentUC.SetPublicBaseURL(cfg.Server.PublicBaseURL)
@@ -423,6 +427,10 @@ func main() {
 	}
 	router.SetStats(statsUC)
 
+	// 平台系统设置（运行时开关：自动盯盘等）——管理后台可切换，调度器即时生效
+	settingsUC := systemsettings.NewSystemSettingsUseCase(settingRepo)
+	router.SetSystemSettings(settingsUC)
+
 	// 管理端装配（用户管理，仅 admin）
 	router.SetAdmin(userRepo)
 
@@ -443,7 +451,7 @@ func main() {
 	// 需要 DB + LLM + 开启开关（AUTO_MONITOR_ENABLED=true）
 	if geoMonitorUCRef != nil && geoRepos != nil && cfg.LLM.IsConfigured() && cfg.Server.AutoMonitorEnabled {
 		monUC := geoMonitorUCRef
-		_ = taskScheduler.Register(scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, log))
+		_ = taskScheduler.Register(scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, settingRepo, cfg.Server.AutoMonitorEnabled, log))
 		log.Info("每日自动监测任务已注册（AUTO_MONITOR_ENABLED=true）")
 	}
 

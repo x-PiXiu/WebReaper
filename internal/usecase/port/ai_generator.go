@@ -52,6 +52,21 @@ type OptionsAwareGenerator interface {
 	ChatStreamWithOptions(ctx context.Context, in ChatStreamInput) (string, error)
 }
 
+// ---- 关键词生成结构化输出契约（防随机化）----
+// 用例层声明的输出格式，adapter 用 SchemaExample 推断 JSON schema，
+// 引擎强制输出后由用例层解析校验（失败降级纯文本路径）。
+
+// KeywordItem 单个候选关键词（term + 搜索意图）。
+type KeywordItem struct {
+	Term   string `json:"term"`
+	Intent string `json:"intent"`
+}
+
+// KeywordList 关键词列表结构化输出（蒸馏/生成共用契约）。
+type KeywordList struct {
+	Keywords []KeywordItem `json:"keywords"`
+}
+
 // AIGenerator 是 AI 加工能力的抽象接口（边界）。
 type AIGenerator interface {
 	// ChatStream 流式对话（无工具），onDelta 回调每段增量。

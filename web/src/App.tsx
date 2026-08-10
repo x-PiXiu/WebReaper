@@ -20,6 +20,7 @@ import AdminUsers from './pages/admin/Users'
 import Indexing from './pages/admin/Indexing'
 import AdminBrands from './pages/admin/Brands'
 import AdminContents from './pages/admin/Contents'
+import AdminSettings from './pages/admin/Settings'
 // 布局与守卫
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/admin/users" element={<AdminUsers />} />
           <Route path="/admin/brands" element={<AdminBrands />} />
           <Route path="/admin/contents" element={<AdminContents />} />
+          <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/agent-configs" element={<AgentConfigs />} />
           <Route path="/admin/data" element={<DataItems />} />
           <Route path="/admin/tasks" element={<Tasks />} />

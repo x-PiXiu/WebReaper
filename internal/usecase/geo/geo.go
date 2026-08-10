@@ -11,6 +11,7 @@ package geo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -204,13 +205,44 @@ func (uc *BrandUseCase) GenerateKeywords(ctx context.Context, tenantID, brandID 
 	} else {
 		userPrompt += "\n请生成 20 个用户可能搜索的相关关键词（包含品牌词、行业词、长尾问题词）。"
 	}
-	userPrompt += "\n每行一个，不要编号，不要解释。"
+	userPrompt += "\n请生成 20 个用户可能搜索的相关关键词（包含品牌词、行业词、长尾问题词）。只输出 JSON，不要其他内容。"
 
 	messages := []port.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 	convID := fmt.Sprintf("kw-gen-%d", time.Now().UnixNano())
+
+	// 结构化输出（防随机化）：JSON schema 强制 {keywords:[{term,intent}]}，
+	// 数量/格式稳定；生成器不支持或解析失败时降级纯文本路径。
+	if gen, ok := uc.aiGen.(port.OptionsAwareGenerator); ok {
+		out, err := gen.ChatStreamWithOptions(ctx, port.ChatStreamInput{
+			ConversationID: convID,
+			LLMConfigName:  "",
+			Messages:       messages,
+			Options: port.ChatOptions{
+				ResponseFormat:    "json",
+				SchemaExample:     &port.KeywordList{},
+				SchemaDescription: "候选关键词列表（term=关键词，intent=搜索意图）",
+				DisableThinking:   true,
+			},
+		})
+		if err == nil {
+			var kl port.KeywordList
+			if jsonBlock := pkg.ExtractJSONBlock(out); json.Unmarshal([]byte(jsonBlock), &kl) == nil && len(kl.Keywords) > 0 {
+				terms := make([]string, 0, len(kl.Keywords))
+				for _, k := range kl.Keywords {
+					if term := strings.TrimSpace(k.Term); term != "" {
+						terms = append(terms, term)
+					}
+				}
+				if len(terms) > 0 {
+					return terms, nil
+				}
+			}
+		}
+	}
+
 	resp, err := uc.aiGen.ChatStream(ctx, convID, "", messages, nil)
 	if err != nil {
 		return nil, fmt.Errorf("生成关键词失败: %w", err)
