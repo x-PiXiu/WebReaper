@@ -405,7 +405,25 @@ func main() {
 			log.Warn("seed 默认套餐失败（将无在售套餐）", port.Err(seedErr))
 		}
 		billingUC := billing.NewBillingUseCase(planRepo, subRepo, orderRepo)
-		billingUC.SetPaymentGateway(payment.NewMockPaymentGateway(cfg.Server.PublicBaseURL))
+		billingUC.SetSettingRepo(settingRepo)
+
+		// 支付网关策略选择：根据 system_settings 的 payment_config 决定用 mock 还是 zpay
+		// 未配置或配置不完整 → mock（开发演示）；配置完整 → zpay（真实收款）
+		var paymentGW port.PaymentGateway = payment.NewMockPaymentGateway(cfg.Server.PublicBaseURL)
+		if payCfg, gwErr := settingRepo.Get(context.Background(), entity.SettingKeyPaymentConfig); gwErr == nil {
+			var pc map[string]string
+			if json.Unmarshal([]byte(payCfg.Value), &pc) == nil && pc["gateway"] == "zpay" && pc["pid"] != "" && pc["key"] != "" {
+				paymentGW = payment.NewZPayGateway(payment.ZPayConfig{
+					PID: pc["pid"], Key: pc["key"],
+					NotifyURL: pc["notify_url"], ReturnURL: pc["return_url"],
+				})
+				log.Info("支付网关已接入 ZPAY（真实收款模式）")
+			}
+		}
+		if _, ok := paymentGW.(*payment.ZPayGateway); !ok {
+			log.Info("支付网关运行在 mock 模式（未配置 ZPAY 或配置不完整，admin 后台可设置）")
+		}
+		billingUC.SetPaymentGateway(paymentGW)
 		router.SetBilling(billingUC)
 
 		// 配额检查门（计数派生型：plan 配额 vs usages 表当月用量）

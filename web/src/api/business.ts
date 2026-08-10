@@ -311,4 +311,8 @@ export const businessApi = {
     apiClient.get<unknown, { orders: Order[] }>('/api/v1/admin/billing/orders'),
   adminRevenueReport: () =>
     apiClient.get<unknown, RevenueSummary>('/api/v1/admin/billing/revenue'),
+  adminGetPaymentConfig: () =>
+    apiClient.get<unknown, { config: Record<string, string> }>('/api/v1/admin/billing/payment-config'),
+  adminSetPaymentConfig: (cfg: { gateway: string; pid: string; key: string; notify_url: string; return_url: string }) =>
+    apiClient.put<unknown, { saved: boolean }>('/api/v1/admin/billing/payment-config', cfg),
 }

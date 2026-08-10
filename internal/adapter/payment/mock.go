@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/port"
 )
 
 // MockPaymentGateway 模拟支付网关。
@@ -50,4 +51,30 @@ func (g *MockPaymentGateway) QueryPayment(_ context.Context, paymentID string) (
 		return "", fmt.Errorf("payment_id 不能为空")
 	}
 	return "paid", nil // mock：始终已支付
+}
+
+// VerifyCallback mock 验签：直接信任参数（无签名）。
+// 真实通道（zpay/stripe）需要做 MD5/HMAC 签名验证。
+func (g *MockPaymentGateway) VerifyCallback(_ context.Context, params map[string]string) (port.CallbackResult, error) {
+	outTradeNo := params["out_trade_no"]
+	if outTradeNo == "" {
+		return port.CallbackResult{}, fmt.Errorf("回调缺少 out_trade_no")
+	}
+	amountStr := params["money"]
+	amountCents := 0
+	if amountStr != "" {
+		var yuan float64
+		fmt.Sscanf(amountStr, "%f", &yuan)
+		amountCents = int(yuan * 100)
+	}
+	status := "pending"
+	if params["trade_status"] == "TRADE_SUCCESS" || params["status"] == "1" {
+		status = "paid"
+	}
+	return port.CallbackResult{
+		OutTradeNo:  outTradeNo,
+		TradeNo:     params["trade_no"],
+		AmountCents: amountCents,
+		Status:      status,
+	}, nil
 }

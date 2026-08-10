@@ -241,6 +241,12 @@ func (r *Router) Engine() *gin.Engine {
 		e.GET("/:key.txt", r.publicHandler.GetIndexNowKeyFile)
 	}
 
+	// 支付网关异步回调（公开——支付平台回调无 JWT，靠签名验证安全）
+	if r.billingUC != nil {
+		e.GET("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
+		e.POST("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
+	}
+
 	// 业务路由（受 JWT 中间件保护）
 	api := e.Group("/api/v1")
 	api.Use(middleware.JWTAuth(r.tokenParser))
@@ -436,6 +442,8 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.PUT("/billing/subscriptions/:tenant", r.HandleAdminAssignPlan) // 手动开通（线下收款）
 				adminGroup.GET("/billing/orders", r.HandleAdminListOrders)
 				adminGroup.GET("/billing/revenue", r.HandleAdminRevenueReport) // 收入概览
+				adminGroup.GET("/billing/payment-config", r.HandleGetPaymentConfig) // 支付网关配置
+				adminGroup.PUT("/billing/payment-config", r.HandleSetPaymentConfig) // 保存支付配置
 			}
 			// 经济系统——商户端（我的套餐/订阅/订单，多租户隔离）
 			if r.billingUC != nil {

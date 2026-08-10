@@ -249,3 +249,86 @@ func (r *Router) HandleGetMyUsage(c *gin.Context) {
 	}
 	success(c, summary)
 }
+
+// ---- 支付网关异步回调（webhook）----
+
+// HandlePaymentCallback POST/GET /billing/webhook/:gateway —— 支付网关异步回调。
+// ZPAY 用 GET 参数回调；验签通过后标记 paid + 开通订阅。
+// 必须返回纯文本 "success"（ZPAY 协议要求），否则平台会重试。
+// 注意：此端点不需要 JWT 认证（支付平台回调无 token）。
+func (r *Router) HandlePaymentCallback(c *gin.Context) {
+	if r.billingUC == nil {
+		c.String(http.StatusOK, "fail")
+		return
+	}
+	// ZPAY 回调用 GET query 参数；其他通道可能是 POST body
+	params := make(map[string]string)
+	// 优先读 GET query（ZPAY 协议）
+	for k, v := range c.Request.URL.Query() {
+		if len(v) > 0 {
+			params[k] = v[0]
+		}
+	}
+	// 兼容 POST form（部分通道用 POST）
+	if c.Request.Method == http.MethodPost {
+		_ = c.Request.ParseForm()
+		for k, v := range c.Request.PostForm {
+			if len(v) > 0 && params[k] == "" {
+				params[k] = v[0]
+			}
+		}
+	}
+	result, err := r.billingUC.HandleCallback(c.Request.Context(), params)
+	if err != nil {
+		c.String(http.StatusOK, "fail")
+		return
+	}
+	c.String(http.StatusOK, result) // "success" 或 "fail"
+}
+
+// ---- admin 支付网关配置管理 ----
+
+// HandleGetPaymentConfig GET /admin/billing/payment-config —— 读取当前支付配置。
+// 返回脱敏后的配置（key 只显示前 4 位）。
+func (r *Router) HandleGetPaymentConfig(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	cfg, err := r.billingUC.GetPaymentConfig(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"config": cfg})
+}
+
+// HandleSetPaymentConfig PUT /admin/billing/payment-config —— 保存支付网关配置。
+// 配置存入 system_settings，运行时生效（重启不丢失）。
+// body: {"gateway":"zpay","pid":"xxx","key":"xxx","notify_url":"xxx","return_url":"xxx"}
+func (r *Router) HandleSetPaymentConfig(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	var req struct {
+		Gateway   string `json:"gateway"`
+		PID       string `json:"pid"`
+		Key       string `json:"key"`
+		NotifyURL string `json:"notify_url"`
+		ReturnURL string `json:"return_url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数解析失败: " + err.Error()})
+		return
+	}
+	cfg := map[string]string{
+		"gateway": req.Gateway, "pid": req.PID, "key": req.Key,
+		"notify_url": req.NotifyURL, "return_url": req.ReturnURL,
+	}
+	if err := r.billingUC.SetPaymentConfig(c.Request.Context(), cfg); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"saved": true})
+}

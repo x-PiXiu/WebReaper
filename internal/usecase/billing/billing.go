@@ -10,6 +10,7 @@ package billing
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -20,10 +21,11 @@ import (
 
 // BillingUseCase 经济系统用例。
 type BillingUseCase struct {
-	planRepo  port.PlanRepository
-	subRepo   port.SubscriptionRepository
-	orderRepo port.OrderRepository
-	payment   port.PaymentGateway // 可选：nil=线下模式（admin 手动开通）
+	planRepo   port.PlanRepository
+	subRepo    port.SubscriptionRepository
+	orderRepo  port.OrderRepository
+	payment    port.PaymentGateway   // 可选：nil=线下模式（admin 手动开通）
+	settingRepo port.SystemSettingRepository // 支付网关运行时配置（admin 后台设置）
 }
 
 func NewBillingUseCase(plan port.PlanRepository, sub port.SubscriptionRepository, order port.OrderRepository) *BillingUseCase {
@@ -35,6 +37,94 @@ func (uc *BillingUseCase) SetPaymentGateway(g port.PaymentGateway) {
 	if g != nil {
 		uc.payment = g
 	}
+}
+
+// SetSettingRepo 注入系统设置仓储（可选；用于支付网关运行时配置管理）。
+func (uc *BillingUseCase) SetSettingRepo(r port.SystemSettingRepository) {
+	if r != nil {
+		uc.settingRepo = r
+	}
+}
+
+// ---- 支付网关配置管理（admin 运行时设置）----
+
+// GetPaymentConfig 读取当前支付网关配置（admin 后台展示用）。
+// 敏感字段 key 脱敏返回（只显示前 4 位）。
+func (uc *BillingUseCase) GetPaymentConfig(ctx context.Context) (map[string]string, error) {
+	if uc.settingRepo == nil {
+		return map[string]string{"gateway": "mock"}, nil
+	}
+	s, err := uc.settingRepo.Get(ctx, entity.SettingKeyPaymentConfig)
+	if err != nil {
+		return map[string]string{"gateway": "mock"}, nil // 未配置 → mock
+	}
+	// 解析 JSON 配置
+	var cfg map[string]string
+	if err := json.Unmarshal([]byte(s.Value), &cfg); err != nil {
+		return map[string]string{"gateway": "mock"}, nil
+	}
+	// 脱敏 key
+	if k, ok := cfg["key"]; ok && len(k) > 4 {
+		cfg["key"] = k[:4] + "****"
+	}
+	return cfg, nil
+}
+
+// SetPaymentConfig 保存支付网关配置（admin 后台设置）。
+// gateway 字段决定用哪个通道（当前支持 mock / zpay）。
+func (uc *BillingUseCase) SetPaymentConfig(ctx context.Context, cfg map[string]string) error {
+	if uc.settingRepo == nil {
+		return fmt.Errorf("系统设置仓储未注入")
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("序列化支付配置失败: %w", err)
+	}
+	return uc.settingRepo.Save(ctx, entity.SystemSetting{
+		Key:   entity.SettingKeyPaymentConfig,
+		Value: string(data),
+	})
+}
+
+// ---- 异步回调处理（支付网关 webhook）----
+
+// HandleCallback 处理支付网关异步回调（统一入口）。
+//
+// 流程：
+//  1. 验签（VerifyCallback）——防伪造回调
+//  2. 查订单 ——校验订单存在 + 金额一致
+//  3. 调 ConfirmPayment ——标记 paid + 开通订阅
+//
+// 返回 "success" 给支付平台（ZPAY 要求返回纯 success 字符串，否则重试）。
+// 调用方（handler）应把返回值作为 HTTP 响应体。
+func (uc *BillingUseCase) HandleCallback(ctx context.Context, params map[string]string) (string, error) {
+	if uc.payment == nil {
+		return "fail", fmt.Errorf("支付网关未注入")
+	}
+
+	// ① 验签 + 提取回调数据
+	result, err := uc.payment.VerifyCallback(ctx, params)
+	if err != nil {
+		return "fail", fmt.Errorf("回调验签失败: %w", err)
+	}
+
+	// ② 查订单 + 校验金额
+	order, err := uc.orderRepo.FindByID(ctx, result.OutTradeNo)
+	if err != nil {
+		return "fail", fmt.Errorf("订单不存在: %s", result.OutTradeNo)
+	}
+	if result.AmountCents != order.AmountCents {
+		return "fail", fmt.Errorf("回调金额 %d 与订单金额 %d 不一致", result.AmountCents, order.AmountCents)
+	}
+
+	// ③ 确认支付（幂等——已 paid 直接返回）
+	if result.Status == "paid" {
+		if _, err := uc.ConfirmPayment(ctx, order.ID); err != nil {
+			return "fail", fmt.Errorf("确认支付失败: %w", err)
+		}
+	}
+
+	return "success", nil
 }
 
 // ---- 套餐管理（admin）----
@@ -168,6 +258,19 @@ func (uc *BillingUseCase) ConfirmPayment(ctx context.Context, orderID string) (e
 	}
 	if order.Status != entity.OrderStatusPending {
 		return entity.Subscription{}, fmt.Errorf("订单状态 %s 不可确认支付", order.Status)
+	}
+
+	// 支付网关二次验证：向网关查询订单真实状态（防"未付款确认"攻击）。
+	// mock 模式下 QueryPayment 始终返回 paid；真实网关（zpay/stripe）会查实际支付状态。
+	// 仅当有 PaymentID（已创建支付）且网关已注入时才验证。
+	if uc.payment != nil && order.PaymentID != "" {
+		status, qErr := uc.payment.QueryPayment(ctx, order.ID)
+		if qErr != nil {
+			return entity.Subscription{}, fmt.Errorf("支付网关查询失败: %w", qErr)
+		}
+		if status != "paid" {
+			return entity.Subscription{}, fmt.Errorf("支付网关未确认付款（状态: %s）", status)
+		}
 	}
 
 	now := time.Now()

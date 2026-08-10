@@ -77,3 +77,8 @@ type IndexingSubmitLog struct {
 // SettingKeyAutoMonitor 每日自动监测开关（"true"/"false"）。
 // 管理后台运行时开关——开启后调度器每日对全平台品牌自动监测（趋势自动生长）。
 const SettingKeyAutoMonitor = "auto_monitor_enabled"
+
+// SettingKeyPaymentConfig 支付网关配置（JSON：pid/key/notify_url/return_url）。
+// admin 后台运行时配置——支持多通道动态切换（当前 zpay）。
+// 值为 JSON 字符串，由 BillingUseCase 解析为具体网关配置。
+const SettingKeyPaymentConfig = "payment_config"
