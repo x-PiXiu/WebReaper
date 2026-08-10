@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { TaskView, AgentConfig, LLMConfig, Collection, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ExternalSystem, PublishResult, PublishRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob } from '../types/api'
+import type { TaskView, AgentConfig, LLMConfig, Collection, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ExternalSystem, PublishResult, PublishRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -234,6 +234,16 @@ export const businessApi = {
   // 发布效果复测：重新触发品牌监测并更新发布后提及率（建议收录周期 1-2 周后使用）
   reMonitorJob: (jobId: string) =>
     apiClient.post<unknown, PublishJob>(`/api/v1/geo/publish-jobs/${jobId}/re-monitor`),
+
+  // 收录管理（管理后台）
+  getIndexingConfig: () =>
+    apiClient.get<unknown, { index_now_key: string; baidu_site: string; baidu_token: string; updated_at: string }>('/api/v1/admin/indexing/config'),
+  updateIndexingConfig: (data: { index_now_key?: string; baidu_site?: string; baidu_token?: string }) =>
+    apiClient.put<unknown, { ok: boolean }>('/api/v1/admin/indexing/config', data),
+  listIndexingLogs: () =>
+    apiClient.get<unknown, IndexingSubmitLog[]>('/api/v1/admin/indexing/logs'),
+  reSubmitAllIndexing: () =>
+    apiClient.post<unknown, { submitted: number; failed: number }>('/api/v1/admin/indexing/re-submit'),
 
   // ---- 用户管理（管理端）----
   listUsers: () =>

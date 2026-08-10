@@ -18,6 +18,7 @@ import Accounts from './pages/merchant/Accounts'
 import Publish from './pages/merchant/Publish'
 // 管理端额外页面
 import AdminUsers from './pages/admin/Users'
+import Indexing from './pages/admin/Indexing'
 // 布局与守卫
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/admin/tools" element={<Tools />} />
           <Route path="/admin/crawl-config" element={<CrawlConfigPage />} />
           <Route path="/admin/external-systems" element={<ExternalSystems />} />
+          <Route path="/admin/indexing" element={<Indexing />} />
           <Route path="/admin/chat" element={<Chat />} />
         </Route>
 

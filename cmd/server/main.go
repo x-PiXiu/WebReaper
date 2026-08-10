@@ -3,12 +3,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"gorm.io/gorm"
 
 	authadapter "webreaper/internal/adapter/auth"
 	agentadapter "webreaper/internal/adapter/agent"
@@ -18,7 +21,6 @@ import (
 	"webreaper/internal/adapter/embedding"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/handler"
-	"webreaper/internal/adapter/indexnow"
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/qrlogin"
@@ -35,6 +37,7 @@ import (
 	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/dataitem"
 	"webreaper/internal/usecase/geo"
+	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/publish"
@@ -264,40 +267,43 @@ func main() {
 	structuredUC := structured.NewStructuredDataUseCase()
 	router.SetStructured(structuredUC)
 	// 公开内容站（让 AI 引擎/搜索引擎可爬取已发布内容）——需要 DB（内容仓储）
-	// 收录通知（IndexNow + 百度主动推送，多渠道并行、失败互不影响）：
-	// 内容发布为 published 时自动通知搜索引擎收录。
-	// 各渠道独立配置，未配置的渠道不启用（发布流程不受影响）。
+	// 收录通知（多渠道并行、失败互不影响；配置运行时动态可调）：
+	//   - 配置来源：system_settings（管理后台可改）优先，.env 兜底
+	//   - CachedProvider 按 30s TTL 重建 submitter——改配置免重启（参照 LLMConfig 模式）
+	//   - 内容发布为 published 时自动触发；未配置任何渠道则空转（不阻断业务）
 	var indexNowSubmitter port.URLSubmitter
+	var indexingUC *indexing.IndexingUseCase
 	if geoRepos != nil {
 		publicHandler := handler.NewPublicHandler(geoRepos.content, structuredUC, cfg.Server.PublicBaseURL)
 		router.SetPublic(publicHandler)
-		var submitters []port.URLSubmitter
-		if cfg.Server.IndexNowKey != "" {
-			publicHandler.SetIndexNowKey(cfg.Server.IndexNowKey)
-			s, sErr := indexnow.NewSubmitter(
-				cfg.Server.PublicBaseURL,
-				cfg.Server.IndexNowKey,
-				cfg.Server.PublicBaseURL+"/public/indexnow-key.txt",
-			)
-			if sErr != nil {
-				log.Error("IndexNow 初始化失败，该渠道禁用", port.Err(sErr))
-			} else {
-				submitters = append(submitters, s)
-				log.Info("收录通知渠道已启用：IndexNow（Bing/Yandex/Naver）")
+
+		// 收录配置加载器：DB（system_settings）优先，env 兜底（main 装配层职责）
+		loadIndexingConfig := func(ctx context.Context) (entity.IndexingConfig, error) {
+			if s, sErr := settingRepo.Get(ctx, entity.SettingKeyIndexingConfig); sErr == nil {
+				var c entity.IndexingConfig
+				if json.Unmarshal([]byte(s.Value), &c) == nil {
+					return c, nil
+				}
 			}
+			return entity.IndexingConfig{
+				IndexNowKey: cfg.Server.IndexNowKey,
+				BaiduSite:   cfg.Baidu.Site,
+				BaiduToken:  cfg.Baidu.Token,
+			}, nil
 		}
-		if cfg.Baidu.IsConfigured() {
-			b, bErr := urlsubmit.NewBaiduSubmitter(cfg.Baidu.Site, cfg.Baidu.Token)
-			if bErr != nil {
-				log.Error("百度推送初始化失败，该渠道禁用", port.Err(bErr))
-			} else {
-				submitters = append(submitters, b)
-				log.Info("收录通知渠道已启用：百度主动推送", port.String("site", cfg.Baidu.Site))
-			}
-		}
-		if len(submitters) > 0 {
-			indexNowSubmitter = urlsubmit.NewMultiSubmitter(submitters...)
-		}
+
+		cachedSubmitter := urlsubmit.NewCachedProvider(loadIndexingConfig, cfg.Server.PublicBaseURL)
+		// key 文件端点读运行时配置（管理后台改 key 后即时生效）
+		publicHandler.SetIndexNowKeyProvider(func(ctx context.Context) string {
+			c, _ := loadIndexingConfig(ctx)
+			return c.IndexNowKey
+		})
+
+		// 收录管理用例（管理后台：配置读写/提交日志/手动补提交）
+		indexingLogRepo := repository.NewGormIndexingLogRepository(geoRepos.db)
+		indexingUC = indexing.NewIndexingUseCase(settingRepo, indexingLogRepo, geoRepos.content, cachedSubmitter, cfg.Server.PublicBaseURL)
+		router.SetIndexing(indexingUC)
+		indexNowSubmitter = cachedSubmitter
 	}
 	var geoMonitorUCRef *geo.MonitorUseCase
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
@@ -477,6 +483,7 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 
 // geoRepos 打包 GEO 仓储，避免 initRepositories 返回值过多。
 type geoRepos struct {
+	db      *gorm.DB // 复用的 DB 连接（收录日志等 GEO 附属仓储共用）
 	brand   port.BrandRepository
 	keyword port.KeywordRepository
 	result  port.MonitoringResultRepository
@@ -493,6 +500,7 @@ func initGEORpositories(dbCfg config.DBConfig) *geoRepos {
 		return nil
 	}
 	return &geoRepos{
+		db:      db,
 		brand:   repository.NewGormBrandRepository(db),
 		keyword: repository.NewGormKeywordRepository(db),
 		result:  repository.NewGormMonitoringResultRepository(db),

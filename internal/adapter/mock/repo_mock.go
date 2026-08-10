@@ -624,3 +624,30 @@ func (r *MockOptimizedContentRepository) ListPublished(_ context.Context) ([]ent
 	}
 	return out, nil
 }
+
+// ---- 收录提交日志 mock ----
+
+// MockIndexingLogRepository 是 port.IndexingLogRepository 的内存实现。
+type MockIndexingLogRepository struct {
+	mu   sync.Mutex
+	recs []entity.IndexingSubmitLog
+}
+
+func NewMockIndexingLogRepository() *MockIndexingLogRepository {
+	return &MockIndexingLogRepository{}
+}
+
+func (r *MockIndexingLogRepository) Save(_ context.Context, log entity.IndexingSubmitLog) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	r.recs = append(r.recs, log)
+	return nil
+}
+
+func (r *MockIndexingLogRepository) ListRecent(_ context.Context, limit int) ([]entity.IndexingSubmitLog, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	out := make([]entity.IndexingSubmitLog, 0, len(r.recs))
+	for i := len(r.recs) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, r.recs[i])
+	}
+	return out, nil
+}

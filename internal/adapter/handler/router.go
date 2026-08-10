@@ -17,6 +17,7 @@ import (
 	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/dataitem"
 	"webreaper/internal/usecase/geo"
+	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
@@ -63,6 +64,8 @@ type Router struct {
 	structuredUC *structured.StructuredDataUseCase
 	// 公开内容站处理器——通过 SetPublic 注入，可选
 	publicHandler *PublicHandler
+	// 收录管理用例（运行时配置/提交日志/手动补提交）——通过 SetIndexing 注入，可选
+	indexingUC *indexing.IndexingUseCase
 	// 多平台发布账号域（扫码绑定 + 半自动发布）——通过 SetAccount 延迟注入，可选
 	accountUC *account.AccountUseCase
 	publishSemiUC *account.PublishUseCase
@@ -85,6 +88,11 @@ func (r *Router) SetStructured(uc *structured.StructuredDataUseCase) {
 // 公开站需要内容仓储（查已发布内容）+ 结构化用例（JSON-LD/llms.txt 生成）。
 func (r *Router) SetPublic(h *PublicHandler) {
 	r.publicHandler = h
+}
+
+// SetIndexing 注入收录管理用例（可选；未注入则收录管理端点不注册）。
+func (r *Router) SetIndexing(uc *indexing.IndexingUseCase) {
+	r.indexingUC = uc
 }
 
 // SetGEO 注入 GEO 业务用例（可选；未注入则 GEO 端点不注册）。
@@ -301,9 +309,16 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.GET("/users", userHandler.HandleListUsers)
 				adminGroup.POST("/users", userHandler.HandleCreateMerchant)
 				adminGroup.DELETE("/users/:id", userHandler.HandleDeleteUser)
-				// Tavily 搜索 API 配置（管理后台用）
-				adminGroup.GET("/tavily-status", r.handleTavilyStatus)
-				adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
+			// Tavily 搜索 API 配置（管理后台用）
+			adminGroup.GET("/tavily-status", r.handleTavilyStatus)
+			adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
+			// 收录管理（运行时配置/提交日志/手动补提交）
+			if r.indexingUC != nil {
+				adminGroup.GET("/indexing/config", r.HandleGetIndexingConfig)
+				adminGroup.PUT("/indexing/config", r.HandleUpdateIndexingConfig)
+				adminGroup.GET("/indexing/logs", r.HandleListIndexingLogs)
+				adminGroup.POST("/indexing/re-submit", r.HandleReSubmitAll)
+			}
 			}
 		}
 	}

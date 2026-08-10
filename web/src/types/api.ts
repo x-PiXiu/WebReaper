@@ -264,3 +264,13 @@ export interface UserView {
   tenant_id: string
 }
 
+
+// ---- 收录管理（管理后台）----
+export interface IndexingSubmitLog {
+  id: string
+  channel: string        // indexnow / baidu / all
+  url: string
+  status: string         // success / failed
+  error_msg: string
+  submitted_at: string
+}
