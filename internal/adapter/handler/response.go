@@ -54,6 +54,8 @@ func statusForError(err error) (httpStatus int, bizCode int) {
 		return http.StatusUnprocessableEntity, 42201
 	case errors.Is(err, pkg.ErrTaskNotExecutable):
 		return http.StatusConflict, 40902
+	case errors.Is(err, pkg.ErrQuotaExceeded):
+		return http.StatusPaymentRequired, 40201
 	default:
 		// Gin binding 错误（json.UnmarshalTypeError、validator.ValidationErrors 等）
 		// 属于客户端请求格式问题，归 400。

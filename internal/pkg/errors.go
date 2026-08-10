@@ -21,4 +21,7 @@ var (
 	ErrPlatformNotRegistered = errors.New("platform not registered")
 	// ErrAlreadyPublished 该内容已成功推送到目标平台（去重拦截）。
 	ErrAlreadyPublished = errors.New("content already published to this platform")
+	// ErrQuotaExceeded 配额耗尽（套餐用量超出当月限额）。
+	// 经济系统专用：handler 层映射为 HTTP 402 Payment Required。
+	ErrQuotaExceeded = errors.New("quota exceeded for current billing period")
 )

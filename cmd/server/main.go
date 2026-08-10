@@ -37,6 +37,7 @@ import (
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/agentconfig"
 	"webreaper/internal/usecase/auth"
+	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/dataitem"
@@ -437,6 +438,18 @@ func main() {
 		statsUC = stats.NewStatsUseCase(dataItemRepo, userRepo, nil, nil, nil, nil, nil)
 	}
 	router.SetStats(statsUC)
+
+	// 经济系统（套餐/订阅/订单）：seed 内置默认套餐，admin 可管理
+	if geoRepos != nil {
+		planRepo := repository.NewGormPlanRepository(geoRepos.db)
+		subRepo := repository.NewGormSubscriptionRepository(geoRepos.db)
+		orderRepo := repository.NewGormOrderRepository(geoRepos.db)
+		if seedErr := billing.SeedPlans(context.Background(), planRepo); seedErr != nil {
+			log.Warn("seed 默认套餐失败（将无在售套餐）", port.Err(seedErr))
+		}
+		billingUC := billing.NewBillingUseCase(planRepo, subRepo, orderRepo)
+		router.SetBilling(billingUC)
+	}
 
 	// 平台系统设置（运行时开关：自动盯盘等）——管理后台可切换，调度器即时生效
 	tenantSettingRepo := repository.NewGormTenantSettingRepository(geoRepos.db)

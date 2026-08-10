@@ -13,6 +13,7 @@ import (
 	"webreaper/internal/usecase/agentconfig"
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/auth"
+	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/dataitem"
@@ -79,6 +80,8 @@ type Router struct {
 	videoUC *video.VideoUseCase
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
+	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
+	billingUC *billing.BillingUseCase
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -147,6 +150,11 @@ func (r *Router) SetVideo(uc *video.VideoUseCase) {
 // SetPromptTemplates 注入提示词模板仓库（可选；admin 管理内容生成/优化提示词）。
 func (r *Router) SetPromptTemplates(repo port.PromptTemplateRepository) {
 	r.promptTemplateRepo = repo
+}
+
+// SetBilling 注入经济系统用例（可选；未注入则计费端点不注册）。
+func (r *Router) SetBilling(uc *billing.BillingUseCase) {
+	r.billingUC = uc
 }
 
 func NewRouter(
@@ -387,8 +395,22 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.POST("/indexing/generate-key", r.HandleGenerateIndexingKey) // 自动生成密钥（IndexNow 所有权证明）
 				adminGroup.GET("/indexing/verify-key", r.HandleVerifyIndexingKey)      // 验证 key 文件可访问
 			}
+			// 经济系统——套餐/订阅/订单管理（admin）
+			if r.billingUC != nil {
+				adminGroup.GET("/billing/plans", r.HandleAdminListPlans)
+				adminGroup.POST("/billing/plans", r.HandleAdminSavePlan)
+				adminGroup.DELETE("/billing/plans/:id", r.HandleAdminDeletePlan)
+				adminGroup.GET("/billing/subscriptions", r.HandleAdminListSubscriptions)
+				adminGroup.GET("/billing/orders", r.HandleAdminListOrders)
+			}
 			}
 		}
+	}
+	// 经济系统——商户端（我的套餐/订阅/订单，多租户隔离）
+	if r.billingUC != nil {
+		api.GET("/billing/plans", r.HandleListActivePlans)
+		api.GET("/billing/my-plan", r.HandleGetMyPlan)
+		api.GET("/billing/orders", r.HandleListMyOrders)
 	}
 	return e
 }
