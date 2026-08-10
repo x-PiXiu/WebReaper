@@ -156,7 +156,12 @@ export default function Content() {
   const handleSetStatus = async (c: OptimizedContent, status: 'draft' | 'published') => {
     try {
       await businessApi.setContentStatus(selectedBrand!, c.id, status)
-      message.success(status === 'published' ? `「${c.title || c.id}」已发布到公开站` : '已下线')
+      if (status === 'published') {
+        // 收录预期管理：发布后 IndexNow 立即通知，引擎爬取+引用约 1-2 周
+        message.success(`「${c.title || c.id}」已发布到公开站（已通知搜索引擎收录，预计 1-2 周生效，届时可复测提及率）`, 5)
+      } else {
+        message.success('已下线')
+      }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
       if (result?.id === c.id) setResult({ ...result, status })
     } catch (e) {

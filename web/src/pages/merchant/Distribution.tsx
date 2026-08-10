@@ -467,11 +467,11 @@ export default function Distribution() {
 
                     {publishMode === 'semi-auto' ? (
                       <Alert type="info" showIcon style={{ marginBottom: 16 }} message="半自动发布模式"
-                        description="系统生成内容并预填发布链接，你点击跳转后在各平台确认发布。零封号风险。" />
+                        description="系统生成内容并预填发布链接，你点击跳转后在各平台确认发布。零封号风险。发布后约 1-2 周被 AI 引擎收录，届时可在发布记录点「复测提及率」验证效果。" />
                     ) : (
                       <>
                         <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="全自动发布模式"
-                          description="系统自动打开浏览器，注入登录态，自动填充标题正文并点击发布。请确保服务器已安装 Chrome。" />
+                          description="系统自动打开浏览器，注入登录态，自动填充标题正文并点击发布。请确保服务器已安装 Chrome。收录周期约 1-2 周，发布记录支持复测验证。" />
                         <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                           <Switch checked={autoSelect} onChange={setAutoSelect} size="small" />
                           <Text style={{ fontSize: 13 }}>自动选号（系统自动选择最久未使用的健康账号，避免单号高频被封）</Text>
@@ -593,7 +593,7 @@ export default function Distribution() {
         width={520}
       >
         <Alert type="success" showIcon style={{ marginBottom: 16 }} message="内容已准备就绪"
-          description="点击下方链接跳转到各平台发布页，粘贴内容并确认发布后，回到这里点击「标记已发布」。" />
+          description="点击下方链接跳转到各平台发布页，粘贴内容并确认发布后，回到这里点击「标记已发布」。发布后约 1-2 周被 AI 引擎收录，可在发布记录点「复测提及率」验证效果。" />
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {publishLinks.map((job) => (
             <div key={job.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>

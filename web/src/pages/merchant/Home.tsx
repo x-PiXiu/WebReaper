@@ -1,12 +1,21 @@
 import { Card, Typography, Row, Col, Spin, Tag, Button } from 'antd'
-import { RocketOutlined, ArrowRightOutlined } from '@ant-design/icons'
+import { RocketOutlined, ArrowRightOutlined, AppstoreAddOutlined, SearchOutlined, RadarChartOutlined, FileTextOutlined } from '@ant-design/icons'
 import { Line, Pie } from '@ant-design/charts'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
+import { deltaView, latestMonitor } from '../../utils/geo'
 import type { Brand } from '../../types/api'
 
 const { Title, Text } = Typography
+
+// 空状态「10 分钟快速见效」引导步骤
+const QUICK_START_STEPS = [
+  { key: 'brand', title: '创建品牌', desc: '填写定位/卖点/竞品', path: '/m/brands', icon: <AppstoreAddOutlined /> },
+  { key: 'keyword', title: '添加关键词', desc: 'AI 生成或蒸馏获取', path: '/m/keywords', icon: <SearchOutlined /> },
+  { key: 'monitor', title: '立即监测', desc: '看 AI 怎么评价你', path: '/m/keywords', icon: <RadarChartOutlined /> },
+  { key: 'content', title: '生成内容', desc: '优化 AI 可见度', path: '/m/content', icon: <FileTextOutlined /> },
+]
 
 function rateColor(rate: number): string {
   if (rate >= 0.8) return 'var(--wr-success)'
@@ -53,26 +62,50 @@ export default function MerchantHome() {
   if (brands.length === 0) {
     return (
       <div className="wr-page-content" style={{ paddingTop: 80 }}>
-        <div className="wr-empty-hero">
-          <div style={{
-            width: 72, height: 72, borderRadius: 20,
-            background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 32, color: '#fff', marginBottom: 20, boxShadow: 'var(--wr-shadow-glow)',
-          }}>
-            <RocketOutlined />
+        <div className="wr-glass-card" style={{ padding: 48, maxWidth: 860, margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: 40 }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: 20, margin: '0 auto 20px',
+              background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 32, color: '#fff', boxShadow: 'var(--wr-shadow-glow)',
+            }}>
+              <RocketOutlined />
+            </div>
+            <h1 style={{ fontSize: 24, fontWeight: 700, margin: '0 0 8px', letterSpacing: '-0.02em' }}>
+              10 分钟，看到你的品牌在 AI 里的样子
+            </h1>
+            <Text type="secondary" style={{ fontSize: 14, maxWidth: 480, display: 'block', margin: '0 auto' }}>
+              现在用户问"XX哪家好"都问 AI 了——10 次回答里提到你几次？按下面四步走完，你的第一份 AI 可见度报告就出来了。
+            </Text>
           </div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 8px', letterSpacing: '-0.02em' }}>开启你的 GEO 之旅</h1>
-          <Text type="secondary" style={{ fontSize: 14, maxWidth: 420 }}>
-            创建第一个品牌，开始优化你在 AI 搜索引擎中的可见度
-          </Text>
-          <div style={{ marginTop: 24 }}>
-            <Button type="primary" size="large" icon={<ArrowRightOutlined />} onClick={() => navigate('/m/brands')}>
-              前往品牌管理
+
+          {/* 快速见效步骤 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 32 }}>
+            {QUICK_START_STEPS.map((s, i) => (
+              <div key={s.key} style={{
+                padding: 16, borderRadius: 12,
+                border: '1px solid var(--wr-border)', background: 'var(--wr-bg-elevated)',
+                display: 'flex', flexDirection: 'column', gap: 6, position: 'relative',
+              }}>
+                <div style={{
+                  width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--wr-gradient)', color: '#fff', fontSize: 13, fontWeight: 700, marginBottom: 4,
+                }}>{i + 1}</div>
+                <Text strong style={{ fontSize: 14 }}>{s.title}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{s.desc}</Text>
+                <Button size="small" type="link" style={{ padding: 0, fontSize: 12, alignSelf: 'flex-start' }}
+                  onClick={() => navigate(s.path)}>
+                  前往 <ArrowRightOutlined style={{ fontSize: 10 }} />
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ textAlign: 'center' }}>
+            <Button type="primary" size="large" onClick={() => navigate('/m/brands')}>
+              创建第一个品牌，开始
             </Button>
           </div>
-          <Text type="secondary" style={{ fontSize: 12, marginTop: 16 }}>
-            创建品牌 → AI 生成关键词 → 监测排名 → 生成优化内容
-          </Text>
         </div>
       </div>
     )
@@ -85,6 +118,19 @@ export default function MerchantHome() {
   const totalKeywords = ovData.reduce((s: number, o: any) => s + (o.keyword_count || 0), 0)
   const totalCompetitors = brands.reduce((s: number, b: Brand) => s + (b.competitors?.length || 0), 0)
   const strongCount = ovData.filter((o: any) => (o.avg_mention_rate || 0) >= 0.5).length
+
+  // 整体变化对比：各品牌最新 vs 上一次提及率的平均变化（delta）
+  const brandDeltas = ovData.map((o: any) => {
+    const trend = (o.trend || []).filter((t: any) => t.mention_rate !== undefined)
+    if (trend.length < 2) return null
+    const latest = trend[trend.length - 1].mention_rate
+    const prev = trend[trend.length - 2].mention_rate
+    return Math.round((latest - prev) * 1000) / 10
+  }).filter((d: number | null) => d !== null) as number[]
+  const overallDelta = brandDeltas.length > 0
+    ? brandDeltas.reduce((s: number, d: number) => s + d, 0) / brandDeltas.length
+    : null
+  const overallDeltaView = deltaView(overallDelta)
 
   // 提及率分布（环形图）
   const distData = [
@@ -128,6 +174,9 @@ export default function MerchantHome() {
                 {(totalAvg * 100).toFixed(1)}<span style={{ fontSize: 16, fontWeight: 600 }}>%</span>
               </div>
               <div className="wr-metric-label">平均提及率</div>
+              <div style={{ fontSize: 11, marginTop: 4, fontWeight: 600, color: overallDeltaView.color }}>
+                {overallDeltaView.arrow} {overallDeltaView.text} 较上期
+              </div>
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4}>
@@ -224,6 +273,13 @@ export default function MerchantHome() {
             const ov = ovData.find((o: any) => o.brand_id === b.id)
             const rate = ov?.avg_mention_rate || 0
             const color = rateColor(rate)
+            // 该品牌最新 vs 上一次提及率变化
+            const trend = (ov?.trend || []).filter((t: any) => t.mention_rate !== undefined)
+            const delta = deltaView(trend.length >= 2
+              ? Math.round((trend[trend.length - 1].mention_rate - trend[trend.length - 2].mention_rate) * 1000) / 10
+              : null)
+            // 最近一次监测的采样次数（置信度传达）
+            const lastSample = latestMonitor(trend as any)?.sample_count || 0
             return (
               <Col xs={24} sm={12} lg={8} key={b.id}>
                 <div className="wr-glass-card" style={{ padding: 22, height: '100%', cursor: 'pointer' }} onClick={() => navigate('/m/brands')}>
@@ -247,11 +303,16 @@ export default function MerchantHome() {
                     </span>
                     <span style={{ fontSize: 18, color: 'var(--wr-text-muted)', fontWeight: 500 }}>%</span>
                     <span style={{ fontSize: 12, color: 'var(--wr-text-muted)', marginLeft: 8 }}>提及率</span>
+                    {/* 变化对比 */}
+                    <span style={{ fontSize: 12, fontWeight: 700, color: delta.color, marginLeft: 6 }}>
+                      {delta.arrow} {delta.text}
+                    </span>
                   </div>
 
                   <div style={{ display: 'flex', gap: 16, paddingTop: 14, borderTop: '1px solid var(--wr-border)' }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>{ov?.keyword_count || 0} 个关键词</Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>{b.competitors?.length || 0} 个竞品</Text>
+                    {lastSample > 0 && <Text type="secondary" style={{ fontSize: 12 }}>采样 {lastSample} 次</Text>}
                   </div>
 
                   {b.core_selling && b.core_selling.length > 0 && (

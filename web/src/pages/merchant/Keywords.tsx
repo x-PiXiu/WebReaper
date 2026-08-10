@@ -4,6 +4,7 @@ import { UploadOutlined } from '@ant-design/icons'
 import { Line } from '@ant-design/charts'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
+import { mentionDelta, deltaView, markLastPoint } from '../../utils/geo'
 import type { Brand, Keyword, MonitoringResult, LLMConfig } from '../../types/api'
 
 const { Text } = Typography
@@ -252,14 +253,20 @@ export default function Keywords() {
         const sentColor = dominantSentiment === 'positive' ? 'var(--wr-success)' : dominantSentiment === 'negative' ? 'var(--wr-danger)' : 'var(--wr-text-muted)'
         const sentLabel = dominantSentiment === 'positive' ? '正面' : dominantSentiment === 'negative' ? '负面' : '中性'
 
+        // 变化对比（最新 vs 上一次监测的提及率差）
+        const delta = deltaView(mentionDelta(results))
+
         return (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {/* 维度1：提及率 */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 64, padding: '4px 8px', borderRadius: 8, background: `${rateColor(bestMention.mention_rate)}15` }}>
+            {/* 维度1：提及率（含变化对比 delta——付费说服力：让用户看到"在生效"）*/}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 72, padding: '4px 8px', borderRadius: 8, background: `${rateColor(bestMention.mention_rate)}15` }}>
               <Text style={{ fontSize: 16, fontWeight: 700, color: rateColor(bestMention.mention_rate), lineHeight: 1.2 }}>
                 {(bestMention.mention_rate * 100).toFixed(0)}%
               </Text>
               <Text type="secondary" style={{ fontSize: 10 }}>提及率</Text>
+              <Text style={{ fontSize: 10, color: delta.color, fontWeight: 600 }}>
+                {delta.arrow} {delta.text}
+              </Text>
             </div>
             {/* 维度2：排名 */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 56, padding: '4px 8px', borderRadius: 8, background: 'var(--wr-bg-elevated)' }}>
@@ -278,12 +285,13 @@ export default function Keywords() {
               <Text style={{ fontSize: 16, fontWeight: 700, color: 'var(--wr-text-primary)', lineHeight: 1.2 }}>{allCompetitors.size}</Text>
               <Text type="secondary" style={{ fontSize: 10 }}>竞品提及</Text>
             </div>
-            {/* 维度5：置信度 */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 56, padding: '4px 8px', borderRadius: 8, background: avgConfidence >= 0.6 ? 'var(--wr-primary-bg)' : 'var(--wr-bg-elevated)' }}>
+            {/* 维度5：置信度（含采样次数——可信度传达：监测是采样，样本越多越可信）*/}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 64, padding: '4px 8px', borderRadius: 8, background: avgConfidence >= 0.6 ? 'var(--wr-primary-bg)' : 'var(--wr-bg-elevated)' }}>
               <Text style={{ fontSize: 14, fontWeight: 700, color: avgConfidence >= 0.6 ? 'var(--wr-primary)' : 'var(--wr-warning)', lineHeight: 1.5 }}>
                 {(avgConfidence * 100).toFixed(0)}%
               </Text>
               <Text type="secondary" style={{ fontSize: 10 }}>置信度</Text>
+              <Text type="secondary" style={{ fontSize: 9, opacity: 0.8 }}>采样 {bestMention.sample_count || 1} 次</Text>
             </div>
           </div>
         )
@@ -381,13 +389,13 @@ export default function Keywords() {
                           }
                           return (
                             <div style={{ padding: '4px 0' }}>
-                              {/* 提及率趋势图 */}
+                              {/* 提及率趋势图（最后一点突出 = 变化点，展示"最新监测结果"）*/}
                               {results.length > 1 && (() => {
-                                const trendData = results.map((r: MonitoringResult) => ({
+                                const trendData = markLastPoint(results.map((r: MonitoringResult) => ({
                                   date: new Date(r.probed_at).toLocaleDateString(),
                                   rate: Math.round((r.mention_rate || 0) * 1000) / 10,
                                   engine: r.engine_name || 'default',
-                                })).sort((a, b) => a.date.localeCompare(b.date))
+                                })).sort((a, b) => a.date.localeCompare(b.date)))
                                 return (
                                   <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 10 }}>
                                     <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>提及率趋势</Text>
@@ -398,7 +406,15 @@ export default function Keywords() {
                                       smooth
                                       height={180}
                                       color={['#6366f1', '#0891b2', '#10b981', '#f59e0b']}
-                                      point={{ size: 3, shape: 'circle' }}
+                                      point={{
+                                        size: 3,
+                                        shape: 'circle',
+                                        style: {
+                                          fill: (d: any) => d.is_last ? 'var(--wr-primary)' : 'transparent',
+                                          stroke: (d: any) => d.is_last ? 'var(--wr-primary)' : '#6366f1',
+                                          lineWidth: 2,
+                                        },
+                                      }}
                                       yAxis={{ label: { formatter: (v: string) => v + '%' } }}
                                     />
                                   </div>
