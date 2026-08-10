@@ -71,7 +71,6 @@ export function AppShell({
   // 角色切换入口：admin 在用户界面时显示「管理后台」，在管理后台时显示「返回用户界面」
   const inAdmin = location.pathname.startsWith('/admin')
   const showRoleSwitch = role === 'admin'
-  const roleSwitchLabel = inAdmin ? '返回用户界面' : '管理后台'
   const roleSwitchTarget = inAdmin ? '/m' : '/admin'
 
   const handleLogout = () => {
@@ -87,7 +86,7 @@ export function AppShell({
 
   const noPadding = noPaddingKeys.includes(selectedKey)
 
-  // 全局资产搜索（品牌/关键词快速跳转；数据来自租户级接口，缓存 60s）
+  // 全局资产搜索（品牌/关键词/发布任务快速跳转；数据来自租户级接口，缓存 60s）
   const { data: brands = [] } = useQuery({
     queryKey: ['global-search-brands'],
     queryFn: () => businessApi.listBrands(),
@@ -97,6 +96,12 @@ export function AppShell({
   const { data: keywords = [] } = useQuery({
     queryKey: ['global-search-keywords'],
     queryFn: () => businessApi.listAllKeywords(),
+    staleTime: 60_000,
+    enabled: !inAdmin,
+  })
+  const { data: publishJobs = [] } = useQuery({
+    queryKey: ['global-search-jobs'],
+    queryFn: () => businessApi.listPublishJobs(),
     staleTime: 60_000,
     enabled: !inAdmin,
   })
@@ -111,6 +116,11 @@ export function AppShell({
       value: `关键词 · ${k.term}`,
       label: `关键词 · ${k.term}`,
       target: '/m/keywords',
+    })),
+    ...publishJobs.slice(0, 20).map((j: { id: string; title: string; platform: string }) => ({
+      value: `发布任务 · ${j.title || j.id}`,
+      label: `发布任务 · ${j.title || j.id} (${j.platform})`,
+      target: '/m/distribution',
     })),
   ]
 
@@ -191,6 +201,26 @@ export function AppShell({
             <span style={{ color: 'var(--wr-text-primary)', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>
               {findMenuLabel(menuItems, selectedKey) || '控制台'}
             </span>
+            {/* 角色切换器（工作空间切换——admin 专属，显眼渐变样式）*/}
+            {showRoleSwitch && (
+              <Button
+                size="small"
+                onClick={() => navigate(roleSwitchTarget)}
+                style={{
+                  marginLeft: 12,
+                  background: inAdmin ? 'var(--wr-bg-base)' : 'var(--wr-gradient)',
+                  color: inAdmin ? 'var(--wr-text-primary)' : '#fff',
+                  border: inAdmin ? '1px solid var(--wr-border-hover)' : 'none',
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  padding: '0 14px',
+                  height: 32,
+                  boxShadow: inAdmin ? 'none' : 'var(--wr-shadow-glow)',
+                }}
+              >
+                {inAdmin ? '← 返回用户界面' : '管理后台 →'}
+              </Button>
+            )}
             {/* 全局资产搜索（商户端）*/}
             {!inAdmin && (
               <AutoComplete
@@ -213,18 +243,6 @@ export function AppShell({
           <Space size={12}>
             {/* 站内通知铃铛（主动唤醒：提及率变化/自动复测/排期发布）*/}
             <NotificationBell />
-            {/* 角色切换入口（仅 admin：用户界面 ↔ 管理后台）*/}
-            {showRoleSwitch && (
-              <Button
-                size="small"
-                type="primary"
-                ghost
-                onClick={() => navigate(roleSwitchTarget)}
-                style={{ fontSize: 13 }}
-              >
-                {roleSwitchLabel}
-              </Button>
-            )}
             {/* 主题切换 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 14 }}>{themeMode === 'dark' ? '深' : '亮'}</span>

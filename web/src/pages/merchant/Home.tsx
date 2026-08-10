@@ -1,5 +1,5 @@
-import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message } from 'antd'
-import { RocketOutlined, ArrowRightOutlined, AppstoreAddOutlined, SearchOutlined, RadarChartOutlined, FileTextOutlined } from '@ant-design/icons'
+import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message, Progress, Tooltip, List } from 'antd'
+import { RocketOutlined, ArrowRightOutlined, AppstoreAddOutlined, SearchOutlined, RadarChartOutlined, FileTextOutlined, BellOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { Line, Pie } from '@ant-design/charts'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -49,6 +49,21 @@ export default function MerchantHome() {
       return results.filter(Boolean)
     },
     enabled: brands.length > 0,
+  })
+
+  // 待办：未读通知（提及率变化/自动复测/排期发布等主动唤醒信号）
+  const { data: notifRes } = useQuery({
+    queryKey: ['merchant-notifications'],
+    queryFn: () => businessApi.listNotifications(),
+    staleTime: 30_000,
+  })
+  const unreadNotifs = (notifRes || []).filter((n: any) => !n.read).slice(0, 3)
+
+  // 配额用量（套餐余量——让商户每次进来感知"我还剩多少额度"）
+  const { data: usage } = useQuery({
+    queryKey: ['my-usage'],
+    queryFn: () => businessApi.getMyUsage().catch(() => null),
+    staleTime: 60_000,
   })
 
   if (isLoading) {
@@ -196,6 +211,72 @@ export default function MerchantHome() {
               <div className="wr-metric-value wr-shimmer">→</div>
               <div className="wr-metric-label">去内容工作台</div>
             </div>
+          </Col>
+        </Row>
+
+        {/* 待办 + 配额用量横条（每次进来第一眼看到的运营信号）*/}
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          {/* 待办：未读通知 */}
+          <Col xs={24} lg={14}>
+            <Card className="wr-glass-card" styles={{ body: { padding: 16 } }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <Space size={6}>
+                  <BellOutlined style={{ color: 'var(--wr-accent)' }} />
+                  <Text strong style={{ fontSize: 14 }}>待办提醒</Text>
+                  {unreadNotifs.length > 0 && <Tag color="processing" style={{ fontSize: 11 }}>{unreadNotifs.length} 条未读</Tag>}
+                </Space>
+                {unreadNotifs.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}><CheckCircleOutlined /> 全部已处理</Text>}
+              </div>
+              {unreadNotifs.length > 0 ? (
+                <List
+                  size="small"
+                  dataSource={unreadNotifs}
+                  renderItem={(n: any) => (
+                    <List.Item style={{ padding: '6px 0', border: 'none', cursor: n.link ? 'pointer' : 'default' }}
+                      onClick={() => n.link && navigate(n.link)}>
+                      <Space size={8} style={{ width: '100%' }}>
+                        <Tag color={n.type?.includes('drop') ? 'error' : n.type?.includes('overtake') ? 'warning' : 'default'} style={{ fontSize: 11, margin: 0 }}>{n.type || '通知'}</Tag>
+                        <Text ellipsis style={{ flex: 1, fontSize: 13, color: 'var(--wr-text-secondary)' }}>{n.title}</Text>
+                        <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>{(n.created_at || '').slice(5, 16).replace('T', ' ')}</Text>
+                      </Space>
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Text type="secondary" style={{ fontSize: 13 }}>暂无待办——监测/复测/排期发布的结果会出现在这里</Text>
+              )}
+            </Card>
+          </Col>
+          {/* 配额用量 */}
+          <Col xs={24} lg={10}>
+            <Card className="wr-glass-card" styles={{ body: { padding: 16 } }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <Space size={6}>
+                  <ThunderboltOutlined style={{ color: 'var(--wr-warning)' }} />
+                  <Text strong style={{ fontSize: 14 }}>本月用量</Text>
+                  <Tag color={usage?.plan?.level === 'team' ? 'gold' : usage?.plan?.level === 'pro' ? 'purple' : 'default'} style={{ fontSize: 11 }}>{usage?.plan?.name || '免费版'}</Tag>
+                </Space>
+                <Button size="small" type="link" onClick={() => navigate('/m/my-plan')}>详情</Button>
+              </div>
+              <Row gutter={[12, 8]}>
+                {usage && Object.entries(usage.usages || {}).slice(0, 4).map(([scene, u]: [string, any]) => {
+                  const unlimited = u.limit === -1
+                  const pct = unlimited ? 0 : u.limit > 0 ? Math.min(100, (u.used / u.limit) * 100) : 0
+                  const labels: Record<string, string> = { monitor: '监测', 'content-gen': '生成', 'content-opt': '优化', chat: '对话' }
+                  return (
+                    <Col span={12} key={scene}>
+                      <Tooltip title={`${labels[scene] || scene}：${unlimited ? '无限' : u.used + '/' + u.limit}`}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>{labels[scene] || scene}</Text>
+                          <Text style={{ fontSize: 11, color: pct >= 100 ? 'var(--wr-danger)' : 'var(--wr-text-muted)' }}>{unlimited ? '∞' : `${u.used}/${u.limit}`}</Text>
+                        </div>
+                        {!unlimited && <Progress percent={pct} size="small" showInfo={false} strokeColor={pct >= 100 ? 'var(--wr-danger)' : pct >= 80 ? 'var(--wr-warning)' : 'var(--wr-accent)'} />}
+                      </Tooltip>
+                    </Col>
+                  )
+                })}
+              </Row>
+            </Card>
           </Col>
         </Row>
 

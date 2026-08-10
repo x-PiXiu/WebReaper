@@ -1,4 +1,4 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Card, Row, Col, Statistic, Modal, Input, InputNumber, Form, Select, Divider } from 'antd'
+import { Typography, Table, Tag, Space, Button, message, Popconfirm, Card, Row, Col, Statistic, Modal, Input, InputNumber, Form, Select, Divider, Tabs } from 'antd'
 import { DollarOutlined, CrownOutlined, TeamOutlined, RiseOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -81,98 +81,102 @@ export default function AdminBilling() {
         <p>收入概览 · 套餐管理 · 订阅与订单</p>
       </div>
 
-      <Space style={{ marginBottom: 16 }}>
-        {[
-          { k: 'overview', label: '收入概览' },
-          { k: 'plans', label: '套餐管理' },
-          { k: 'subs', label: '订阅列表' },
-          { k: 'orders', label: '订单流水' },
-        ].map(t => (
-          <Button key={t.k} type={tab === t.k ? 'primary' : 'default'} onClick={() => setTab(t.k)}>{t.label}</Button>
-        ))}
-      </Space>
-
-      {/* 收入概览 */}
-      {tab === 'overview' && (
-        <div>
-          <Row gutter={16}>
-            <Col span={6}><Card><Statistic title="累计收入" value={yuan(revenue?.total_revenue_cents || 0)} prefix={<DollarOutlined />} /></Card></Col>
-            <Col span={6}><Card><Statistic title="当月收入" value={yuan(revenue?.month_revenue_cents || 0)} prefix={<RiseOutlined />} /></Card></Col>
-            <Col span={6}><Card><Statistic title="已支付订单" value={revenue?.paid_orders || 0} prefix={<CrownOutlined />} /></Card></Col>
-            <Col span={6}><Card><Statistic title="有效订阅" value={revenue?.active_subscriptions || 0} prefix={<TeamOutlined />} /></Card></Col>
-          </Row>
-          <Card title="套餐分布" style={{ marginTop: 16 }}>
-            {Object.entries(revenue?.plan_distribution || {}).length === 0 ? (
-              <Text type="secondary">暂无有效订阅</Text>
-            ) : (
-              <Space wrap>
-                {Object.entries(revenue?.plan_distribution || {}).map(([pid, n]) => (
-                  <Tag key={pid} color="blue">{planName(pid)}: {n} 个订阅</Tag>
-                ))}
-              </Space>
-            )}
-          </Card>
-        </div>
-      )}
-
-      {/* 套餐管理 */}
-      {tab === 'plans' && (
-        <div>
-          <div style={{ marginBottom: 16 }}><Button type="primary" onClick={openNewPlan}>新建套餐</Button></div>
-          <Table dataSource={plans} rowKey="id" size="small" pagination={false}>
-            <Table.Column title="套餐" dataIndex="name" key="name" render={(n, r: Plan) => <Space direction="vertical" size={0}><Text strong>{n}</Text><Text type="secondary">{r.id}</Text></Space>} />
-            <Table.Column title="层级" dataIndex="level" key="level" width={80} render={(l) => <Tag color={l === 'team' ? 'gold' : l === 'pro' ? 'purple' : 'default'}>{l}</Tag>} />
-            <Table.Column title="月费" dataIndex="price_cents" key="price" width={100} render={(c) => <Text strong>{yuan(c)}</Text>} />
-            <Table.Column title="配额" dataIndex="quotas" key="quotas" render={(q: Record<string, number>) => (
-              <Space wrap size={4}>
-                {Object.entries(q || {}).map(([k, v]) => <Tag key={k} style={{ fontSize: 11 }}>{k}: {v === -1 ? '∞' : v}</Tag>)}
-              </Space>
-            )} />
-            <Table.Column title="状态" dataIndex="status" key="status" width={80} render={(s) => <Tag color={statusColor[s] || 'default'}>{s}</Tag>} />
-            <Table.Column title="操作" key="action" width={140} render={(_: unknown, r: Plan) => (
-              <Space size={4}>
-                <Button size="small" type="link" onClick={() => openEditPlan(r)}>编辑</Button>
-                <Popconfirm title="删除该套餐？" onConfirm={() => deletePlanMut.mutate(r.id)}>
-                  <Button size="small" type="link" danger>删除</Button>
-                </Popconfirm>
-              </Space>
-            )} />
-          </Table>
-        </div>
-      )}
-
-      {/* 订阅列表 */}
-      {tab === 'subs' && (
-        <div>
-          <div style={{ marginBottom: 16 }}>
-            <Button type="primary" onClick={() => setAssignModal({ open: true, tenant: '', planId: '' })}>手动开通套餐</Button>
-          </div>
-          <Table dataSource={subs} rowKey="id" size="small" pagination={{ pageSize: 20 }}>
-            <Table.Column title="租户" dataIndex="tenant_id" key="tenant" render={(t) => <Text copyable style={{ fontSize: 12 }}>{t}</Text>} />
-            <Table.Column title="套餐" dataIndex="plan_id" key="plan" render={(p) => <Tag color="blue">{planName(p)}</Tag>} />
-            <Table.Column title="状态" dataIndex="status" key="status" width={100} render={(s) => <Tag color={statusColor[s]}>{s}</Tag>} />
-            <Table.Column title="计费周期" key="period" width={200} render={(_: unknown, r: Subscription) => (
-              <Text type="secondary" style={{ fontSize: 12 }}>{r.period_start?.slice(0, 10)} ~ {r.period_end?.slice(0, 10)}</Text>
-            )} />
-            <Table.Column title="操作" key="action" width={100} render={(_: unknown, r: Subscription) => (
-              <Button size="small" type="link" onClick={() => setAssignModal({ open: true, tenant: r.tenant_id, planId: r.plan_id })}>变更</Button>
-            )} />
-          </Table>
-        </div>
-      )}
-
-      {/* 订单流水 */}
-      {tab === 'orders' && (
-        <Table dataSource={orders} rowKey="id" size="small" pagination={{ pageSize: 20 }}>
-          <Table.Column title="订单号" dataIndex="id" key="id" render={(id) => <Text copyable style={{ fontSize: 12 }}>{id}</Text>} />
-          <Table.Column title="租户" dataIndex="tenant_id" key="tenant" render={(t) => <Text style={{ fontSize: 12 }}>{t?.slice(0, 16)}…</Text>} />
-          <Table.Column title="套餐" dataIndex="plan_id" key="plan" render={(p) => <Tag>{planName(p)}</Tag>} />
-          <Table.Column title="金额" dataIndex="amount_cents" key="amount" width={100} render={(c) => <Text strong>{yuan(c)}</Text>} />
-          <Table.Column title="状态" dataIndex="status" key="status" width={90} render={(s) => <Tag color={statusColor[s]}>{s}</Tag>} />
-          <Table.Column title="支付方式" dataIndex="payment_gateway" key="gw" width={90} />
-          <Table.Column title="创建时间" dataIndex="created_at" key="created" width={130} render={(t) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.slice(0, 16).replace('T', ' ')}</Text>} />
-        </Table>
-      )}
+      <Tabs
+        activeKey={tab}
+        onChange={setTab}
+        items={[
+          {
+            key: 'overview',
+            label: '收入概览',
+            children: (
+              <div>
+                <Row gutter={16}>
+                  <Col span={6}><Card><Statistic title="累计收入" value={yuan(revenue?.total_revenue_cents || 0)} prefix={<DollarOutlined />} /></Card></Col>
+                  <Col span={6}><Card><Statistic title="当月收入" value={yuan(revenue?.month_revenue_cents || 0)} prefix={<RiseOutlined />} /></Card></Col>
+                  <Col span={6}><Card><Statistic title="已支付订单" value={revenue?.paid_orders || 0} prefix={<CrownOutlined />} /></Card></Col>
+                  <Col span={6}><Card><Statistic title="有效订阅" value={revenue?.active_subscriptions || 0} prefix={<TeamOutlined />} /></Card></Col>
+                </Row>
+                <Card title="套餐分布" style={{ marginTop: 16 }}>
+                  {Object.entries(revenue?.plan_distribution || {}).length === 0 ? (
+                    <Text type="secondary">暂无有效订阅</Text>
+                  ) : (
+                    <Space wrap>
+                      {Object.entries(revenue?.plan_distribution || {}).map(([pid, n]) => (
+                        <Tag key={pid} color="blue">{planName(pid)}: {n} 个订阅</Tag>
+                      ))}
+                    </Space>
+                  )}
+                </Card>
+              </div>
+            ),
+          },
+          {
+            key: 'plans',
+            label: '套餐管理',
+            children: (
+              <div>
+                <div style={{ marginBottom: 16 }}><Button type="primary" onClick={openNewPlan}>新建套餐</Button></div>
+                <Table dataSource={plans} rowKey="id" size="small" pagination={false}>
+                  <Table.Column title="套餐" dataIndex="name" key="name" render={(n, r: Plan) => <Space direction="vertical" size={0}><Text strong>{n}</Text><Text type="secondary">{r.id}</Text></Space>} />
+                  <Table.Column title="层级" dataIndex="level" key="level" width={80} render={(l) => <Tag color={l === 'team' ? 'gold' : l === 'pro' ? 'purple' : 'default'}>{l}</Tag>} />
+                  <Table.Column title="月费" dataIndex="price_cents" key="price" width={100} render={(c) => <Text strong>{yuan(c)}</Text>} />
+                  <Table.Column title="配额" dataIndex="quotas" key="quotas" render={(q: Record<string, number>) => (
+                    <Space wrap size={4}>
+                      {Object.entries(q || {}).map(([k, v]) => <Tag key={k} style={{ fontSize: 11 }}>{k}: {v === -1 ? '∞' : v}</Tag>)}
+                    </Space>
+                  )} />
+                  <Table.Column title="状态" dataIndex="status" key="status" width={80} render={(s) => <Tag color={statusColor[s] || 'default'}>{s}</Tag>} />
+                  <Table.Column title="操作" key="action" width={140} render={(_: unknown, r: Plan) => (
+                    <Space size={4}>
+                      <Button size="small" type="link" onClick={() => openEditPlan(r)}>编辑</Button>
+                      <Popconfirm title="删除该套餐？" onConfirm={() => deletePlanMut.mutate(r.id)}>
+                        <Button size="small" type="link" danger>删除</Button>
+                      </Popconfirm>
+                    </Space>
+                  )} />
+                </Table>
+              </div>
+            ),
+          },
+          {
+            key: 'subs',
+            label: '订阅列表',
+            children: (
+              <div>
+                <div style={{ marginBottom: 16 }}>
+                  <Button type="primary" onClick={() => setAssignModal({ open: true, tenant: '', planId: '' })}>手动开通套餐</Button>
+                </div>
+                <Table dataSource={subs} rowKey="id" size="small" pagination={{ pageSize: 20 }}>
+                  <Table.Column title="租户" dataIndex="tenant_id" key="tenant" render={(t) => <Text copyable style={{ fontSize: 12 }}>{t}</Text>} />
+                  <Table.Column title="套餐" dataIndex="plan_id" key="plan" render={(p) => <Tag color="blue">{planName(p)}</Tag>} />
+                  <Table.Column title="状态" dataIndex="status" key="status" width={100} render={(s) => <Tag color={statusColor[s]}>{s}</Tag>} />
+                  <Table.Column title="计费周期" key="period" width={200} render={(_: unknown, r: Subscription) => (
+                    <Text type="secondary" style={{ fontSize: 12 }}>{r.period_start?.slice(0, 10)} ~ {r.period_end?.slice(0, 10)}</Text>
+                  )} />
+                  <Table.Column title="操作" key="action" width={100} render={(_: unknown, r: Subscription) => (
+                    <Button size="small" type="link" onClick={() => setAssignModal({ open: true, tenant: r.tenant_id, planId: r.plan_id })}>变更</Button>
+                  )} />
+                </Table>
+              </div>
+            ),
+          },
+          {
+            key: 'orders',
+            label: '订单流水',
+            children: (
+              <Table dataSource={orders} rowKey="id" size="small" pagination={{ pageSize: 20 }}>
+                <Table.Column title="订单号" dataIndex="id" key="id" render={(id) => <Text copyable style={{ fontSize: 12 }}>{id}</Text>} />
+                <Table.Column title="租户" dataIndex="tenant_id" key="tenant" render={(t) => <Text style={{ fontSize: 12 }}>{t?.slice(0, 16)}…</Text>} />
+                <Table.Column title="套餐" dataIndex="plan_id" key="plan" render={(p) => <Tag>{planName(p)}</Tag>} />
+                <Table.Column title="金额" dataIndex="amount_cents" key="amount" width={100} render={(c) => <Text strong>{yuan(c)}</Text>} />
+                <Table.Column title="状态" dataIndex="status" key="status" width={90} render={(s) => <Tag color={statusColor[s]}>{s}</Tag>} />
+                <Table.Column title="支付方式" dataIndex="payment_gateway" key="gw" width={90} />
+                <Table.Column title="创建时间" dataIndex="created_at" key="created" width={130} render={(t) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.slice(0, 16).replace('T', ' ')}</Text>} />
+              </Table>
+            ),
+          },
+        ]}
+      />
 
       {/* 套餐编辑 Modal */}
       <Modal title={planModal?.id ? '编辑套餐' : '新建套餐'} open={!!planModal} onOk={handleSavePlan} onCancel={() => setPlanModal(null)} width={560} destroyOnClose>

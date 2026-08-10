@@ -16,6 +16,7 @@ import Keywords from './pages/merchant/Keywords'
 import Distribution from './pages/merchant/Distribution'
 import VideoWorkbench from './pages/merchant/Video'
 import MyPlan from './pages/merchant/MyPlan'
+import Visibility from './pages/merchant/Visibility'
 // 管理端额外页面
 import AdminUsers from './pages/admin/Users'
 import Indexing from './pages/admin/Indexing'
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/m" element={<MerchantHome />} />
           <Route path="/m/brands" element={<Brands />} />
           <Route path="/m/keywords" element={<Keywords />} />
+          <Route path="/m/visibility" element={<Visibility />} />
           <Route path="/m/content" element={<Content />} />
           <Route path="/m/video" element={<VideoWorkbench />} />
           <Route path="/m/distribution" element={<Distribution />} />

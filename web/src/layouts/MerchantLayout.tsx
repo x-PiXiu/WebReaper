@@ -8,22 +8,24 @@ import {
   ExportOutlined,
   MessageOutlined,
   CrownOutlined,
+  RadarChartOutlined,
 } from '@ant-design/icons'
 
-// 商户端布局：分组导航（概览 / 资产 / 创作 / 分发 / AI 助手）。
-// AntD Menu group 分组渲染，选中态 Linear 化（CSS 覆盖）。
+// 商户端布局：分组导航（资产 / 可见度 / 创作 / 运营）。
+// 设计原则：按业务域分组，每组 ≥2 项（避免单项目组——原 概览/分发/AI助手/账户 各 1 项过碎）。
 const merchantMenu: NavItem[] = [
   {
-    key: 'overview', label: '概览',
+    key: 'assets', label: '品牌资产',
     children: [
       { key: '/m', label: '数据驾驶舱', icon: <DashboardOutlined /> },
+      { key: '/m/brands', label: '品牌管理', icon: <AppstoreOutlined /> },
+      { key: '/m/keywords', label: '关键词管理', icon: <SearchOutlined /> },
     ],
   },
   {
-    key: 'assets', label: '资产',
+    key: 'visibility', label: 'AI 可见度',
     children: [
-      { key: '/m/brands', label: '品牌管理', icon: <AppstoreOutlined /> },
-      { key: '/m/keywords', label: '关键词管理', icon: <SearchOutlined /> },
+      { key: '/m/visibility', label: '可见度总览', icon: <RadarChartOutlined /> },
     ],
   },
   {
@@ -34,20 +36,10 @@ const merchantMenu: NavItem[] = [
     ],
   },
   {
-    key: 'distribution', label: '分发',
+    key: 'operation', label: '运营',
     children: [
       { key: '/m/distribution', label: '分发中心', icon: <ExportOutlined /> },
-    ],
-  },
-  {
-    key: 'assistant', label: 'AI 助手',
-    children: [
       { key: '/m/chat', label: 'AI 对话', icon: <MessageOutlined /> },
-    ],
-  },
-  {
-    key: 'account', label: '账户',
-    children: [
       { key: '/m/my-plan', label: '我的套餐', icon: <CrownOutlined /> },
     ],
   },

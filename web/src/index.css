@@ -37,10 +37,10 @@
   --wr-border: rgba(255, 255, 255, 0.07);
   --wr-border-hover: rgba(255, 255, 255, 0.14);
 
-  /* 文字层级 */
+  /* 文字层级（muted 提亮一档：原 #5e5e68 在深色背景上对比度不足，长时间阅读累）*/
   --wr-text-primary: #ededf0;
-  --wr-text-secondary: #9b9ba3;
-  --wr-text-muted: #5e5e68;
+  --wr-text-secondary: #ababb4;
+  --wr-text-muted: #76767f;
 
   /* 组件 */
   --wr-card-bg: rgba(19, 19, 27, 0.6);
@@ -158,6 +158,21 @@ body::before {
 .ant-table-tbody > tr:hover > td,
 .ant-table-tbody > tr.ant-table-row:hover > td { background: var(--wr-table-row-hover) !important; }
 .ant-table-row-selected > td { background: var(--wr-primary-bg) !important; }
+
+/* 表格密度统一：所有表格默认 compact（小屏信息密度高，商户/admin 一致）*/
+.ant-table-middle, .ant-table { font-size: 13px; }
+.ant-table-thead > tr > th { padding: 10px 12px !important; font-weight: 600; }
+.ant-table-tbody > tr > td { padding: 10px 12px !important; }
+
+/* 帮助 tooltip 里的 .wr-help-tip 样式（次要文字旁的 ? 图标）*/
+.wr-help-tip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--wr-bg-hover); color: var(--wr-text-muted);
+  font-size: 10px; cursor: help; margin-left: 4px; vertical-align: middle;
+  transition: all 150ms;
+}
+.wr-help-tip:hover { background: var(--wr-primary-bg); color: var(--wr-primary); }
 
 /* 卡片：玻璃拟态 + 低对比边框（无重阴影）*/
 .ant-card {
