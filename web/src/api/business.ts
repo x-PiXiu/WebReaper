@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { TaskView, AgentConfig, LLMConfig, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob } from '../types/api'
+import type { TaskView, AgentConfig, LLMConfig, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -302,4 +302,36 @@ export const businessApi = {
 
   listVideoJobs: () =>
     apiClient.get<unknown, VideoJob[]>('/api/v1/video/jobs'),
+
+  // ---- 经济系统（套餐/订阅/订单/用量）----
+
+  // 商户端
+  listActivePlans: () =>
+    apiClient.get<unknown, { plans: Plan[] }>('/api/v1/billing/plans'),
+  getMyPlan: () =>
+    apiClient.get<unknown, { subscription: Subscription | null; hint?: string }>('/api/v1/billing/my-plan'),
+  getMyUsage: () =>
+    apiClient.get<unknown, MyUsageSummary>('/api/v1/billing/usage'),
+  listMyOrders: () =>
+    apiClient.get<unknown, { orders: Order[] }>('/api/v1/billing/orders'),
+  createOrder: (planId: string) =>
+    apiClient.post<unknown, { order: Order; payment_url: string }>('/api/v1/billing/orders', { plan_id: planId }),
+  confirmOrder: (orderId: string) =>
+    apiClient.post<unknown, { subscription: Subscription }>(`/api/v1/billing/orders/${orderId}/confirm`),
+
+  // admin 端
+  adminListPlans: () =>
+    apiClient.get<unknown, { plans: Plan[] }>('/api/v1/admin/billing/plans'),
+  adminSavePlan: (plan: Plan) =>
+    apiClient.post<unknown, Plan>('/api/v1/admin/billing/plans', plan),
+  adminDeletePlan: (id: string) =>
+    apiClient.delete<unknown, { id: string }>(`/api/v1/admin/billing/plans/${id}`),
+  adminListSubscriptions: () =>
+    apiClient.get<unknown, { subscriptions: Subscription[] }>('/api/v1/admin/billing/subscriptions'),
+  adminAssignPlan: (tenant: string, planId: string) =>
+    apiClient.put<unknown, { subscription: Subscription }>(`/api/v1/admin/billing/subscriptions/${tenant}`, { plan_id: planId }),
+  adminListOrders: () =>
+    apiClient.get<unknown, { orders: Order[] }>('/api/v1/admin/billing/orders'),
+  adminRevenueReport: () =>
+    apiClient.get<unknown, RevenueSummary>('/api/v1/admin/billing/revenue'),
 }

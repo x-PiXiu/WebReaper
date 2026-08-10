@@ -306,3 +306,60 @@ export interface VideoJob {
   error: string
   created_at: string
 }
+
+// ---- 经济系统（订阅 / 计费 / 配额）----
+
+export interface Plan {
+  id: string
+  name: string
+  level: string                // free / pro / team
+  price_cents: number          // 月费（分）
+  quotas: Record<string, number>  // 场景→配额（-1=无限）
+  features: string[]
+  status: string               // active / archived
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Subscription {
+  id: string
+  tenant_id: string
+  plan_id: string
+  status: string               // active / expired / cancelled
+  period_start: string
+  period_end: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Order {
+  id: string
+  tenant_id: string
+  plan_id: string
+  amount_cents: number
+  status: string               // pending / paid / refunded / failed
+  payment_gateway: string
+  payment_id: string
+  created_at: string
+  paid_at: string
+}
+
+export interface RevenueSummary {
+  total_revenue_cents: number
+  month_revenue_cents: number
+  paid_orders: number
+  active_subscriptions: number
+  plan_distribution: Record<string, number>
+}
+
+export interface UsageEntry {
+  limit: number                // -1=无限
+  used: number
+}
+
+export interface MyUsageSummary {
+  subscription: Subscription | null
+  plan: Plan
+  usages: Record<string, UsageEntry>
+}

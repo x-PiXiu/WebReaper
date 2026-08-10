@@ -7,6 +7,7 @@ import {
   VideoCameraOutlined,
   ExportOutlined,
   MessageOutlined,
+  CrownOutlined,
 } from '@ant-design/icons'
 
 // 商户端布局：分组导航（概览 / 资产 / 创作 / 分发 / AI 助手）。
@@ -42,6 +43,12 @@ const merchantMenu: NavItem[] = [
     key: 'assistant', label: 'AI 助手',
     children: [
       { key: '/m/chat', label: 'AI 对话', icon: <MessageOutlined /> },
+    ],
+  },
+  {
+    key: 'account', label: '账户',
+    children: [
+      { key: '/m/my-plan', label: '我的套餐', icon: <CrownOutlined /> },
     ],
   },
 ]

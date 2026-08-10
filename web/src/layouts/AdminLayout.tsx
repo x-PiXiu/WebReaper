@@ -14,6 +14,7 @@ const adminMenu: NavItem[] = [
       { key: '/admin/users', label: '商户管理' },
       { key: '/admin/brands', label: '品牌管理' },
       { key: '/admin/contents', label: '内容管理' },
+      { key: '/admin/billing', label: '计费管理' },
       { key: '/admin/settings', label: '平台设置' },
     ],
   },

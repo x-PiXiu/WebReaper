@@ -15,12 +15,14 @@ import Content from './pages/merchant/Content'
 import Keywords from './pages/merchant/Keywords'
 import Distribution from './pages/merchant/Distribution'
 import VideoWorkbench from './pages/merchant/Video'
+import MyPlan from './pages/merchant/MyPlan'
 // 管理端额外页面
 import AdminUsers from './pages/admin/Users'
 import Indexing from './pages/admin/Indexing'
 import AdminBrands from './pages/admin/Brands'
 import AdminContents from './pages/admin/Contents'
 import AdminSettings from './pages/admin/Settings'
+import AdminBilling from './pages/admin/Billing'
 // 布局与守卫
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
@@ -41,6 +43,7 @@ export default function App() {
           <Route path="/m/content" element={<Content />} />
           <Route path="/m/video" element={<VideoWorkbench />} />
           <Route path="/m/distribution" element={<Distribution />} />
+          <Route path="/m/my-plan" element={<MyPlan />} />
           <Route path="/m/chat" element={<Chat />} />
         </Route>
 
@@ -57,6 +60,7 @@ export default function App() {
           <Route path="/admin/tools" element={<Tools />} />
           <Route path="/admin/crawl-config" element={<CrawlConfigPage />} />
           <Route path="/admin/indexing" element={<Indexing />} />
+          <Route path="/admin/billing" element={<AdminBilling />} />
           <Route path="/admin/chat" element={<Chat />} />
         </Route>
 
