@@ -129,33 +129,6 @@ func (r *Router) handleCreateFromContent(c *gin.Context) {
 	success(c, dataItemToView(item))
 }
 
-// ---- 采集集合 ----
-
-func collectionToView(c entity.Collection) gin.H {
-	return gin.H{
-		"id":         c.ID,
-		"name":       c.Name,
-		"agent_name": c.AgentName,
-		"task_id":    c.TaskID,
-		"status":     string(c.Status),
-		"item_count": c.ItemCount,
-		"created_at": c.CreatedAt,
-	}
-}
-
-func (r *Router) handleListCollections(c *gin.Context) {
-	cols, err := r.dataItemUC.ListCollections(c.Request.Context(), 50)
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	views := make([]gin.H, 0, len(cols))
-	for _, col := range cols {
-		views = append(views, collectionToView(col))
-	}
-	success(c, views)
-}
-
 // ---- Agent 配置（薄 handler：DTO 转换 + 调用 agentCfgUC）----
 
 func agentConfigToView(cfg entity.AgentConfig) gin.H {

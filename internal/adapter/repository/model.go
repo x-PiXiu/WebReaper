@@ -55,21 +55,6 @@ type DataItemPO struct {
 
 func (DataItemPO) TableName() string { return "data_items" }
 
-// ---- CollectionPO（采集集合）----
-
-type CollectionPO struct {
-	ID        string    `gorm:"primaryKey;size:64"`
-	Name      string    `gorm:"size:128"`
-	AgentName string    `gorm:"size:64"`
-	TaskID    string    `gorm:"size:64;index"`
-	Status    string    `gorm:"size:20;default:'collecting'"`
-	ItemCount int       `gorm:"default:0"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-func (CollectionPO) TableName() string { return "collections" }
-
 // ---- AgentConfigPO（Agent 配置，存DB）----
 
 type AgentConfigPO struct {
@@ -162,7 +147,6 @@ func allModels() []any {
 		&UserPO{},
 		&TaskPO{},
 		&DataItemPO{},
-		&CollectionPO{},
 		&AgentConfigPO{},
 		&LLMConfigPO{},
 		&ConversationPO{},

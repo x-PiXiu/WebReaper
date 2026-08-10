@@ -97,22 +97,6 @@ func dataItemFromPO(p DataItemPO) entity.DataItem {
 	}
 }
 
-// ---- Collection ----
-
-func collectionToPO(e entity.Collection) CollectionPO {
-	return CollectionPO{
-		ID: e.ID, Name: e.Name, AgentName: e.AgentName, TaskID: e.TaskID,
-		Status: string(e.Status), ItemCount: e.ItemCount, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
-	}
-}
-
-func collectionFromPO(p CollectionPO) entity.Collection {
-	return entity.Collection{
-		ID: p.ID, Name: p.Name, AgentName: p.AgentName, TaskID: p.TaskID,
-		Status: entity.CollectionStatus(p.Status), ItemCount: p.ItemCount, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
-	}
-}
-
 // ---- AgentConfig ----
 
 func agentConfigToPO(e entity.AgentConfig) AgentConfigPO {

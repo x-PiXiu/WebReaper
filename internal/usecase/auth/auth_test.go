@@ -54,6 +54,9 @@ func (r *fakeUserRepo) Delete(_ context.Context, id string) error {
 	}
 	return nil
 }
+func (r *fakeUserRepo) Count(_ context.Context) (int, error) {
+	return len(r.users), nil
+}
 
 // fakeHasher 简单的哈希：加前缀 "hash:"，Compare 直接字符串比较。
 type fakeHasher struct{}

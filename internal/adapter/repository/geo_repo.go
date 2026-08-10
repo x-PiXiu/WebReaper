@@ -68,6 +68,14 @@ func (r *GormBrandRepository) Delete(ctx context.Context, tenantID, id string) e
 	return q.Where("id = ?", id).Delete(&BrandPO{}).Error
 }
 
+func (r *GormBrandRepository) Count(ctx context.Context) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&BrandPO{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 // ============ KeywordRepository ============
 
 type GormKeywordRepository struct{ db *gorm.DB }
@@ -127,6 +135,14 @@ func (r *GormKeywordRepository) ListByTenant(ctx context.Context, tenantID strin
 func (r *GormKeywordRepository) Delete(ctx context.Context, tenantID, id string) error {
 	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
 	return q.Where("id = ?", id).Delete(&KeywordPO{}).Error
+}
+
+func (r *GormKeywordRepository) Count(ctx context.Context) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&KeywordPO{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 // ============ MonitoringResultRepository ============
@@ -223,6 +239,14 @@ func (r *GormMonitoringResultRepository) Trend(ctx context.Context, tenantID, br
 	return out, nil
 }
 
+func (r *GormMonitoringResultRepository) Count(ctx context.Context) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&MonitoringResultPO{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 // ============ OptimizedContentRepository ============
 
 type GormOptimizedContentRepository struct{ db *gorm.DB }
@@ -306,4 +330,21 @@ func (r *GormOptimizedContentRepository) ListPublished(ctx context.Context) ([]e
 		out = append(out, optimizedContentFromPO(p))
 	}
 	return out, nil
+}
+
+func (r *GormOptimizedContentRepository) Count(ctx context.Context) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&OptimizedContentPO{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+func (r *GormOptimizedContentRepository) CountPublished(ctx context.Context) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&OptimizedContentPO{}).
+		Where("status = ?", "published").Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }

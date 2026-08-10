@@ -1,20 +1,36 @@
 import { AppShell, type NavItem } from './MainLayout'
 
-// 管理后台布局：菜单按功能域分组（通过 type 区分标题项和路由项）。
-// AntD Menu 的 inline 模式支持 type: 'group' 分组渲染。
-const adminMenu: (NavItem & { group?: string })[] = [
-  // 核心运营
-  { key: '/admin', label: '平台总览' },
-  { key: '/admin/users', label: '商户管理' },
-  { key: '/admin/agent-configs', label: 'Agent 配置' },
-  { key: '/admin/data', label: '数据管理' },
-  { key: '/admin/tasks', label: '任务监控' },
-  // 系统配置
-  { key: '/admin/tools', label: '工具面板' },
-  { key: '/admin/crawl-config', label: '采集配置' },
-  { key: '/admin/indexing', label: '收录管理' },
-  // AI 工具
-  { key: '/admin/chat', label: 'AI 对话' },
+// 管理后台布局：菜单按功能域分组（AntD Menu 的 group 类型渲染）。
+// 分组依据（域辨别）：
+//   - 平台管理：SaaS 平台本身的运营（总览 + 商户）
+//   - GEO 内容引擎：改造后新增的 GEO 域（Agent/LLM 配置、AI 对话、工具、收录）
+//   - 数据采集：改造前的"数据采集结构化"域（数据管理 + 任务监控 + 采集配置），
+//     与 GEO 无耦合，独立成组保留——避免混淆且不阻塞演进。
+const adminMenu: NavItem[] = [
+  {
+    key: 'platform', label: '平台管理',
+    children: [
+      { key: '/admin', label: '平台总览' },
+      { key: '/admin/users', label: '商户管理' },
+    ],
+  },
+  {
+    key: 'geo', label: 'GEO 内容引擎',
+    children: [
+      { key: '/admin/agent-configs', label: 'Agent 配置' },
+      { key: '/admin/chat', label: 'AI 对话' },
+      { key: '/admin/tools', label: '工具面板' },
+      { key: '/admin/indexing', label: '收录管理' },
+    ],
+  },
+  {
+    key: 'data', label: '数据采集',
+    children: [
+      { key: '/admin/data', label: '数据管理' },
+      { key: '/admin/tasks', label: '任务监控' },
+      { key: '/admin/crawl-config', label: '采集配置' },
+    ],
+  },
 ]
 
 // 管理后台布局。

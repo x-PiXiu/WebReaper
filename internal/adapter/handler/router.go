@@ -106,6 +106,12 @@ func (r *Router) SetAdmin(userRepo port.UserRepository) {
 	r.userRepo = userRepo
 }
 
+// SetStats 重新注入平台总览统计用例（晚装配：GEO/发布仓储就绪后再组装完整统计）。
+// 未注入时 /stats 返回 null（前端降级隐藏）。
+func (r *Router) SetStats(uc *stats.StatsUseCase) {
+	r.statsUC = uc
+}
+
 // SetAccount 注入多平台发布账号域用例（可选；未注入则账号/发布端点不注册）。
 func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCase) {
 	r.accountUC = au
@@ -195,7 +201,6 @@ func (r *Router) Engine() *gin.Engine {
 		api.POST("/data-items/from-content", r.handleCreateFromContent)
 		api.DELETE("/data-items/:id", r.handleDeleteItem)
 		// 采集集合
-		api.GET("/collections", r.handleListCollections)
 		// Agent 配置
 		api.GET("/agents", r.handleListAgentConfigs)
 		api.POST("/agents", r.handleCreateAgentConfig)

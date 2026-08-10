@@ -67,3 +67,11 @@ func (r *GormUserRepository) List(ctx context.Context) ([]entity.User, error) {
 func (r *GormUserRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&UserPO{}).Error
 }
+
+func (r *GormUserRepository) Count(ctx context.Context) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&UserPO{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}

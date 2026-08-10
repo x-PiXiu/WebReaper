@@ -130,3 +130,11 @@ func (r *GormPublishJobRepository) ListByTenant(ctx context.Context, tenantID st
 	}
 	return out, nil
 }
+
+func (r *GormPublishJobRepository) Count(ctx context.Context) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&PublishJobPO{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}

@@ -14,7 +14,6 @@ import (
 // 确保接口实现
 var (
 	_ port.DataItemRepository = (*fakeDataItemRepo)(nil)
-	_ port.CollectionRepository = (*fakeCollectionRepo)(nil)
 	_ port.ItemProcessor = (*fakeProcessor)(nil)
 )
 
@@ -57,12 +56,6 @@ func (f *fakeDataItemRepo) DailyCounts(_ context.Context, days int) ([]port.Dail
 func (f *fakeDataItemRepo) GroupByMetaKey(_ context.Context, key string) ([]port.GroupCount, error) { return nil, nil }
 func (f *fakeDataItemRepo) TopTags(_ context.Context, limit int) ([]port.GroupCount, error) { return nil, nil }
 
-type fakeCollectionRepo struct{}
-func (fakeCollectionRepo) Save(context.Context, entity.Collection) error { return nil }
-func (fakeCollectionRepo) FindByID(context.Context, string) (entity.Collection, error) { return entity.Collection{}, nil }
-func (fakeCollectionRepo) List(context.Context, int) ([]entity.Collection, error) { return nil, nil }
-func (fakeCollectionRepo) UpdateStatus(context.Context, string, entity.CollectionStatus) error { return nil }
-
 // fakeProcessor 记录是否被调用、用什么 itemID 调用。
 type fakeProcessor struct {
 	mu      sync.Mutex
@@ -80,7 +73,7 @@ func (f *fakeProcessor) ProcessItem(_ context.Context, itemID string) error {
 // TestApprove_UpdatesStatusToApproved 验证审核通过会更新状态为 approved。
 func TestApprove_UpdatesStatusToApproved(t *testing.T) {
 	repo := &fakeDataItemRepo{status: map[string]entity.ItemStatus{"i1": entity.ItemStatusPendingReview}}
-	uc := NewDataItemUseCase(repo, fakeCollectionRepo{}, nil, port.NopLogger{})
+	uc := NewDataItemUseCase(repo, nil, port.NopLogger{})
 
 	out, err := uc.Approve(context.Background(), "i1")
 	if err != nil {
@@ -99,7 +92,7 @@ func TestApprove_UpdatesStatusToApproved(t *testing.T) {
 func TestApprove_TriggersProcessorAsync(t *testing.T) {
 	repo := &fakeDataItemRepo{status: map[string]entity.ItemStatus{"i1": entity.ItemStatusPendingReview}}
 	proc := &fakeProcessor{}
-	uc := NewDataItemUseCase(repo, fakeCollectionRepo{}, proc, port.NopLogger{})
+	uc := NewDataItemUseCase(repo, proc, port.NopLogger{})
 
 	_, _ = uc.Approve(context.Background(), "i1")
 
@@ -125,7 +118,7 @@ func TestApprove_TriggersProcessorAsync(t *testing.T) {
 // TestApprove_NilProcessorDoesNotPanic 验证 processor 为 nil（降级场景）时不 panic。
 func TestApprove_NilProcessorDoesNotPanic(t *testing.T) {
 	repo := &fakeDataItemRepo{status: map[string]entity.ItemStatus{"i1": entity.ItemStatusPendingReview}}
-	uc := NewDataItemUseCase(repo, fakeCollectionRepo{}, nil, port.NopLogger{})
+	uc := NewDataItemUseCase(repo, nil, port.NopLogger{})
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -141,7 +134,7 @@ func TestApprove_NilProcessorDoesNotPanic(t *testing.T) {
 // TestReject_UpdatesStatusToRejected 验证驳回更新状态。
 func TestReject_UpdatesStatusToRejected(t *testing.T) {
 	repo := &fakeDataItemRepo{status: map[string]entity.ItemStatus{"i1": entity.ItemStatusPendingReview}}
-	uc := NewDataItemUseCase(repo, fakeCollectionRepo{}, nil, port.NopLogger{})
+	uc := NewDataItemUseCase(repo, nil, port.NopLogger{})
 
 	if err := uc.Reject(context.Background(), "i1"); err != nil {
 		t.Fatalf("Reject failed: %v", err)

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { TaskView, AgentConfig, LLMConfig, Collection, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog } from '../types/api'
+import type { TaskView, AgentConfig, LLMConfig, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -68,10 +68,6 @@ export const businessApi = {
     apiClient.put<unknown, CrawlConfig>('/api/v1/crawl-config', data),
 
   // ---- 外部推送系统 ----
-  // ---- 采集集合 ----
-  listCollections: () =>
-    apiClient.get<unknown, Collection[]>('/api/v1/collections'),
-
   // ---- 数据项 ----
   listDataItems: () =>
     apiClient.get<unknown, DataItem[]>('/api/v1/data-items'),

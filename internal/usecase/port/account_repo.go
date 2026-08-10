@@ -40,6 +40,8 @@ type PublishJobRepository interface {
 	Save(ctx context.Context, j entity.PublishJob) error
 	UpdateStatus(ctx context.Context, tenantID, id, status, externalURL, errorMsg string) error
 	ListByTenant(ctx context.Context, tenantID string, limit int) ([]entity.PublishJob, error)
+	// Count 统计发布任务总数（平台总览用，admin 看全局）。
+	Count(ctx context.Context) (int, error)
 }
 
 // QRLoginResult 是一次扫码登录轮询的结果。

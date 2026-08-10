@@ -23,25 +23,22 @@ import (
 
 // DataItemUseCase 数据项管理用例。
 type DataItemUseCase struct {
-	dataItemRepo   port.DataItemRepository
-	collectionRepo port.CollectionRepository
-	processor      port.ItemProcessor // 审核通过后的结构化+向量化处理器（可为 nil，降级时跳过）
-	logger         port.Logger
+	dataItemRepo port.DataItemRepository
+	processor    port.ItemProcessor // 审核通过后的结构化+向量化处理器（可为 nil，降级时跳过）
+	logger       port.Logger
 }
 
 // NewDataItemUseCase 创建数据项用例。
 // processor 为 nil 时审核后跳过结构化（如未配置 LLM/向量库）。
 func NewDataItemUseCase(
 	dataItemRepo port.DataItemRepository,
-	collectionRepo port.CollectionRepository,
 	processor port.ItemProcessor,
 	logger port.Logger,
 ) *DataItemUseCase {
 	return &DataItemUseCase{
-		dataItemRepo:   dataItemRepo,
-		collectionRepo: collectionRepo,
-		processor:      processor,
-		logger:         logger,
+		dataItemRepo: dataItemRepo,
+		processor:    processor,
+		logger:       logger,
 	}
 }
 
@@ -51,14 +48,6 @@ func (uc *DataItemUseCase) ListDataItems(ctx context.Context, limit int) ([]enti
 		limit = 50
 	}
 	return uc.dataItemRepo.List(ctx, limit)
-}
-
-// ListCollections 列出采集集合。
-func (uc *DataItemUseCase) ListCollections(ctx context.Context, limit int) ([]entity.Collection, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	return uc.collectionRepo.List(ctx, limit)
 }
 
 // ApproveOutput 审核通过的输出。

@@ -40,14 +40,6 @@ type GroupCount struct {
 	Count int
 }
 
-// CollectionRepository 采集集合持久化接口。
-type CollectionRepository interface {
-	Save(ctx context.Context, c entity.Collection) error
-	FindByID(ctx context.Context, id string) (entity.Collection, error)
-	List(ctx context.Context, limit int) ([]entity.Collection, error)
-	UpdateStatus(ctx context.Context, id string, status entity.CollectionStatus) error
-}
-
 // AgentConfigRepository Agent 配置持久化接口。
 type AgentConfigRepository interface {
 	Save(ctx context.Context, cfg entity.AgentConfig) error

@@ -15,6 +15,8 @@ type BrandRepository interface {
 	FindByID(ctx context.Context, tenantID, id string) (entity.Brand, error)
 	ListByTenant(ctx context.Context, tenantID string) ([]entity.Brand, error)
 	Delete(ctx context.Context, tenantID, id string) error
+	// Count 统计品牌总数（平台总览用，admin 看全局）。
+	Count(ctx context.Context) (int, error)
 }
 
 // KeywordRepository 关键词仓储。
@@ -24,6 +26,8 @@ type KeywordRepository interface {
 	ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.Keyword, error)
 	ListByTenant(ctx context.Context, tenantID string) ([]entity.Keyword, error)
 	Delete(ctx context.Context, tenantID, id string) error
+	// Count 统计关键词总数（平台总览用，admin 看全局）。
+	Count(ctx context.Context) (int, error)
 }
 
 // MonitoringResultRepository 监测结果仓储（核心数据资产）。
@@ -37,6 +41,8 @@ type MonitoringResultRepository interface {
 	LatestByTenant(ctx context.Context, tenantID string) ([]entity.MonitoringResult, error)
 	// Trend 取某品牌的提及率趋势（时间序列）。
 	Trend(ctx context.Context, tenantID, brandID string, limit int) ([]entity.MonitoringResult, error)
+	// Count 统计监测结果总数（平台总览用，admin 看全局）。
+	Count(ctx context.Context) (int, error)
 }
 
 // OptimizedContentRepository 优化内容仓储。
@@ -50,4 +56,8 @@ type OptimizedContentRepository interface {
 	FindPublishedByID(ctx context.Context, id string) (entity.OptimizedContent, error)
 	// ListPublished 公开查询：列出全部已发布内容（sitemap/llms.txt 用）。
 	ListPublished(ctx context.Context) ([]entity.OptimizedContent, error)
+	// Count 统计优化内容总数（平台总览用，admin 看全局）。
+	Count(ctx context.Context) (int, error)
+	// CountPublished 统计已发布内容数（平台总览/公开站点规模用）。
+	CountPublished(ctx context.Context) (int, error)
 }

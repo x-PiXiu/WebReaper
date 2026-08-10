@@ -76,7 +76,7 @@ func main() {
 	log.Info("WebReaper 启动中", port.String("env", cfg.Server.Env))
 
 	// 初始化仓储（降级 mock）
-	dataItemRepo, collectionRepo, agentConfigRepo, llmConfigRepo, taskRepo, userRepo, convRepo, msgRepo, settingRepo := initRepositories(cfg.DB, logger)
+	dataItemRepo, agentConfigRepo, llmConfigRepo, taskRepo, userRepo, convRepo, msgRepo, settingRepo := initRepositories(cfg.DB, logger)
 
 	// 爬虫限流策略（从 config 读取，可经 .env 的 CRAWLER_REQUEST_INTERVAL_MS 调配）
 	crawlPolicy := cfg.Crawler.ToPolicy()
@@ -193,9 +193,10 @@ func main() {
 
 	// 业务用例装配（handler 只依赖这些 usecase，不直接持有仓储）
 	taskQueryUC := taskquery.NewTaskQueryUseCase(taskRepo)
-	dataItemUC := dataitem.NewDataItemUseCase(dataItemRepo, collectionRepo, itemProcessor, logger)
-	// 仪表盘统计聚合（依赖 DataItemRepo 的聚合查询方法）
-	statsUC := stats.NewStatsUseCase(dataItemRepo)
+	dataItemUC := dataitem.NewDataItemUseCase(dataItemRepo, itemProcessor, logger)
+	// 平台总览统计：GEO/发布仓储在后续装配，此处先声明（nil），
+	// 待 geoRepos/accountRepos 就绪后经 router.SetStats 重新注入完整统计。
+	var statsUC *stats.StatsUseCase
 	agentCfgUC := agentconfig.NewAgentConfigUseCase(agentConfigRepo)
 	conversationUC := conversation.NewConversationUseCase(convRepo, msgRepo)
 	crawlCfgUC := crawlconfig.NewCrawlConfigUseCase(settingRepo)
@@ -350,8 +351,9 @@ func main() {
 	// 多平台发布账号域装配（扫码绑定 + 半自动/全自动发布）。需要 DB 才启用。
 	var geoAccountUC *account.AccountUseCase
 	var geoPublishUC *account.PublishUseCase
+	var accountRepos *accountRepos // 提升到外层：平台总览统计需要发布任务计数
 	if geoRepos != nil {
-		accountRepos := initAccountRepositories(cfg.DB)
+		accountRepos = initAccountRepositories(cfg.DB)
 		if accountRepos != nil {
 			// cookie 加密保险库（需要 PUBLISH_COOKIE_SECRET）
 			var vault port.CookieVault
@@ -395,6 +397,17 @@ func main() {
 	} else {
 		log.Info("多平台发布未启用（需配置 DB）")
 	}
+
+	// 平台总览统计（SaaS 级聚合，一次返回全量指标）：
+	// GEO/发布仓储未装配（无 DB）时注入 nil → StatsUseCase 内判 nil，对应指标为 0。
+	if geoRepos != nil && accountRepos != nil {
+		statsUC = stats.NewStatsUseCase(dataItemRepo, userRepo,
+			geoRepos.brand, geoRepos.keyword, geoRepos.result, geoRepos.content,
+			accountRepos.job)
+	} else {
+		statsUC = stats.NewStatsUseCase(dataItemRepo, userRepo, nil, nil, nil, nil, nil)
+	}
+	router.SetStats(statsUC)
 
 	// 管理端装配（用户管理，仅 admin）
 	router.SetAdmin(userRepo)
@@ -441,14 +454,14 @@ func main() {
 }
 
 func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
-	port.DataItemRepository, port.CollectionRepository, port.AgentConfigRepository,
+	port.DataItemRepository, port.AgentConfigRepository,
 	port.LLMConfigRepository, port.TaskRepository, port.UserRepository,
 	port.ConversationRepository, port.MessageRepository, port.SystemSettingRepository,
 ) {
 	log := logger.With(port.String("component", "repository"))
 	if !dbCfg.IsConfigured() {
 		log.Info("未配置数据库，使用内存 mock")
-		return mock.NewMockDataItemRepository(), mock.NewMockCollectionRepository(),
+		return mock.NewMockDataItemRepository(),
 			mock.NewMockAgentConfigRepository(), mock.NewMockLLMConfigRepository(),
 			mock.NewMockTaskRepository(), mock.NewMockUserRepository(),
 			mock.NewMockConversationRepository(), mock.NewMockMessageRepository(),
@@ -458,7 +471,7 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 	db, err := repository.NewMySQLDBFromConfig(dbCfg)
 	if err != nil { log.Error("连接数据库失败", port.Err(err)); os.Exit(1) }
 	log.Info("MySQL 连接成功")
-	return repository.NewGormDataItemRepository(db), repository.NewGormCollectionRepository(db),
+	return repository.NewGormDataItemRepository(db),
 		repository.NewGormAgentConfigRepository(db), repository.NewGormLLMConfigRepository(db),
 		repository.NewGormTaskRepository(db), repository.NewGormUserRepository(db),
 		repository.NewGormConversationRepository(db), repository.NewGormMessageRepository(db),

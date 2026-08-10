@@ -6,9 +6,40 @@ import { useThemeStore } from '../store/theme'
 const { Header, Sider, Content } = Layout
 
 export interface NavItem {
-  key: string   // 路由路径
+  key: string   // 路由路径（分组项的 key 仅为唯一标识，不参与路由）
   label: string // 菜单显示名
   icon?: React.ReactNode // 菜单图标（可选）
+  children?: NavItem[]   // 有 children 时渲染为 AntD 分组（type: 'group'）
+}
+
+// 在菜单（含分组）中查找 key 对应的显示名（顶栏标题用）。
+function findMenuLabel(items: NavItem[], key: string): string | undefined {
+  for (const m of items) {
+    if (m.key === key) return m.label
+    const c = m.children?.find(c => c.key === key)
+    if (c) return c.label
+  }
+  return undefined
+}
+
+// 把菜单项（含分组）映射为 AntD Menu 的 items。
+function toMenuItems(items: NavItem[]) {
+  return items.map(m => m.children
+    ? { type: 'group' as const, label: m.label, children: m.children.map(c => ({ key: c.key, label: c.label, icon: c.icon })) }
+    : { key: m.key, label: m.label, icon: m.icon })
+}
+
+// 在菜单（含分组）中查找当前路由对应的菜单项（按完整 key 匹配，其次按末段路径匹配）。
+function findSelectedKey(items: NavItem[], pathname: string): string | undefined {
+  const pathSegs = pathname.split('/').filter(Boolean)
+  for (const m of items) {
+    if (m.key === pathname) return m.key
+    for (const c of m.children || []) {
+      if (c.key === pathname) return c.key
+      if (pathSegs.length > 0 && c.key.endsWith('/' + pathSegs[pathSegs.length - 1])) return c.key
+    }
+  }
+  return undefined
 }
 
 // AppShell 是通用应用骨架（侧边栏 + 顶栏 + 内容区）。
@@ -44,12 +75,9 @@ export function AppShell({
     navigate('/login', { replace: true })
   }
 
-  // selectedKey 取一级路径（/m/brands → /m/brands，按完整 key 匹配）
-  const pathSegs = location.pathname.split('/').filter(Boolean)
-  // 尝试用最长前缀匹配菜单项
-  const selectedKey = menuItems.find((m) => m.key === location.pathname)?.key
-    || menuItems.find((m) => pathSegs.length > 0 && m.key.endsWith('/' + pathSegs[pathSegs.length - 1]))?.key
-    || menuItems[0]?.key
+  // selectedKey 优先完整路径匹配，其次末段路径匹配（含分组子项）；兜底第一个非分组项
+  const selectedKey = findSelectedKey(menuItems, location.pathname)
+    || menuItems.find(m => !m.children)?.key
     || '/'
 
   const noPadding = noPaddingKeys.includes(selectedKey)
@@ -98,7 +126,7 @@ export function AppShell({
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
           style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 12, padding: '0 10px' }}
-          items={menuItems.map(m => ({ key: m.key, label: m.label, icon: m.icon }))}
+          items={toMenuItems(menuItems)}
         />
       </Sider>
 
@@ -122,7 +150,7 @@ export function AppShell({
             <span style={{ color: 'var(--wr-text-muted)', fontSize: 14 }}>{brandName}</span>
             <span style={{ color: 'var(--wr-border-hover)' }}>/</span>
             <span style={{ color: 'var(--wr-text-primary)', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>
-              {menuItems.find((m) => m.key === selectedKey)?.label || '控制台'}
+              {findMenuLabel(menuItems, selectedKey) || '控制台'}
             </span>
           </div>
 

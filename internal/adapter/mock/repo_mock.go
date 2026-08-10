@@ -59,6 +59,11 @@ func (r *MockUserRepository) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *MockUserRepository) Count(_ context.Context) (int, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	return len(r.byUN), nil
+}
+
 // ---- Task 仓储 ----
 
 type MockTaskRepository struct {
@@ -259,47 +264,6 @@ func (r *MockDataItemRepository) TopTags(_ context.Context, limit int) ([]port.G
 		result = result[:limit]
 	}
 	return result, nil
-}
-
-// ---- Collection 仓储 ----
-
-type MockCollectionRepository struct {
-	mu   sync.Mutex
-	byID map[string]entity.Collection
-}
-
-func NewMockCollectionRepository() *MockCollectionRepository {
-	return &MockCollectionRepository{byID: make(map[string]entity.Collection)}
-}
-
-func (r *MockCollectionRepository) Save(_ context.Context, c entity.Collection) error {
-	r.mu.Lock(); defer r.mu.Unlock()
-	r.byID[c.ID] = c
-	return nil
-}
-
-func (r *MockCollectionRepository) FindByID(_ context.Context, id string) (entity.Collection, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	c, ok := r.byID[id]
-	if !ok { return entity.Collection{}, pkg.ErrNotFound }
-	return c, nil
-}
-
-func (r *MockCollectionRepository) List(_ context.Context, limit int) ([]entity.Collection, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	if limit <= 0 { limit = 50 }
-	result := make([]entity.Collection, 0, len(r.byID))
-	for _, c := range r.byID {
-		result = append(result, c)
-		if len(result) >= limit { break }
-	}
-	return result, nil
-}
-
-func (r *MockCollectionRepository) UpdateStatus(_ context.Context, id string, status entity.CollectionStatus) error {
-	r.mu.Lock(); defer r.mu.Unlock()
-	if c, ok := r.byID[id]; ok { c.Status = status; r.byID[id] = c }
-	return nil
 }
 
 // ---- AgentConfig 仓储 ----
@@ -551,6 +515,22 @@ func (r *MockOptimizedContentRepository) ListPublished(_ context.Context) ([]ent
 		}
 	}
 	return out, nil
+}
+
+func (r *MockOptimizedContentRepository) Count(_ context.Context) (int, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	return len(r.recs), nil
+}
+
+func (r *MockOptimizedContentRepository) CountPublished(_ context.Context) (int, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	n := 0
+	for _, c := range r.recs {
+		if c.Status == "published" {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // ---- 收录提交日志 mock ----

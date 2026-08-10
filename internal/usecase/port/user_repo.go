@@ -19,4 +19,6 @@ type UserRepository interface {
 	List(ctx context.Context) ([]entity.User, error)
 	// Delete 删除用户。
 	Delete(ctx context.Context, id string) error
+	// Count 统计用户总数（平台总览用）。
+	Count(ctx context.Context) (int, error)
 }

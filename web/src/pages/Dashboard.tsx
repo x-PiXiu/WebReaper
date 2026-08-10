@@ -1,4 +1,4 @@
-import { Card, Row, Col, Typography, Tag, Table, Button, Spin } from 'antd'
+import { Card, Row, Col, Typography, Spin } from 'antd'
 import { Line, Pie, Bar } from '@ant-design/charts'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -7,9 +7,6 @@ import { businessApi } from '../api/business'
 
 const { Text } = Typography
 
-const statusColor: Record<string, string> = {
-  pending_review: 'orange', approved: 'green', rejected: 'red',
-}
 const statusLabel: Record<string, string> = {
   pending_review: '待审核', approved: '已通过', rejected: '已拒绝',
 }
@@ -45,23 +42,18 @@ function ChartCard({ title, children, height = 280 }: { title: string; children:
   )
 }
 
+// 平台总览：SaaS 平台维度统计（商户/GEO 资产/发布/采集）。
+// 每个数字卡片点击跳转到对应管理页；无对应页面的指标（如已发布内容）纯展示。
 export default function Dashboard() {
   const username = useAuthStore(s => s.username)
   const navigate = useNavigate()
 
-  // 统计聚合（一次请求拿全）
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['stats'],
     queryFn: () => businessApi.getStats(),
   })
-  // 最近数据（表格用，独立请求）
-  const { data: items = [] } = useQuery({ queryKey: ['data-items'], queryFn: () => businessApi.listDataItems() })
 
-  const totals = stats?.totals || {}
-  const pending = totals['pending_review'] || 0
-  const approved = totals['approved'] || 0
-
-  // 图表数据转换
+  // 图表数据转换（数据资产明细）
   const trendData = (stats?.daily_trend || []).map(d => ({ date: d.date, value: d.count }))
   const statusData = Object.entries(stats?.status_breakdown || {}).map(([k, v]) => ({
     type: statusLabel[k] || k, value: v,
@@ -80,35 +72,49 @@ export default function Dashboard() {
       {/* 标题 */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: '-0.02em', color: 'var(--wr-text-primary)' }}>
-          数据中心{username ? ` · ${username}` : ''}
+          平台总览{username ? ` · ${username}` : ''}
         </h1>
         <Text type="secondary" style={{ fontSize: 14 }}>
-          {totals['data_items'] || 0} 条数据 · {sourceData.length} 个数据源 · {tagData.length} 个标签
+          SaaS 平台核心指标 · GEO 内容引擎 + 数据采集双域运行概况
         </Text>
       </div>
 
       {statsLoading && <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}
 
-      {/* 统计卡片 */}
+      {/* 平台规模卡片（SaaS 维度） */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
-          <StatCard label="数据总量" value={totals['data_items'] || 0} sublabel={`已通过 ${approved}`} gradient="linear-gradient(180deg,#f59e0b,#d97706)" onClick={() => navigate('/data')} />
+          <StatCard label="商户数" value={stats?.users ?? 0} sublabel="平台注册商户" gradient="linear-gradient(180deg,#6366f1,#4f46e5)" onClick={() => navigate('/admin/users')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="待审核" value={pending} sublabel={pending > 0 ? '需处理' : '全部已审'} gradient="linear-gradient(180deg,#ec4899,#db2777)" onClick={() => navigate('/data')} />
+          <StatCard label="品牌资产" value={stats?.brands ?? 0} sublabel="GEO 监测品牌" gradient="linear-gradient(180deg,#f59e0b,#d97706)" onClick={() => navigate('/m/brands')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="数据源" value={sourceData.length} sublabel="采集来源数" gradient="linear-gradient(180deg,#22d3ee,#0891b2)" onClick={() => navigate('/tools')} />
+          <StatCard label="关键词" value={stats?.keywords ?? 0} sublabel="投放监测关键词" gradient="linear-gradient(180deg,#22d3ee,#0891b2)" onClick={() => navigate('/m/keywords')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="标签类型" value={tagData.length} sublabel="分类维度" gradient="linear-gradient(180deg,#6366f1,#4f46e5)" onClick={() => navigate('/data')} />
+          <StatCard label="优化内容" value={stats?.optimized_contents ?? 0} sublabel="GEO 生成/优化" gradient="linear-gradient(180deg,#10b981,#059669)" onClick={() => navigate('/m/content')} />
+        </Col>
+      </Row>
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={12} md={6}>
+          <StatCard label="已发布公开页" value={stats?.published_contents ?? 0} sublabel="AI 引擎可爬取" gradient="linear-gradient(180deg,#8b5cf6,#7c3aed)" />
+        </Col>
+        <Col xs={12} md={6}>
+          <StatCard label="监测结果" value={stats?.monitor_results ?? 0} sublabel="累计引擎探测" gradient="linear-gradient(180deg,#ec4899,#db2777)" onClick={() => navigate('/m/brands')} />
+        </Col>
+        <Col xs={12} md={6}>
+          <StatCard label="发布任务" value={stats?.publish_jobs ?? 0} sublabel="多平台分发" gradient="linear-gradient(180deg,#f97316,#ea580c)" onClick={() => navigate('/m/publish')} />
+        </Col>
+        <Col xs={12} md={6}>
+          <StatCard label="采集数据项" value={stats?.data_items ?? 0} sublabel="数据资产总量" gradient="linear-gradient(180deg,#14b8a6,#0d9488)" onClick={() => navigate('/admin/data')} />
         </Col>
       </Row>
 
-      {/* 图表区：趋势 + 状态 */}
+      {/* 数据资产明细：趋势 + 状态 */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} lg={14}>
-          <ChartCard title="采集趋势（近 14 天）">
+          <ChartCard title="数据项采集趋势（近 14 天）">
             <Line
               data={trendData}
               xField="date" yField="value"
@@ -123,7 +129,7 @@ export default function Dashboard() {
           </ChartCard>
         </Col>
         <Col xs={24} lg={10}>
-          <ChartCard title="审核状态分布">
+          <ChartCard title="数据项审核状态分布">
             {statusData.length > 0 ? (
               <Pie
                 data={statusData}
@@ -139,8 +145,8 @@ export default function Dashboard() {
         </Col>
       </Row>
 
-      {/* 图表区：数据源 + 标签 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+      {/* 数据资产明细：数据源 + 标签 */}
+      <Row gutter={[16, 16]}>
         <Col xs={24} lg={10}>
           <ChartCard title="数据源分布">
             {sourceData.length > 0 ? (
@@ -170,18 +176,6 @@ export default function Dashboard() {
           </ChartCard>
         </Col>
       </Row>
-
-      {/* 最近采集 */}
-      <Card title="最近采集" extra={<Button type="link" onClick={() => navigate('/data')}>查看全部</Button>}>
-        <Table
-          dataSource={items.slice(0, 8)} rowKey="id" size="small" pagination={false}
-          columns={[
-            { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
-            { title: '标签', dataIndex: 'tags', key: 'tags', width: 200, render: (tags: string[]) => tags?.slice(0, 3).map(t => <Tag key={t}>{t}</Tag>) },
-            { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (s: string) => <Tag color={statusColor[s]}>{statusLabel[s] || s}</Tag> },
-          ]}
-        />
-      </Card>
     </div>
   )
 }

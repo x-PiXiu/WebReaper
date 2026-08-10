@@ -107,17 +107,6 @@ export interface PublishRecord {
   result_at?: string
 }
 
-// ---- 采集集合 ----
-export interface Collection {
-  id: string
-  name: string
-  agent_name: string
-  task_id: string
-  status: string
-  item_count: number
-  created_at: string
-}
-
 // ---- 数据项 ----
 export interface DataItem {
   id: string
@@ -140,11 +129,20 @@ export interface ToolView {
   enabled: boolean
 }
 
-// ---- 仪表盘统计 ----
+// ---- 平台总览统计 ----
 export interface StatsView {
-  totals: Record<string, number>            // data_items / pending_review / approved / rejected
-  status_breakdown: Record<string, number>  // 状态分布
-  daily_trend: { date: string; count: number }[]      // 近14天趋势
+  // 平台规模（SaaS 总览数字卡片）
+  users: number               // 平台商户总数
+  brands: number              // 品牌资产总数
+  keywords: number            // 关键词总数
+  monitor_results: number     // 监测结果总数（累计探测）
+  optimized_contents: number  // 优化内容总数
+  published_contents: number  // 已发布公开内容数
+  publish_jobs: number        // 发布任务总数
+  data_items: number          // 采集数据项总数
+  // 数据资产明细（趋势/分布图）
+  status_breakdown: Record<string, number>  // 数据项状态分布
+  daily_trend: { date: string; count: number }[]      // 近14天数据项趋势
   source_distribution: { name: string; count: number }[]  // 数据源分布
   top_tags: { name: string; count: number }[]             // 标签Top8
 }
