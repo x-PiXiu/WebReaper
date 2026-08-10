@@ -57,6 +57,12 @@ server {
         proxy_pass http://127.0.0.1:8082;
         proxy_set_header Host $host;
     }
+    # 公开内容站（无认证文章页 /public/articles/:id + sitemap.xml + llms.txt）
+    # 必须反代——否则 SPA fallback 会把公开页吞掉跳回登录页
+    location /public/ {
+        proxy_pass http://127.0.0.1:8082;
+        proxy_set_header Host $host;
+    }
     # SSE 流式对话（/api/v1/chat）需要关闭缓冲 + 长超时
     location /api/v1/chat {
         proxy_pass http://127.0.0.1:8082;
