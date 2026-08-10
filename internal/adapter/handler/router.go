@@ -82,6 +82,8 @@ type Router struct {
 	promptTemplateRepo port.PromptTemplateRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
 	billingUC *billing.BillingUseCase
+	// 配额检查门（注入到 ChatHandler 等无独立 usecase 的端点）——通过 SetQuotaGate 注入，可选
+	quotaGate port.QuotaStore
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -157,6 +159,11 @@ func (r *Router) SetBilling(uc *billing.BillingUseCase) {
 	r.billingUC = uc
 }
 
+// SetQuotaGate 注入配额检查门（可选；注入到 ChatHandler 等无独立 usecase 的端点）。
+func (r *Router) SetQuotaGate(g port.QuotaStore) {
+	r.quotaGate = g
+}
+
 func NewRouter(
 	registerUC *auth.RegisterUseCase,
 	loginUC *auth.LoginUseCase,
@@ -220,8 +227,10 @@ func (r *Router) Engine() *gin.Engine {
 	api := e.Group("/api/v1")
 	api.Use(middleware.JWTAuth(r.tokenParser))
 	{
-		// AI 对话（SSE 流式）
-		api.POST("/chat", NewChatHandler(r.ai).HandleStream)
+		// AI 对话（SSE 流式）——配额检查在 SSE 头设置前，超限返回 JSON 402
+		chatHandler := NewChatHandler(r.ai)
+		chatHandler.SetQuotaGate(r.quotaGate)
+		api.POST("/chat", chatHandler.HandleStream)
 		// 全局工具列表（供前端查看实际可用工具，含启用状态）
 		api.GET("/tools", r.handleListTools)
 		// 动态启用/禁用工具（工具面板用）

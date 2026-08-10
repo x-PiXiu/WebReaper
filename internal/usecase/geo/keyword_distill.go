@@ -50,6 +50,8 @@ func (uc *KeywordDistillUseCase) Distill(ctx context.Context, source string, in 
 			return nil, err
 		}
 	}
+	// 计量挂钩：注入租户 + 场景到 ctx，source 调 LLM 时 RecordUsage 据此落库。
+	ctx = port.WithUsageContext(ctx, in.TenantID, "keyword-distill")
 	keywords, err := s.Distill(ctx, in)
 	if err != nil {
 		return nil, err

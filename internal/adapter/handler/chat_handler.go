@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/usecase/port"
 )
 
@@ -15,11 +16,20 @@ import (
 // 输出 AI SDK 兼容的 SSE 流（UI Message Stream 格式），
 // 让前端 useChat hook 能直接消费。
 type ChatHandler struct {
-	ai port.AIGenerator
+	ai        port.AIGenerator
+	quotaGate port.QuotaStore // 配额检查门（可选；nil=不检查）
 }
 
 func NewChatHandler(ai port.AIGenerator) *ChatHandler {
 	return &ChatHandler{ai: ai}
+}
+
+// SetQuotaGate 注入配额检查门（可选；未注入时不检查配额——向后兼容）。
+// 注入后在 SSE 响应头设置前检查 chat 配额，超限返回 JSON 402（而非流式错误）。
+func (h *ChatHandler) SetQuotaGate(g port.QuotaStore) {
+	if g != nil {
+		h.quotaGate = g
+	}
 }
 
 // chatRequest 对应前端聊天请求。
@@ -53,6 +63,15 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 		return
 	}
 
+	// 配额检查（在 SSE 响应头设置前，超限可返回 JSON 402）
+	tenantID := middleware.CurrentTenantID(c)
+	if h.quotaGate != nil {
+		if err := h.quotaGate.Check(c.Request.Context(), tenantID, "chat"); err != nil {
+			fail(c, err)
+			return
+		}
+	}
+
 	// 设置 SSE 响应头
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -61,6 +80,9 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	flusher, _ := c.Writer.(interface{ Flush() })
+
+	// 计量挂钩：注入租户 + 场景到 ctx，trpc_agent 的 RecordUsage 据此落库 usages 表。
+	ctx = port.WithUsageContext(ctx, tenantID, "chat")
 
 	// 获取最后一条 user 消息（作为 Agent 任务输入）
 	lastUser := ""

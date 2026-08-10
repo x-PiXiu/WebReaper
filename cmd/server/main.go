@@ -459,6 +459,7 @@ func main() {
 		// 注入到烧 token 的 usecase——超限返回 ErrQuotaExceeded → HTTP 402
 		usageRecorder := repository.NewGormUsageRecorder(geoRepos.db)
 		quotaGate := quota.NewGate(planRepo, subRepo, usageRecorder)
+		router.SetQuotaGate(quotaGate) // ChatHandler 等无独立 usecase 的端点用
 		if geoContentUCRef != nil {
 			geoContentUCRef.SetQuotaGate(quotaGate)
 		}
