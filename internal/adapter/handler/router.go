@@ -173,6 +173,8 @@ func (r *Router) Engine() *gin.Engine {
 		e.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
 		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
 		e.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
+		// IndexNow 协议要求的根目录密钥文件：https://<domain>/{key}.txt（文件名=密钥）
+		e.GET("/:key.txt", r.publicHandler.GetIndexNowKeyFile)
 	}
 
 	// 业务路由（受 JWT 中间件保护）
@@ -312,6 +314,8 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.PUT("/indexing/config", r.HandleUpdateIndexingConfig)
 				adminGroup.GET("/indexing/logs", r.HandleListIndexingLogs)
 				adminGroup.POST("/indexing/re-submit", r.HandleReSubmitAll)
+				adminGroup.POST("/indexing/generate-key", r.HandleGenerateIndexingKey) // 自动生成密钥（IndexNow 所有权证明）
+				adminGroup.GET("/indexing/verify-key", r.HandleVerifyIndexingKey)      // 验证 key 文件可访问
 			}
 			}
 		}

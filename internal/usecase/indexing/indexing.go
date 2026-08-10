@@ -13,8 +13,12 @@ package indexing
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -72,6 +76,62 @@ func (uc *IndexingUseCase) UpdateConfig(ctx context.Context, cfg entity.Indexing
 	return uc.settingRepo.Save(ctx, entity.SystemSetting{
 		Key: SettingKeyIndexingConfig, Value: string(data), UpdatedAt: time.Now(),
 	})
+}
+
+// GenerateKey 自动生成 IndexNow 密钥并持久化。
+//
+// 设计依据（IndexNow 协议 FAQ）：密钥不是注册颁发的，而是"网站所有权证明"——
+// 由网站所有者生成 GUID，把 {key}.txt 放到站点根目录供搜索引擎验证。
+// 因此正确体验是系统代为生成（GUID 格式，8-128 位 a-zA-Z0-9- 合法），
+// 并由公开站自动托管 key 文件（/public/indexnow-key.txt 端点）——用户零手工操作。
+func (uc *IndexingUseCase) GenerateKey(ctx context.Context) (string, error) {
+	// 标准 GUID 格式：8-4-4-4-12（共 36 字符，全 hex + 连字符）
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("生成密钥失败: %w", err)
+	}
+	h := hex.EncodeToString(raw)
+	key := fmt.Sprintf("%s-%s-%s-%s-%s", h[0:8], h[8:12], h[12:16], h[16:20], h[20:32])
+
+	cfg, err := uc.GetConfig(ctx)
+	if err != nil {
+		cfg = entity.IndexingConfig{}
+	}
+	cfg.IndexNowKey = key
+	if err := uc.UpdateConfig(ctx, cfg); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+// VerifyKey 以搜索引擎视角验证密钥文件可公开访问。
+// 探测 {baseURL}/{key}.txt：HTTP 200 且响应体与密钥一致 = 验证通过。
+// 返回探测结果（文件 URL / 可达性 / 内容一致性），供管理后台一键检查。
+func (uc *IndexingUseCase) VerifyKey(ctx context.Context) (map[string]any, error) {
+	cfg, err := uc.GetConfig(ctx)
+	if err != nil || cfg.IndexNowKey == "" {
+		return nil, fmt.Errorf("尚未配置 IndexNow 密钥——请先生成密钥")
+	}
+	if uc.publicBaseURL == "" {
+		return nil, fmt.Errorf("公开站根地址未配置（PUBLIC_BASE_URL）")
+	}
+	keyURL := strings.TrimRight(uc.publicBaseURL, "/") + "/" + cfg.IndexNowKey + ".txt"
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(keyURL)
+	if err != nil {
+		return map[string]any{
+			"url": keyURL, "reachable": false, "content_match": false, "error": err.Error(),
+		}, nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+	reachable := resp.StatusCode == http.StatusOK
+	contentMatch := reachable && strings.TrimSpace(string(body)) == cfg.IndexNowKey
+	return map[string]any{
+		"url": keyURL, "reachable": reachable, "content_match": contentMatch,
+		"status_code": resp.StatusCode, "error": "",
+	}, nil
 }
 
 // ---- 提交日志 ----

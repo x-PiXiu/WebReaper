@@ -1,12 +1,12 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Empty } from 'antd'
-import { DeleteOutlined } from '@ant-design/icons'
+import { Typography, Table, Tag, Space, Button, message, Popconfirm, Empty, Row, Col } from 'antd'
+import { DeleteOutlined, AppstoreOutlined, TagOutlined, EnvironmentOutlined, BulbOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Brand } from '../../types/api'
 
 const { Text } = Typography
 
-// 品牌统一管理（管理后台）：全平台品牌资产一览 + 详情 + 删除。
+// 品牌统一管理（管理后台）：全平台品牌资产一览 + 行展开详情 + 删除。
 // admin 租户为空 → geo 接口返回全局数据（绝对控制落点）。
 export default function AdminBrands() {
   const queryClient = useQueryClient()
@@ -14,6 +14,10 @@ export default function AdminBrands() {
     queryKey: ['admin-brands'],
     queryFn: () => businessApi.listBrands(),
   })
+
+  const tenants = new Set(brands.map((b: Brand) => b.tenant_id)).size
+  const totalSelling = brands.reduce((s: number, b: Brand) => s + (b.core_selling?.length || 0), 0)
+  const totalCompetitors = brands.reduce((s: number, b: Brand) => s + (b.competitors?.length || 0), 0)
 
   const handleDelete = async (b: Brand) => {
     try {
@@ -34,7 +38,7 @@ export default function AdminBrands() {
       ),
     },
     {
-      title: '商户', dataIndex: 'tenant_id', key: 'tenant_id', width: 160,
+      title: '商户', dataIndex: 'tenant_id', key: 'tenant_id', width: 150,
       render: (t: string) => <Tag style={{ fontFamily: 'monospace' }}>{t || '全局'}</Tag>,
     },
     {
@@ -50,11 +54,11 @@ export default function AdminBrands() {
       render: (list: string[]) => (list || []).slice(0, 3).map((c, i) => <Tag key={i} style={{ fontSize: 11 }}>{c}</Tag>),
     },
     {
-      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 150,
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 130,
       render: (t: string) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.slice(0, 10)}</Text>,
     },
     {
-      title: '操作', key: 'action', width: 100,
+      title: '操作', key: 'action', width: 90,
       render: (_: unknown, r: Brand) => (
         <Popconfirm title={`删除品牌「${r.name}」？其关键词与优化内容将一并删除`} onConfirm={() => handleDelete(r)}>
           <Button size="small" type="text" danger icon={<DeleteOutlined />}>删除</Button>
@@ -66,9 +70,37 @@ export default function AdminBrands() {
   return (
     <div className="wr-page-content">
       <div className="wr-page-header">
-        <h1>品牌统一管理</h1>
+        <h1>品牌管理</h1>
         <p>全平台品牌资产一览 · 绝对控制（删除将级联清理关键词与内容）</p>
       </div>
+
+      {/* 统计卡 */}
+      <Row gutter={[16, 16]} className="wr-stagger" style={{ marginBottom: 16 }}>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card">
+            <div className="wr-metric-value wr-gradient-text">{brands.length}</div>
+            <div className="wr-metric-label"><AppstoreOutlined style={{ marginRight: 4 }} />品牌总数</div>
+          </div>
+        </Col>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card">
+            <div className="wr-metric-value">{tenants}</div>
+            <div className="wr-metric-label">覆盖商户数</div>
+          </div>
+        </Col>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card">
+            <div className="wr-metric-value">{totalSelling}</div>
+            <div className="wr-metric-label"><TagOutlined style={{ marginRight: 4 }} />核心卖点</div>
+          </div>
+        </Col>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card">
+            <div className="wr-metric-value">{totalCompetitors}</div>
+            <div className="wr-metric-label"><EnvironmentOutlined style={{ marginRight: 4 }} />竞品追踪</div>
+          </div>
+        </Col>
+      </Row>
 
       <div className="wr-glass-card" style={{ padding: 8 }}>
         <Table
@@ -78,6 +110,25 @@ export default function AdminBrands() {
           size="small"
           pagination={{ pageSize: 12, size: 'small' }}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无品牌" /> }}
+          expandable={{
+            expandedRowRender: (r: Brand) => (
+              <div style={{ padding: '4px 24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, fontSize: 13 }}>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                    <BulbOutlined /> 品牌定位
+                  </Text>
+                  <Text style={{ color: 'var(--wr-text-secondary)', lineHeight: 1.7 }}>{r.positioning || '（未填写）'}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>完整卖点 / 竞品</Text>
+                  <Space wrap size={6}>
+                    {(r.core_selling || []).map((s, i) => <Tag key={'s' + i} style={{ fontSize: 11 }}>{s}</Tag>)}
+                    {(r.competitors || []).map((c, i) => <Tag key={'c' + i} color="orange" style={{ fontSize: 11 }}>{c}</Tag>)}
+                  </Space>
+                </div>
+              </div>
+            ),
+          }}
         />
       </div>
     </div>

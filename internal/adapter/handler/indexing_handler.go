@@ -99,6 +99,36 @@ func (r *Router) HandleReSubmitAll(c *gin.Context) {
 	success(c, gin.H{"submitted": submitted, "failed": failed})
 }
 
+// HandleGenerateIndexingKey POST /api/v1/admin/indexing/generate-key —— 自动生成 IndexNow 密钥。
+// IndexNow 协议：密钥由网站所有者生成（所有权证明）——系统代为生成 GUID 并自动托管 key 文件。
+func (r *Router) HandleGenerateIndexingKey(c *gin.Context) {
+	if r.indexingUC == nil {
+		fail(c, errNotConfigured("收录管理"))
+		return
+	}
+	key, err := r.indexingUC.GenerateKey(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"index_now_key": key})
+}
+
+// HandleVerifyIndexingKey GET /api/v1/admin/indexing/verify-key —— 验证密钥文件可公开访问。
+// 以搜索引擎视角探测 {baseURL}/{key}.txt（200 且内容一致 = 验证通过）。
+func (r *Router) HandleVerifyIndexingKey(c *gin.Context) {
+	if r.indexingUC == nil {
+		fail(c, errNotConfigured("收录管理"))
+		return
+	}
+	result, err := r.indexingUC.VerifyKey(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, result)
+}
+
 // errNotConfigured 未装配时的统一错误。
 func errNotConfigured(what string) error {
 	return &configMissingError{what: what}

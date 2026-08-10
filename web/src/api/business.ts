@@ -227,6 +227,12 @@ export const businessApi = {
     apiClient.get<unknown, IndexingSubmitLog[]>('/api/v1/admin/indexing/logs'),
   reSubmitAllIndexing: () =>
     apiClient.post<unknown, { submitted: number; failed: number }>('/api/v1/admin/indexing/re-submit'),
+  // IndexNow 密钥自动生成（协议：密钥由网站所有者生成 = 所有权证明，系统代为生成 GUID 并托管 key 文件）
+  generateIndexingKey: () =>
+    apiClient.post<unknown, { index_now_key: string }>('/api/v1/admin/indexing/generate-key'),
+  // 验证 key 文件可公开访问（搜索引擎视角）
+  verifyIndexingKey: () =>
+    apiClient.get<unknown, { url: string; reachable: boolean; content_match: boolean; status_code: number; error: string }>('/api/v1/admin/indexing/verify-key'),
 
   // ---- 用户管理（管理端）----
   listUsers: () =>

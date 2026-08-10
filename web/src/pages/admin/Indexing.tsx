@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { Card, Typography, Button, Input, Form, message, Table, Tag, Space, Popconfirm, Alert } from 'antd'
-import { CloudUploadOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Card, Typography, Button, Input, Form, message, Table, Tag, Space, Popconfirm, Alert, Row, Col } from 'antd'
+import { CloudUploadOutlined, ReloadOutlined, KeyOutlined, SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { IndexingSubmitLog } from '../../types/api'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 // 渠道名映射
 const CHANNEL_NAMES: Record<string, string> = {
@@ -14,11 +14,16 @@ const CHANNEL_NAMES: Record<string, string> = {
   all: '全渠道（补提交）',
 }
 
+// 收录管理：渠道配置 · 密钥自动生成与验证 · 提交审计 · 手动补提交。
+// IndexNow 协议要点（官方 FAQ）：密钥=网站所有权证明，由站长生成 GUID 并托管 {key}.txt——
+// 本平台代为生成并自动托管 key 文件（/public/indexnow-key.txt），管理员只需一键生成 + 验证。
 export default function Indexing() {
   const queryClient = useQueryClient()
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
   const [resubmitting, setResubmitting] = useState(false)
+  const [generatingKey, setGeneratingKey] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<{ url: string; reachable: boolean; content_match: boolean; status_code: number; error: string } | null>(null)
 
   const { data: config, isLoading: cfgLoading } = useQuery({
     queryKey: ['indexing-config'],
@@ -28,7 +33,7 @@ export default function Indexing() {
   const { data: logs = [] } = useQuery({
     queryKey: ['indexing-logs'],
     queryFn: () => businessApi.listIndexingLogs(),
-    refetchInterval: 10000, // 10s 自动刷新（补提交后能看到结果）
+    refetchInterval: 10000,
   })
 
   // 保存配置
@@ -50,7 +55,37 @@ export default function Indexing() {
     }
   }
 
-  // 手动补提交全部已发布内容
+  // 一键自动生成 IndexNow 密钥（GUID；key 文件由公开站自动托管）
+  const handleGenerateKey = async () => {
+    setGeneratingKey(true)
+    try {
+      const r = await businessApi.generateIndexingKey()
+      form.setFieldValue('index_now_key', r.index_now_key)
+      message.success('密钥已自动生成，key 文件已托管（无需手动放置）')
+      queryClient.invalidateQueries({ queryKey: ['indexing-config'] })
+    } catch (e) {
+      message.error('生成失败：' + ((e as Error)?.message || ''))
+    } finally {
+      setGeneratingKey(false)
+    }
+  }
+
+  // 验证密钥文件可公开访问（搜索引擎视角）
+  const handleVerifyKey = async () => {
+    try {
+      const r = await businessApi.verifyIndexingKey()
+      setVerifyResult(r)
+      if (r.content_match) {
+        message.success('验证通过：key 文件可公开访问且内容一致')
+      } else {
+        message.warning('验证未通过：' + (r.error || `状态码 ${r.status_code}`))
+      }
+    } catch (e) {
+      message.error('验证失败：' + ((e as Error)?.message || ''))
+    }
+  }
+
+  // 手动补提交
   const handleReSubmit = async () => {
     setResubmitting(true)
     try {
@@ -79,9 +114,7 @@ export default function Indexing() {
     },
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 90,
-      render: (s: string) => s === 'success'
-        ? <Tag color="success">成功</Tag>
-        : <Tag color="error">失败</Tag>,
+      render: (s: string) => s === 'success' ? <Tag color="success">成功</Tag> : <Tag color="error">失败</Tag>,
     },
     {
       title: '错误信息', dataIndex: 'error_msg', key: 'error', width: 200,
@@ -90,19 +123,64 @@ export default function Indexing() {
   ]
 
   return (
-    <div className="wr-page-content" style={{ paddingTop: 8 }}>
-      <div style={{ marginBottom: 24 }}>
-        <Title level={4} style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em' }}>收录管理</Title>
-        <Text type="secondary" style={{ fontSize: 14 }}>搜索引擎收录通知：运行时配置 · 提交审计 · 手动补提交</Text>
+    <div className="wr-page-content">
+      <div className="wr-page-header">
+        <h1>收录管理</h1>
+        <p>搜索引擎收录通知：密钥自动托管 · 渠道配置 · 提交审计 · 手动补提交</p>
       </div>
 
-      {/* 配置卡片 */}
-      <Card title="收录渠道配置" className="wr-glass-card" style={{ marginBottom: 16 }} loading={cfgLoading}>
+      {/* ① 密钥与验证 */}
+      <div className="wr-glass-card" style={{ padding: 20, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <KeyOutlined style={{ color: 'var(--wr-primary)' }} />
+          <Text strong style={{ fontSize: 15 }}>IndexNow 密钥（所有权证明）</Text>
+        </div>
         <Alert
           type="info" showIcon style={{ marginBottom: 16 }}
-          message="内容发布为 published 时自动推送到已配置的渠道；修改配置 30 秒内生效，无需重启"
-          description="IndexNow 覆盖 Bing/Yandex/Naver（国内 AI 引擎主要走 Bing 索引）；百度主动推送覆盖百度收录。均未配置时自动跳过。"
+          message="密钥无需手工生成——按 IndexNow 协议，密钥是网站所有权证明：系统自动生成 GUID 并托管 {key}.txt 文件"
+          description="公开站已托管 /public/indexnow-key.txt 端点。生成密钥后点「验证」即可确认搜索引擎能访问；同域名下自动生效（Bing/Yandex/Naver）。"
         />
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} md={12}>
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Text type="secondary" style={{ fontSize: 12 }}>当前密钥（{config?.index_now_key ? '已配置' : '未配置'}）</Text>
+              <code style={{
+                padding: '10px 14px', borderRadius: 8, display: 'block',
+                fontSize: 12.5, wordBreak: 'break-all', fontFamily: 'JetBrains Mono, monospace',
+                background: 'var(--wr-input-bg)', border: '1px solid var(--wr-border)',
+              }}>
+                {config?.index_now_key || '（空——点击「自动生成密钥」）'}
+              </code>
+            </Space>
+          </Col>
+          <Col xs={24} md={12}>
+            <Space wrap>
+              <Button type="primary" icon={<KeyOutlined />} loading={generatingKey} onClick={handleGenerateKey}>
+                自动生成密钥
+              </Button>
+              <Button icon={<SafetyCertificateOutlined />} onClick={handleVerifyKey}>
+                验证密钥文件
+              </Button>
+            </Space>
+            {verifyResult && (
+              <div style={{ marginTop: 12 }}>
+                {verifyResult.content_match ? (
+                  <Alert type="success" showIcon icon={<CheckCircleOutlined />}
+                    message="验证通过：key 文件可公开访问且内容一致"
+                    description={<Text style={{ fontSize: 12 }}>{verifyResult.url}</Text>} />
+                ) : (
+                  <Alert type="warning" showIcon icon={<CloseCircleOutlined />}
+                    message={`验证未通过（${verifyResult.error || 'HTTP ' + verifyResult.status_code}）`}
+                    description={<Text style={{ fontSize: 12 }}>{verifyResult.url}</Text>} />
+                )}
+              </div>
+            )}
+          </Col>
+        </Row>
+      </div>
+
+      {/* ② 渠道配置 */}
+      <Card title="渠道配置" className="wr-glass-card" style={{ marginBottom: 16 }} loading={cfgLoading}>
         <Form
           form={form}
           layout="vertical"
@@ -114,10 +192,10 @@ export default function Indexing() {
         >
           <Form.Item
             name="index_now_key" label="IndexNow 密钥"
-            extra="8-128 个字母/数字/连字符。生成方式：随机字符串（如 uuid）。密钥文件已托管于 /public/indexnow-key.txt"
+            extra="8-128 个字母/数字/连字符；留空 = 不启用。密钥文件已由公开站自动托管"
             rules={[{ pattern: /^[a-zA-Z0-9-]{8,128}$/, message: '格式：8-128 个字母/数字/连字符' }]}
           >
-            <Input.Password placeholder="留空 = 不启用 IndexNow" autoComplete="new-password" />
+            <Input.Password placeholder="点击上方「自动生成密钥」" autoComplete="new-password" />
           </Form.Item>
           <Form.Item name="baidu_site" label="百度站点（已验证域名）" style={{ marginBottom: 12 }}>
             <Input placeholder="如 content.example.com（留空 = 不启用百度）" />
@@ -142,7 +220,7 @@ export default function Indexing() {
         </Space>
       </Card>
 
-      {/* 提交日志 */}
+      {/* ③ 提交日志 */}
       <Card title={<Space><CloudUploadOutlined />提交日志（最近 50 条，10 秒自动刷新）</Space>}>
         <Table
           dataSource={logs as IndexingSubmitLog[]}

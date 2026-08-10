@@ -145,7 +145,9 @@ func (h *PublicHandler) GetSitemapXML(c *gin.Context) {
 	c.String(http.StatusOK, `<?xml version="1.0" encoding="UTF-8"?>`+"\n"+
 		`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`+"\n")
 	for _, it := range items {
-		c.Writer.WriteString(fmt.Sprintf("  <url><loc>%s/public/articles/%s</loc></url>\n", h.baseURL, it.ID))
+		// lastmod 按 IndexNow FAQ：sitemap（带 lastmod）补充全量/历史变更发现
+		c.Writer.WriteString(fmt.Sprintf("  <url><loc>%s/public/articles/%s</loc><lastmod>%s</lastmod></url>\n",
+			h.baseURL, it.ID, it.CreatedAt.Format("2006-01-02")))
 	}
 	c.Writer.WriteString(`</urlset>`)
 }
@@ -174,15 +176,30 @@ func (h *PublicHandler) GetLLMSTxt(c *gin.Context) {
 	c.String(http.StatusOK, txt)
 }
 
-// GetIndexNowKeyFile GET /public/indexnow-key.txt —— 托管 IndexNow 密钥文件。
-// IndexNow 验证时会访问 keyLocation 并比对内容（必须与提交的 key 一致）。
-// 优先读运行时配置（管理后台可改），未配置时返回 404。
+// GetIndexNowKeyFile 托管 IndexNow 密钥文件（协议关键端点）。
+//
+// IndexNow 协议要求（官方 FAQ）：搜索引擎验证域名所有权时访问
+//   https://<domain>/{key}.txt   （文件名 = 密钥本身，放网站根目录）
+// 内容必须与密钥一致。因此本端点支持两种路径：
+//   - /{key}.txt            ← 协议要求的根目录位置（Gin 动态路由 /:key.txt 进入）
+//   - /public/indexnow-key.txt ← 兼容旧路径
+// 未配置密钥或文件名与当前密钥不符时返回 404（避免暴露错误文件）。
 func (h *PublicHandler) GetIndexNowKeyFile(c *gin.Context) {
 	key := h.indexNowKey
 	if h.indexNowKeyProvider != nil {
 		key = h.indexNowKeyProvider(c.Request.Context())
 	}
 	if key == "" {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+	// 动态路由进入时校验文件名 = 当前密钥（IndexNow 只认 {key}.txt）。
+	// Gin 的 :key.txt 参数值含 .txt 后缀（param 名=key.txt），兼容两种取值。
+	param := c.Param("key.txt")
+	if param == "" {
+		param = c.Param("key")
+	}
+	if param != "" && param != key && param != key+".txt" {
 		c.String(http.StatusNotFound, "not found")
 		return
 	}

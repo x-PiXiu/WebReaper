@@ -1,5 +1,5 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Select, Empty, Drawer } from 'antd'
-import { DeleteOutlined, EyeOutlined, SwapOutlined } from '@ant-design/icons'
+import { Typography, Table, Tag, Space, Button, message, Popconfirm, Select, Empty, Drawer, Tabs, Row, Col } from 'antd'
+import { DeleteOutlined, EyeOutlined, SwapOutlined, FileTextOutlined, GlobalOutlined, EditOutlined, InboxOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -10,7 +10,7 @@ const { Text } = Typography
 const statusMeta: Record<string, { color: string; label: string }> = {
   draft: { color: 'default', label: '草稿' },
   approved: { color: 'processing', label: '已审核' },
-  published: { color: 'success', label: '已发布(公网可爬)' },
+  published: { color: 'success', label: '已发布' },
 }
 
 function scoreColor(s: number): string {
@@ -20,11 +20,13 @@ function scoreColor(s: number): string {
   return 'var(--wr-danger)'
 }
 
-// 内容统一管理（管理后台）：全平台优化内容一览 + 状态强制流转 + 预览 + 删除。
+// 内容统一管理（管理后台）：全平台优化内容一览。
+// 「区分开来」：按状态分区（全部/已发布/草稿/其他），每区独立统计与操作，
+// 已发布区展示公开页链接（公网资产），草稿区提示可发布。
 export default function AdminContents() {
   const queryClient = useQueryClient()
   const [brandFilter, setBrandFilter] = useState<string>()
-  const [statusFilter, setStatusFilter] = useState<string>()
+  const [activeTab, setActiveTab] = useState('all')
   const [preview, setPreview] = useState<OptimizedContent | null>(null)
 
   const { data: brands = [] } = useQuery({
@@ -32,7 +34,6 @@ export default function AdminContents() {
     queryFn: () => businessApi.listBrands(),
   })
 
-  // 内容按品牌分批拉取（admin 租户为空 = 全局）
   const { data: contentsByBrand = [] } = useQuery({
     queryKey: ['admin-contents', brands.map((b: Brand) => b.id).join(',')],
     queryFn: async () => {
@@ -44,9 +45,14 @@ export default function AdminContents() {
     enabled: brands.length > 0,
   })
 
-  const contents = contentsByBrand
-    .filter((c: OptimizedContent) => !brandFilter || c.brand_id === brandFilter)
-    .filter((c: OptimizedContent) => !statusFilter || c.status === statusFilter)
+  const filtered = contentsByBrand.filter((c: OptimizedContent) => !brandFilter || c.brand_id === brandFilter)
+  const published = filtered.filter((c: OptimizedContent) => c.status === 'published')
+  const drafts = filtered.filter((c: OptimizedContent) => c.status === 'draft')
+  const others = filtered.filter((c: OptimizedContent) => c.status !== 'published' && c.status !== 'draft')
+
+  const contents = activeTab === 'all' ? filtered
+    : activeTab === 'published' ? published
+    : activeTab === 'draft' ? drafts : others
 
   const brandName = (id: string) => brands.find((b: Brand) => b.id === id)?.name || id.slice(0, 10)
 
@@ -54,7 +60,7 @@ export default function AdminContents() {
     const next = c.status === 'published' ? 'draft' : 'published'
     try {
       await businessApi.setContentStatus(c.brand_id, c.id, next)
-      message.success(`已${next === 'published' ? '发布到公开站' : '下架'}`)
+      message.success(`已${next === 'published' ? '发布到公开站（AI 引擎可爬取）' : '下架'}`)
       queryClient.invalidateQueries({ queryKey: ['admin-contents'] })
     } catch { message.error('状态流转失败') }
   }
@@ -78,11 +84,11 @@ export default function AdminContents() {
       ),
     },
     {
-      title: '品牌', dataIndex: 'brand_id', key: 'brand_id', width: 130,
+      title: '品牌', dataIndex: 'brand_id', key: 'brand_id', width: 120,
       render: (id: string) => <Tag>{brandName(id)}</Tag>,
     },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 120,
+      title: '状态', dataIndex: 'status', key: 'status', width: 110,
       render: (s: string) => {
         const meta = statusMeta[s] || { color: 'default', label: s }
         return <Tag color={meta.color}>{meta.label}</Tag>
@@ -101,11 +107,11 @@ export default function AdminContents() {
       render: (v: number) => <Text type="secondary">v{v}</Text>,
     },
     {
-      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 140,
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 130,
       render: (t: string) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.slice(0, 10)}</Text>,
     },
     {
-      title: '操作', key: 'action', width: 190,
+      title: '操作', key: 'action', width: 220,
       render: (_: unknown, r: OptimizedContent) => (
         <Space size={4}>
           <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setPreview(r)}>预览</Button>
@@ -116,8 +122,13 @@ export default function AdminContents() {
           >
             {r.status === 'published' ? '下架' : '发布'}
           </Button>
+          {r.status === 'published' && (
+            <Button size="small" type="link" icon={<GlobalOutlined />} href={`/public/articles/${r.id}`} target="_blank">
+              公开页
+            </Button>
+          )}
           <Popconfirm title="删除该内容？" onConfirm={() => handleDelete(r)}>
-            <Button size="small" type="text" danger icon={<DeleteOutlined />}>删除</Button>
+            <Button size="small" type="text" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
       ),
@@ -127,11 +138,39 @@ export default function AdminContents() {
   return (
     <div className="wr-page-content">
       <div className="wr-page-header">
-        <h1>内容统一管理</h1>
-        <p>全平台优化内容一览 · 上下架控制 · 公开页预览</p>
+        <h1>内容管理</h1>
+        <p>全平台优化内容 · 按状态分区管理 · 上下架控制 · 公开页预览</p>
       </div>
 
-      {/* 筛选条 */}
+      {/* 统计卡（状态区分）*/}
+      <Row gutter={[16, 16]} className="wr-stagger" style={{ marginBottom: 16 }}>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card">
+            <div className="wr-metric-value wr-gradient-text">{filtered.length}</div>
+            <div className="wr-metric-label"><FileTextOutlined style={{ marginRight: 4 }} />内容总数</div>
+          </div>
+        </Col>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card" onClick={() => { setActiveTab('published'); setBrandFilter(undefined) }} style={{ cursor: 'pointer' }}>
+            <div className="wr-metric-value" style={{ color: 'var(--wr-success)' }}>{published.length}</div>
+            <div className="wr-metric-label"><GlobalOutlined style={{ marginRight: 4 }} />已发布（公网可爬）</div>
+          </div>
+        </Col>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card" onClick={() => { setActiveTab('draft'); setBrandFilter(undefined) }} style={{ cursor: 'pointer' }}>
+            <div className="wr-metric-value">{drafts.length}</div>
+            <div className="wr-metric-label"><EditOutlined style={{ marginRight: 4 }} />草稿</div>
+          </div>
+        </Col>
+        <Col xs={12} md={6}>
+          <div className="wr-metric-card" onClick={() => { setActiveTab('other'); setBrandFilter(undefined) }} style={{ cursor: 'pointer' }}>
+            <div className="wr-metric-value">{others.length}</div>
+            <div className="wr-metric-label"><InboxOutlined style={{ marginRight: 4 }} />其他状态</div>
+          </div>
+        </Col>
+      </Row>
+
+      {/* 品牌筛选 */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
         <Select
           style={{ width: 200 }}
@@ -141,41 +180,36 @@ export default function AdminContents() {
           onChange={setBrandFilter}
           options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
         />
-        <Select
-          style={{ width: 160 }}
-          placeholder="按状态筛选"
-          allowClear
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={[
-            { value: 'draft', label: '草稿' },
-            { value: 'approved', label: '已审核' },
-            { value: 'published', label: '已发布' },
-          ]}
-        />
         <Text type="secondary" style={{ alignSelf: 'center', fontSize: 12 }}>
           {contents.length} 条内容
         </Text>
       </div>
 
+      {/* 状态分区 Tabs（区分管理）*/}
       <div className="wr-glass-card" style={{ padding: 8 }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            { key: 'all', label: <Space>全部<Tag>{filtered.length}</Tag></Space> },
+            { key: 'published', label: <Space>已发布<Tag color="success">{published.length}</Tag></Space> },
+            { key: 'draft', label: <Space>草稿<Tag>{drafts.length}</Tag></Space> },
+            { key: 'other', label: <Space>其他<Tag>{others.length}</Tag></Space> },
+          ]}
+          style={{ padding: '0 12px' }}
+        />
         <Table
           dataSource={contents}
           columns={columns}
           rowKey="id"
           size="small"
           pagination={{ pageSize: 12, size: 'small' }}
-          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容" /> }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={activeTab === 'published' ? '暂无已发布内容——将内容「发布」后进入此区' : '暂无内容'} /> }}
         />
       </div>
 
-      {/* 预览抽屉：iframe 加载公开页 */}
-      <Drawer
-        title={preview?.title || '内容预览'}
-        width={720}
-        open={!!preview}
-        onClose={() => setPreview(null)}
-      >
+      {/* 预览抽屉 */}
+      <Drawer title={preview?.title || '内容预览'} width={720} open={!!preview} onClose={() => setPreview(null)}>
         {preview?.status === 'published' ? (
           <iframe
             src={`/public/articles/${preview.id}`}
