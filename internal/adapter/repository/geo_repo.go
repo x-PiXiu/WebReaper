@@ -76,6 +76,19 @@ func (r *GormBrandRepository) Count(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// ListAll 全平台品牌列表（admin 旁路——无租户过滤，仅管理后台全局端点调用）。
+func (r *GormBrandRepository) ListAll(ctx context.Context) ([]entity.Brand, error) {
+	var pos []BrandPO
+	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.Brand, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, brandFromPO(p))
+	}
+	return out, nil
+}
+
 // ============ KeywordRepository ============
 
 type GormKeywordRepository struct{ db *gorm.DB }
@@ -352,4 +365,24 @@ func (r *GormOptimizedContentRepository) CountPublished(ctx context.Context) (in
 		return 0, err
 	}
 	return int(n), nil
+}
+
+// ListAll 全平台内容列表（admin 旁路——无租户过滤，仅管理后台全局端点调用）。
+func (r *GormOptimizedContentRepository) ListAll(ctx context.Context, status string, limit int) ([]entity.OptimizedContent, error) {
+	q := r.db.WithContext(ctx).Order("created_at DESC")
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var pos []OptimizedContentPO
+	if err := q.Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.OptimizedContent, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, optimizedContentFromPO(p))
+	}
+	return out, nil
 }

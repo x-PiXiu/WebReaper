@@ -88,6 +88,24 @@ func (uc *BrandUseCase) List(ctx context.Context, tenantID string) ([]entity.Bra
 	return uc.brandRepo.ListByTenant(ctx, tenantID)
 }
 
+// ListAll 全平台品牌列表（admin 旁路——仅管理后台全局管理端点调用）。
+// 商户上下文一律走 List（租户隔离）；此处显式无租户过滤，由 admin 路由守卫保护。
+func (uc *BrandUseCase) ListAll(ctx context.Context) ([]entity.Brand, error) {
+	return uc.brandRepo.ListAll(ctx)
+}
+
+// AdminDelete 全平台品牌删除（admin 旁路——管理后台绝对控制，不做租户校验）。
+// 级联清理其下关键词。
+func (uc *BrandUseCase) AdminDelete(ctx context.Context, brandID string) error {
+	kws, err := uc.keywordRepo.ListByBrand(ctx, "", brandID)
+	if err == nil {
+		for _, kw := range kws {
+			_ = uc.keywordRepo.Delete(ctx, "", kw.ID)
+		}
+	}
+	return uc.brandRepo.Delete(ctx, "", brandID)
+}
+
 // Delete 删除品牌（同时清理其下关键词）。
 func (uc *BrandUseCase) Delete(ctx context.Context, tenantID, brandID string) error {
 	// 先删关键词（简化：逐个删；生产可批量）

@@ -73,12 +73,16 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in RegisterInput) (Regis
 	}
 
 	// 4. 构造用户并存库
-	// 商户若未指定 tenant_id，则用其 user_id 作为 tenant_id（一人一租户的简化模型）。
+	// 租户隔离铁律：每个账号（含 admin）都必须有租户归属——
+	//   - merchant：一人一租户（userID 派生）
+	//   - admin：也有自己的私有租户空间（登录后进用户界面时作为普通用户使用，
+	//     只能看到自己的数据；管理后台的全平台管理走显式 admin 旁路端点）
+	// 未指定 TenantID 时统一按 userID 派生，杜绝"空租户 = 看全局"的越权路径。
 	now := time.Now()
 	userID := fmt.Sprintf("user-%d", now.UnixNano())
 	tenantID := in.TenantID
-	if tenantID == "" && role == entity.RoleMerchant {
-		tenantID = "tenant-" + userID // 一人一租户
+	if tenantID == "" {
+		tenantID = "tenant-" + userID // 一人一租户（admin 亦同）
 	}
 	user := entity.User{
 		ID:           userID,

@@ -410,6 +410,72 @@ func (h *GEOHandler) HandleDeleteContent(c *gin.Context) {
 	success(c, gin.H{"deleted": true})
 }
 
+// HandleAdminListBrands GET /api/v1/admin/brands —— 全平台品牌列表（admin 旁路）。
+// 注意：不走 CurrentTenantID（商户上下文租户隔离）；由 adminGroup 角色守卫保护，
+// 仅管理后台全局管理端点调用——杜绝"空租户看全局"的越权路径。
+func (h *GEOHandler) HandleAdminListBrands(c *gin.Context) {
+	brands, err := h.brandUC.ListAll(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	views := make([]gin.H, 0, len(brands))
+	for _, b := range brands {
+		views = append(views, brandToView(b))
+	}
+	success(c, views)
+}
+
+// HandleAdminListContents GET /api/v1/admin/contents —— 全平台内容列表（admin 旁路）。
+// 支持 ?status=draft|published 过滤；不限定租户，由 adminGroup 角色守卫保护。
+func (h *GEOHandler) HandleAdminListContents(c *gin.Context) {
+	items, err := h.contentUC.ListAll(c.Request.Context(), c.Query("status"), 0)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	views := make([]gin.H, 0, len(items))
+	for _, oc := range items {
+		views = append(views, optimizedContentToView(oc))
+	}
+	success(c, views)
+}
+
+// HandleAdminDeleteBrand DELETE /api/v1/admin/brands/:id —— 全平台品牌删除（admin 旁路）。
+func (h *GEOHandler) HandleAdminDeleteBrand(c *gin.Context) {
+	if err := h.brandUC.AdminDelete(c.Request.Context(), c.Param("id")); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"deleted": true})
+}
+
+// HandleAdminSetContentStatus POST /api/v1/admin/contents/:id/status —— 全平台内容上下架（admin 旁路）。
+func (h *GEOHandler) HandleAdminSetContentStatus(c *gin.Context) {
+	var req struct {
+		Status string `json:"status" binding:"required"` // draft / published
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	oc, err := h.contentUC.AdminSetStatus(c.Request.Context(), c.Param("id"), req.Status)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, optimizedContentToView(oc))
+}
+
+// HandleAdminDeleteContent DELETE /api/v1/admin/contents/:id —— 全平台内容删除（admin 旁路）。
+func (h *GEOHandler) HandleAdminDeleteContent(c *gin.Context) {
+	if err := h.contentUC.AdminDelete(c.Request.Context(), c.Param("id")); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"deleted": true})
+}
+
 // HandleGenerateContent POST /api/v1/geo/brands/:id/contents/generate
 // 从零生成内容：根据品牌信息 + 关键词（单个或多个组合），AI 原创一篇 GEO 优化文章。
 func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {

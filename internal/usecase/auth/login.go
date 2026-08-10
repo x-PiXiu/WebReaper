@@ -54,6 +54,15 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 		return LoginOutput{}, fmt.Errorf("%w: invalid username or password", pkg.ErrInvalidArgument)
 	}
 
+	// 2.5 租户兜底（隔离铁律）：存量账号（租户隔离改造前注册）可能无 tenant_id。
+	// 任何账号登录后必须归属一个租户——否则在用户界面会因"空租户=看全局"越权。
+	if user.TenantID == "" {
+		user.TenantID = "tenant-" + user.ID
+		if err := uc.repo.Save(ctx, user); err != nil {
+			return LoginOutput{}, fmt.Errorf("assign tenant: %w", err)
+		}
+	}
+
 	// 3. 生成 token（把 role/tenant_id 一并写入令牌）
 	token, err := uc.tokenGen.Generate(port.TokenClaims{
 		UserID:   user.ID,

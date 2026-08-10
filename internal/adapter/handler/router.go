@@ -235,8 +235,10 @@ func (r *Router) Engine() *gin.Engine {
 		}
 
 		// GEO 业务路由（商户端核心：品牌/关键词/监测/排行榜/内容）
+		// geoHandler 提升到外层：管理后台的全局管理端点（/admin/brands 等）也复用它。
+		var geoHandler *GEOHandler
 		if r.geoBrandUC != nil {
-			geoHandler := NewGEOHandler(r.geoBrandUC, r.geoMonitorUC, r.geoRankUC, r.geoContentUC, r.geoDiagnoseUC)
+			geoHandler = NewGEOHandler(r.geoBrandUC, r.geoMonitorUC, r.geoRankUC, r.geoContentUC, r.geoDiagnoseUC)
 			// 注入关键词蒸馏能力（可选）
 			if r.geoDistillUC != nil {
 				geoHandler.SetDistillUC(r.geoDistillUC)
@@ -296,15 +298,23 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/geo/publish-jobs/:id/re-monitor", accountHandler.HandleReMonitor) // 发布效果复测（收录周期后验证提及率爬升）
 		}
 
-		// 管理端路由（仅 admin 角色可访问）
-		if r.userRepo != nil {
-			adminGroup := api.Group("/admin")
-			adminGroup.Use(middleware.RequireRole("admin"))
-			{
-				userHandler := NewUserHandler(r.authRegister, r.userRepo)
-				adminGroup.GET("/users", userHandler.HandleListUsers)
-				adminGroup.POST("/users", userHandler.HandleCreateMerchant)
-				adminGroup.DELETE("/users/:id", userHandler.HandleDeleteUser)
+			// 管理端路由（仅 admin 角色可访问）
+			if r.userRepo != nil {
+				adminGroup := api.Group("/admin")
+				adminGroup.Use(middleware.RequireRole("admin"))
+				{
+					userHandler := NewUserHandler(r.authRegister, r.userRepo)
+					adminGroup.GET("/users", userHandler.HandleListUsers)
+					adminGroup.POST("/users", userHandler.HandleCreateMerchant)
+					adminGroup.DELETE("/users/:id", userHandler.HandleDeleteUser)
+				// 全平台资源管理（admin 旁路：显式全局查询，不走商户租户上下文）
+				if r.geoBrandUC != nil {
+					adminGroup.GET("/brands", geoHandler.HandleAdminListBrands)
+					adminGroup.GET("/contents", geoHandler.HandleAdminListContents)
+					adminGroup.DELETE("/brands/:id", geoHandler.HandleAdminDeleteBrand)
+					adminGroup.POST("/contents/:id/status", geoHandler.HandleAdminSetContentStatus)
+					adminGroup.DELETE("/contents/:id", geoHandler.HandleAdminDeleteContent)
+				}
 			// Tavily 搜索 API 配置（管理后台用）
 			adminGroup.GET("/tavily-status", r.handleTavilyStatus)
 			adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)

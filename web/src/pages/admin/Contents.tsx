@@ -31,18 +31,13 @@ export default function AdminContents() {
 
   const { data: brands = [] } = useQuery({
     queryKey: ['admin-brands'],
-    queryFn: () => businessApi.listBrands(),
+    queryFn: () => businessApi.adminListBrands(), // admin 旁路端点（全局）
   })
 
+  // 全平台内容（admin 旁路端点一次拿全，不再按品牌循环——避免 N 次请求）
   const { data: contentsByBrand = [] } = useQuery({
-    queryKey: ['admin-contents', brands.map((b: Brand) => b.id).join(',')],
-    queryFn: async () => {
-      const lists = await Promise.all(
-        brands.map((b: Brand) => businessApi.listContents(b.id).catch(() => []))
-      )
-      return lists.flat()
-    },
-    enabled: brands.length > 0,
+    queryKey: ['admin-contents'],
+    queryFn: () => businessApi.adminListContents(), // admin 旁路端点（全局，无租户过滤）
   })
 
   const filtered = contentsByBrand.filter((c: OptimizedContent) => !brandFilter || c.brand_id === brandFilter)
@@ -59,7 +54,7 @@ export default function AdminContents() {
   const handleToggleStatus = async (c: OptimizedContent) => {
     const next = c.status === 'published' ? 'draft' : 'published'
     try {
-      await businessApi.setContentStatus(c.brand_id, c.id, next)
+      await businessApi.adminSetContentStatus(c.id, next) // admin 旁路（全局上下架）
       message.success(`已${next === 'published' ? '发布到公开站（AI 引擎可爬取）' : '下架'}`)
       queryClient.invalidateQueries({ queryKey: ['admin-contents'] })
     } catch { message.error('状态流转失败') }
@@ -67,7 +62,7 @@ export default function AdminContents() {
 
   const handleDelete = async (c: OptimizedContent) => {
     try {
-      await businessApi.deleteContent(c.brand_id, c.id)
+      await businessApi.adminDeleteContent(c.id) // admin 旁路（全局删除）
       message.success('内容已删除')
       queryClient.invalidateQueries({ queryKey: ['admin-contents'] })
     } catch { message.error('删除失败') }

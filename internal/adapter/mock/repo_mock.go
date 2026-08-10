@@ -544,6 +544,22 @@ func (r *MockOptimizedContentRepository) CountPublished(_ context.Context) (int,
 	return n, nil
 }
 
+// ListAll 全平台内容（mock：不按租户过滤）。
+func (r *MockOptimizedContentRepository) ListAll(_ context.Context, status string, limit int) ([]entity.OptimizedContent, error) {
+	r.mu.Lock(); defer r.mu.Unlock()
+	var out []entity.OptimizedContent
+	for _, c := range r.recs {
+		if status != "" && c.Status != status {
+			continue
+		}
+		out = append(out, c)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // ---- 收录提交日志 mock ----
 
 // MockIndexingLogRepository 是 port.IndexingLogRepository 的内存实现。

@@ -17,6 +17,9 @@ type BrandRepository interface {
 	Delete(ctx context.Context, tenantID, id string) error
 	// Count 统计品牌总数（平台总览用，admin 看全局）。
 	Count(ctx context.Context) (int, error)
+	// ListAll 全平台品牌列表（admin 旁路——仅管理后台全局管理端点调用，
+	// 商户上下文一律走 ListByTenant，杜绝空租户越权）。
+	ListAll(ctx context.Context) ([]entity.Brand, error)
 }
 
 // KeywordRepository 关键词仓储。
@@ -62,4 +65,7 @@ type OptimizedContentRepository interface {
 	CountPublished(ctx context.Context) (int, error)
 	// Delete 删除优化内容（管理后台/内容工作台用）。
 	Delete(ctx context.Context, tenantID, id string) error
+	// ListAll 全平台内容列表（admin 旁路——仅管理后台全局管理端点调用；
+	// 可按状态过滤，limit<=0 返回全部）。
+	ListAll(ctx context.Context, status string, limit int) ([]entity.OptimizedContent, error)
 }

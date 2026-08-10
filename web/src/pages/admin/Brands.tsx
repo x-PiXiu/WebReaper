@@ -12,7 +12,7 @@ export default function AdminBrands() {
   const queryClient = useQueryClient()
   const { data: brands = [] } = useQuery({
     queryKey: ['admin-brands'],
-    queryFn: () => businessApi.listBrands(),
+    queryFn: () => businessApi.adminListBrands(), // admin 旁路端点（全局，不走商户租户上下文）
   })
 
   const tenants = new Set(brands.map((b: Brand) => b.tenant_id)).size
@@ -21,7 +21,7 @@ export default function AdminBrands() {
 
   const handleDelete = async (b: Brand) => {
     try {
-      await businessApi.deleteBrand(b.id)
+      await businessApi.adminDeleteBrand(b.id) // admin 旁路（全局）
       message.success(`品牌「${b.name}」已删除（含关键词/内容）`)
       queryClient.invalidateQueries({ queryKey: ['admin-brands'] })
     } catch { message.error('删除失败') }

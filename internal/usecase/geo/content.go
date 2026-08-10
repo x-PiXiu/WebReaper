@@ -201,6 +201,53 @@ func (uc *ContentUseCase) List(ctx context.Context, tenantID, brandID string) ([
 	return uc.contentRepo.ListByBrand(ctx, tenantID, brandID)
 }
 
+// ListAll 全平台内容列表（admin 旁路——仅管理后台全局管理端点调用；
+// 可按状态过滤。商户上下文一律走 List，租户隔离）。
+func (uc *ContentUseCase) ListAll(ctx context.Context, status string, limit int) ([]entity.OptimizedContent, error) {
+	return uc.contentRepo.ListAll(ctx, status, limit)
+}
+
+// AdminSetStatus 全平台内容状态流转（admin 旁路——管理后台上下架控制，
+// 不做租户校验，由 admin 路由守卫保护。复用发布副作用：published 触发收录通知）。
+func (uc *ContentUseCase) AdminSetStatus(ctx context.Context, contentID, status string) (entity.OptimizedContent, error) {
+	switch status {
+	case "draft", "published":
+	default:
+		return entity.OptimizedContent{}, fmt.Errorf("不支持的状态: %q（仅支持 draft/published）", status)
+	}
+	oc, err := uc.contentRepo.FindPublishedByID(ctx, contentID)
+	if err != nil {
+		// FindPublishedByID 只查 published——draft 内容需走通用查询
+		oc, err = uc.findAnyByID(ctx, contentID)
+		if err != nil {
+			return entity.OptimizedContent{}, err
+		}
+	}
+	if oc.Status == status {
+		return oc, nil // 幂等
+	}
+	oc.Status = status
+	if err := uc.contentRepo.Save(ctx, oc); err != nil {
+		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
+	}
+	// 发布副作用：通知搜索引擎收录（与商户端 SetStatus 同口径）
+	if status == "published" && uc.urlSubmitter != nil && uc.publicBaseURL != "" {
+		publicURL := strings.TrimRight(uc.publicBaseURL, "/") + "/public/articles/" + oc.ID
+		_ = uc.urlSubmitter.SubmitURLs(ctx, []string{publicURL})
+	}
+	return oc, nil
+}
+
+// findAnyByID 无条件按 ID 查内容（admin 旁路辅助：FindPublishedByID 之外的全状态查询）。
+func (uc *ContentUseCase) findAnyByID(ctx context.Context, contentID string) (entity.OptimizedContent, error) {
+	return uc.contentRepo.FindByID(ctx, "", contentID)
+}
+
+// AdminDelete 全平台内容删除（admin 旁路——管理后台绝对控制，不做租户校验）。
+func (uc *ContentUseCase) AdminDelete(ctx context.Context, contentID string) error {
+	return uc.contentRepo.Delete(ctx, "", contentID)
+}
+
 // Delete 删除优化内容（内容工作台/管理后台用）。
 // 先 FindByID 做租户校验（只允许删自己租户的内容），再物理删除。
 func (uc *ContentUseCase) Delete(ctx context.Context, tenantID, contentID string) error {

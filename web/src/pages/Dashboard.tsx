@@ -81,30 +81,30 @@ export default function Dashboard() {
 
       {statsLoading && <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}
 
-      {/* 平台规模卡片（SaaS 维度） */}
+      {/* 平台规模卡片（SaaS 维度）——跳转管理后台对应管理页（不跳商户端）*/}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
           <StatCard label="商户数" value={stats?.users ?? 0} sublabel="平台注册商户" gradient="linear-gradient(180deg,#6366f1,#4f46e5)" onClick={() => navigate('/admin/users')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="品牌资产" value={stats?.brands ?? 0} sublabel="GEO 监测品牌" gradient="linear-gradient(180deg,#f59e0b,#d97706)" onClick={() => navigate('/m/brands')} />
+          <StatCard label="品牌资产" value={stats?.brands ?? 0} sublabel="GEO 监测品牌" gradient="linear-gradient(180deg,#f59e0b,#d97706)" onClick={() => navigate('/admin/brands')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="关键词" value={stats?.keywords ?? 0} sublabel="投放监测关键词" gradient="linear-gradient(180deg,#22d3ee,#0891b2)" onClick={() => navigate('/m/keywords')} />
+          <StatCard label="关键词" value={stats?.keywords ?? 0} sublabel="投放监测关键词" gradient="linear-gradient(180deg,#22d3ee,#0891b2)" onClick={() => navigate('/admin/brands')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="优化内容" value={stats?.optimized_contents ?? 0} sublabel="GEO 生成/优化" gradient="linear-gradient(180deg,#10b981,#059669)" onClick={() => navigate('/m/content')} />
+          <StatCard label="优化内容" value={stats?.optimized_contents ?? 0} sublabel="GEO 生成/优化" gradient="linear-gradient(180deg,#10b981,#059669)" onClick={() => navigate('/admin/contents')} />
         </Col>
       </Row>
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
-          <StatCard label="已发布公开页" value={stats?.published_contents ?? 0} sublabel="AI 引擎可爬取" gradient="linear-gradient(180deg,#8b5cf6,#7c3aed)" />
+          <StatCard label="已发布公开页" value={stats?.published_contents ?? 0} sublabel="AI 引擎可爬取" gradient="linear-gradient(180deg,#8b5cf6,#7c3aed)" onClick={() => navigate('/admin/contents')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="监测结果" value={stats?.monitor_results ?? 0} sublabel="累计引擎探测" gradient="linear-gradient(180deg,#ec4899,#db2777)" onClick={() => navigate('/m/brands')} />
+          <StatCard label="监测结果" value={stats?.monitor_results ?? 0} sublabel="累计引擎探测" gradient="linear-gradient(180deg,#ec4899,#db2777)" onClick={() => navigate('/admin/brands')} />
         </Col>
         <Col xs={12} md={6}>
-          <StatCard label="发布任务" value={stats?.publish_jobs ?? 0} sublabel="多平台分发" gradient="linear-gradient(180deg,#f97316,#ea580c)" onClick={() => navigate('/m/publish')} />
+          <StatCard label="发布任务" value={stats?.publish_jobs ?? 0} sublabel="多平台分发" gradient="linear-gradient(180deg,#f97316,#ea580c)" onClick={() => navigate('/admin/brands')} />
         </Col>
         <Col xs={12} md={6}>
           <StatCard label="采集数据项" value={stats?.data_items ?? 0} sublabel="数据资产总量" gradient="linear-gradient(180deg,#14b8a6,#0d9488)" onClick={() => navigate('/admin/data')} />

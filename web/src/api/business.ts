@@ -244,6 +244,22 @@ export const businessApi = {
   deleteUser: (id: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/admin/users/${id}`),
 
+  // ---- 全平台资源管理（admin 旁路：显式全局查询端点，不走商户租户上下文）----
+  adminListBrands: () =>
+    apiClient.get<unknown, Brand[]>('/api/v1/admin/brands'),
+
+  adminListContents: (status?: string) =>
+    apiClient.get<unknown, OptimizedContent[]>(`/api/v1/admin/contents${status ? `?status=${status}` : ''}`),
+
+  adminDeleteBrand: (id: string) =>
+    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/brands/${id}`),
+
+  adminSetContentStatus: (contentId: string, status: 'draft' | 'published') =>
+    apiClient.post<unknown, OptimizedContent>(`/api/v1/admin/contents/${contentId}/status`, { status }),
+
+  adminDeleteContent: (contentId: string) =>
+    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/contents/${contentId}`),
+
   // ---- Tavily 搜索配置（管理端）----
   getTavilyStatus: () =>
     apiClient.get<unknown, { registered: boolean; enabled: boolean }>('/api/v1/admin/tavily-status'),
