@@ -214,6 +214,7 @@ export default function AdminContents() {
           columns={columns}
           rowKey="id"
           size="small"
+          scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 12, size: 'small' }}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={activeTab === 'published' ? '暂无已发布内容——将内容「发布」后进入此区' : '暂无内容'} /> }}
         />

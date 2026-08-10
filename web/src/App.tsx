@@ -1,12 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
-// 管理后台页面（复用现有）
+// 管理后台页面
 import Dashboard from './pages/Dashboard'
 import Chat from './pages/Chat'
 import AgentConfigs from './pages/AgentConfigs'
-import DataItems from './pages/DataItems'
-import Tasks from './pages/Tasks'
-import CrawlConfigPage from './pages/CrawlConfig'
 import Tools from './pages/Tools'
 // 商户端 GEO 页面
 import MerchantHome from './pages/merchant/Home'
@@ -57,10 +54,7 @@ export default function App() {
           <Route path="/admin/contents" element={<AdminContents />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/agent-configs" element={<AgentConfigs />} />
-          <Route path="/admin/data" element={<DataItems />} />
-          <Route path="/admin/tasks" element={<Tasks />} />
           <Route path="/admin/tools" element={<Tools />} />
-          <Route path="/admin/crawl-config" element={<CrawlConfigPage />} />
           <Route path="/admin/indexing" element={<Indexing />} />
           <Route path="/admin/billing" element={<AdminBilling />} />
           <Route path="/admin/chat" element={<Chat />} />

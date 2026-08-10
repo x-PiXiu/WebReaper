@@ -54,8 +54,8 @@ export default function AdminUsers() {
       render: (r: string) => <Tag color={r === 'admin' ? 'red' : 'blue'}>{r === 'admin' ? '管理员' : '商户'}</Tag>,
     },
     {
-      title: '租户 ID', dataIndex: 'tenant_id', key: 'tenant_id',
-      render: (t: string) => <Text type="secondary" style={{ fontFamily: 'monospace', fontSize: 12 }}>{t || '-'}</Text>,
+      title: '租户', dataIndex: 'tenant_id', key: 'tenant_id', width: 140, ellipsis: true,
+      render: (t: string) => <Text copyable={{ tooltips: ['复制', '已复制'] }} style={{ fontFamily: 'monospace', fontSize: 12 }}>{t ? t.slice(0, 16) + '…' : '-'}</Text>,
     },
     {
       title: '操作', key: 'action', width: 90,

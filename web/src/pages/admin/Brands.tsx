@@ -1,4 +1,4 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Empty, Row, Col } from 'antd'
+import { Typography, Table, Tag, Space, Button, message, Popconfirm, Empty, Row, Col, Tooltip } from 'antd'
 import { DeleteOutlined, AppstoreOutlined, TagOutlined, EnvironmentOutlined, BulbOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -38,8 +38,8 @@ export default function AdminBrands() {
       ),
     },
     {
-      title: '商户', dataIndex: 'tenant_id', key: 'tenant_id', width: 150,
-      render: (t: string) => <Tag style={{ fontFamily: 'monospace' }}>{t || '全局'}</Tag>,
+      title: '商户', dataIndex: 'tenant_id', key: 'tenant_id', width: 130, ellipsis: true,
+      render: (t: string) => <Tooltip title={t}><Tag style={{ fontFamily: 'monospace', fontSize: 11 }}>{t ? t.slice(0, 14) + '…' : '全局'}</Tag></Tooltip>,
     },
     {
       title: '品牌定位', dataIndex: 'positioning', key: 'positioning', ellipsis: true,
@@ -47,11 +47,11 @@ export default function AdminBrands() {
     },
     {
       title: '核心卖点', dataIndex: 'core_selling', key: 'core_selling', width: 220,
-      render: (list: string[]) => (list || []).slice(0, 3).map((s, i) => <Tag key={i} style={{ fontSize: 11 }}>{s}</Tag>),
+      render: (list: string[]) => <Space wrap size={4}>{(list || []).slice(0, 3).map((s, i) => <Tag key={i} style={{ fontSize: 11, margin: 0 }}>{s}</Tag>)}</Space>,
     },
     {
       title: '竞品', dataIndex: 'competitors', key: 'competitors', width: 180,
-      render: (list: string[]) => (list || []).slice(0, 3).map((c, i) => <Tag key={i} style={{ fontSize: 11 }}>{c}</Tag>),
+      render: (list: string[]) => <Space wrap size={4}>{(list || []).slice(0, 3).map((c, i) => <Tag key={i} style={{ fontSize: 11, margin: 0 }}>{c}</Tag>)}</Space>,
     },
     {
       title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 130,
@@ -108,6 +108,7 @@ export default function AdminBrands() {
           columns={columns}
           rowKey="id"
           size="small"
+          scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 12, size: 'small' }}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无品牌" /> }}
           expandable={{

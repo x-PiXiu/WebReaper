@@ -27,14 +27,6 @@ const adminMenu: NavItem[] = [
       { key: '/admin/indexing', label: '收录管理' },
     ],
   },
-  {
-    key: 'data', label: '数据采集',
-    children: [
-      { key: '/admin/data', label: '数据管理' },
-      { key: '/admin/tasks', label: '任务监控' },
-      { key: '/admin/crawl-config', label: '采集配置' },
-    ],
-  },
 ]
 
 // 管理后台布局。
