@@ -24,21 +24,21 @@ const (
 // VideoTask 视频生成任务（聚合根）。
 // Mode 区分输入方式：text（随机文本生成）/ material（上传素材）。
 type VideoTask struct {
-	ID          string
-	TenantID    string
-	BrandID     string          // 可选：与品牌关联
-	Mode        string          // text / material
-	Prompt      string          // 生成提示词（text 模式；material 模式可为描述文案）
-	MaterialURL string          // 素材地址（material 模式）
-	Status      VideoTaskStatus
-	VideoURL    string          // ① 生成结果视频
-	VoiceText   string          // ② 配音文本
-	VoiceURL    string          // ② 配音音频
-	FinalURL    string          // ③ 合成成片
-	DurationSec int
-	Error       string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          string          `json:"id"`
+	TenantID    string          `json:"tenant_id"`
+	BrandID     string          `json:"brand_id"` // 可选：与品牌关联
+	Mode        string          `json:"mode"`     // text / material
+	Prompt      string          `json:"prompt"`   // 生成提示词（text 模式；material 模式可为描述文案）
+	MaterialURL string          `json:"material_url"` // 素材地址（material 模式）
+	Status      VideoTaskStatus `json:"status"`
+	VideoURL    string          `json:"video_url"` // ① 生成结果视频
+	VoiceText   string          `json:"voice_text"` // ② 配音文本
+	VoiceURL    string          `json:"voice_url"` // ② 配音音频
+	FinalURL    string          `json:"final_url"` // ③ 合成成片
+	DurationSec int             `json:"duration_sec"`
+	Error       string          `json:"error"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // IsValid 领域规则：任务必须有 ID、TenantID、模式与输入。
@@ -95,13 +95,13 @@ func (t VideoTask) StatusLabel() string {
 
 // VideoJob 视频发布任务（抖音/快手等视频平台）。
 type VideoJob struct {
-	ID          string
-	TenantID    string
-	TaskID      string    // 关联 VideoTask
-	AccountID   string    // 发布账号（空 = 账号池随机）
-	Platform    string    // douyin / kuaishou ...
-	Status      string    // pending / publishing / published / failed
-	ExternalURL string
-	Error       string
-	CreatedAt   time.Time
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	TaskID      string    `json:"task_id"` // 关联 VideoTask
+	AccountID   string    `json:"account_id"` // 发布账号（空 = 账号池随机）
+	Platform    string    `json:"platform"` // douyin / kuaishou ...
+	Status      string    `json:"status"` // pending / publishing / published / failed
+	ExternalURL string    `json:"external_url"`
+	Error       string    `json:"error"`
+	CreatedAt   time.Time `json:"created_at"`
 }

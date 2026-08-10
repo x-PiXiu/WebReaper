@@ -122,6 +122,10 @@ type ServerConfig struct {
 	BingAPIKey string
 	// BingSiteURL Bing 已验证的站点地址（如 https://content.example.com）。
 	BingSiteURL string
+	// ViduAPIKey Vidu 视频生成 API Key（可选）。未配置时视频工作台走 mock 模拟进度。
+	ViduAPIKey string
+	// ViduModel Vidu 视频生成模型（默认 viduq3-pro；可换 viduq3-turbo 等）。
+	ViduModel string
 	// AutoMonitorEnabled 是否启用每日自动监测（AUTO_MONITOR_ENABLED=true）。
 	// 启用后调度器每天对全平台品牌执行一次监测，趋势图自动生长。
 	AutoMonitorEnabled bool
@@ -246,6 +250,8 @@ func Load() Config {
 			IndexNowKey:   os.Getenv("INDEXNOW_KEY"),
 			BingAPIKey:    os.Getenv("BING_API_KEY"),
 			BingSiteURL:   os.Getenv("BING_SITE_URL"),
+			ViduAPIKey:    os.Getenv("VIDU_API_KEY"),
+			ViduModel:     getenvDefault("VIDU_MODEL", "viduq3-pro"),
 			AutoMonitorEnabled: os.Getenv("AUTO_MONITOR_ENABLED") == "true",
 		},
 		DB: DBConfig{

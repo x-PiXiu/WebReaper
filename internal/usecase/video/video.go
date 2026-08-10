@@ -61,6 +61,7 @@ type SubmitInput struct {
 	Mode        string // text / material
 	Prompt      string
 	MaterialURL string
+	VoiceText   string // 可选：配音文本（配置 TTS 后生成配音并合成）
 }
 
 // Submit 提交视频生成任务（立即返回，流水线后台驱动）。
@@ -73,6 +74,7 @@ func (uc *VideoUseCase) Submit(ctx context.Context, in SubmitInput) (entity.Vide
 		Mode:        in.Mode,
 		Prompt:      in.Prompt,
 		MaterialURL: in.MaterialURL,
+		VoiceText:   in.VoiceText,
 		Status:      entity.VideoStatusPending,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -142,8 +144,12 @@ func (uc *VideoUseCase) pipeline(ctx context.Context, taskID string) {
 			return
 		}
 	}
-	// ④ 就绪
-	if task.CanTransitionTo(entity.VideoStatusReady) {
+	// ④ 就绪（各步骤已同步内存状态；直接以最终状态落库）
+	if task.Status == entity.VideoStatusReady {
+		if task.FinalURL == "" {
+			task.FinalURL = task.VideoURL // 兜底：无合成环节时原视频即成片
+		}
+		_ = uc.repo.UpdateResult(ctx, task.TenantID, task.ID, map[string]any{"final_url": task.FinalURL})
 		_ = uc.repo.UpdateStatus(ctx, task.TenantID, task.ID, entity.VideoStatusReady, "")
 		log.Info("视频成片就绪", port.String("final", task.FinalURL))
 	}
@@ -157,6 +163,7 @@ func (uc *VideoUseCase) stepGenerate(ctx context.Context, task *entity.VideoTask
 	if !task.CanTransitionTo(entity.VideoStatusGenerating) {
 		return nil
 	}
+	task.Status = entity.VideoStatusGenerating // 同步内存状态（DB 由 UpdateStatus 写）
 	_ = uc.repo.UpdateStatus(ctx, task.TenantID, task.ID, entity.VideoStatusGenerating, "")
 	remoteID, err := uc.provider.Submit(ctx, task.Mode, task.Prompt, task.MaterialURL)
 	if err != nil {
@@ -178,6 +185,16 @@ func (uc *VideoUseCase) stepGenerate(ctx context.Context, task *entity.VideoTask
 			if done {
 				task.VideoURL = videoURL
 				_ = uc.repo.UpdateResult(ctx, task.TenantID, task.ID, map[string]any{"video_url": videoURL})
+				// 预置下一步状态（配音→合成→就绪按流水线配置走）
+				switch {
+				case task.VoiceText != "" && uc.voice != nil:
+					task.Status = entity.VideoStatusDubbing
+				case uc.composer != nil:
+					task.Status = entity.VideoStatusComposing
+				default:
+					task.Status = entity.VideoStatusReady
+					task.FinalURL = videoURL // 无合成器：原视频即成片
+				}
 				log.Info("视频生成完成", port.String("url", videoURL))
 				return nil
 			}
@@ -190,6 +207,7 @@ func (uc *VideoUseCase) stepDub(ctx context.Context, task *entity.VideoTask, log
 	if !task.CanTransitionTo(entity.VideoStatusDubbing) {
 		return nil
 	}
+	task.Status = entity.VideoStatusDubbing // 同步内存状态（DB 由 UpdateStatus 写）
 	_ = uc.repo.UpdateStatus(ctx, task.TenantID, task.ID, entity.VideoStatusDubbing, "")
 	audioURL, err := uc.voice.Synthesize(ctx, task.VoiceText, "")
 	if err != nil {
@@ -197,6 +215,11 @@ func (uc *VideoUseCase) stepDub(ctx context.Context, task *entity.VideoTask, log
 	}
 	task.VoiceURL = audioURL
 	_ = uc.repo.UpdateResult(ctx, task.TenantID, task.ID, map[string]any{"voice_url": audioURL})
+	if uc.composer != nil {
+		task.Status = entity.VideoStatusComposing
+	} else {
+		task.Status = entity.VideoStatusReady
+	}
 	log.Info("配音完成", port.String("url", audioURL))
 	return nil
 }
@@ -206,6 +229,7 @@ func (uc *VideoUseCase) stepCompose(ctx context.Context, task *entity.VideoTask,
 	if !task.CanTransitionTo(entity.VideoStatusComposing) {
 		return nil
 	}
+	task.Status = entity.VideoStatusComposing // 同步内存状态（DB 由 UpdateStatus 写）
 	_ = uc.repo.UpdateStatus(ctx, task.TenantID, task.ID, entity.VideoStatusComposing, "")
 	finalURL, err := uc.composer.Compose(ctx, task.VideoURL, task.VoiceURL)
 	if err != nil {
@@ -213,6 +237,7 @@ func (uc *VideoUseCase) stepCompose(ctx context.Context, task *entity.VideoTask,
 	}
 	task.FinalURL = finalURL
 	_ = uc.repo.UpdateResult(ctx, task.TenantID, task.ID, map[string]any{"final_url": finalURL})
+	task.Status = entity.VideoStatusReady
 	log.Info("合成完成", port.String("url", finalURL))
 	return nil
 }

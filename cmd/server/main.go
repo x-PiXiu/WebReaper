@@ -24,6 +24,7 @@ import (
 	"webreaper/internal/adapter/lock"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/mock"
+	"webreaper/internal/adapter/provider"
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
@@ -52,6 +53,7 @@ import (
 	"webreaper/internal/usecase/systemsettings"
 	taskuc "webreaper/internal/usecase/task"
 	taskquery "webreaper/internal/usecase/taskquery"
+	"webreaper/internal/usecase/video"
 )
 
 func main() {
@@ -438,6 +440,27 @@ func main() {
 	// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）
 	notifyUC := notification.NewNotifyUseCase(repository.NewGormNotificationRepository(geoRepos.db))
 	router.SetNotifications(notifyUC)
+
+	// 视频生成工作台（Vidu 模型策略：配置 VIDU_API_KEY 走真实 API，否则 mock 模拟进度）
+	// 策略选择与降级：真实积分珍贵，未配置 key 时 mock 保证前端可完整演示流程。
+	if geoRepos != nil {
+		var videoProvider port.VideoProvider = provider.NewMockVideoProvider()
+		if cfg.Server.ViduAPIKey != "" {
+			videoProvider = provider.NewViduProvider(cfg.Server.ViduAPIKey, cfg.Server.ViduModel)
+			log.Info("视频生成已接入 Vidu（真实 API）")
+		} else {
+			log.Info("视频生成运行在 mock 模式（未配置 VIDU_API_KEY，提交即模拟进度）")
+		}
+		videoUC := video.NewVideoUseCase(
+			repository.NewGormVideoTaskRepository(geoRepos.db),
+			repository.NewGormVideoJobRepository(geoRepos.db),
+			videoProvider,
+			nil, // 配音 TTS 未接入（跳过配音阶段，直接生成原视频）
+			nil, // 合成器未接入（跳过合成阶段）
+			log,
+		)
+		router.SetVideo(videoUC)
+	}
 
 	// 管理端装配（用户管理，仅 admin）
 	router.SetAdmin(userRepo)

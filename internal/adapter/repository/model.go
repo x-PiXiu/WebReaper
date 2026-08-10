@@ -165,5 +165,8 @@ func allModels() []any {
 		&UsagePO{},
 		// 租户级设置（多租户个性化配置）
 		&TenantSettingPO{},
+		// 视频生成工作台（生成任务 + 发布任务）
+		&VideoTaskPO{},
+		&VideoJobPO{},
 	}
 }

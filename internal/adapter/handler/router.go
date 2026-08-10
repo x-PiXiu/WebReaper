@@ -27,6 +27,7 @@ import (
 	"webreaper/internal/usecase/structured"
 	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
+	"webreaper/internal/usecase/video"
 )
 
 // Router 组装所有 HTTP 路由。
@@ -74,6 +75,8 @@ type Router struct {
 	settingsUC *systemsettings.SystemSettingsUseCase
 	// 站内通知（主动唤醒）——通过 SetNotifications 注入，可选
 	notifyUC *notification.NotifyUseCase
+	// 视频生成工作台——通过 SetVideo 注入，可选
+	videoUC *video.VideoUseCase
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -132,6 +135,11 @@ func (r *Router) SetNotifications(uc *notification.NotifyUseCase) {
 func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCase) {
 	r.accountUC = au
 	r.publishSemiUC = pu
+}
+
+// SetVideo 注入视频生成工作台用例（可选；未注入则视频端点不注册）。
+func (r *Router) SetVideo(uc *video.VideoUseCase) {
+	r.videoUC = uc
 }
 
 func NewRouter(
@@ -321,6 +329,16 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/geo/publish-jobs/:id/published", accountHandler.HandleMarkPublished)
 			api.GET("/geo/publish-jobs/:id/status", accountHandler.HandleGetJobStatus)
 			api.POST("/geo/publish-jobs/:id/re-monitor", accountHandler.HandleReMonitor) // 发布效果复测（收录周期后验证提及率爬升）
+		}
+
+		// 视频生成工作台（未配置 DB 时降级：不注册视频端点）
+		if r.videoUC != nil {
+			vh := NewVideoHandler(r.videoUC)
+			api.POST("/video/tasks", vh.HandleSubmit)
+			api.GET("/video/tasks/:id", vh.HandleGet)
+			api.GET("/video/tasks", vh.HandleList)
+			api.POST("/video/tasks/publish", vh.HandlePublish)
+			api.GET("/video/jobs", vh.HandleListJobs)
 		}
 
 			// 管理端路由（仅 admin 角色可访问）
