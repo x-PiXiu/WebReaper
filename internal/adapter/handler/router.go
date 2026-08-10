@@ -263,6 +263,11 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/geo/monitor", geoHandler.HandleMonitor)
 			api.POST("/geo/monitor-keyword", geoHandler.HandleMonitorKeyword) // 单关键词即时监测
 			api.POST("/geo/monitor-multi", geoHandler.HandleMonitorMultiEngine) // 多引擎批量监测
+			// 商户端自动盯盘开关（租户级：我的品牌是否参与每日自动监测）
+			if r.settingsUC != nil {
+				api.GET("/geo/monitor-auto", r.HandleGetTenantAutoMonitor)
+				api.PUT("/geo/monitor-auto", r.HandleSetTenantAutoMonitor)
+			}
 			api.GET("/geo/monitor/:keywordId", geoHandler.HandleLatestMonitor)
 			api.GET("/geo/brands/:id/monitor-results", geoHandler.HandleLatestMonitorByBrand) // 品牌批量结果
 			api.GET("/geo/monitor-results", geoHandler.HandleAllMonitorResults) // 租户全部监测结果（关键词一览页用）

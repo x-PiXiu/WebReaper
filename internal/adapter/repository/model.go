@@ -163,5 +163,7 @@ func allModels() []any {
 		&PublishJobPO{},
 		// LLM 用量计量（经济系统基础，AutoMigrate 自动建表）
 		&UsagePO{},
+		// 租户级设置（多租户个性化配置）
+		&TenantSettingPO{},
 	}
 }

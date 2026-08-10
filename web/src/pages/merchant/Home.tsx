@@ -1,8 +1,8 @@
-import { Card, Typography, Row, Col, Spin, Tag, Button } from 'antd'
+import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message } from 'antd'
 import { RocketOutlined, ArrowRightOutlined, AppstoreAddOutlined, SearchOutlined, RadarChartOutlined, FileTextOutlined } from '@ant-design/icons'
 import { Line, Pie } from '@ant-design/charts'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { deltaView, latestMonitor } from '../../utils/geo'
 import type { Brand } from '../../types/api'
@@ -203,9 +203,13 @@ export default function MerchantHome() {
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={24} lg={16}>
             <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
-              <Title level={5} style={{ color: 'var(--wr-text-secondary)', fontWeight: 600, marginBottom: 16, fontSize: 14 }}>
-                提及率趋势
-              </Title>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Title level={5} style={{ color: 'var(--wr-text-secondary)', fontWeight: 600, marginBottom: 0, fontSize: 14 }}>
+                  提及率趋势
+                </Title>
+                {/* 自动盯盘状态（商户端感知：趋势自动生长）*/}
+                <AutoMonitorBadge />
+              </div>
               {(() => {
                 const trendData: any[] = []
                 ovData.forEach((o: any, i: number) => {
@@ -340,5 +344,51 @@ export default function MerchantHome() {
         </Row>
       </div>
     </div>
+  )
+}
+
+// AutoMonitorBadge 自动盯盘状态徽标（商户端感知：趋势自动生长）。
+// 两级开关：平台总闸（管理员控制，只读）+ 租户开关（商户可自控）。
+function AutoMonitorBadge() {
+  const queryClient = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['tenant-auto-monitor'],
+    queryFn: () => businessApi.getTenantAutoMonitor(),
+  })
+
+  const toggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => businessApi.setTenantAutoMonitor(enabled),
+    onSuccess: () => {
+      message.success('自动盯盘已' + (data?.tenant_enabled ? '关闭' : '开启') + '（每日自动监测，趋势自动生长）')
+      queryClient.invalidateQueries({ queryKey: ['tenant-auto-monitor'] })
+    },
+  })
+
+  const active = data?.platform_enabled && data?.tenant_enabled
+  return (
+    <Space size={6}>
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '3px 10px', borderRadius: 20, fontSize: 11.5, fontWeight: 600,
+        background: active ? 'rgba(74,222,128,0.12)' : 'var(--wr-bg-elevated)',
+        color: active ? 'var(--wr-success)' : 'var(--wr-text-muted)',
+        border: `1px solid ${active ? 'rgba(74,222,128,0.3)' : 'var(--wr-border)'}`,
+      }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: active ? 'var(--wr-success)' : 'var(--wr-text-muted)',
+          animation: active ? 'wr-pulse 2s infinite' : 'none',
+        }} />
+        {active ? '自动盯盘已开启 · 趋势自动生长' : data?.platform_enabled ? '自动盯盘已暂停' : '平台自动盯盘未开启'}
+      </span>
+      {data?.platform_enabled && (
+        <Switch
+          size="small"
+          checked={data?.tenant_enabled}
+          loading={isLoading || toggleMutation.isPending}
+          onChange={(v) => toggleMutation.mutate(v)}
+        />
+      )}
+    </Space>
   )
 }

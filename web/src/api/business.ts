@@ -266,6 +266,12 @@ export const businessApi = {
   setAutoMonitor: (enabled: boolean) =>
     apiClient.put<unknown, { auto_monitor_enabled: boolean }>('/api/v1/admin/settings/auto-monitor', { enabled }),
 
+  // ---- 商户端自动盯盘（租户级）----
+  getTenantAutoMonitor: () =>
+    apiClient.get<unknown, { tenant_enabled: boolean; platform_enabled: boolean }>('/api/v1/geo/monitor-auto'),
+  setTenantAutoMonitor: (enabled: boolean) =>
+    apiClient.put<unknown, { tenant_enabled: boolean }>('/api/v1/geo/monitor-auto', { enabled }),
+
   // ---- Tavily 搜索配置（管理端）----
   getTavilyStatus: () =>
     apiClient.get<unknown, { registered: boolean; enabled: boolean }>('/api/v1/admin/tavily-status'),

@@ -428,7 +428,9 @@ func main() {
 	router.SetStats(statsUC)
 
 	// 平台系统设置（运行时开关：自动盯盘等）——管理后台可切换，调度器即时生效
+	tenantSettingRepo := repository.NewGormTenantSettingRepository(geoRepos.db)
 	settingsUC := systemsettings.NewSystemSettingsUseCase(settingRepo)
+	settingsUC.SetTenantSettingRepo(tenantSettingRepo)
 	router.SetSystemSettings(settingsUC)
 
 	// 管理端装配（用户管理，仅 admin）
@@ -451,7 +453,7 @@ func main() {
 	// 需要 DB + LLM + 开启开关（AUTO_MONITOR_ENABLED=true）
 	if geoMonitorUCRef != nil && geoRepos != nil && cfg.LLM.IsConfigured() && cfg.Server.AutoMonitorEnabled {
 		monUC := geoMonitorUCRef
-		_ = taskScheduler.Register(scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, settingRepo, cfg.Server.AutoMonitorEnabled, log))
+		_ = taskScheduler.Register(scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, settingRepo, tenantSettingRepo, cfg.Server.AutoMonitorEnabled, log))
 		log.Info("每日自动监测任务已注册（AUTO_MONITOR_ENABLED=true）")
 	}
 
