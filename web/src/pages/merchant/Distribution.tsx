@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, Spin } from 'antd'
+import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, Spin, DatePicker } from 'antd'
 import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, LinkOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import dayjs from 'dayjs'
 import { businessApi } from '../../api/business'
 import type { Brand, OptimizedContent, Account, PublishJob } from '../../types/api'
 
@@ -62,6 +63,7 @@ export default function Distribution() {
   const [publishMode, setPublishMode] = useState<'semi-auto' | 'auto'>('semi-auto')
   const [autoSelect, setAutoSelect] = useState(false)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
+  const [scheduleTime, setScheduleTime] = useState<Date | null>(null) // 定时发送（null=立即）
   const [publishLinks, setPublishLinks] = useState<PublishJob[]>([])
   const [autoJobIds, setAutoJobIds] = useState<string[]>([])
 
@@ -181,6 +183,8 @@ export default function Distribution() {
     if (!autoSelect && selectedAccountIds.length === 0) { message.warning('请选择至少一个目标账号，或开启自动选号'); return }
     setPublishing(true)
     setPublishLinks([])
+    // 定时发送：选了排期时间则只落库排期任务（到期由调度器自动发布）
+    const scheduledAt = scheduleTime ? scheduleTime.toISOString() : undefined
     try {
       const results: PublishJob[] = []
       if (autoSelect && publishMode === 'auto') {
@@ -189,6 +193,7 @@ export default function Distribution() {
           results.push(await businessApi.publishContent({
             account_id: '', platform, content_id: selectedContent.id, brand_id: selectedBrand,
             title: selectedContent.title || '', content: selectedContent.optimized_text, mode: publishMode,
+            scheduled_at: scheduledAt,
           }))
         }
       } else {
@@ -198,10 +203,15 @@ export default function Distribution() {
           results.push(await businessApi.publishContent({
             account_id: accId, platform: acc.platform, content_id: selectedContent.id, brand_id: selectedBrand,
             title: selectedContent.title || '', content: selectedContent.optimized_text, mode: publishMode,
+            scheduled_at: scheduledAt,
           }))
         }
       }
-      if (publishMode === 'auto') {
+      if (scheduledAt) {
+        // 排期模式：任务已落库，到期自动发布
+        message.success(`已排期 ${results.length} 个发布任务（${scheduleTime!.toLocaleString()} 自动执行）`)
+        setPublishing(false)
+      } else if (publishMode === 'auto') {
         setAutoJobIds(results.map(j => j.id))
         message.success(`已启动 ${results.length} 个自动发布任务`)
       } else {
@@ -521,6 +531,23 @@ export default function Distribution() {
                       })}
                     </Space>
 
+                    {/* 定时发送（排期发布：到期自动执行）*/}
+                    <div style={{ marginTop: 16, padding: 12, borderRadius: 10, border: '1px solid var(--wr-border)', background: 'var(--wr-bg-elevated)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <Switch size="small" checked={!!scheduleTime} onChange={(v) => setScheduleTime(v ? dayjs().add(1, 'hour').toDate() : null)} />
+                        <Text style={{ fontSize: 13 }}>定时发送（排期发布）</Text>
+                      </div>
+                      {scheduleTime && (
+                        <DatePicker
+                          showTime
+                          value={dayjs(scheduleTime)}
+                          onChange={(v) => setScheduleTime(v ? v.toDate() : null)}
+                          style={{ width: '100%' }}
+                          disabledDate={(d) => d && d.isBefore(dayjs().startOf('day'))}
+                          placeholder="选择自动发布时间"
+                        />
+                      )}
+                    </div>
                     <Button
                       type="primary" size="large" block style={{ marginTop: 16 }}
                       loading={publishing}

@@ -42,6 +42,8 @@ type PublishJobRepository interface {
 	ListByTenant(ctx context.Context, tenantID string, limit int) ([]entity.PublishJob, error)
 	// Count 统计发布任务总数（平台总览用，admin 看全局）。
 	Count(ctx context.Context) (int, error)
+	// ListScheduledDue 列出已到期未执行的排期任务（调度任务用，全租户）。
+	ListScheduledDue(ctx context.Context, before time.Time) ([]entity.PublishJob, error)
 }
 
 // QRLoginResult 是一次扫码登录轮询的结果。

@@ -41,6 +41,7 @@ import (
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
+	"webreaper/internal/usecase/notification"
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/process"
@@ -433,6 +434,10 @@ func main() {
 	settingsUC.SetTenantSettingRepo(tenantSettingRepo)
 	router.SetSystemSettings(settingsUC)
 
+	// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）
+	notifyUC := notification.NewNotifyUseCase(repository.NewGormNotificationRepository(geoRepos.db))
+	router.SetNotifications(notifyUC)
+
 	// 管理端装配（用户管理，仅 admin）
 	router.SetAdmin(userRepo)
 
@@ -453,10 +458,22 @@ func main() {
 	// 需要 DB + LLM + 开启开关（AUTO_MONITOR_ENABLED=true）
 	if geoMonitorUCRef != nil && geoRepos != nil && cfg.LLM.IsConfigured() && cfg.Server.AutoMonitorEnabled {
 		monUC := geoMonitorUCRef
-		_ = taskScheduler.Register(scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, settingRepo, tenantSettingRepo, cfg.Server.AutoMonitorEnabled, log))
+		dailyTask := scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, settingRepo, tenantSettingRepo, cfg.Server.AutoMonitorEnabled, log)
+		if notifyUC != nil {
+			dailyTask.SetNotifier(scheduledtask.NewMonitorNotifier(geoRepos.result, notifyUC, log))
+		}
+		_ = taskScheduler.Register(dailyTask)
 		log.Info("每日自动监测任务已注册（AUTO_MONITOR_ENABLED=true）")
 	}
 
+	// 排期发布（定时发送）：每 5 分钟扫描到期任务
+	if geoPublishUC != nil && accountRepos != nil {
+		_ = taskScheduler.Register(scheduledtask.NewScheduledPublishTask(accountRepos.job, geoPublishUC, notifyUC, log))
+	}
+	// 自动复测：发布 7 天后自动复测提及率并通知（效果追踪闭环）
+	if geoPublishUC != nil && accountRepos != nil {
+		_ = taskScheduler.Register(scheduledtask.NewAutoRecheckTask(accountRepos.job, geoPublishUC, notifyUC, settingRepo, log))
+	}
 	taskScheduler.Start(schedulerCtx)
 
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}

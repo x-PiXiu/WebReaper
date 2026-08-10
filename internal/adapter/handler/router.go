@@ -19,6 +19,7 @@ import (
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
+	"webreaper/internal/usecase/notification"
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/stats"
@@ -71,6 +72,8 @@ type Router struct {
 	userRepo port.UserRepository
 	// 平台系统设置（运行时开关）——通过 SetSystemSettings 注入，可选
 	settingsUC *systemsettings.SystemSettingsUseCase
+	// 站内通知（主动唤醒）——通过 SetNotifications 注入，可选
+	notifyUC *notification.NotifyUseCase
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -118,6 +121,11 @@ func (r *Router) SetStats(uc *stats.StatsUseCase) {
 // SetSystemSettings 注入平台系统设置用例（可选；未注入则设置端点不注册）。
 func (r *Router) SetSystemSettings(uc *systemsettings.SystemSettingsUseCase) {
 	r.settingsUC = uc
+}
+
+// SetNotifications 注入站内通知用例（可选；未注入则通知端点返回空）。
+func (r *Router) SetNotifications(uc *notification.NotifyUseCase) {
+	r.notifyUC = uc
 }
 
 // SetAccount 注入多平台发布账号域用例（可选；未注入则账号/发布端点不注册）。
@@ -195,6 +203,10 @@ func (r *Router) Engine() *gin.Engine {
 		api.GET("/tools", r.handleListTools)
 		// 动态启用/禁用工具（工具面板用）
 		api.PUT("/tools/:name/toggle", r.handleToggleTool)
+		// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）
+		api.GET("/notifications", r.HandleListNotifications)
+		api.GET("/notifications/unread-count", r.HandleNotificationUnread)
+		api.POST("/notifications/:id/read", r.HandleMarkNotificationRead)
 		// 仪表盘统计聚合（一次返回全量指标）
 		api.GET("/stats", r.handleGetStats)
 		// Agent 任务（同步执行）

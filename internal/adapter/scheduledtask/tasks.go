@@ -50,6 +50,7 @@ type DailyMonitorTask struct {
 	brandRepo         port.BrandRepository
 	settingRepo       port.SystemSettingRepository
 	tenantSettingRepo port.TenantSettingRepository // 租户开关（nil=全部租户都监测）
+	notifier          *MonitorNotifier             // 变化通知（nil=不通知）
 	defaultEnabled    bool                         // 平台开关未配置时的兜底（.env AUTO_MONITOR_ENABLED）
 	logger            port.Logger
 }
@@ -59,6 +60,13 @@ func NewDailyMonitorTask(uc *geo.MonitorUseCase, brandRepo port.BrandRepository,
 		uc: uc, brandRepo: brandRepo, settingRepo: settingRepo,
 		tenantSettingRepo: tenantSettingRepo,
 		defaultEnabled:    defaultEnabled, logger: logger,
+	}
+}
+
+// SetNotifier 注入监测变化通知器（可选；nil=仅监测不通知）。
+func (t *DailyMonitorTask) SetNotifier(n *MonitorNotifier) {
+	if n != nil {
+		t.notifier = n
 	}
 }
 
@@ -111,15 +119,25 @@ func (t *DailyMonitorTask) Execute(ctx context.Context) error {
 			}
 			continue
 		}
-		if _, mErr := t.uc.Monitor(ctx, geo.MonitorInput{
+		// 变化通知基线：上一批监测的平均提及率（Trend 取最近记录）
+		beforeAvg := 0.0
+		if t.notifier != nil {
+			beforeAvg = t.notifier.BaselineAvg(ctx, b.TenantID, b.ID)
+		}
+		results, mErr := t.uc.Monitor(ctx, geo.MonitorInput{
 			TenantID: b.TenantID,
 			BrandID:  b.ID,
-		}); mErr != nil {
+		})
+		if mErr != nil {
 			failed++
 			t.logger.Error("每日监测失败", port.Err(mErr), port.String("brand", b.Name))
 			continue
 		}
 		success++
+		// 变化通知：提及率显著下降 / 竞品反超 → 站内通知（主动唤醒）
+		if t.notifier != nil {
+			t.notifier.EvaluateAndNotify(ctx, b.TenantID, b.Name, beforeAvg, results)
+		}
 	}
 	t.logger.Info("每日自动监测完成",
 		port.Int("brands", len(brands)),

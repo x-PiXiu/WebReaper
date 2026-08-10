@@ -1,7 +1,7 @@
-import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
+import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input, Badge, Popover, List, Empty } from 'antd'
+import { SearchOutlined, BellOutlined } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { clearQueryCache } from '../main'
@@ -211,6 +211,8 @@ export function AppShell({
           </div>
 
           <Space size={12}>
+            {/* 站内通知铃铛（主动唤醒：提及率变化/自动复测/排期发布）*/}
+            <NotificationBell />
             {/* 角色切换入口（仅 admin：用户界面 ↔ 管理后台）*/}
             {showRoleSwitch && (
               <Button
@@ -283,4 +285,91 @@ export function AppShell({
 // MainLayout 保留为默认导出（兼容旧路由引用，现由商户端/管理端布局取代）。
 export default function MainLayout() {
   return <AppShell menuItems={[]} />
+}
+
+// NotificationBell 顶栏通知铃铛：未读数角标 + 通知列表 + 已读。
+// 主动唤醒入口（提及率下降/竞品反超/自动复测完成/排期发布完成）。
+const NOTIFY_TYPE_LABEL: Record<string, string> = {
+  mention_drop: '⚠️ 提及率下降',
+  competitor_overtake: '⚔️ 竞品反超',
+  recheck_done: '✅ 复测完成',
+  scheduled_publish: '📤 排期发布',
+  system: '🔔 系统',
+}
+
+function NotificationBell() {
+  const queryClient = useQueryClient()
+  // 未读数（30s 轮询）
+  const { data: unread } = useQuery({
+    queryKey: ['notify-unread'],
+    queryFn: () => businessApi.notificationUnreadCount(),
+    refetchInterval: 30_000,
+  })
+  const { data: items = [] } = useQuery({
+    queryKey: ['notifications'],
+    queryFn: () => businessApi.listNotifications(),
+  })
+
+  const markAll = async () => {
+    await businessApi.markNotificationRead()
+    queryClient.invalidateQueries({ queryKey: ['notify-unread'] })
+    queryClient.invalidateQueries({ queryKey: ['notifications'] })
+  }
+
+  const markOne = async (id: string) => {
+    await businessApi.markNotificationRead(id)
+    queryClient.invalidateQueries({ queryKey: ['notify-unread'] })
+    queryClient.invalidateQueries({ queryKey: ['notifications'] })
+  }
+
+  const content = (
+    <div style={{ width: 340 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--wr-text-primary)' }}>通知</span>
+        {(unread?.unread || 0) > 0 && (
+          <Button size="small" type="link" style={{ fontSize: 12 }} onClick={markAll}>全部已读</Button>
+        )}
+      </div>
+      {items.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无通知" style={{ padding: '24px 0' }} />
+      ) : (
+        <List
+          size="small"
+          dataSource={items}
+          style={{ maxHeight: 360, overflow: 'auto' }}
+          renderItem={(n) => (
+            <List.Item
+              onClick={() => { if (!n.read) markOne(n.id); if (n.link) window.location.href = n.link }}
+              style={{
+                cursor: 'pointer', padding: '10px 12px', borderRadius: 8,
+                background: n.read ? 'transparent' : 'var(--wr-primary-bg)',
+                border: 'none', display: 'block',
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--wr-text-primary)', marginBottom: 2 }}>
+                {NOTIFY_TYPE_LABEL[n.type] || n.type} · {n.title}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--wr-text-secondary)', lineHeight: 1.5 }}>{n.content}</div>
+              <div style={{ fontSize: 10, color: 'var(--wr-text-muted)', marginTop: 2 }}>
+                {new Date(n.created_at).toLocaleString()}
+              </div>
+            </List.Item>
+          )}
+        />
+      )}
+    </div>
+  )
+
+  return (
+    <Popover content={content} placement="bottomRight" trigger="click" arrow={false}>
+      <Badge count={unread?.unread || 0} size="small" offset={[-2, 2]}>
+        <Button
+          type="text"
+          size="small"
+          icon={<BellOutlined style={{ fontSize: 16 }} />}
+          style={{ color: 'var(--wr-text-muted)' }}
+        />
+      </Badge>
+    </Popover>
+  )
 }

@@ -84,6 +84,9 @@ type PublishJob struct {
 	PublishedAt time.Time // 发布成功时间（status=published 时有值）
 	PreMentionRate  float64 // 发布前品牌提及率（发布效果追踪用）
 	PostMentionRate float64 // 发布后品牌提及率（发布效果追踪用）
+	// ScheduledAt 排期发布时间（零值 = 立即发布）。
+	// 将来时间 = 定时发送：任务落库 pending，调度任务到期后自动执行发布。
+	ScheduledAt time.Time
 }
 
 // IsValid 领域规则。

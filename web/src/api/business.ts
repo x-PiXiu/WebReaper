@@ -202,7 +202,7 @@ export const businessApi = {
     apiClient.delete<unknown, unknown>(`/api/v1/geo/accounts/${id}`),
 
   // ---- GEO 内容发布（半自动）----
-  publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string }) =>
+  publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string; scheduled_at?: string }) =>
     apiClient.post<unknown, PublishJob>('/api/v1/geo/publish', data),
 
   listPublishJobs: () =>
@@ -265,6 +265,14 @@ export const businessApi = {
     apiClient.get<unknown, { auto_monitor_enabled: boolean }>('/api/v1/admin/settings/auto-monitor'),
   setAutoMonitor: (enabled: boolean) =>
     apiClient.put<unknown, { auto_monitor_enabled: boolean }>('/api/v1/admin/settings/auto-monitor', { enabled }),
+
+  // ---- 站内通知（主动唤醒）----
+  listNotifications: () =>
+    apiClient.get<unknown, { id: string; type: string; title: string; content: string; link: string; read: boolean; created_at: string }[]>('/api/v1/notifications'),
+  notificationUnreadCount: () =>
+    apiClient.get<unknown, { unread: number }>('/api/v1/notifications/unread-count'),
+  markNotificationRead: (id?: string) =>
+    apiClient.post<unknown, { ok: boolean }>(`/api/v1/notifications/${id || 'all'}/read`),
 
   // ---- 商户端自动盯盘（租户级）----
   getTenantAutoMonitor: () =>

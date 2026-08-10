@@ -28,8 +28,8 @@ import (
 // AccountUseCase 账号扫码绑定 / 列表 / 解绑。
 type AccountUseCase struct {
 	accountRepo port.AccountRepository
-	qrLogin     port.QRLoginSession   // 扫码登录会话（浏览器自动化）
-	vault       port.CookieVault      // cookie 加密存储
+	qrLogin     port.QRLoginSession // 扫码登录会话（浏览器自动化）
+	vault       port.CookieVault    // cookie 加密存储
 }
 
 func NewAccountUseCase(ar port.AccountRepository, qr port.QRLoginSession, vault port.CookieVault) *AccountUseCase {
@@ -213,6 +213,8 @@ type PublishInput struct {
 	Title     string
 	Content   string
 	Mode      string // semi-auto / auto
+	// ScheduledAt 排期发布时间（零值 = 立即发布；将来时间 = 定时发送）。
+	ScheduledAt time.Time
 }
 
 // appendPublicLink 在发布内容尾部追加公开站链接（纯函数，可单测）。
@@ -275,6 +277,15 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		Mode:      mode,
 		Status:    entity.PublishStatusPending,
 		CreatedAt: now,
+	}
+
+	// 定时发送：ScheduledAt 在未来 → 仅落库 pending，到期由调度任务执行发布
+	if in.ScheduledAt.After(now) {
+		job.ScheduledAt = in.ScheduledAt
+		if err := uc.jobRepo.Save(ctx, job); err != nil {
+			return entity.PublishJob{}, fmt.Errorf("保存排期任务失败: %w", err)
+		}
+		return job, nil
 	}
 
 	// 发布前基线：取品牌最近一次监测的平均提及率（真实历史数据；无记录保持 0）
@@ -432,6 +443,42 @@ func (uc *PublishUseCase) GetJobStatus(ctx context.Context, tenantID, jobID stri
 		}
 	}
 	return entity.PublishJob{}, fmt.Errorf("job not found: %s", jobID)
+}
+
+// ExecuteScheduledJob 执行到期的排期发布任务（调度任务调用）。
+// 按 job.Mode 分派：全自动 → publishAuto；半自动 → 生成预填链接。
+// 与 Publish 的立即执行路径共用同一分派逻辑（无重复实现）。
+func (uc *PublishUseCase) ExecuteScheduledJob(ctx context.Context, tenantID, jobID string) (entity.PublishJob, error) {
+	job, err := uc.GetJobStatus(ctx, tenantID, jobID)
+	if err != nil {
+		return entity.PublishJob{}, err
+	}
+	if job.Status != entity.PublishStatusPending {
+		return job, nil // 非待发布（已执行/已取消）跳过
+	}
+	ch, err := uc.registry.Get(job.Platform)
+	if err != nil {
+		return entity.PublishJob{}, fmt.Errorf("获取发布通道失败: %w", err)
+	}
+	job.Status = entity.PublishStatusRunning
+	_ = uc.jobRepo.Save(ctx, job)
+
+	if job.Mode == entity.PublishModeAuto {
+		return uc.publishAuto(ctx, job, ch)
+	}
+	// 半自动：生成预填链接（与 Publish 半自动路径一致）
+	acc := entity.Account{ID: job.AccountID, Platform: job.Platform}
+	externalURL, err := ch.PublishSemiAuto(ctx, job, acc)
+	if err != nil {
+		job.Status = entity.PublishStatusFailed
+		job.ErrorMsg = err.Error()
+		_ = uc.jobRepo.Save(ctx, job)
+		return job, fmt.Errorf("生成发布链接失败: %w", err)
+	}
+	job.ExternalURL = externalURL
+	job.Status = entity.PublishStatusPending // 半自动仍待用户确认
+	_ = uc.jobRepo.Save(ctx, job)
+	return job, nil
 }
 
 // ReMonitor 发布效果复测：重新触发品牌监测，更新发布后提及率。

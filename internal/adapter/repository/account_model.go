@@ -24,22 +24,23 @@ func (AccountPO) TableName() string { return "geo_accounts" }
 
 // PublishJobPO 发布任务记录。
 type PublishJobPO struct {
-	ID          string    `gorm:"primaryKey;size:64"`
-	TenantID    string    `gorm:"size:64;index"`
-	AccountID   string    `gorm:"size:64"`
-	Platform    string    `gorm:"size:32"`
-	ContentID   string    `gorm:"size:64"`
-	BrandID     string    `gorm:"size:64"`
-	Title       string    `gorm:"size:256"`
-	Content     string    `gorm:"type:longtext"`
-	Mode        string    `gorm:"size:16"`
-	Status      string    `gorm:"size:16"`
-	ExternalURL string    `gorm:"type:text"`
-	ErrorMsg    string    `gorm:"type:text"`
-	CreatedAt   time.Time
-	PublishedAt time.Time
-	PreMentionRate  float64 `gorm:"type:decimal(5,2)"`
-	PostMentionRate float64 `gorm:"type:decimal(5,2)"`
+	ID              string `gorm:"primaryKey;size:64"`
+	TenantID        string `gorm:"size:64;index"`
+	AccountID       string `gorm:"size:64"`
+	Platform        string `gorm:"size:32"`
+	ContentID       string `gorm:"size:64"`
+	BrandID         string `gorm:"size:64"`
+	Title           string `gorm:"size:256"`
+	Content         string `gorm:"type:longtext"`
+	Mode            string `gorm:"size:16"`
+	Status          string `gorm:"size:16"`
+	ExternalURL     string `gorm:"type:text"`
+	ErrorMsg        string `gorm:"type:text"`
+	CreatedAt       time.Time
+	PublishedAt     time.Time
+	PreMentionRate  float64   `gorm:"type:decimal(5,2)"`
+	PostMentionRate float64   `gorm:"type:decimal(5,2)"`
+	ScheduledAt     time.Time `gorm:"index"` // 排期发布时间（零值=立即）
 }
 
 func (PublishJobPO) TableName() string { return "geo_publish_jobs" }
