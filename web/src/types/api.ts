@@ -22,9 +22,6 @@ export interface RegisterResponse { user_id: string; role: string; tenant_id: st
 // ---- 任务 ----
 export interface EnqueueTaskRequest { type: string; input: unknown }
 export interface EnqueueTaskResponse { task_id: string }
-export interface TaskView {
-  id: string; type: string; status: string; error?: string; output?: string; progress?: string
-}
 
 // ---- 聊天 ----
 export interface ChatMessage { role: string; content: string }
@@ -36,8 +33,6 @@ export interface AgentConfig {
   tools: string[]
   llm_config_name?: string  // 引用的 LLMConfig.name（留空用 default）
   max_iterations?: number
-  auto_save?: boolean       // 自动把对话回复落库为 DataItem
-  field_mapping?: string    // 自动落库字段映射 JSON
 }
 
 // ---- LLM 配置（独立聚合根，多厂商多模型）----
@@ -107,21 +102,6 @@ export interface PublishRecord {
   result_at?: string
 }
 
-// ---- 数据项 ----
-export interface DataItem {
-  id: string
-  collection_id: string
-  title: string
-  content: string
-  summary: string
-  tags: string[]
-  source_url: string
-  raw_content: string
-  status: string // pending_review / approved / rejected
-  metadata: Record<string, string>
-  created_at: string
-}
-
 // ---- 工具面板 ----
 export interface ToolView {
   name: string
@@ -139,12 +119,6 @@ export interface StatsView {
   optimized_contents: number  // 优化内容总数
   published_contents: number  // 已发布公开内容数
   publish_jobs: number        // 发布任务总数
-  data_items: number          // 采集数据项总数
-  // 数据资产明细（趋势/分布图）
-  status_breakdown: Record<string, number>  // 数据项状态分布
-  daily_trend: { date: string; count: number }[]      // 近14天数据项趋势
-  source_distribution: { name: string; count: number }[]  // 数据源分布
-  top_tags: { name: string; count: number }[]             // 标签Top8
 }
 
 // ---- GEO：品牌资产 ----

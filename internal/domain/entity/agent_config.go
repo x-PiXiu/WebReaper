@@ -30,8 +30,6 @@ type AgentConfig struct {
 	Tools         []string // 历史兼容字段；工具现已全局可用，新建 Agent 时不再配置
 	LLMConfigName string   // 引用的 LLMConfig.Name（留空用 "default"）
 	MaxIterations int      // 最大工具调用次数（防死循环，默认 10）
-	AutoSave      bool     // 是否自动把对话回复落库为 DataItem（用于"生成结构化数据"场景）
-	FieldMapping  string   // 自动落库时的字段映射 JSON：{"llm_field":"dataitem_field"}
 }
 
 // IsValid 领域规则：有效的 Agent 配置必须有名称和系统提示词。

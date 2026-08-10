@@ -31,8 +31,6 @@ type CreateInput struct {
 	SystemPrompt  string
 	LLMConfigName string // 留空用 default
 	MaxIterations int    // 留空（<=0）用默认值
-	AutoSave      bool   // 自动落库开关
-	FieldMapping  string // 自动落库字段映射 JSON
 }
 
 // Create 创建 Agent 配置：校验 + 填默认值 + 持久化。
@@ -42,8 +40,6 @@ func (uc *AgentConfigUseCase) Create(ctx context.Context, in CreateInput) (entit
 		SystemPrompt:  in.SystemPrompt,
 		LLMConfigName: in.LLMConfigName,
 		MaxIterations: in.MaxIterations,
-		AutoSave:      in.AutoSave,
-		FieldMapping:  in.FieldMapping,
 	}.FillDefaults()
 	if !cfg.IsValid() {
 		return entity.AgentConfig{}, fmt.Errorf("agent config 无效：name 和 system_prompt 不能为空")
@@ -67,8 +63,6 @@ type UpdateInput struct {
 	SystemPrompt  *string // 不传（nil）则保留原值
 	LLMConfigName *string // 不传（nil）则保留原值；传 "" 表示改为用 default
 	MaxIterations *int    // 不传（nil）则保留原值
-	AutoSave      *bool   // 不传（nil）则保留原值
-	FieldMapping  *string // 不传（nil）则保留原值
 }
 
 // Update 修改 Agent 配置：先取原值，应用部分更新，校验后持久化。
@@ -87,12 +81,6 @@ func (uc *AgentConfigUseCase) Update(ctx context.Context, name string, in Update
 	}
 	if in.MaxIterations != nil {
 		old.MaxIterations = *in.MaxIterations
-	}
-	if in.AutoSave != nil {
-		old.AutoSave = *in.AutoSave
-	}
-	if in.FieldMapping != nil {
-		old.FieldMapping = *in.FieldMapping
 	}
 	// 填默认值（MaxIterations<=0 → 10）并校验
 	old = old.FillDefaults()

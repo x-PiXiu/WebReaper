@@ -2,14 +2,12 @@ package mock
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/domain/valueobject"
 	"webreaper/internal/pkg"
-	"webreaper/internal/usecase/port"
 )
 
 // ---- User 仓储 ----
@@ -124,146 +122,6 @@ func (r *MockTaskRepository) UpdateProgress(_ context.Context, id string, progre
 	t.Progress = progress
 	r.byID[id] = t
 	return nil
-}
-
-// ---- DataItem 仓储 ----
-
-type MockDataItemRepository struct {
-	mu   sync.Mutex
-	byID map[string]entity.DataItem
-}
-
-func NewMockDataItemRepository() *MockDataItemRepository {
-	return &MockDataItemRepository{byID: make(map[string]entity.DataItem)}
-}
-
-func (r *MockDataItemRepository) Save(_ context.Context, item entity.DataItem) error {
-	r.mu.Lock(); defer r.mu.Unlock()
-	r.byID[item.ID] = item
-	return nil
-}
-
-func (r *MockDataItemRepository) SaveBatch(_ context.Context, items []entity.DataItem) error {
-	r.mu.Lock(); defer r.mu.Unlock()
-	for _, item := range items { r.byID[item.ID] = item }
-	return nil
-}
-
-func (r *MockDataItemRepository) FindByID(_ context.Context, id string) (entity.DataItem, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	item, ok := r.byID[id]
-	if !ok { return entity.DataItem{}, pkg.ErrNotFound }
-	return item, nil
-}
-
-func (r *MockDataItemRepository) List(_ context.Context, limit int) ([]entity.DataItem, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	if limit <= 0 { limit = 50 }
-	result := make([]entity.DataItem, 0, len(r.byID))
-	for _, item := range r.byID {
-		result = append(result, item)
-		if len(result) >= limit { break }
-	}
-	return result, nil
-}
-
-func (r *MockDataItemRepository) ListByCollection(_ context.Context, collectionID string) ([]entity.DataItem, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	var result []entity.DataItem
-	for _, item := range r.byID {
-		if item.CollectionID == collectionID { result = append(result, item) }
-	}
-	return result, nil
-}
-
-func (r *MockDataItemRepository) ListByStatus(_ context.Context, status entity.ItemStatus) ([]entity.DataItem, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	var result []entity.DataItem
-	for _, item := range r.byID {
-		if item.Status == status { result = append(result, item) }
-	}
-	return result, nil
-}
-
-func (r *MockDataItemRepository) UpdateStatus(_ context.Context, id string, status entity.ItemStatus) error {
-	r.mu.Lock(); defer r.mu.Unlock()
-	if item, ok := r.byID[id]; ok { item.Status = status; r.byID[id] = item }
-	return nil
-}
-
-func (r *MockDataItemRepository) Delete(_ context.Context, id string) error {
-	r.mu.Lock(); defer r.mu.Unlock()
-	delete(r.byID, id)
-	return nil
-}
-
-// ---- 统计聚合（mock 实现：在内存数据上计算，不依赖 SQL）----
-
-func (r *MockDataItemRepository) CountByStatus(_ context.Context) (map[string]int, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	m := map[string]int{}
-	for _, item := range r.byID {
-		m[string(item.Status)]++
-	}
-	return m, nil
-}
-
-func (r *MockDataItemRepository) DailyCounts(_ context.Context, days int) ([]port.DailyCount, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	m := map[string]int{}
-	cutoff := time.Now().AddDate(0, 0, -days)
-	for _, item := range r.byID {
-		if item.CreatedAt.After(cutoff) {
-			m[item.CreatedAt.Format("2006-01-02")]++
-		}
-	}
-	result := make([]port.DailyCount, 0, len(m))
-	for d, c := range m {
-		result = append(result, port.DailyCount{Date: d, Count: c})
-	}
-	// 按日期排序
-	sort.Slice(result, func(i, j int) bool { return result[i].Date < result[j].Date })
-	return result, nil
-}
-
-func (r *MockDataItemRepository) GroupByMetaKey(_ context.Context, key string) ([]port.GroupCount, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	m := map[string]int{}
-	for _, item := range r.byID {
-		if v, ok := item.Metadata[key]; ok && v != "" {
-			m[v]++
-		}
-	}
-	result := make([]port.GroupCount, 0, len(m))
-	for name, cnt := range m {
-		result = append(result, port.GroupCount{Name: name, Count: cnt})
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Count > result[j].Count })
-	return result, nil
-}
-
-func (r *MockDataItemRepository) TopTags(_ context.Context, limit int) ([]port.GroupCount, error) {
-	r.mu.Lock(); defer r.mu.Unlock()
-	if limit <= 0 {
-		limit = 8
-	}
-	m := map[string]int{}
-	for _, item := range r.byID {
-		for _, t := range item.Tags {
-			if t != "" {
-				m[t]++
-			}
-		}
-	}
-	result := make([]port.GroupCount, 0, len(m))
-	for tag, cnt := range m {
-		result = append(result, port.GroupCount{Name: tag, Count: cnt})
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Count > result[j].Count })
-	if len(result) > limit {
-		result = result[:limit]
-	}
-	return result, nil
 }
 
 // ---- AgentConfig 仓储 ----

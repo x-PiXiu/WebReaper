@@ -1,16 +1,9 @@
 import { apiClient } from './client'
-import type { TaskView, AgentConfig, LLMConfig, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary } from '../types/api'
+import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary } from '../types/api'
 
 // 通用平台 API 封装。
 
 export const businessApi = {
-  // ---- 任务 ----
-  getTask: (id: string) =>
-    apiClient.get<unknown, TaskView>(`/api/v1/tasks/${id}`),
-
-  listTasks: () =>
-    apiClient.get<unknown, TaskView[]>('/api/v1/tasks'),
-
   // ---- Agent 配置 ----
   listAgentConfigs: () =>
     apiClient.get<unknown, AgentConfig[]>('/api/v1/agents'),
@@ -69,22 +62,6 @@ export const businessApi = {
 
   // ---- 外部推送系统 ----
   // ---- 数据项 ----
-  listDataItems: () =>
-    apiClient.get<unknown, DataItem[]>('/api/v1/data-items'),
-
-  approveItem: (id: string) =>
-    apiClient.post<unknown, unknown>(`/api/v1/data-items/${id}/approve`),
-
-  rejectItem: (id: string) =>
-    apiClient.post<unknown, unknown>(`/api/v1/data-items/${id}/reject`),
-
-  deleteDataItem: (id: string) =>
-    apiClient.delete<unknown, unknown>(`/api/v1/data-items/${id}`),
-
-  // 把 LLM 对话生成的结构化内容落库为 DataItem（打通"对话生成→自动落库"闭环）
-  createDataItemFromContent: (data: { content: string; field_mapping?: string; source_url?: string }) =>
-    apiClient.post<unknown, DataItem>('/api/v1/data-items/from-content', data),
-
   // ---- 工具面板 ----
   toggleTool: (name: string, enabled: boolean) =>
     apiClient.put<unknown, { name: string; enabled: boolean }>(`/api/v1/tools/${name}/toggle`, { enabled }),

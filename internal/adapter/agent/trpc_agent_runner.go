@@ -29,10 +29,9 @@ const defaultLLMConfigName = "default"
 //
 // LLM 客户端按 AgentConfig.LLMConfigName 从 LLMConfigRepository 解析（空则 default）。
 type TrpcAgentRunner struct {
-	llmCfgRepo   port.LLMConfigRepository
-	registry     *port.ToolRegistry
-	dataItemRepo port.DataItemRepository
-	logger       port.Logger
+	llmCfgRepo port.LLMConfigRepository
+	registry   *port.ToolRegistry
+	logger     port.Logger
 }
 
 // 编译期断言：TrpcAgentRunner 同时实现
@@ -40,10 +39,10 @@ type TrpcAgentRunner struct {
 //   - task.AgentRunner（供异步 worker 调用 RunTask）
 var _ port.AgentSyncRunner = (*TrpcAgentRunner)(nil)
 
-// NewTrpcAgentRunner 创建 Agent 执行器（注入 LLMConfigRepository 用于按 Agent 选 LLM，
-// 注入 DataItemRepo 用于工具结果落库，注入 Logger 用于工具落库失败日志）。
-func NewTrpcAgentRunner(llmCfgRepo port.LLMConfigRepository, registry *port.ToolRegistry, dataItemRepo port.DataItemRepository, logger port.Logger) *TrpcAgentRunner {
-	return &TrpcAgentRunner{llmCfgRepo: llmCfgRepo, registry: registry, dataItemRepo: dataItemRepo, logger: logger}
+// NewTrpcAgentRunner 创建 Agent 执行器。
+// 解耦后不再依赖 DataItemRepository——工具结果不自动落库（保持 Agent 链纯净）。
+func NewTrpcAgentRunner(llmCfgRepo port.LLMConfigRepository, registry *port.ToolRegistry, logger port.Logger) *TrpcAgentRunner {
+	return &TrpcAgentRunner{llmCfgRepo: llmCfgRepo, registry: registry, logger: logger}
 }
 
 // resolveLLM 按 AgentConfig.LLMConfigName 解析 LLM 配置并构建客户端。
@@ -68,9 +67,8 @@ type RunInput struct {
 
 // RunOutput 是 Agent 执行的输出。
 type RunOutput struct {
-	Response     string            // Agent 的最终回复
-	CrawlResults []entity.DataItem // Agent 调用爬虫产生的结果（供存储）
-	Tokens       TokenUsage        // 本次任务的 token 消耗统计
+	Response string     // Agent 的最终回复
+	Tokens   TokenUsage // 本次任务的 token 消耗统计
 }
 
 // TokenUsage 记录一次 Agent 任务的 LLM token 消耗。
@@ -100,9 +98,9 @@ func (r *TrpcAgentRunner) Run(ctx context.Context, in RunInput) (RunOutput, erro
 	defer span.End()
 	span.SetAttributes(attribute.String("agent_name", in.AgentConfig.Name))
 
-	// 1. 获取允许的工具（注入 DataItemRepo 用于落库）
+	// 1. 获取允许的工具（解耦后不落库，工具结果直接返回给 LLM）
 	crawlers := r.registry.GetByNames(in.AgentConfig.Tools)
-	tools := ConvertTools(crawlers, r.dataItemRepo, r.logger)
+	tools := ConvertTools(crawlers)
 
 	// 2. 按 Agent 引用的 LLMConfigName 解析并构建 LLM 客户端
 	llm, err := r.resolveLLM(ctx, in.AgentConfig.LLMConfigName)

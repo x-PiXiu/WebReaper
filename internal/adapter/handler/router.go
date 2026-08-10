@@ -16,17 +16,14 @@ import (
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/crawlconfig"
-	"webreaper/internal/usecase/dataitem"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/notification"
-	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/structured"
-	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/video"
 )
@@ -44,15 +41,12 @@ type Router struct {
 	ai               port.AIGenerator
 	enqueueUC        *taskuc.EnqueueUseCase
 	agentRunner      port.AgentSyncRunner   // 接口，非具体 struct（DIP）
-	taskQueryUC      *taskquery.TaskQueryUseCase
-	dataItemUC       *dataitem.DataItemUseCase
 	agentCfgUC       *agentconfig.AgentConfigUseCase
 	llmCfgUC         *llmconfig.LLMConfigUseCase
 	conversationUC   *conversation.ConversationUseCase
 	crawlCfgUC       *crawlconfig.CrawlConfigUseCase
 	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
 	knowledgeSearch  port.KnowledgeSearcher // 可为 nil（未配置向量库时降级）
-	orchestrateUC    *orchestrate.OrchestratorUseCase // 可为 nil（未配置编排器时该端点 503）
 	statsUC          *stats.StatsUseCase               // 仪表盘统计聚合
 	// GEO 业务（商户端核心）——通过 SetGEO 延迟注入，可选
 	geoBrandUC   *geo.BrandUseCase
@@ -164,34 +158,60 @@ func (r *Router) SetQuotaGate(g port.QuotaStore) {
 	r.quotaGate = g
 }
 
-func NewRouter(
-	registerUC *auth.RegisterUseCase,
-	loginUC *auth.LoginUseCase,
-	tokenParser *authadapter.JWTGenerator,
-	ai port.AIGenerator,
-	enqueueUC *taskuc.EnqueueUseCase,
-	agentRunner port.AgentSyncRunner,
-	taskQueryUC *taskquery.TaskQueryUseCase,
-	dataItemUC *dataitem.DataItemUseCase,
-	agentCfgUC *agentconfig.AgentConfigUseCase,
-	llmCfgUC *llmconfig.LLMConfigUseCase,
-	conversationUC *conversation.ConversationUseCase,
-	crawlCfgUC *crawlconfig.CrawlConfigUseCase,
-	toolRegistry *port.ToolRegistry,
-	knowledgeSearch port.KnowledgeSearcher,
-	orchestrateUC *orchestrate.OrchestratorUseCase,
-	statsUC *stats.StatsUseCase,
-) *Router {
-	return &Router{
-		authRegister: registerUC, authLogin: loginUC, tokenParser: tokenParser,
-		ai: ai, enqueueUC: enqueueUC, agentRunner: agentRunner,
-		taskQueryUC: taskQueryUC, dataItemUC: dataItemUC,
-		agentCfgUC: agentCfgUC, llmCfgUC: llmCfgUC,
-		conversationUC: conversationUC, crawlCfgUC: crawlCfgUC,
-		toolRegistry: toolRegistry, knowledgeSearch: knowledgeSearch,
-		orchestrateUC: orchestrateUC,
-		statsUC:       statsUC,
-	}
+// NewRouter 创建路由器（零参数——所有依赖通过 SetXxx 可选注入）。
+// 整洁架构"推迟决策"：Router 不绑死依赖，端点按注入的 usecase 条件注册。
+func NewRouter() *Router {
+	return &Router{}
+}
+
+// ---- 核心依赖注入（auth/ai/agent/task 等基础能力）----
+
+// SetAuth 注入认证用例（register/login + JWT 解析）。
+func (r *Router) SetAuth(registerUC *auth.RegisterUseCase, loginUC *auth.LoginUseCase, tokenParser *authadapter.JWTGenerator) {
+	r.authRegister = registerUC
+	r.authLogin = loginUC
+	r.tokenParser = tokenParser
+}
+
+// SetAI 注入 AI 生成器（对话/工具调用）。
+func (r *Router) SetAI(ai port.AIGenerator) {
+	r.ai = ai
+}
+
+// SetTask 注入异步任务用例（enqueue + agent runner）。
+func (r *Router) SetTask(enqueueUC *taskuc.EnqueueUseCase, agentRunner port.AgentSyncRunner) {
+	r.enqueueUC = enqueueUC
+	r.agentRunner = agentRunner
+}
+
+// SetAgentConfig 注入 Agent 配置管理用例。
+func (r *Router) SetAgentConfig(uc *agentconfig.AgentConfigUseCase) {
+	r.agentCfgUC = uc
+}
+
+// SetLLMConfig 注入 LLM 配置管理用例。
+func (r *Router) SetLLMConfig(uc *llmconfig.LLMConfigUseCase) {
+	r.llmCfgUC = uc
+}
+
+// SetConversation 注入对话历史用例。
+func (r *Router) SetConversation(uc *conversation.ConversationUseCase) {
+	r.conversationUC = uc
+}
+
+// SetCrawlConfig 注入采集配置用例（保留：crawler 速率/robots 策略）。
+func (r *Router) SetCrawlConfig(uc *crawlconfig.CrawlConfigUseCase) {
+	r.crawlCfgUC = uc
+}
+
+// SetToolRegistry 注入全局工具注册表（供 /tools 端点查询）。
+func (r *Router) SetToolRegistry(reg *port.ToolRegistry) {
+	r.toolRegistry = reg
+}
+
+// SetKnowledgeSearch 注入知识检索器（可选；未配置向量库时降级）。
+func (r *Router) SetKnowledgeSearch(ks port.KnowledgeSearcher) {
+	r.knowledgeSearch = ks
 }
 
 func (r *Router) Engine() *gin.Engine {
@@ -243,17 +263,9 @@ func (r *Router) Engine() *gin.Engine {
 		api.GET("/stats", r.handleGetStats)
 		// Agent 任务（同步执行）
 		api.POST("/agents/run", NewAgentHandler(r.agentRunner).HandleRun)
-		// 异步任务
+		// 异步任务投递（agent_run 后台执行通道——Chat 的"后台采集"用）
 		taskHandler := NewTaskHandler(r.enqueueUC)
 		api.POST("/tasks", taskHandler.HandleEnqueue)
-		api.GET("/tasks", r.handleListTasks)
-		api.GET("/tasks/:id", r.handleGetTask)
-		// 数据项（审核编排下沉到 dataItemUC）
-		api.GET("/data-items", r.handleListDataItems)
-		api.POST("/data-items/:id/approve", r.handleApproveItem)
-		api.POST("/data-items/:id/reject", r.handleRejectItem)
-		api.POST("/data-items/from-content", r.handleCreateFromContent)
-		api.DELETE("/data-items/:id", r.handleDeleteItem)
 		// 采集集合
 		// Agent 配置
 		api.GET("/agents", r.handleListAgentConfigs)
@@ -280,11 +292,6 @@ func (r *Router) Engine() *gin.Engine {
 		// 外部系统推送（动态配置目标系统 + 推送 + 推送记录）
 		// 知识搜索
 		api.GET("/search", r.handleSearch)
-		// 框架内容编排（图编排：探查→生成→校验→补生成，落库不推送）
-		if r.orchestrateUC != nil {
-			orchHandler := NewOrchestrationHandler(r.orchestrateUC)
-			api.POST("/orchestrations", orchHandler.HandleOrchestrate)
-		}
 
 		// GEO 业务路由（商户端核心：品牌/关键词/监测/排行榜/内容）
 		// geoHandler 提升到外层：管理后台的全局管理端点（/admin/brands 等）也复用它。

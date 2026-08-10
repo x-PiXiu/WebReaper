@@ -517,19 +517,6 @@ export default function Chat() {
           id: aMsg.id, role: 'assistant', content: accContent,
           tool_calls: accTools.length > 0 ? JSON.stringify(accTools) : '',
         }).catch(() => {})
-
-        // 自动落库：若 Agent 配置了 auto_save，把 LLM 回复按 field_mapping 转成 DataItem
-        // 这打通了"对话生成结构化数据 → 自动入库"闭环
-        if (currentAgent?.auto_save && accContent) {
-          businessApi.createDataItemFromContent({
-            content: accContent,
-            field_mapping: currentAgent.field_mapping || '',
-            source_url: `chat://${convIdRef}`,
-          }).then(() => {
-            // 落库成功后刷新数据项列表缓存
-            queryClient.invalidateQueries({ queryKey: ['data-items'] })
-          }).catch(() => {})
-        }
       }
     } catch (e) {
       const err = e as Error
@@ -674,7 +661,6 @@ export default function Chat() {
                 {tools.filter((t: ToolView) => t.enabled).length}/{tools.length} 个工具可用
               </Tag>
             </Popover>
-            {currentAgent?.auto_save && <Tag color="green">自动落库</Tag>}
           </Space>
         </div>
 

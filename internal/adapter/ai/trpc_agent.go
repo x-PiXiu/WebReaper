@@ -373,7 +373,7 @@ func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, conversationID st
 		} else {
 			selectedCrawlers = g.toolRegistry.GetByNames(toolNames) // 监测模式：只用搜索工具
 		}
-		adapterTools := agentadapter.ConvertTools(selectedCrawlers, nil, g.logger)
+		adapterTools := agentadapter.ConvertTools(selectedCrawlers)
 		tools = adapterTools
 	}
 

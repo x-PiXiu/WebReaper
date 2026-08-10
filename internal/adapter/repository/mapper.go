@@ -93,33 +93,12 @@ func taskFromPO(p TaskPO) entity.Task {
 	}
 }
 
-// ---- DataItem ----
-
-func dataItemToPO(e entity.DataItem) DataItemPO {
-	return DataItemPO{
-		ID: e.ID, CollectionID: e.CollectionID, Title: e.Title, Content: e.Content,
-		Summary: e.Summary, Tags: toJSON(e.Tags), SourceURL: e.SourceURL, RawContent: e.RawContent,
-		Status: string(e.Status), Metadata: metadataToJSON(e.Metadata),
-		CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
-	}
-}
-
-func dataItemFromPO(p DataItemPO) entity.DataItem {
-	return entity.DataItem{
-		ID: p.ID, CollectionID: p.CollectionID, Title: p.Title, Content: p.Content,
-		Summary: p.Summary, Tags: toStringSlice(p.Tags), SourceURL: p.SourceURL, RawContent: p.RawContent,
-		Status: entity.ItemStatus(p.Status), Metadata: metadataFromJSON(p.Metadata),
-		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
-	}
-}
-
 // ---- AgentConfig ----
 
 func agentConfigToPO(e entity.AgentConfig) AgentConfigPO {
 	return AgentConfigPO{
 		Name: e.Name, SystemPrompt: e.SystemPrompt, Tools: toJSON(e.Tools),
 		LLMConfigName: e.LLMConfigName, MaxIterations: e.MaxIterations,
-		AutoSave: e.AutoSave, FieldMapping: e.FieldMapping,
 	}
 }
 
@@ -127,7 +106,6 @@ func agentConfigFromPO(p AgentConfigPO) entity.AgentConfig {
 	return entity.AgentConfig{
 		Name: p.Name, SystemPrompt: p.SystemPrompt, Tools: toStringSlice(p.Tools),
 		LLMConfigName: p.LLMConfigName, MaxIterations: p.MaxIterations,
-		AutoSave: p.AutoSave, FieldMapping: p.FieldMapping,
 	}
 }
 

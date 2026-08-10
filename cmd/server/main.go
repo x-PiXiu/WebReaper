@@ -41,21 +41,17 @@ import (
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/crawlconfig"
-	"webreaper/internal/usecase/dataitem"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/notification"
-	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
-	"webreaper/internal/usecase/process"
 	"webreaper/internal/usecase/quota"
 	"webreaper/internal/usecase/scheduler"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
 	"webreaper/internal/usecase/systemsettings"
 	taskuc "webreaper/internal/usecase/task"
-	taskquery "webreaper/internal/usecase/taskquery"
 	"webreaper/internal/usecase/video"
 )
 
@@ -64,17 +60,16 @@ func main() {
 	logger := zaplogger.MustNewZapLogger(cfg.Server.Env)
 	defer logger.Sync()
 
-	traceShutdown, tracer, err := telemetry.Init(telemetry.Config{
+	traceShutdown, _, err := telemetry.Init(telemetry.Config{
 		Enabled:      cfg.Telemetry.Enabled,
 		Exporter:     telemetry.ExporterKind(cfg.Telemetry.Exporter),
 		OTLPEndpoint: cfg.Telemetry.OTLPEndpoint,
 		ServiceName:  "webreaper",
 	})
 	if err != nil {
-		// trace 初始化失败不阻断启动——降级为 no-op tracer，业务照常运行
+		// trace 初始化失败不阻断启动——降级为 no-op，业务照常运行
 		log := zaplogger.MustNewZapLogger(cfg.Server.Env)
 		log.Warn("trace 初始化失败，降级为 no-op", port.Err(err))
-		tracer = port.NewNopTracer()
 	}
 	defer func() { _ = traceShutdown(context.Background()) }()
 
@@ -87,7 +82,7 @@ func main() {
 	log.Info("WebReaper 启动中", port.String("env", cfg.Server.Env))
 
 	// 初始化仓储（降级 mock）
-	dataItemRepo, agentConfigRepo, llmConfigRepo, taskRepo, userRepo, convRepo, msgRepo, settingRepo := initRepositories(cfg.DB, logger)
+	agentConfigRepo, llmConfigRepo, taskRepo, userRepo, convRepo, msgRepo, settingRepo := initRepositories(cfg.DB, logger)
 
 	// 爬虫限流策略（从 config 读取，可经 .env 的 CRAWLER_REQUEST_INTERVAL_MS 调配）
 	crawlPolicy := cfg.Crawler.ToPolicy()
@@ -165,20 +160,13 @@ func main() {
 		log.Info("未配置 MILVUS_HOST，使用内存向量存储（重启即丢，仅供开发）")
 	}
 
-	// 结构化处理用例（审核通过后：LLM提取→向量化→存向量库）
-	// 同时作为 port.ItemProcessor（供 dataitem usecase 审核后触发）和
-	// port.KnowledgeSearcher（供知识检索工具和搜索 API）。
-	var processUC *process.ProcessUseCase
-	var itemProcessor port.ItemProcessor
+	// 知识检索（向量库配置后启用——供知识搜索工具和搜索 API）
+	// 注意：原 process usecase 已删除（属 dataitem 审核后处理链，与 GEO 无关）。
+	// 知识检索能力暂保留为 nil（后续若 GEO 需要可独立实现轻量 KnowledgeSearcher）。
 	var knowledgeSearch port.KnowledgeSearcher
 	if embedder != nil && vectorStore != nil {
-		processUC = process.NewProcessUseCase(dataItemRepo, aiGenerator, embedder, vectorStore)
-		processUC.SetTracer(tracer)
-		itemProcessor = processUC
-		knowledgeSearch = processUC
-		// 注册知识检索工具
-		toolRegistry.Register(crawler.NewKnowledgeSearcher(knowledgeSearch))
-		log.Info("数据闭环就绪：审核通过→结构化→向量化→检索")
+		// 向量库已配置但暂无独立 KnowledgeSearcher 实现——保留 hook 位
+		log.Info("向量库已配置（知识检索能力待独立实现）")
 	}
 
 	// 认证
@@ -200,15 +188,10 @@ func main() {
 		log.Info("已 seed 默认管理员账号 admin/admin123（请立即修改密码）")
 	}
 
-	// Agent 执行器（注入 LLMConfigRepository 用于按 Agent 选 LLM，
-	// 注入 DataItemRepo 用于工具采集结果落库，注入 Logger 用于工具落库日志）
-	agentRunner := agentadapter.NewTrpcAgentRunner(llmConfigRepo, toolRegistry, dataItemRepo, logger)
+	// Agent 执行器（解耦后不依赖 DataItemRepository——工具结果不自动落库）
+	agentRunner := agentadapter.NewTrpcAgentRunner(llmConfigRepo, toolRegistry, logger)
 
 	// 业务用例装配（handler 只依赖这些 usecase，不直接持有仓储）
-	taskQueryUC := taskquery.NewTaskQueryUseCase(taskRepo)
-	dataItemUC := dataitem.NewDataItemUseCase(dataItemRepo, itemProcessor, logger)
-	// 平台总览统计：GEO/发布仓储在后续装配，此处先声明（nil），
-	// 待 geoRepos/accountRepos 就绪后经 router.SetStats 重新注入完整统计。
 	var statsUC *stats.StatsUseCase
 	agentCfgUC := agentconfig.NewAgentConfigUseCase(agentConfigRepo)
 	conversationUC := conversation.NewConversationUseCase(convRepo, msgRepo)
@@ -216,29 +199,21 @@ func main() {
 	// 首次启动 seed 默认采集策略
 	_ = crawlCfgUC.EnsureDefault(context.Background())
 
-	// 框架内容编排用例（图编排：探查→生成→校验→补生成，落库不推送）。
-	// 仅配了 LLM 时启用（scout/generator 依赖 LLM）；否则降级为 nil，编排端点不注册。
-	var orchestrateUC *orchestrate.OrchestratorUseCase
-	var graphOrchestrator port.ContentOrchestrator
+	// 框架内容编排工具（图编排：探查→生成→校验→补生成）。
+	// 仅配了 LLM 时启用；包装成 generate_content 工具注册进工具池。
+	// 注意：原 orchestrate usecase 已删除（它把结果落库到 dataitem，与 GEO 无关）。
+	// ContentGenerationTool 直接返回生成内容给 LLM，不落库。
 	if cfg.LLM.IsConfigured() {
-		graphOrchestrator = agentadapter.NewGraphContentOrchestrator(
+		graphOrchestrator := agentadapter.NewGraphContentOrchestrator(
 			aiGenerator,
 			[]string{"static_crawler", "search_crawler", "dynamic_crawler"}, // scout 探查文档用的爬虫
 			logger,
 		)
-		orchestrateUC = orchestrate.NewOrchestratorUseCase(graphOrchestrator, dataItemRepo, logger)
-		log.Info("框架内容编排已启用（图编排模式）")
-		// 把图编排包装成 generate_content 工具，注册进工具池——
-		// 让通用 Agent 能把它当作"子能力"自主调用。
 		toolRegistry.Register(agentadapter.NewContentGenerationTool(graphOrchestrator))
+		log.Info("内容生成工具已注册（图编排模式，结果直接返回 LLM 不落库）")
 	} else {
-		log.Info("未配置 LLM，框架内容编排降级禁用")
+		log.Info("未配置 LLM，内容生成工具降级禁用")
 	}
-
-	// 注册 save_data_item 工具：让 LLM 自主保存结构化内容为 DataItem
-	// （LLM 生成 JSON → 调此工具保存 → 收到"已保存" → 回复友好总结，不显示 JSON 原文）
-	saverAdapter := &dataItemSaverAdapter{uc: dataItemUC}
-	toolRegistry.Register(crawler.NewSaveDataItemTool(saverAdapter))
 
 	// 异步任务
 	taskQueue := mock.NewMockTaskQueue(100)
@@ -258,9 +233,17 @@ func main() {
 	}
 
 	// 路由 + HTTP 服务（handler 只依赖 usecase 与 port 接口，不直接持有仓储/具体 adapter struct）
-	router := handler.NewRouter(registerUC, loginUC, tokenParser, aiGenerator, enqueueUC,
-		agentRunner, taskQueryUC, dataItemUC, agentCfgUC, llmCfgUC, conversationUC, crawlCfgUC,
-		toolRegistry, knowledgeSearch, orchestrateUC, statsUC)
+	// 路由器（零参数——所有依赖通过 SetXxx 可选注入，端点按注入条件注册）
+	router := handler.NewRouter()
+	router.SetAuth(registerUC, loginUC, tokenParser)
+	router.SetAI(aiGenerator)
+	router.SetTask(enqueueUC, agentRunner)
+	router.SetAgentConfig(agentCfgUC)
+	router.SetLLMConfig(llmCfgUC)
+	router.SetConversation(conversationUC)
+	router.SetCrawlConfig(crawlCfgUC)
+	router.SetToolRegistry(toolRegistry)
+	router.SetKnowledgeSearch(knowledgeSearch)
 
 	// GEO 业务装配（商户端核心）。需要 DB + LLM 才启用。
 	geoRepos := initGEORpositories(cfg.DB)
@@ -437,11 +420,11 @@ func main() {
 	// 平台总览统计（SaaS 级聚合，一次返回全量指标）：
 	// GEO/发布仓储未装配（无 DB）时注入 nil → StatsUseCase 内判 nil，对应指标为 0。
 	if geoRepos != nil && accountRepos != nil {
-		statsUC = stats.NewStatsUseCase(dataItemRepo, userRepo,
+		statsUC = stats.NewStatsUseCase(userRepo,
 			geoRepos.brand, geoRepos.keyword, geoRepos.result, geoRepos.content,
 			accountRepos.job)
 	} else {
-		statsUC = stats.NewStatsUseCase(dataItemRepo, userRepo, nil, nil, nil, nil, nil)
+		statsUC = stats.NewStatsUseCase(userRepo, nil, nil, nil, nil, nil)
 	}
 	router.SetStats(statsUC)
 
@@ -580,15 +563,14 @@ func main() {
 }
 
 func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
-	port.DataItemRepository, port.AgentConfigRepository,
+	port.AgentConfigRepository,
 	port.LLMConfigRepository, port.TaskRepository, port.UserRepository,
 	port.ConversationRepository, port.MessageRepository, port.SystemSettingRepository,
 ) {
 	log := logger.With(port.String("component", "repository"))
 	if !dbCfg.IsConfigured() {
 		log.Info("未配置数据库，使用内存 mock")
-		return mock.NewMockDataItemRepository(),
-			mock.NewMockAgentConfigRepository(), mock.NewMockLLMConfigRepository(),
+		return mock.NewMockAgentConfigRepository(), mock.NewMockLLMConfigRepository(),
 			mock.NewMockTaskRepository(), mock.NewMockUserRepository(),
 			mock.NewMockConversationRepository(), mock.NewMockMessageRepository(),
 			mock.NewMockSystemSettingRepository()
@@ -600,8 +582,7 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 		os.Exit(1)
 	}
 	log.Info("MySQL 连接成功")
-	return repository.NewGormDataItemRepository(db),
-		repository.NewGormAgentConfigRepository(db), repository.NewGormLLMConfigRepository(db),
+	return repository.NewGormAgentConfigRepository(db), repository.NewGormLLMConfigRepository(db),
 		repository.NewGormTaskRepository(db), repository.NewGormUserRepository(db),
 		repository.NewGormConversationRepository(db), repository.NewGormMessageRepository(db),
 		repository.NewGormSystemSettingRepository(db)
@@ -701,20 +682,3 @@ func startMockSite(log port.Logger) {
 	_ = http.ListenAndServe(":8088", mux)
 }
 
-// dataItemSaverAdapter 把 dataitem.DataItemUseCase 适配为 crawler.DataItemSaver 接口。
-// 让 save_data_item 工具能通过 usecase 落库，依赖方向合法。
-type dataItemSaverAdapter struct {
-	uc *dataitem.DataItemUseCase
-}
-
-func (a *dataItemSaverAdapter) SaveFromContent(ctx context.Context, content, fieldMapping, sourceURL string) (string, string, error) {
-	item, err := a.uc.CreateFromContent(ctx, dataitem.CreateFromContentInput{
-		Content:      content,
-		FieldMapping: fieldMapping,
-		SourceURL:    sourceURL,
-	})
-	if err != nil {
-		return "", "", err
-	}
-	return item.ID, item.Title, nil
-}

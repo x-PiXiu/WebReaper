@@ -36,25 +36,6 @@ type TaskPO struct {
 
 func (TaskPO) TableName() string { return "tasks" }
 
-// ---- DataItemPO（通用数据项，替代 JobPost/Knowledge/CrawlResult）----
-
-type DataItemPO struct {
-	ID           string         `gorm:"primaryKey;size:64"`
-	CollectionID string         `gorm:"size:64;index"`
-	Title        string         `gorm:"size:512"`
-	Content      string         `gorm:"type:longtext"`
-	Summary      string         `gorm:"type:text"`
-	Tags         datatypes.JSON `gorm:"type:json"`
-	SourceURL    string         `gorm:"size:512"`
-	RawContent   string         `gorm:"type:longtext"`
-	Status       string         `gorm:"size:20;index;default:'pending_review'"`
-	Metadata     datatypes.JSON `gorm:"type:json"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
-func (DataItemPO) TableName() string { return "data_items" }
-
 // ---- AgentConfigPO（Agent 配置，存DB）----
 
 type AgentConfigPO struct {
@@ -64,8 +45,6 @@ type AgentConfigPO struct {
 	Model         string `gorm:"size:64"`           // 历史字段（保留向后兼容，新代码用 LLMConfigName）
 	LLMConfigName string `gorm:"column:llm_config_name;size:64"` // 引用的 LLM 配置名
 	MaxIterations int    `gorm:"default:10"`
-	AutoSave      bool   `gorm:"default:false"`     // 自动落库开关
-	FieldMapping  string `gorm:"type:text"`         // 自动落库字段映射 JSON
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -146,7 +125,6 @@ func allModels() []any {
 	return []any{
 		&UserPO{},
 		&TaskPO{},
-		&DataItemPO{},
 		&AgentConfigPO{},
 		&LLMConfigPO{},
 		&ConversationPO{},

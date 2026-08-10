@@ -33,14 +33,12 @@ export default function AgentConfigs() {
 
   // ---- Agent 配置 CRUD ----
   // 新建/编辑统一入口：editingAgent 为 null 时是新建，否则是编辑该 name
-  const openEditAgent = (record: { name: string; system_prompt: string; llm_config_name?: string; auto_save?: boolean; field_mapping?: string }) => {
+  const openEditAgent = (record: { name: string; system_prompt: string; llm_config_name?: string; max_iterations?: number }) => {
     setEditingAgent(record.name)
     agentForm.setFieldsValue({
       name: record.name,
       system_prompt: record.system_prompt,
       llm_config_name: record.llm_config_name || undefined,
-      auto_save: record.auto_save || false,
-      field_mapping: record.field_mapping || '',
     })
     setAgentModalOpen(true)
   }
@@ -51,15 +49,13 @@ export default function AgentConfigs() {
     setAgentModalOpen(true)
   }
 
-  const handleSubmitAgent = async (values: { name: string; system_prompt: string; llm_config_name?: string; auto_save?: boolean; field_mapping?: string }) => {
+  const handleSubmitAgent = async (values: { name: string; system_prompt: string; llm_config_name?: string; max_iterations?: number }) => {
     try {
       if (editingAgent) {
         // 编辑模式：部分更新（name 不可改）
         await businessApi.updateAgentConfig(editingAgent, {
           system_prompt: values.system_prompt,
           llm_config_name: values.llm_config_name || '',
-          auto_save: values.auto_save || false,
-          field_mapping: values.field_mapping || '',
         })
         message.success(`Agent ${editingAgent} 已更新`)
       } else {
@@ -69,8 +65,6 @@ export default function AgentConfigs() {
           tools: [],
           llm_config_name: values.llm_config_name || '',
           max_iterations: 10,
-          auto_save: values.auto_save || false,
-          field_mapping: values.field_mapping || '',
         })
         message.success(`Agent ${values.name} 创建成功`)
       }
@@ -326,32 +320,6 @@ export default function AgentConfigs() {
               placeholder="留空使用默认 LLM 配置"
               options={llmOptions}
             />
-          </Form.Item>
-          <Form.Item
-            label="自动落库"
-            name="auto_save"
-            valuePropName="checked"
-            tooltip="开启后，该 Agent 的对话回复会自动存为数据项（在提示词里要求 LLM 返回结构化 JSON 时使用）"
-          >
-            <Switch />
-          </Form.Item>
-          <Form.Item
-            noStyle
-            shouldUpdate={(prev, cur) => prev.auto_save !== cur.auto_save}
-          >
-            {({ getFieldValue }) => getFieldValue('auto_save') ? (
-              <Form.Item
-                label="字段映射（JSON）"
-                name="field_mapping"
-                tooltip='把 LLM 返回的 JSON 字段映射到数据项字段。格式：{"LLM字段":"数据项字段"}'
-              >
-                <Input.TextArea
-                  placeholder='{"title":"title","content":"content","summary":"summary","tags":"tags"}'
-                  autoSize={{ minRows: 2, maxRows: 4 }}
-                  style={{ fontFamily: 'monospace', fontSize: 12 }}
-                />
-              </Form.Item>
-            ) : null}
           </Form.Item>
           <Form.Item>
             <Space>
