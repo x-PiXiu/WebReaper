@@ -29,3 +29,4 @@ coverage.txt
 
 # 日志
 *.log
+.zcode/

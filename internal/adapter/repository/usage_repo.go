@@ -38,6 +38,19 @@ func (r *GormUsageRecorder) RecordUsage(ctx context.Context, rec entity.UsageRec
 	return r.db.WithContext(ctx).Create(&po).Error
 }
 
+// CountSince 实现 port.UsageQueryer：统计租户某场景计费周期内的 LLM 调用次数。
+// 配额扣减的数据源——计数派生型配额（用量即扣减，无独立计数器状态）。
+func (r *GormUsageRecorder) CountSince(ctx context.Context, tenantID, scene string, since time.Time) (int, error) {
+	if tenantID == "" || scene == "" {
+		return 0, nil // 平台消耗（空租户）不计入配额
+	}
+	var n int64
+	err := r.db.WithContext(ctx).Model(&UsagePO{}).
+		Where("tenant_id = ? AND scene = ? AND created_at >= ?", tenantID, scene, since).
+		Count(&n).Error
+	return int(n), err
+}
+
 // UsagePO LLM 用量持久化对象（usages 表，AutoMigrate 建表）。
 type UsagePO struct {
 	ID               string    `gorm:"primaryKey;size:64"`

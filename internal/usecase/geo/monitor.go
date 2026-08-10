@@ -18,10 +18,18 @@ type MonitorUseCase struct {
 	keywordRepo port.KeywordRepository
 	resultRepo  port.MonitoringResultRepository
 	probe       port.AIEngineProbe // AI 引擎探测适配器
+	quotaGate   port.QuotaStore   // 配额检查门（可选；nil=不检查）
 }
 
 func NewMonitorUseCase(br port.BrandRepository, kr port.KeywordRepository, rr port.MonitoringResultRepository, probe port.AIEngineProbe) *MonitorUseCase {
 	return &MonitorUseCase{brandRepo: br, keywordRepo: kr, resultRepo: rr, probe: probe}
+}
+
+// SetQuotaGate 注入配额检查门（可选；未注入时不检查配额——向后兼容）。
+func (uc *MonitorUseCase) SetQuotaGate(g port.QuotaStore) {
+	if g != nil {
+		uc.quotaGate = g
+	}
 }
 
 // MonitorInput 监测的输入。
@@ -38,6 +46,14 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 	if in.TenantID == "" {
 		return nil, fmt.Errorf("tenant_id 不能为空")
 	}
+
+	// 配额检查（计费周期内 monitor 次数；超限返回 ErrQuotaExceeded → HTTP 402）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, in.TenantID, "monitor"); err != nil {
+			return nil, err
+		}
+	}
+
 	brand, err := uc.brandRepo.FindByID(ctx, in.TenantID, in.BrandID)
 	if err != nil {
 		return nil, fmt.Errorf("品牌不存在: %w", err)

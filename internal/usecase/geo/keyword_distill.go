@@ -11,7 +11,8 @@ import (
 //
 // 职责：按来源类型选策略 → 执行蒸馏 → 结果去重。
 type KeywordDistillUseCase struct {
-	sources map[string]port.KeywordSource
+	sources   map[string]port.KeywordSource
+	quotaGate port.QuotaStore // 配额检查门（可选；nil=不检查）
 }
 
 // NewKeywordDistillUseCase 创建蒸馏用例。
@@ -21,6 +22,13 @@ func NewKeywordDistillUseCase(sources ...port.KeywordSource) *KeywordDistillUseC
 		m[s.SourceName()] = s
 	}
 	return &KeywordDistillUseCase{sources: m}
+}
+
+// SetQuotaGate 注入配额检查门（可选；未注入时不检查配额——向后兼容）。
+func (uc *KeywordDistillUseCase) SetQuotaGate(g port.QuotaStore) {
+	if g != nil {
+		uc.quotaGate = g
+	}
 }
 
 // Distill 按来源蒸馏关键词。
@@ -35,6 +43,12 @@ func (uc *KeywordDistillUseCase) Distill(ctx context.Context, source string, in 
 			available = append(available, k)
 		}
 		return nil, fmt.Errorf("不支持的关键词来源 %q，可用：%v", source, available)
+	}
+	// 配额检查（计费周期内 keyword-distill 次数；超限返回 ErrQuotaExceeded → HTTP 402）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, in.TenantID, "keyword-distill"); err != nil {
+			return nil, err
+		}
 	}
 	keywords, err := s.Distill(ctx, in)
 	if err != nil {

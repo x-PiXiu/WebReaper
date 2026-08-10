@@ -34,6 +34,7 @@ type ContentUseCase struct {
 	logger        port.Logger                 // 日志（标题兜底等告警用）
 	ragRetriever  port.ContentRAGRetriever    // RAG 检索（可选；nil=纯 LLM 推断）
 	templateRepo  port.PromptTemplateRepository // 提示词模板（可选；nil=内置默认）
+	quotaGate     port.QuotaStore             // 配额检查门（可选；nil=不检查）
 }
 
 // 内置默认提示词模板（模板仓库无记录时的兜底，与 seed 内容一致）。
@@ -94,6 +95,14 @@ func (uc *ContentUseCase) systemPrompt(ctx context.Context, key, fallback, targe
 func (uc *ContentUseCase) SetPromptTemplateRepo(r port.PromptTemplateRepository) {
 	if r != nil {
 		uc.templateRepo = r
+	}
+}
+
+// SetQuotaGate 注入配额检查门（可选；未注入时不检查配额——向后兼容）。
+// 注入后 Optimize/Generate 入口检查 content-opt/content-gen 配额，超限返回 ErrQuotaExceeded。
+func (uc *ContentUseCase) SetQuotaGate(g port.QuotaStore) {
+	if g != nil {
+		uc.quotaGate = g
 	}
 }
 
@@ -217,6 +226,13 @@ type OptimizeResult struct {
 func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (OptimizeResult, error) {
 	if in.OriginalText == "" {
 		return OptimizeResult{}, fmt.Errorf("原始内容不能为空")
+	}
+
+	// 配额检查（计费周期内 content-opt 次数；超限返回 ErrQuotaExceeded → HTTP 402）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, in.TenantID, "content-opt"); err != nil {
+			return OptimizeResult{}, err
+		}
 	}
 
 	// 统一关键词描述：多关键词组合时拼接
@@ -450,6 +466,13 @@ func (uc *ContentUseCase) Generate(ctx context.Context, in GenerateInput) (entit
 func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, onDelta func(delta string)) (entity.OptimizedContent, error) {
 	if len(in.Keywords) == 0 {
 		return entity.OptimizedContent{}, fmt.Errorf("关键词不能为空")
+	}
+
+	// 配额检查（计费周期内 content-gen 次数；超限返回 ErrQuotaExceeded → HTTP 402）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, in.TenantID, "content-gen"); err != nil {
+			return entity.OptimizedContent{}, err
+		}
 	}
 	keywordDesc := strings.Join(in.Keywords, "、")
 	isMulti := len(in.Keywords) > 1

@@ -48,6 +48,7 @@ import (
 	"webreaper/internal/usecase/orchestrate"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/process"
+	"webreaper/internal/usecase/quota"
 	"webreaper/internal/usecase/scheduler"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
@@ -314,6 +315,8 @@ func main() {
 		indexNowSubmitter = cachedSubmitter
 	}
 	var geoMonitorUCRef *geo.MonitorUseCase
+	var geoContentUCRef *geo.ContentUseCase
+	var geoDistillUCRef *geo.KeywordDistillUseCase
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
 		geoScorer := ai.NewLLMGEOScorer(aiGenerator)
 		geoBrandUC := geo.NewBrandUseCase(geoRepos.brand, geoRepos.keyword)
@@ -343,6 +346,7 @@ func main() {
 		geoMonitorUCRef = geoMonitorUC
 		geoRankUC := geo.NewRankUseCase(geoRepos.result)
 		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
+		geoContentUCRef = geoContentUC
 		// 免费规则评分器：优化前后对比用（不烧 token、可单测）
 		geoContentUC.SetRuleScorer(geo.NewRuleScorer())
 		// RAG 增强：原创生成前检索"品牌+关键词"真实信息注入 prompt（"不编造数据"变能力）
@@ -372,6 +376,7 @@ func main() {
 			ai.NewFileSource(aiGenerator),                                    // 文件内容
 			ai.NewWebSource(aiGenerator, webFetcher),                         // 网络爬取
 		)
+		geoDistillUCRef = geoDistillUC
 		router.SetKeywordDistill(geoDistillUC)
 		log.Info("GEO 业务已启用（品牌监测/排行榜/内容优化/关键词生成/诊断/关键词蒸馏引擎）")
 	} else {
@@ -449,6 +454,21 @@ func main() {
 		}
 		billingUC := billing.NewBillingUseCase(planRepo, subRepo, orderRepo)
 		router.SetBilling(billingUC)
+
+		// 配额检查门（计数派生型：plan 配额 vs usages 表当月用量）
+		// 注入到烧 token 的 usecase——超限返回 ErrQuotaExceeded → HTTP 402
+		usageRecorder := repository.NewGormUsageRecorder(geoRepos.db)
+		quotaGate := quota.NewGate(planRepo, subRepo, usageRecorder)
+		if geoContentUCRef != nil {
+			geoContentUCRef.SetQuotaGate(quotaGate)
+		}
+		if geoMonitorUCRef != nil {
+			geoMonitorUCRef.SetQuotaGate(quotaGate)
+		}
+		if geoDistillUCRef != nil {
+			geoDistillUCRef.SetQuotaGate(quotaGate)
+		}
+		log.Info("配额检查已启用（content-opt/content-gen/monitor/keyword-distill 超限返回 402）")
 	}
 
 	// 平台系统设置（运行时开关：自动盯盘等）——管理后台可切换，调度器即时生效
