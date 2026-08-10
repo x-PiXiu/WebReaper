@@ -57,7 +57,11 @@ type MonitoringResult struct {
 	MentionRate  float64 // 提及率 = MentionCount/SampleCount
 	AvgPosition  int     // 平均排名（1=最靠前，0=未被提及）
 	Sentiment    string  // positive/neutral/negative
-	Competitors  []string // 同次回答里提到的竞品
+	Competitors  []string // 同次回答里提到的竞品（去重清单）
+	// CompetitorRates 竞品提及率（{竞品名: 提及率}）——付费说服力核心：
+	// 用户需要坐标系"我 45% vs 竞品 80%"才知道自己好不好。
+	// 与 Competitors 同源（探测时统计），落库时按采样数归一化。
+	CompetitorRates map[string]float64
 	Confidence   float64 // 置信度（采样次数少则低）
 	ProbedAt     time.Time
 	RawSample    string  // 原始回答摘录（留证，便于复核；不存全量以省空间）

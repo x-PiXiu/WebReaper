@@ -21,10 +21,12 @@ import (
 	"webreaper/internal/adapter/embedding"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/handler"
+	"webreaper/internal/adapter/lock"
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
+	"webreaper/internal/adapter/scheduledtask"
 	"webreaper/internal/adapter/telemetry"
 	"webreaper/internal/adapter/urlsubmit"
 	"webreaper/internal/adapter/vectorstore"
@@ -41,6 +43,7 @@ import (
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/orchestrate"
+	"webreaper/internal/usecase/scheduler"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
 	taskquery "webreaper/internal/usecase/taskquery"
@@ -412,28 +415,33 @@ func main() {
 	// 管理端装配（用户管理，仅 admin）
 	router.SetAdmin(userRepo)
 
+	// 通用定时任务调度器（统一驱动：防重入/分布式锁/panic 恢复/错误日志）。
+	// 新增定时功能 = 实现 port.ScheduledTask + Register 一行，避免"一功能一套 ticker"。
+	// 分布式演进：多实例部署时把 NoopLock 换成 lock.RedisLock，业务零改动。
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	taskScheduler := scheduler.New(lock.NewNoopLock(), log)
+
+	// ① 账号健康度定时检查：每 10 分钟检查所有账号的 cookie 过期状态
+	//（原裸 goroutine + ticker 改造为注册任务——统一调度语义）
+	if geoAccountUC != nil {
+		accUC := geoAccountUC
+		_ = taskScheduler.Register(scheduledtask.NewAccountHealthTask(accUC, log))
+	}
+
+	// ② 每日自动监测（自动盯盘：让趋势图自动生长，无需用户手动点监测）
+	// 需要 DB + LLM + 开启开关（AUTO_MONITOR_ENABLED=true）
+	if geoMonitorUCRef != nil && geoRepos != nil && cfg.LLM.IsConfigured() && cfg.Server.AutoMonitorEnabled {
+		monUC := geoMonitorUCRef
+		_ = taskScheduler.Register(scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, log))
+		log.Info("每日自动监测任务已注册（AUTO_MONITOR_ENABLED=true）")
+	}
+
+	taskScheduler.Start(schedulerCtx)
+
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	// 账号健康度定时检查：每 10 分钟检查所有账号的 cookie 过期状态
-	if geoAccountUC != nil {
-		go func() {
-			ticker := time.NewTicker(10 * time.Minute)
-			defer ticker.Stop()
-			healthCtx := context.Background()
-			log.Info("账号健康度检查定时任务已启动（每 10 分钟）")
-			for {
-				select {
-				case <-ticker.C:
-					geoAccountUC.CheckAccountHealth(healthCtx)
-				case <-quit:
-					return
-				}
-			}
-		}()
-	}
 
 	go func() {
 		log.Info("HTTP 服务已启动", port.String("port", cfg.Server.Port))
@@ -445,6 +453,8 @@ func main() {
 
 	<-quit
 	log.Info("正在关闭服务...")
+	schedulerCancel()
+	taskScheduler.Stop()
 	workerCancel()
 	_ = taskQueue.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

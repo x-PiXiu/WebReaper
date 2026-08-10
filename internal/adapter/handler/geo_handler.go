@@ -79,20 +79,21 @@ func keywordsToView(ks []entity.Keyword) []gin.H {
 
 func monitoringResultToView(r entity.MonitoringResult) gin.H {
 	return gin.H{
-		"id":            r.ID,
-		"tenant_id":     r.TenantID,
-		"brand_id":      r.BrandID,
-		"keyword_id":    r.KeywordID,
-		"engine_name":   r.EngineName,
-		"sample_count":  r.SampleCount,
-		"mention_count": r.MentionCount,
-		"mention_rate":  r.MentionRate,
-		"avg_position":  r.AvgPosition,
-		"sentiment":     r.Sentiment,
-		"competitors":   r.Competitors,
-		"confidence":    r.Confidence,
-		"probed_at":     r.ProbedAt,
-		"raw_sample":    r.RawSample,
+		"id":               r.ID,
+		"tenant_id":        r.TenantID,
+		"brand_id":         r.BrandID,
+		"keyword_id":       r.KeywordID,
+		"engine_name":      r.EngineName,
+		"sample_count":     r.SampleCount,
+		"mention_count":    r.MentionCount,
+		"mention_rate":     r.MentionRate,
+		"avg_position":     r.AvgPosition,
+		"sentiment":        r.Sentiment,
+		"competitors":      r.Competitors,
+		"competitor_rates": r.CompetitorRates, // 竞品提及率（对比坐标系）
+		"confidence":       r.Confidence,
+		"probed_at":        r.ProbedAt,
+		"raw_sample":       r.RawSample,
 	}
 }
 

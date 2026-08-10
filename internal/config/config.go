@@ -117,6 +117,9 @@ type ServerConfig struct {
 	// 配置后：内容发布为 published 时自动通知 Bing/Yandex 收录，替代人工提交 sitemap。
 	// Key 文件由公开站端点 /public/indexnow-key.txt 托管（keyLocation 指向它）。
 	IndexNowKey string
+	// AutoMonitorEnabled 是否启用每日自动监测（AUTO_MONITOR_ENABLED=true）。
+	// 启用后调度器每天对全平台品牌执行一次监测，趋势图自动生长。
+	AutoMonitorEnabled bool
 }
 
 // DBConfig MySQL 数据库配置。
@@ -236,6 +239,7 @@ func Load() Config {
 			Env:           getenvDefault("APP_ENV", "development"),
 			PublicBaseURL: getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
 			IndexNowKey:   os.Getenv("INDEXNOW_KEY"),
+			AutoMonitorEnabled: os.Getenv("AUTO_MONITOR_ENABLED") == "true",
 		},
 		DB: DBConfig{
 			Host:     getenvDefault("DB_HOST", "localhost"),

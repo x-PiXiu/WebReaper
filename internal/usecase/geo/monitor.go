@@ -69,27 +69,32 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 			continue
 		}
 
-		// 竞品列表（被提及的）
+		// 竞品列表（被提及的）+ 竞品提及率（对比坐标系：付费说服力核心）
 		var mentionedCompetitors []string
-		for name := range probeResult.Competitors {
-			mentionedCompetitors = append(mentionedCompetitors, name)
+		competitorRates := make(map[string]float64)
+		if probeResult.SampleCount > 0 {
+			for name, cnt := range probeResult.Competitors {
+				mentionedCompetitors = append(mentionedCompetitors, name)
+				competitorRates[name] = float64(cnt) / float64(probeResult.SampleCount)
+			}
 		}
 
 		result := entity.MonitoringResult{
-			ID:           fmt.Sprintf("mr-%d-%d", time.Now().UnixNano(), len(results)),
-			TenantID:     in.TenantID,
-			BrandID:      in.BrandID,
-			KeywordID:    kw.ID,
-			EngineName:   in.EngineName,
-			SampleCount:  probeResult.SampleCount,
-			MentionCount: probeResult.MentionCount,
-			MentionRate:  probeResult.MentionRate,
-			AvgPosition:  probeResult.AvgPosition,
-			Sentiment:    probeResult.Sentiment,
-			Competitors:  mentionedCompetitors,
-			Confidence:   probeResult.Confidence,
-			ProbedAt:     time.Now(),
-			RawSample:    probeResult.RawSample,
+			ID:              fmt.Sprintf("mr-%d-%d", time.Now().UnixNano(), len(results)),
+			TenantID:        in.TenantID,
+			BrandID:         in.BrandID,
+			KeywordID:       kw.ID,
+			EngineName:      in.EngineName,
+			SampleCount:     probeResult.SampleCount,
+			MentionCount:    probeResult.MentionCount,
+			MentionRate:     probeResult.MentionRate,
+			AvgPosition:     probeResult.AvgPosition,
+			Sentiment:       probeResult.Sentiment,
+			Competitors:     mentionedCompetitors,
+			CompetitorRates: competitorRates,
+			Confidence:      probeResult.Confidence,
+			ProbedAt:        time.Now(),
+			RawSample:       probeResult.RawSample,
 		}
 		_ = uc.resultRepo.Save(ctx, result)
 		results = append(results, result)
@@ -141,7 +146,7 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 
 	sampleSize := in.SampleSize
 	if sampleSize <= 0 {
-		sampleSize = 1
+		sampleSize = 3 // 快测默认 3 次采样：单次采样是噪声（AI 随机性），数字不稳用户不信
 	}
 
 	probeResult, pErr := uc.probe.Probe(ctx, port.ProbeInput{
@@ -157,24 +162,29 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 	}
 
 	var mentionedCompetitors []string
-	for name := range probeResult.Competitors {
-		mentionedCompetitors = append(mentionedCompetitors, name)
+	competitorRates := make(map[string]float64)
+	if probeResult.SampleCount > 0 {
+		for name, cnt := range probeResult.Competitors {
+			mentionedCompetitors = append(mentionedCompetitors, name)
+			competitorRates[name] = float64(cnt) / float64(probeResult.SampleCount)
+		}
 	}
 	result := entity.MonitoringResult{
-		ID:           fmt.Sprintf("mr-%d", time.Now().UnixNano()),
-		TenantID:     in.TenantID,
-		BrandID:      brand.ID,
-		KeywordID:    kw.ID,
-		EngineName:   in.EngineName,
-		SampleCount:  probeResult.SampleCount,
-		MentionCount: probeResult.MentionCount,
-		MentionRate:  probeResult.MentionRate,
-		AvgPosition:  probeResult.AvgPosition,
-		Sentiment:    probeResult.Sentiment,
-		Competitors:  mentionedCompetitors,
-		Confidence:   probeResult.Confidence,
-		ProbedAt:     time.Now(),
-		RawSample:    probeResult.RawSample,
+		ID:              fmt.Sprintf("mr-%d", time.Now().UnixNano()),
+		TenantID:        in.TenantID,
+		BrandID:         brand.ID,
+		KeywordID:       kw.ID,
+		EngineName:      in.EngineName,
+		SampleCount:     probeResult.SampleCount,
+		MentionCount:    probeResult.MentionCount,
+		MentionRate:     probeResult.MentionRate,
+		AvgPosition:     probeResult.AvgPosition,
+		Sentiment:       probeResult.Sentiment,
+		Competitors:     mentionedCompetitors,
+		CompetitorRates: competitorRates,
+		Confidence:      probeResult.Confidence,
+		ProbedAt:        time.Now(),
+		RawSample:       probeResult.RawSample,
 	}
 	_ = uc.resultRepo.Save(ctx, result)
 	return result, nil

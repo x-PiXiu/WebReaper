@@ -136,7 +136,7 @@ export default function Keywords() {
   const handleMonitorKeyword = async (keywordId: string) => {
     setMonitoringKwId(keywordId)
     try {
-      await businessApi.monitorKeyword({ keyword_id: keywordId, sample_size: 1, engine_name: selectedEngine })
+      await businessApi.monitorKeyword({ keyword_id: keywordId, sample_size: 3, engine_name: selectedEngine })
       message.success(`监测完成（引擎：${selectedEngine || 'default'}）`)
       queryClient.invalidateQueries({ queryKey: ['geo-monitor-results'] })
       queryClient.invalidateQueries({ queryKey: ['geo-overviews'] })
@@ -158,7 +158,7 @@ export default function Keywords() {
     for (const kw of displayedKeywords) {
       setMonitoringKwId(kw.id)
       try {
-        await businessApi.monitorKeyword({ keyword_id: kw.id, sample_size: 1, engine_name: selectedEngine })
+        await businessApi.monitorKeyword({ keyword_id: kw.id, sample_size: 3, engine_name: selectedEngine })
         success++
       } catch {}
     }
@@ -421,7 +421,15 @@ export default function Keywords() {
                                 )
                               })()}
                               <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>各 AI 引擎检测详情</Text>
-                              {results.map((r: MonitoringResult) => (
+                              {results.map((r: MonitoringResult) => {
+                                // 竞品对比（坐标系：我 X% vs 竞品 Y%——付费说服力核心）
+                                const compRates = Object.entries(r.competitor_rates || {})
+                                  .sort((a, b) => b[1] - a[1])
+                                  .slice(0, 4)
+                                // 证据高亮词：品牌名 + 竞品名（"AI 提到你了"亲眼可见）
+                                const brandName = brandMap.get(r.brand_id) || ''
+                                const highlightWords = [brandName, ...(r.competitors || [])].filter(Boolean)
+                                return (
                                 <div key={r.id} style={{ marginBottom: 12, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 10 }}>
                                   {/* 引擎标识 + 五维度 */}
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -437,23 +445,51 @@ export default function Keywords() {
                                       {r.sentiment === 'positive' ? '正面' : r.sentiment === 'negative' ? '负面' : '中性'}
                                     </Tag>
                                     <Text type="secondary" style={{ fontSize: 11 }}>置信 {(r.confidence * 100).toFixed(0)}%</Text>
-                                    {r.competitors && r.competitors.length > 0 && (
-                                      <Text type="secondary" style={{ fontSize: 11 }}>竞品: {r.competitors.join('、')}</Text>
-                                    )}
                                   </div>
-                                  {/* AI 生成的回答内容 */}
+
+                                  {/* 竞品提及率对比条（坐标系：用户需要"我 45% vs 竞品 80%"才知道自己好不好）*/}
+                                  {compRates.length > 0 && (
+                                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: 'rgba(0,0,0,0.12)' }}>
+                                      <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 6 }}>
+                                        提及率对比（{r.sample_count} 次采样）
+                                      </Text>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                        {/* 我的品牌 */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                          <Text style={{ fontSize: 12, minWidth: 70, fontWeight: 600, color: 'var(--wr-primary)' }}>{brandName || '我'}</Text>
+                                          <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--wr-bg-hover)', overflow: 'hidden' }}>
+                                            <div style={{ width: `${Math.min(100, r.mention_rate * 100)}%`, height: '100%', background: 'var(--wr-gradient)', borderRadius: 3 }} />
+                                          </div>
+                                          <Text style={{ fontSize: 11, minWidth: 42, textAlign: 'right', fontWeight: 600 }}>{(r.mention_rate * 100).toFixed(0)}%</Text>
+                                        </div>
+                                        {/* 竞品 */}
+                                        {compRates.map(([name, rate]) => (
+                                          <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <Text style={{ fontSize: 12, minWidth: 70, color: 'var(--wr-text-secondary)' }} ellipsis>{name}</Text>
+                                            <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--wr-bg-hover)', overflow: 'hidden' }}>
+                                              <div style={{ width: `${Math.min(100, rate * 100)}%`, height: '100%', background: 'var(--wr-warning)', borderRadius: 3, opacity: 0.85 }} />
+                                            </div>
+                                            <Text style={{ fontSize: 11, minWidth: 42, textAlign: 'right', color: 'var(--wr-text-muted)' }}>{(rate * 100).toFixed(0)}%</Text>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* AI 生成的回答内容（证据高亮：品牌/竞品名出现处 <mark>）*/}
                                   {r.raw_sample && (
                                     <div style={{ marginTop: 8, padding: 10, background: 'rgba(0,0,0,0.15)', borderRadius: 8 }}>
                                       <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 4 }}>
-                                        AI 回答内容（{r.mention_count}/{r.sample_count} 次采样中提到品牌）
+                                        AI 回答内容（{r.mention_count}/{r.sample_count} 次采样中提到品牌——高亮处为你的品牌/竞品）
                                       </Text>
                                       <Text style={{ whiteSpace: 'pre-wrap', fontSize: 12, color: 'var(--wr-text-secondary)', lineHeight: 1.6, display: 'block' }}>
-                                        {r.raw_sample}
+                                        <HighlightMentions text={r.raw_sample} words={highlightWords} />
                                       </Text>
                                     </div>
                                   )}
                                 </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           )
                         },
@@ -514,4 +550,46 @@ export default function Keywords() {
       </div>
     </div>
   )
+}
+
+// HighlightMentions 证据高亮：把文本中出现的品牌/竞品名用 <mark> 包裹（绿色底纹）。
+// 安全实现：split 分段渲染 React 节点，不用 dangerouslySetInnerHTML（防 XSS）。
+// 用途：AI 回答原文中"提到你的地方"亲眼可见——最强付费证据。
+function HighlightMentions({ text, words }: { text: string; words: string[] }) {
+  const cleanWords = [...new Set(words.filter((w) => w && w.length >= 2))]
+  if (cleanWords.length === 0) return <>{text}</>
+
+  // 按词频降序，避免短词覆盖长词
+  const sorted = [...cleanWords].sort((a, b) => b.length - a.length)
+  // 构造一次扫描的分段：用最长的词优先匹配
+  const segments: React.ReactNode[] = []
+  let rest = text
+  let key = 0
+  while (rest.length > 0) {
+    let matched: { word: string; index: number } | null = null
+    for (const w of sorted) {
+      const idx = rest.indexOf(w)
+      if (idx >= 0 && (matched === null || idx < matched.index)) {
+        matched = { word: w, index: idx }
+      }
+    }
+    if (!matched) {
+      segments.push(rest)
+      break
+    }
+    if (matched.index > 0) segments.push(rest.slice(0, matched.index))
+    segments.push(
+      <mark key={key++} style={{
+        background: 'rgba(74, 222, 128, 0.22)',
+        color: 'var(--wr-success)',
+        padding: '0 2px',
+        borderRadius: 3,
+        fontWeight: 600,
+      }}>
+        {matched.word}
+      </mark>
+    )
+    rest = rest.slice(matched.index + matched.word.length)
+  }
+  return <>{segments}</>
 }

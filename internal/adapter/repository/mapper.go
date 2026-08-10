@@ -28,6 +28,22 @@ func toStringSlice(j datatypes.JSON) []string {
 	return ss
 }
 
+// toFloatMap map[string]float64 → JSON（竞品提及率等）。
+func toFloatMap(m map[string]float64) datatypes.JSON {
+	if len(m) == 0 {
+		return datatypes.JSON([]byte("{}"))
+	}
+	b, _ := json.Marshal(m)
+	return datatypes.JSON(b)
+}
+
+// toFloatMapFromJSON JSON → map[string]float64。
+func toFloatMapFromJSON(j datatypes.JSON) map[string]float64 {
+	m := map[string]float64{}
+	_ = json.Unmarshal(j, &m)
+	return m
+}
+
 func metadataToJSON(m map[string]string) datatypes.JSON {
 	if len(m) == 0 {
 		return datatypes.JSON([]byte("{}"))

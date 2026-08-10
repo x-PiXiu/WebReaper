@@ -48,6 +48,9 @@ type MonitoringResultPO struct {
 	AvgPosition  int
 	Sentiment    string         `gorm:"size:16"`
 	Competitors  datatypes.JSON `gorm:"type:json"`
+	// CompetitorRates 竞品提及率 JSON（{name: rate}）——探测时统计、落库时归一化，
+	// 前端对比条"我 X% vs 竞品 Y%"的数据源
+	CompetitorRates datatypes.JSON `gorm:"type:json"`
 	Confidence   float64        `gorm:"type:decimal(4,3)"`
 	ProbedAt     time.Time      `gorm:"index"`
 	RawSample    string         `gorm:"type:text"`

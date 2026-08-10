@@ -181,6 +181,7 @@ export interface MonitoringResult {
   avg_position: number
   sentiment: string          // positive/neutral/negative
   competitors: string[]
+  competitor_rates: Record<string, number> // 竞品提及率（对比坐标系）
   confidence: number
   probed_at: string
   raw_sample: string

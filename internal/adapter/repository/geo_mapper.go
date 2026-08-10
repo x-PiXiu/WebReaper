@@ -35,7 +35,8 @@ func monitoringResultToPO(e entity.MonitoringResult) MonitoringResultPO {
 		ID: e.ID, TenantID: e.TenantID, BrandID: e.BrandID, KeywordID: e.KeywordID,
 		EngineName: e.EngineName, SampleCount: e.SampleCount, MentionCount: e.MentionCount,
 		MentionRate: e.MentionRate, AvgPosition: e.AvgPosition, Sentiment: e.Sentiment,
-		Competitors: toJSON(e.Competitors), Confidence: e.Confidence, ProbedAt: e.ProbedAt,
+		Competitors: toJSON(e.Competitors), CompetitorRates: toFloatMap(e.CompetitorRates),
+		Confidence: e.Confidence, ProbedAt: e.ProbedAt,
 		RawSample: e.RawSample,
 	}
 }
@@ -45,7 +46,8 @@ func monitoringResultFromPO(p MonitoringResultPO) entity.MonitoringResult {
 		ID: p.ID, TenantID: p.TenantID, BrandID: p.BrandID, KeywordID: p.KeywordID,
 		EngineName: p.EngineName, SampleCount: p.SampleCount, MentionCount: p.MentionCount,
 		MentionRate: p.MentionRate, AvgPosition: p.AvgPosition, Sentiment: p.Sentiment,
-		Competitors: toStringSlice(p.Competitors), Confidence: p.Confidence, ProbedAt: p.ProbedAt,
+		Competitors: toStringSlice(p.Competitors), CompetitorRates: toFloatMapFromJSON(p.CompetitorRates),
+		Confidence: p.Confidence, ProbedAt: p.ProbedAt,
 		RawSample: p.RawSample,
 	}
 }
