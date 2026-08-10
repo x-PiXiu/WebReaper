@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios'
 import { message as antdMessage } from 'antd'
 import { getToken, useAuthStore } from '../store/auth'
+import { clearQueryCache } from '../main'
 import type { ApiEnvelope } from '../types/api'
 
 // Axios 实例 + 拦截器。
@@ -42,8 +43,9 @@ apiClient.interceptors.response.use(
   (error: AxiosError<ApiEnvelope<unknown>>) => {
     const status = error.response?.status
     if (status === 401) {
-      // token 失效：清登录态，跳登录页
+      // token 失效：清登录态 + 清数据缓存（旧租户数据绝不残留），跳登录页
       useAuthStore.getState().clearAuth()
+      clearQueryCache()
       antdMessage.error('登录已过期，请重新登录')
       // 用 location 跳转避免在拦截器里耦合 router
       window.location.href = '/login'

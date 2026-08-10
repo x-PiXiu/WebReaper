@@ -4,6 +4,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
+import { clearQueryCache } from '../main'
 import { businessApi } from '../api/business'
 
 const { Header, Sider, Content } = Layout
@@ -75,6 +76,7 @@ export function AppShell({
 
   const handleLogout = () => {
     clearAuth()
+    clearQueryCache() // 清数据缓存——防止下一账号看到上一账号的缓存数据
     navigate('/login', { replace: true })
   }
 

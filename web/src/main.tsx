@@ -10,6 +10,12 @@ import './index.css'
 
 const queryClient = new QueryClient()
 
+// 全局登出清理：清空 React Query 缓存（避免旧租户/旧账号的数据残留闪现）。
+// 401 强制重新登录与手动退出都调用——不同账号间切换绝不显示他人缓存数据。
+export function clearQueryCache() {
+  queryClient.clear()
+}
+
 // 暗色主题配置
 const darkThemeConfig = {
   algorithm: antdTheme.darkAlgorithm,

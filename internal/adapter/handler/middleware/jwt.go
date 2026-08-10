@@ -45,6 +45,14 @@ func JWTAuth(tokenParser *authadapter.JWTGenerator) gin.HandlerFunc {
 			return
 		}
 
+		// 租户隔离铁律：token 必须携带租户归属（租户隔离升级前签发的旧 token
+		// 无 tenant_id，空租户在仓储层 = 不过滤 = 越权看全局）。
+		// 空租户直接 401，强制客户端重新登录（登录时会兜底分配租户）。
+		if claims.TenantID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": 40103, "msg": "登录态已过期（租户隔离升级），请重新登录"})
+			return
+		}
+
 		// 注入用户身份信息供后续 handler 使用
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
@@ -79,8 +87,8 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 }
 
 // CurrentTenantID 从 gin.Context 取当前请求的租户 ID。
-// merchant 返回其 tenant_id；admin 返回空（看全局，仓储层据此跳过过滤）。
-// 供 handler 传给用例做数据隔离。
+// 已由 JWTAuth 中间件保证非空（租户隔离铁律：空租户 401）——
+// 商户与 admin 在各自上下文都携带明确租户，仓储层据此隔离。
 func CurrentTenantID(c *gin.Context) string {
 	v, ok := c.Get("tenant_id")
 	if !ok {
