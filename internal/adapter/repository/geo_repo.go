@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -348,6 +349,14 @@ func (r *GormOptimizedContentRepository) ListPublished(ctx context.Context) ([]e
 		out = append(out, optimizedContentFromPO(p))
 	}
 	return out, nil
+}
+
+// UpdateIndexStatus 更新内容收录状态（收录验证任务用；tenantID 限定租户防越权）。
+func (r *GormOptimizedContentRepository) UpdateIndexStatus(ctx context.Context, tenantID, id, status string, indexedAt time.Time) error {
+	return applyTenantScope(r.db.WithContext(ctx), tenantID).
+		Model(&OptimizedContentPO{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"index_status": status, "indexed_at": indexedAt}).Error
 }
 
 func (r *GormOptimizedContentRepository) Count(ctx context.Context) (int, error) {

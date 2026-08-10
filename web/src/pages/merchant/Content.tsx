@@ -528,6 +528,12 @@ export default function Content() {
                           ) : (
                             <Tag style={{ margin: 0, fontSize: 11 }}>草稿</Tag>
                           )}
+                          {c.status === 'published' && c.index_status === 'indexed' && (
+                            <Tag color="green" style={{ margin: 0, fontSize: 11 }}>已收录</Tag>
+                          )}
+                          {c.status === 'published' && c.index_status === 'pending' && (
+                            <Tag color="warning" style={{ margin: 0, fontSize: 11 }}>待收录</Tag>
+                          )}
                         </Space>
                         <Text type="secondary" style={{ fontSize: 12 }}>v{c.version}</Text>
                       </div>

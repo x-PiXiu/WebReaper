@@ -58,7 +58,7 @@ func optimizedContentToPO(e entity.OptimizedContent) OptimizedContentPO {
 		OriginalText: e.OriginalText, OptimizedText: e.OptimizedText, Version: e.Version,
 		ScoreTotal: e.Score.Total, Authority: e.Score.Authority, Specificity: e.Score.Specificity,
 		Structure: e.Score.Structure, Uniqueness: e.Score.Uniqueness, Recency: e.Score.Recency,
-		Status: e.Status, CreatedAt: e.CreatedAt,
+		Status: e.Status, IndexStatus: e.IndexStatus, IndexedAt: e.IndexedAt, CreatedAt: e.CreatedAt,
 	}
 }
 
@@ -70,6 +70,6 @@ func optimizedContentFromPO(p OptimizedContentPO) entity.OptimizedContent {
 			Total: p.ScoreTotal, Authority: p.Authority, Specificity: p.Specificity,
 			Structure: p.Structure, Uniqueness: p.Uniqueness, Recency: p.Recency,
 		},
-		Status: p.Status, CreatedAt: p.CreatedAt,
+		Status: p.Status, IndexStatus: p.IndexStatus, IndexedAt: p.IndexedAt, CreatedAt: p.CreatedAt,
 	}
 }

@@ -303,6 +303,11 @@ func (uc *ContentUseCase) AdminSetStatus(ctx context.Context, contentID, status 
 		return oc, nil // 幂等
 	}
 	oc.Status = status
+	if status == "published" {
+		// 发布即进入"待收录"（收录验证任务每日查询后回写 indexed）
+		oc.IndexStatus = entity.IndexStatusPending
+		oc.IndexedAt = time.Time{}
+	}
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
 	}
@@ -357,6 +362,11 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 	}
 
 	oc.Status = status
+	if status == "published" {
+		// 发布即进入"待收录"（收录验证任务每日查询后回写 indexed）
+		oc.IndexStatus = entity.IndexStatusPending
+		oc.IndexedAt = time.Time{}
+	}
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
 	}

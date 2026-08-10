@@ -221,6 +221,8 @@ export interface OptimizedContent {
   score_before?: GeoScore
   recommendations?: string[]
   status: string
+  index_status?: string  // 收录状态：pending（已提交未收录）/ indexed（已收录）/ error（查询失败）
+  indexed_at?: string    // 收录确认时间
   created_at: string
 }
 

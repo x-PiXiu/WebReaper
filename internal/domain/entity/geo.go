@@ -150,9 +150,18 @@ type OptimizedContent struct {
 	OptimizedText string   // AI 优化后的内容
 	Version       int      // 版本号
 	Score         GEOScore
-	Status        string   // draft/approved/published
+	Status        string    // draft/approved/published
+	IndexStatus   string    // 收录状态：pending（已提交未收录）/ indexed（已收录）/ error（查询失败）
+	IndexedAt     time.Time // 收录确认时间
 	CreatedAt     time.Time
 }
+
+// 收录状态常量（收录验证任务写入，公开站点/管理后台展示）。
+const (
+	IndexStatusPending = "pending" // 已提交 IndexNow，尚未被收录
+	IndexStatusIndexed = "indexed" // 已被 Bing 收录
+	IndexStatusError   = "error"   // 查询失败（网络/key 问题），保留上次状态
+)
 
 // IsValid 领域规则。
 func (o OptimizedContent) IsValid() bool {

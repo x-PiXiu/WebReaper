@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"webreaper/internal/domain/entity"
 )
@@ -68,4 +69,7 @@ type OptimizedContentRepository interface {
 	// ListAll 全平台内容列表（admin 旁路——仅管理后台全局管理端点调用；
 	// 可按状态过滤，limit<=0 返回全部）。
 	ListAll(ctx context.Context, status string, limit int) ([]entity.OptimizedContent, error)
+	// UpdateIndexStatus 更新内容收录状态（收录验证任务用；status 为空表示
+	// 从未验证过——发布后初始写入 pending）。
+	UpdateIndexStatus(ctx context.Context, tenantID, id, status string, indexedAt time.Time) error
 }

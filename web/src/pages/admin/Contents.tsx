@@ -13,6 +13,13 @@ const statusMeta: Record<string, { color: string; label: string }> = {
   published: { color: 'success', label: '已发布' },
 }
 
+// 收录状态（IndexNow 提交 ≠ 被收录；收录验证任务每日回写）
+const indexMeta: Record<string, { color: string; label: string }> = {
+  indexed: { color: 'success', label: '已收录' },
+  pending: { color: 'warning', label: '待收录' },
+  error: { color: 'error', label: '查询失败' },
+}
+
 function scoreColor(s: number): string {
   if (s >= 80) return 'var(--wr-success)'
   if (s >= 65) return 'var(--wr-accent)'
@@ -86,6 +93,15 @@ export default function AdminContents() {
       title: '状态', dataIndex: 'status', key: 'status', width: 110,
       render: (s: string) => {
         const meta = statusMeta[s] || { color: 'default', label: s }
+        return <Tag color={meta.color}>{meta.label}</Tag>
+      },
+    },
+    {
+      title: '收录', dataIndex: 'index_status', key: 'index_status', width: 100,
+      render: (s: string, r: OptimizedContent) => {
+        if (r.status !== 'published') return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+        if (!s) return <Tag color="default">未验证</Tag>
+        const meta = indexMeta[s] || { color: 'default', label: s }
         return <Tag color={meta.color}>{meta.label}</Tag>
       },
     },

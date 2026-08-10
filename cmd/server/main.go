@@ -16,6 +16,7 @@ import (
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
 	authadapter "webreaper/internal/adapter/auth"
+	"webreaper/internal/adapter/bing"
 	"webreaper/internal/adapter/crawler"
 	"webreaper/internal/adapter/crypto"
 	"webreaper/internal/adapter/embedding"
@@ -473,6 +474,14 @@ func main() {
 	// 自动复测：发布 7 天后自动复测提及率并通知（效果追踪闭环）
 	if geoPublishUC != nil && accountRepos != nil {
 		_ = taskScheduler.Register(scheduledtask.NewAutoRecheckTask(accountRepos.job, geoPublishUC, notifyUC, settingRepo, log))
+	}
+	// 收录状态验证：每日查询已发布内容是否被 Bing 真正收录（IndexNow 提交 ≠ 收录）
+	if geoRepos != nil {
+		var indexChecker port.IndexStatusChecker
+		if cfg.Server.BingAPIKey != "" {
+			indexChecker = bing.NewChecker(cfg.Server.BingAPIKey, cfg.Server.BingSiteURL)
+		}
+		_ = taskScheduler.Register(scheduledtask.NewIndexCheckTask(geoRepos.content, indexChecker, cfg.Server.PublicBaseURL, log))
 	}
 	taskScheduler.Start(schedulerCtx)
 

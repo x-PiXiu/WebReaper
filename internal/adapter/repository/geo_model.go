@@ -75,6 +75,8 @@ type OptimizedContentPO struct {
 	Uniqueness    float64   `gorm:"type:decimal(5,2)"`
 	Recency       float64   `gorm:"type:decimal(5,2)"`
 	Status        string    `gorm:"size:32"`
+	IndexStatus   string    `gorm:"size:16"` // 收录状态：pending/indexed/error
+	IndexedAt     time.Time // 收录确认时间
 	CreatedAt     time.Time
 }
 

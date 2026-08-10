@@ -117,6 +117,11 @@ type ServerConfig struct {
 	// 配置后：内容发布为 published 时自动通知 Bing/Yandex 收录，替代人工提交 sitemap。
 	// Key 文件由公开站端点 /public/indexnow-key.txt 托管（keyLocation 指向它）。
 	IndexNowKey string
+	// BingAPIKey Bing 站长 API 密钥（可选，收录状态验证用）。
+	// 配置后：每日收录验证任务查询已发布内容是否被真正收录并回写状态。
+	BingAPIKey string
+	// BingSiteURL Bing 已验证的站点地址（如 https://content.example.com）。
+	BingSiteURL string
 	// AutoMonitorEnabled 是否启用每日自动监测（AUTO_MONITOR_ENABLED=true）。
 	// 启用后调度器每天对全平台品牌执行一次监测，趋势图自动生长。
 	AutoMonitorEnabled bool
@@ -239,6 +244,8 @@ func Load() Config {
 			Env:           getenvDefault("APP_ENV", "development"),
 			PublicBaseURL: getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
 			IndexNowKey:   os.Getenv("INDEXNOW_KEY"),
+			BingAPIKey:    os.Getenv("BING_API_KEY"),
+			BingSiteURL:   os.Getenv("BING_SITE_URL"),
 			AutoMonitorEnabled: os.Getenv("AUTO_MONITOR_ENABLED") == "true",
 		},
 		DB: DBConfig{

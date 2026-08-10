@@ -560,6 +560,19 @@ func (r *MockOptimizedContentRepository) ListAll(_ context.Context, status strin
 	return out, nil
 }
 
+// UpdateIndexStatus 更新内容收录状态（mock：直接改内存记录）。
+func (r *MockOptimizedContentRepository) UpdateIndexStatus(_ context.Context, tenantID, id, status string, indexedAt time.Time) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	c, ok := r.recs[id]
+	if !ok || c.TenantID != tenantID {
+		return nil
+	}
+	c.IndexStatus = status
+	c.IndexedAt = indexedAt
+	r.recs[id] = c
+	return nil
+}
+
 // ---- 收录提交日志 mock ----
 
 // MockIndexingLogRepository 是 port.IndexingLogRepository 的内存实现。
