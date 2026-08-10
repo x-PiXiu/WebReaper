@@ -4,24 +4,51 @@ import {
   AppstoreOutlined,
   SearchOutlined,
   EditOutlined,
+  VideoCameraOutlined,
   UserOutlined,
   ExportOutlined,
   MessageOutlined,
 } from '@ant-design/icons'
 
-// 商户端布局：GEO 核心功能菜单。
-// 菜单按功能分组：概览 / 资产管理 / 内容运营
+// 商户端布局：分组导航（概览 / 资产 / 创作 / 分发 / AI 助手）。
+// AntD Menu group 分组渲染，选中态 Linear 化（CSS 覆盖）。
 const merchantMenu: NavItem[] = [
-  { key: '/m', label: '数据驾驶舱', icon: <DashboardOutlined /> },
-  { key: '/m/brands', label: '品牌管理', icon: <AppstoreOutlined /> },
-  { key: '/m/keywords', label: '关键词管理', icon: <SearchOutlined /> },
-  { key: '/m/content', label: '内容工作台', icon: <EditOutlined /> },
-  { key: '/m/accounts', label: '账号管理', icon: <UserOutlined /> },
-  { key: '/m/publish', label: '内容发布', icon: <ExportOutlined /> },
-  { key: '/m/chat', label: 'AI 对话', icon: <MessageOutlined /> },
+  {
+    key: 'overview', label: '概览',
+    children: [
+      { key: '/m', label: '数据驾驶舱', icon: <DashboardOutlined /> },
+    ],
+  },
+  {
+    key: 'assets', label: '资产',
+    children: [
+      { key: '/m/brands', label: '品牌管理', icon: <AppstoreOutlined /> },
+      { key: '/m/keywords', label: '关键词管理', icon: <SearchOutlined /> },
+    ],
+  },
+  {
+    key: 'creation', label: '创作',
+    children: [
+      { key: '/m/content', label: '内容工作台', icon: <EditOutlined /> },
+      { key: '/m/video', label: '视频工作台', icon: <VideoCameraOutlined /> },
+    ],
+  },
+  {
+    key: 'distribution', label: '分发',
+    children: [
+      { key: '/m/accounts', label: '账号管理', icon: <UserOutlined /> },
+      { key: '/m/publish', label: '内容发布', icon: <ExportOutlined /> },
+    ],
+  },
+  {
+    key: 'assistant', label: 'AI 助手',
+    children: [
+      { key: '/m/chat', label: 'AI 对话', icon: <MessageOutlined /> },
+    ],
+  },
 ]
 
 // 商户端布局。
 export default function MerchantLayout() {
-  return <AppShell menuItems={merchantMenu} brandName="GEO 商户端" brandIcon="G" noPaddingKeys={['/m/chat']} />
+  return <AppShell menuItems={merchantMenu} brandName="WebReaper" brandIcon="W" noPaddingKeys={['/m/chat']} />
 }

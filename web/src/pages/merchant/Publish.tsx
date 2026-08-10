@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Brand, OptimizedContent, Account, PublishJob } from '../../types/api'
 
-const { Title, Text, Paragraph } = Typography
+const { Text, Paragraph } = Typography
 
 // 评分 → 颜色
 function scoreColor(s: number): string {
@@ -262,13 +262,9 @@ export default function Publish() {
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* Hero 区 */}
-        <div style={{ marginBottom: 28 }}>
-          <Title level={3} style={{ margin: 0, fontSize: 28, letterSpacing: '-0.03em' }}>
-            内容发布
-          </Title>
-          <Text type="secondary" style={{ fontSize: 14 }}>
-            将内容工作台生成的文章一键发布到各社媒平台
-          </Text>
+        <div className="wr-page-header">
+          <h1>内容发布</h1>
+          <p>将内容工作台生成的文章一键发布到各社媒平台</p>
         </div>
 
         {/* 品牌选择 */}

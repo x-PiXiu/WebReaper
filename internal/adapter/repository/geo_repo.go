@@ -304,8 +304,13 @@ func (r *GormOptimizedContentRepository) FindMaxVersion(ctx context.Context, ten
 
 // FindPublishedByID 公开查询：按 ID 查已发布内容（不限定租户、不限定 status 之外的任何条件）。
 // 未发布（draft）内容对公网不可见——返回 pkg.ErrNotFound。
-func (r *GormOptimizedContentRepository) FindPublishedByID(ctx context.Context, id string) (entity.OptimizedContent, error) {
-	var po OptimizedContentPO
+// Delete 删除优化内容（物理删除；管理后台/内容工作台用）。
+func (r *GormOptimizedContentRepository) Delete(ctx context.Context, tenantID, id string) error {
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	return q.Where("id = ?", id).Delete(&OptimizedContentPO{}).Error
+}
+
+func (r *GormOptimizedContentRepository) FindPublishedByID(ctx context.Context, id string) (entity.OptimizedContent, error) {	var po OptimizedContentPO
 	err := r.db.WithContext(ctx).Where("id = ? AND status = ?", id, "published").First(&po).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return entity.OptimizedContent{}, pkg.ErrNotFound

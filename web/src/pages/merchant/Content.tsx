@@ -6,7 +6,7 @@ import { businessApi } from '../../api/business'
 import { getToken } from '../../store/auth'
 import type { Brand, Keyword, OptimizedContent } from '../../types/api'
 
-const { Title, Text, Paragraph } = Typography
+const { Text, Paragraph } = Typography
 const { TextArea } = Input
 
 // 评分 → 颜色（沿用项目 token，双主题自适应）
@@ -205,13 +205,9 @@ export default function Content() {
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* ① Hero 区 */}
-        <div style={{ marginBottom: 28 }}>
-          <Title level={3} style={{ margin: 0, fontSize: 28, letterSpacing: '-0.03em' }}>
-            内容工作台
-          </Title>
-          <Text type="secondary" style={{ fontSize: 14 }}>
-            AI 原创生成与 GEO 优化，提升品牌在 AI 搜索引擎中的可见度
-          </Text>
+        <div className="wr-page-header">
+          <h1>内容工作台</h1>
+          <p>AI 原创生成与 GEO 优化，提升品牌在 AI 搜索引擎中的可见度</p>
         </div>
 
         {/* ② 品牌上下文条 */}

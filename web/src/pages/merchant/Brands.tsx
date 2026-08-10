@@ -119,25 +119,21 @@ export default function Brands() {
 
   return (
     <div className="wr-page-content" style={{ paddingTop: 0 }}>
-      {/* Hero 区 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, padding: '8px 0' }}>
+      {/* 页面标题区（Linear 式）*/}
+      <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
-          <Title level={3} style={{ margin: 0, fontSize: 28, letterSpacing: '-0.03em' }}>
-            品牌管理
-          </Title>
-          <Text type="secondary" style={{ fontSize: 14 }}>
-            管理品牌资产与关键词，AI 据此监测可见度并生成优化内容
-          </Text>
+          <h1>品牌管理</h1>
+          <p>管理品牌资产与关键词，AI 据此监测可见度并生成优化内容</p>
         </div>
         <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>
           创建品牌
         </Button>
       </div>
 
-      {/* 左右分栏：品牌列表 + 详情面板 */}
-      <div style={{ display: 'flex', gap: 16, minHeight: 'calc(100vh - 180px)' }}>
+      {/* 左右分栏：品牌列表 + 详情面板（玻璃卡片）*/}
+      <div style={{ display: 'flex', gap: 16, minHeight: 'calc(100vh - 200px)' }}>
         {/* 左：品牌列表 */}
-        <div style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="wr-glass-card" style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: 16 }}>
           {/* 搜索框 */}
           <AntInput
             prefix={<SearchOutlined style={{ color: 'var(--wr-text-muted)' }} />}
@@ -219,13 +215,8 @@ export default function Brands() {
         <div style={{ flex: 1, minWidth: 0 }}>
           {selectedBrand ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* 品牌信息区 */}
-              <div style={{
-                padding: 24,
-                background: 'var(--wr-bg-surface)',
-                borderRadius: 12,
-                border: '1px solid var(--wr-border)',
-              }}>
+              {/* 品牌信息区（玻璃卡片）*/}
+              <div className="wr-glass-card" style={{ padding: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                   <Title level={4} style={{ margin: 0, fontSize: 22 }}>{selectedBrand.name}</Title>
                   <Button
@@ -273,14 +264,8 @@ export default function Brands() {
                 )}
               </div>
 
-              {/* 关键词管理区 */}
-              <div style={{
-                padding: 24,
-                background: 'var(--wr-bg-surface)',
-                borderRadius: 12,
-                border: '1px solid var(--wr-border)',
-                flex: 1,
-              }}>
+              {/* 关键词管理区（玻璃卡片）*/}
+              <div className="wr-glass-card" style={{ padding: 24, flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Space>
                     <Text strong style={{ fontSize: 16 }}>关键词</Text>
@@ -312,14 +297,11 @@ export default function Brands() {
               </div>
             </div>
           ) : (
-            <div style={{
+            <div className="wr-glass-card" style={{
               height: '100%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: 'var(--wr-bg-surface)',
-              borderRadius: 12,
-              border: '1px solid var(--wr-border)',
             }}>
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}

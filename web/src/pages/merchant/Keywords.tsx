@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Brand, Keyword, MonitoringResult, LLMConfig } from '../../types/api'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 type SourceType = 'mine' | 'brand' | 'text' | 'seed' | 'file' | 'web'
@@ -303,10 +303,11 @@ export default function Keywords() {
   ]
 
   return (
-    <div className="wr-page-content">
-      <div style={{ marginBottom: 24 }}>
-        <Title level={4} style={{ margin: 0, fontSize: 26, letterSpacing: '-0.03em' }}>关键词管理</Title>
-        <Text type="secondary" style={{ fontSize: 14 }}>多来源关键词蒸馏 · 监测结果一览</Text>
+    <div className="wr-page-content wr-aurora-bg" style={{ position: 'relative' }}>
+      <div style={{ position: 'relative', zIndex: 1 }}>
+      <div className="wr-page-header">
+        <h1>关键词管理</h1>
+        <p>多来源关键词蒸馏 · 结构化生成 · 监测结果一览</p>
       </div>
 
       <Card className="wr-glass-card" styles={{ body: { padding: 24 } }}>
@@ -480,6 +481,7 @@ export default function Keywords() {
           </>
         )}
       </Card>
+      </div>
     </div>
   )
 }

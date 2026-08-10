@@ -15,9 +15,12 @@ import Content from './pages/merchant/Content'
 import Keywords from './pages/merchant/Keywords'
 import Accounts from './pages/merchant/Accounts'
 import Publish from './pages/merchant/Publish'
+import VideoWorkbench from './pages/merchant/Video'
 // 管理端额外页面
 import AdminUsers from './pages/admin/Users'
 import Indexing from './pages/admin/Indexing'
+import AdminBrands from './pages/admin/Brands'
+import AdminContents from './pages/admin/Contents'
 // 布局与守卫
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
@@ -36,6 +39,7 @@ export default function App() {
           <Route path="/m/brands" element={<Brands />} />
           <Route path="/m/keywords" element={<Keywords />} />
           <Route path="/m/content" element={<Content />} />
+          <Route path="/m/video" element={<VideoWorkbench />} />
           <Route path="/m/accounts" element={<Accounts />} />
           <Route path="/m/publish" element={<Publish />} />
           <Route path="/m/chat" element={<Chat />} />
@@ -45,6 +49,8 @@ export default function App() {
         <Route element={<ProtectedRoute role="admin"><AdminLayout /></ProtectedRoute>}>
           <Route path="/admin" element={<Dashboard />} />
           <Route path="/admin/users" element={<AdminUsers />} />
+          <Route path="/admin/brands" element={<AdminBrands />} />
+          <Route path="/admin/contents" element={<AdminContents />} />
           <Route path="/admin/agent-configs" element={<AgentConfigs />} />
           <Route path="/admin/data" element={<DataItems />} />
           <Route path="/admin/tasks" element={<Tasks />} />

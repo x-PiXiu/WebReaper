@@ -496,6 +496,17 @@ func (r *MockOptimizedContentRepository) FindMaxVersion(_ context.Context, tenan
 }
 
 // FindPublishedByID 公开查询：仅返回已发布内容。
+// Delete 删除优化内容（mock：从 map 移除）。
+func (r *MockOptimizedContentRepository) Delete(_ context.Context, tenantID, id string) error {
+	r.mu.Lock(); defer r.mu.Unlock()
+	c, ok := r.recs[id]
+	if !ok || c.TenantID != tenantID {
+		return nil
+	}
+	delete(r.recs, id)
+	return nil
+}
+
 func (r *MockOptimizedContentRepository) FindPublishedByID(_ context.Context, id string) (entity.OptimizedContent, error) {
 	r.mu.Lock(); defer r.mu.Unlock()
 	c, ok := r.recs[id]

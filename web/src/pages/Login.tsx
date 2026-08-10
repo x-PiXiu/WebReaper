@@ -15,8 +15,8 @@ export default function Login() {
       const res = await authApi.login(values)
       setAuth(res.token, res.username || values.username, res.role, res.tenant_id)
       message.success('登录成功')
-      const home = res.role === 'admin' ? '/admin' : '/m'
-      navigate(home, { replace: true })
+      // 统一先进用户界面（管理后台从用户界面顶栏入口进入）
+      navigate('/m', { replace: true })
     } catch {
     } finally {
       setLoading(false)

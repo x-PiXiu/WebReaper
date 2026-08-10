@@ -272,3 +272,34 @@ export interface IndexingSubmitLog {
   error_msg: string
   submitted_at: string
 }
+
+// ---- 视频生成工作台 ----
+export interface VideoTask {
+  id: string
+  tenant_id: string
+  brand_id?: string
+  mode: string            // text / material
+  prompt: string
+  material_url: string
+  status: string          // pending / generating / dubbing / composing / ready / failed
+  video_url: string
+  voice_text: string
+  voice_url: string
+  final_url: string
+  duration_sec: number
+  error: string
+  created_at: string
+  updated_at: string
+}
+
+export interface VideoJob {
+  id: string
+  tenant_id: string
+  task_id: string
+  account_id: string
+  platform: string
+  status: string          // pending / publishing / published / failed
+  external_url: string
+  error: string
+  created_at: string
+}

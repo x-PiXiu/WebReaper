@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { TaskView, AgentConfig, LLMConfig, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog } from '../types/api'
+import type { TaskView, AgentConfig, LLMConfig, DataItem, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -181,6 +181,10 @@ export const businessApi = {
   setContentStatus: (brandId: string, contentId: string, status: 'draft' | 'published') =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/${contentId}/status`, { status }),
 
+  // 删除内容（内容工作台/管理后台）
+  deleteContent: (brandId: string, contentId: string) =>
+    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/geo/brands/${brandId}/contents/${contentId}`),
+
   // ---- GEO 平台账号（扫码绑定）----
   listAccounts: () =>
     apiClient.get<unknown, Account[]>('/api/v1/geo/accounts'),
@@ -240,4 +244,20 @@ export const businessApi = {
 
   updateTavilyKey: (data: { enabled: boolean; api_key?: string }) =>
     apiClient.put<unknown, { name: string; enabled: boolean; note: string }>('/api/v1/admin/tavily-key', data),
+
+  // ---- 视频生成工作台（Vidu 流水线）----
+  submitVideoTask: (data: { mode: string; prompt?: string; material_url?: string; brand_id?: string; voice_text?: string }) =>
+    apiClient.post<unknown, VideoTask>('/api/v1/video/tasks', data),
+
+  getVideoTask: (id: string) =>
+    apiClient.get<unknown, VideoTask>(`/api/v1/video/tasks/${id}`),
+
+  listVideoTasks: () =>
+    apiClient.get<unknown, VideoTask[]>('/api/v1/video/tasks'),
+
+  publishVideoTask: (data: { task_id: string; platform: string; account_id?: string }) =>
+    apiClient.post<unknown, VideoJob>('/api/v1/video/tasks/publish', data),
+
+  listVideoJobs: () =>
+    apiClient.get<unknown, VideoJob[]>('/api/v1/video/jobs'),
 }

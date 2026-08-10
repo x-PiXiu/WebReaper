@@ -1,0 +1,197 @@
+import { Typography, Table, Tag, Space, Button, message, Popconfirm, Select, Empty, Drawer } from 'antd'
+import { DeleteOutlined, EyeOutlined, SwapOutlined } from '@ant-design/icons'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { businessApi } from '../../api/business'
+import type { Brand, OptimizedContent } from '../../types/api'
+
+const { Text } = Typography
+
+const statusMeta: Record<string, { color: string; label: string }> = {
+  draft: { color: 'default', label: '草稿' },
+  approved: { color: 'processing', label: '已审核' },
+  published: { color: 'success', label: '已发布(公网可爬)' },
+}
+
+function scoreColor(s: number): string {
+  if (s >= 80) return 'var(--wr-success)'
+  if (s >= 65) return 'var(--wr-accent)'
+  if (s >= 50) return 'var(--wr-warning)'
+  return 'var(--wr-danger)'
+}
+
+// 内容统一管理（管理后台）：全平台优化内容一览 + 状态强制流转 + 预览 + 删除。
+export default function AdminContents() {
+  const queryClient = useQueryClient()
+  const [brandFilter, setBrandFilter] = useState<string>()
+  const [statusFilter, setStatusFilter] = useState<string>()
+  const [preview, setPreview] = useState<OptimizedContent | null>(null)
+
+  const { data: brands = [] } = useQuery({
+    queryKey: ['admin-brands'],
+    queryFn: () => businessApi.listBrands(),
+  })
+
+  // 内容按品牌分批拉取（admin 租户为空 = 全局）
+  const { data: contentsByBrand = [] } = useQuery({
+    queryKey: ['admin-contents', brands.map((b: Brand) => b.id).join(',')],
+    queryFn: async () => {
+      const lists = await Promise.all(
+        brands.map((b: Brand) => businessApi.listContents(b.id).catch(() => []))
+      )
+      return lists.flat()
+    },
+    enabled: brands.length > 0,
+  })
+
+  const contents = contentsByBrand
+    .filter((c: OptimizedContent) => !brandFilter || c.brand_id === brandFilter)
+    .filter((c: OptimizedContent) => !statusFilter || c.status === statusFilter)
+
+  const brandName = (id: string) => brands.find((b: Brand) => b.id === id)?.name || id.slice(0, 10)
+
+  const handleToggleStatus = async (c: OptimizedContent) => {
+    const next = c.status === 'published' ? 'draft' : 'published'
+    try {
+      await businessApi.setContentStatus(c.brand_id, c.id, next)
+      message.success(`已${next === 'published' ? '发布到公开站' : '下架'}`)
+      queryClient.invalidateQueries({ queryKey: ['admin-contents'] })
+    } catch { message.error('状态流转失败') }
+  }
+
+  const handleDelete = async (c: OptimizedContent) => {
+    try {
+      await businessApi.deleteContent(c.brand_id, c.id)
+      message.success('内容已删除')
+      queryClient.invalidateQueries({ queryKey: ['admin-contents'] })
+    } catch { message.error('删除失败') }
+  }
+
+  const columns = [
+    {
+      title: '标题', dataIndex: 'title', key: 'title', ellipsis: true,
+      render: (t: string, r: OptimizedContent) => (
+        <Space direction="vertical" size={0}>
+          <Text strong style={{ fontSize: 13.5 }}>{t || '(无标题)'}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>{r.id}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: '品牌', dataIndex: 'brand_id', key: 'brand_id', width: 130,
+      render: (id: string) => <Tag>{brandName(id)}</Tag>,
+    },
+    {
+      title: '状态', dataIndex: 'status', key: 'status', width: 120,
+      render: (s: string) => {
+        const meta = statusMeta[s] || { color: 'default', label: s }
+        return <Tag color={meta.color}>{meta.label}</Tag>
+      },
+    },
+    {
+      title: 'GEO 评分', dataIndex: ['score', 'total'], key: 'score', width: 100,
+      render: (v: number, r: OptimizedContent) => (
+        <Text strong style={{ color: scoreColor(v || r.score?.total || 0), fontSize: 14 }}>
+          {(v || r.score?.total || 0).toFixed(0)}
+        </Text>
+      ),
+    },
+    {
+      title: '版本', dataIndex: 'version', key: 'version', width: 70,
+      render: (v: number) => <Text type="secondary">v{v}</Text>,
+    },
+    {
+      title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 140,
+      render: (t: string) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.slice(0, 10)}</Text>,
+    },
+    {
+      title: '操作', key: 'action', width: 190,
+      render: (_: unknown, r: OptimizedContent) => (
+        <Space size={4}>
+          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setPreview(r)}>预览</Button>
+          <Button
+            size="small" type="text" icon={<SwapOutlined />}
+            onClick={() => handleToggleStatus(r)}
+            style={{ color: r.status === 'published' ? 'var(--wr-warning)' : 'var(--wr-success)' }}
+          >
+            {r.status === 'published' ? '下架' : '发布'}
+          </Button>
+          <Popconfirm title="删除该内容？" onConfirm={() => handleDelete(r)}>
+            <Button size="small" type="text" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <div className="wr-page-content">
+      <div className="wr-page-header">
+        <h1>内容统一管理</h1>
+        <p>全平台优化内容一览 · 上下架控制 · 公开页预览</p>
+      </div>
+
+      {/* 筛选条 */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+        <Select
+          style={{ width: 200 }}
+          placeholder="按品牌筛选"
+          allowClear
+          value={brandFilter}
+          onChange={setBrandFilter}
+          options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
+        />
+        <Select
+          style={{ width: 160 }}
+          placeholder="按状态筛选"
+          allowClear
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: 'draft', label: '草稿' },
+            { value: 'approved', label: '已审核' },
+            { value: 'published', label: '已发布' },
+          ]}
+        />
+        <Text type="secondary" style={{ alignSelf: 'center', fontSize: 12 }}>
+          {contents.length} 条内容
+        </Text>
+      </div>
+
+      <div className="wr-glass-card" style={{ padding: 8 }}>
+        <Table
+          dataSource={contents}
+          columns={columns}
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 12, size: 'small' }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容" /> }}
+        />
+      </div>
+
+      {/* 预览抽屉：iframe 加载公开页 */}
+      <Drawer
+        title={preview?.title || '内容预览'}
+        width={720}
+        open={!!preview}
+        onClose={() => setPreview(null)}
+      >
+        {preview?.status === 'published' ? (
+          <iframe
+            src={`/public/articles/${preview.id}`}
+            style={{ width: '100%', height: '100%', minHeight: 480, border: '1px solid var(--wr-border)', borderRadius: 10, background: '#fff' }}
+          />
+        ) : (
+          <div style={{ padding: 40, textAlign: 'center' }}>
+            <Text type="secondary">该内容未发布，公开页不可见。可先「发布」再预览。</Text>
+            <div style={{ marginTop: 20 }}>
+              <pre style={{ maxHeight: 400, overflow: 'auto', textAlign: 'left', fontSize: 12 }}>
+                {preview?.optimized_text}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Drawer>
+    </div>
+  )
+}

@@ -60,4 +60,6 @@ type OptimizedContentRepository interface {
 	Count(ctx context.Context) (int, error)
 	// CountPublished 统计已发布内容数（平台总览/公开站点规模用）。
 	CountPublished(ctx context.Context) (int, error)
+	// Delete 删除优化内容（管理后台/内容工作台用）。
+	Delete(ctx context.Context, tenantID, id string) error
 }

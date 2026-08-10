@@ -194,15 +194,17 @@ export function AppShell({
           </Space>
         </Header>
 
-        {/* 内容区 */}
+        {/* 内容区（外层极光背景）*/}
         <Content style={{
           margin: 0,
           padding: noPadding ? 0 : 24,
           minHeight: 'calc(100vh - 60px)',
           overflow: noPadding ? 'hidden' : 'visible',
         }}>
-          <div className="wr-fade-in">
-            <Outlet />
+          <div className="wr-aurora-bg" style={{ minHeight: '100%', borderRadius: 0 }}>
+            <div className="wr-fade-in">
+              <Outlet />
+            </div>
           </div>
         </Content>
       </Layout>

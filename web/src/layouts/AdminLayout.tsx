@@ -12,6 +12,8 @@ const adminMenu: NavItem[] = [
     children: [
       { key: '/admin', label: '平台总览' },
       { key: '/admin/users', label: '商户管理' },
+      { key: '/admin/brands', label: '品牌管理' },
+      { key: '/admin/contents', label: '内容管理' },
     ],
   },
   {

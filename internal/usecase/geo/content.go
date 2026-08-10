@@ -201,6 +201,15 @@ func (uc *ContentUseCase) List(ctx context.Context, tenantID, brandID string) ([
 	return uc.contentRepo.ListByBrand(ctx, tenantID, brandID)
 }
 
+// Delete 删除优化内容（内容工作台/管理后台用）。
+// 先 FindByID 做租户校验（只允许删自己租户的内容），再物理删除。
+func (uc *ContentUseCase) Delete(ctx context.Context, tenantID, contentID string) error {
+	if _, err := uc.contentRepo.FindByID(ctx, tenantID, contentID); err != nil {
+		return err
+	}
+	return uc.contentRepo.Delete(ctx, tenantID, contentID)
+}
+
 // SetStatus 内容状态流转（draft → published 发布到公开站 / published → draft 下线）。
 //
 // 状态语义：

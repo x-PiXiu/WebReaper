@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, Typography, Button, Row, Col, Tag, Space, Popconfirm, Modal, Spin, message, Empty, Table } from 'antd'
-const { Title, Text, Paragraph } = Typography
+const { Text, Paragraph } = Typography
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -170,13 +170,9 @@ export default function Accounts() {
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* Hero 区 */}
-        <div style={{ marginBottom: 28 }}>
-          <Title level={3} style={{ margin: 0, fontSize: 28, letterSpacing: '-0.03em' }}>
-            账号管理
-          </Title>
-          <Text type="secondary" style={{ fontSize: 14 }}>
-            绑定社媒平台账号，支持扫码登录与 cookie 自动续期
-          </Text>
+        <div className="wr-page-header">
+          <h1>账号管理</h1>
+          <p>绑定社媒平台账号，支持扫码登录与 cookie 自动续期</p>
         </div>
 
         {/* 平台账号卡片 */}

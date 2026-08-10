@@ -399,6 +399,17 @@ func (h *GEOHandler) HandleSetContentStatus(c *gin.Context) {
 	success(c, optimizedContentToView(oc))
 }
 
+// HandleDeleteContent DELETE /api/v1/geo/brands/:id/contents/:contentId
+// 删除优化内容（租户校验；删除后公开页立即 404）。
+func (h *GEOHandler) HandleDeleteContent(c *gin.Context) {
+	contentID := c.Param("contentId")
+	if err := h.contentUC.Delete(c.Request.Context(), middleware.CurrentTenantID(c), contentID); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"deleted": true})
+}
+
 // HandleGenerateContent POST /api/v1/geo/brands/:id/contents/generate
 // 从零生成内容：根据品牌信息 + 关键词（单个或多个组合），AI 原创一篇 GEO 优化文章。
 func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
