@@ -26,8 +26,8 @@ import (
 type BrandUseCase struct {
 	brandRepo   port.BrandRepository
 	keywordRepo port.KeywordRepository
-	aiGen       port.AIGenerator  // 可选：关键词生成用
-	webSearch   port.WebSearcher  // 可选：全网搜索（RAG 增强关键词发现）
+	aiGen       port.AIGenerator // 可选：关键词生成用
+	webSearch   port.WebSearcher // 可选：全网搜索（RAG 增强关键词发现）
 }
 
 // WebSearcher 全网搜索抽象（用例层声明，适配器实现）。

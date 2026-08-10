@@ -19,7 +19,7 @@ import (
 // 评分分工（免费快筛 + 深度评审 分层思想）：
 //   - ruleScorer（免费规则评分）：优化前后对比用，零成本、可测。
 //   - scorer（默认 LLM 深评）：最终落库的 Score 用，烧 token 但维度更深。
-//   两套都是 port.GEOScorer，经 SetRuleScorer 注入，未注入时降级为同 scorer。
+//     两套都是 port.GEOScorer，经 SetRuleScorer 注入，未注入时降级为同 scorer。
 //
 // 收录通知（发布副作用）：
 //   - urlSubmitter（IndexNow 等）：内容发布为 published 时自动通知搜索引擎收录。
@@ -148,9 +148,10 @@ type OptimizeInput struct {
 // OptimizeResult 是 Optimize 的返回结果：优化产物 + 前后对比反馈。
 //
 // 设计动机（量化闭环）：
-//   优化是否有效不能靠感觉——ScoreBefore/ScoreAfter 的差值 + Recommendations
-//   让"优化-评分-反馈"形成可验证的闭环（借鉴 geo-optimizer 的 Compare + 建议生成，
-//   但用免费规则评分做对比，不额外烧 token）。
+//
+//	优化是否有效不能靠感觉——ScoreBefore/ScoreAfter 的差值 + Recommendations
+//	让"优化-评分-反馈"形成可验证的闭环（借鉴 geo-optimizer 的 Compare + 建议生成，
+//	但用免费规则评分做对比，不额外烧 token）。
 type OptimizeResult struct {
 	Content         entity.OptimizedContent // 优化产物（含 Score=优化后分数）
 	ScoreBefore     entity.GEOScore         // 优化前的规则评分（免费快筛）
@@ -209,6 +210,8 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 		{Role: "user", Content: userPrompt},
 	}
 	convID := fmt.Sprintf("content-opt-%d", time.Now().UnixNano())
+	// 用量计量上下文（经济系统基础）：租户 + 场景
+	ctx = port.WithUsageContext(ctx, in.TenantID, "content-opt")
 	optimized, err := uc.callGenerator(ctx, convID, in.LLMConfigName, messages, nil)
 	if err != nil {
 		return OptimizeResult{}, fmt.Errorf("优化失败: %w", err)
@@ -431,6 +434,8 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 		{Role: "user", Content: userPrompt},
 	}
 	convID := fmt.Sprintf("content-gen-%d", time.Now().UnixNano())
+	// 用量计量上下文（经济系统基础）：租户 + 场景
+	ctx = port.WithUsageContext(ctx, in.TenantID, "content-gen")
 	content, err := uc.callGenerator(ctx, convID, in.LLMConfigName, messages, onDelta)
 	if err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("生成内容失败: %w", err)

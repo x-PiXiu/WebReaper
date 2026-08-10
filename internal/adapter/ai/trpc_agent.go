@@ -14,8 +14,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"trpc.group/trpc-go/trpc-agent-go/agent"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent"
-	"trpc.group/trpc-go/trpc-agent-go/event"
 	"trpc.group/trpc-go/trpc-agent-go/agent/llmagent/builtin"
+	"trpc.group/trpc-go/trpc-agent-go/event"
 	"trpc.group/trpc-go/trpc-agent-go/model"
 	"trpc.group/trpc-go/trpc-agent-go/model/openai"
 	"trpc.group/trpc-go/trpc-agent-go/runner"
@@ -25,6 +25,7 @@ import (
 	agentadapter "webreaper/internal/adapter/agent"
 	llmadapter "webreaper/internal/adapter/llm"
 	"webreaper/internal/adapter/telemetry"
+	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
 
@@ -54,10 +55,11 @@ type TrpcAgentGenerator struct {
 	mu           sync.RWMutex
 	runners      map[string]runner.Runner
 	sessionSvc   *inmemory.SessionService
-	toolRegistry *port.ToolRegistry    // 全局工具注册表（所有爬虫）
-	llmCache     sync.Map              // map[string]*llmCacheEntry（按 LLMConfigName 缓存，带 TTL）
+	toolRegistry *port.ToolRegistry      // 全局工具注册表（所有爬虫）
+	llmCache     sync.Map                // map[string]*llmCacheEntry（按 LLMConfigName 缓存，带 TTL）
 	memory       port.ConversationMemory // 会话历史（重启后从 DB 恢复上下文）；nil 则不 seed 历史
-	logger       port.Logger           // 日志（注入给 toolAdapter 替代 fmt.Printf）
+	logger       port.Logger             // 日志（注入给 toolAdapter 替代 fmt.Printf）
+	usage        port.UsageRecorder      // LLM 用量计量（可选注入，nil=不记录）——经济系统基础
 }
 
 // 编译期断言：实现 port.AIGenerator。
@@ -80,6 +82,12 @@ func NewTrpcAgentGenerator(llmCfgRepo port.LLMConfigRepository, toolRegistry *po
 // SetMemory 注入会话记忆（支持后装配，用于解决循环依赖或延迟初始化）。
 func (g *TrpcAgentGenerator) SetMemory(m port.ConversationMemory) {
 	g.memory = m
+}
+
+// SetUsageRecorder 注入 LLM 用量记录器（可选；nil 或未注入 = 不计量，行为不变）。
+// 计量上下文（租户/场景）从 ctx 读取（port.WithUsageContext 注入）。
+func (g *TrpcAgentGenerator) SetUsageRecorder(r port.UsageRecorder) {
+	g.usage = r
 }
 
 // resolveLLM 按 llmConfigName 解析并（带 TTL 缓存地）构建 LLM 客户端。
@@ -181,11 +189,15 @@ func (g *TrpcAgentGenerator) ChatStreamWithOptions(ctx context.Context, in port.
 	ctx, span := telemetry.StartSpan(ctx, "ai.chat_stream")
 	defer span.End()
 
-	if len(in.Messages) == 0 { return "", fmt.Errorf("no messages") }
+	if len(in.Messages) == 0 {
+		return "", fmt.Errorf("no messages")
+	}
 
 	// 解析 LLM 客户端（按 llmConfigName，空则 default）
 	llm, err := g.resolveLLM(ctx, in.LLMConfigName)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 
 	// 提取 system prompt（如果有）和最后一条 user 消息
 	var systemPrompt string
@@ -231,7 +243,7 @@ func (g *TrpcAgentGenerator) ChatStreamWithOptions(ctx context.Context, in port.
 			if err != nil {
 				return "", fmt.Errorf("runner run with messages: %w", err)
 			}
-			return g.drainChatStreamEvents(ctx, events, in.OnDelta)
+			return g.drainChatStreamEvents(ctx, events, in.OnDelta, in.LLMConfigName)
 		}
 	}
 
@@ -239,8 +251,10 @@ func (g *TrpcAgentGenerator) ChatStreamWithOptions(ctx context.Context, in port.
 		model.Message{Role: model.RoleUser, Content: lastUser.Content},
 		g.structuredOutputRunOption(in.Options)...,
 	)
-	if err != nil { return "", fmt.Errorf("runner run: %w", err) }
-	return g.drainChatStreamEvents(ctx, events, in.OnDelta)
+	if err != nil {
+		return "", fmt.Errorf("runner run: %w", err)
+	}
+	return g.drainChatStreamEvents(ctx, events, in.OnDelta, in.LLMConfigName)
 }
 
 // structuredOutputRunOption 按选项构造框架结构化输出 RunOption（无则返回空）。
@@ -262,7 +276,7 @@ func (g *TrpcAgentGenerator) structuredOutputRunOption(opts port.ChatOptions) []
 // 抽出为独立方法，避免 ChatStream 在 seed/非 seed 两条路径上重复事件消费逻辑。
 // （谦卑对象模式：事件循环依赖框架难单测，但可测的累加逻辑已在 accumulateUsage 等
 // 纯函数中；此处只是 IO 编排。）
-func (g *TrpcAgentGenerator) drainChatStreamEvents(ctx context.Context, events <-chan *event.Event, onDelta func(delta string)) (string, error) {
+func (g *TrpcAgentGenerator) drainChatStreamEvents(ctx context.Context, events <-chan *event.Event, onDelta func(delta string), llmConfigName string) (string, error) {
 	_, span := telemetry.StartSpan(ctx, "ai.chat_stream.drain")
 	defer span.End()
 
@@ -270,14 +284,18 @@ func (g *TrpcAgentGenerator) drainChatStreamEvents(ctx context.Context, events <
 	var promptTokens, completionTokens, totalTokens, llmCalls int
 	for evt := range events {
 		if evt.IsError() {
-			if evt.Error != nil { return sb.String(), fmt.Errorf("llm error: %v", evt.Error) }
+			if evt.Error != nil {
+				return sb.String(), fmt.Errorf("llm error: %v", evt.Error)
+			}
 			break
 		}
 		if evt.Object == model.ObjectTypeChatCompletionChunk && evt.Response != nil {
 			for _, choice := range evt.Response.Choices {
 				if choice.Delta.Content != "" {
 					sb.WriteString(choice.Delta.Content)
-					if onDelta != nil { onDelta(choice.Delta.Content) }
+					if onDelta != nil {
+						onDelta(choice.Delta.Content)
+					}
 				}
 			}
 		}
@@ -285,7 +303,9 @@ func (g *TrpcAgentGenerator) drainChatStreamEvents(ctx context.Context, events <
 			for _, choice := range evt.Response.Choices {
 				if choice.Message.Content != "" && sb.Len() == 0 {
 					sb.WriteString(choice.Message.Content)
-					if onDelta != nil { onDelta(choice.Message.Content) }
+					if onDelta != nil {
+						onDelta(choice.Message.Content)
+					}
 				}
 			}
 			if evt.Response.Usage != nil {
@@ -310,6 +330,19 @@ func (g *TrpcAgentGenerator) drainChatStreamEvents(ctx context.Context, events <
 			attribute.Int("token.total", totalTokens),
 			attribute.Int("token.llm_calls", llmCalls),
 		)
+		// 用量计量落库（经济系统基础）：租户/场景从 ctx 取（调用方 WithUsageContext 注入），
+		// 后台任务 ctx 无租户则记空（平台消耗）。失败不阻断主流程。
+		if g.usage != nil {
+			_ = g.usage.RecordUsage(ctx, entity.UsageRecord{
+				TenantID:         port.UsageTenantFrom(ctx),
+				Scene:            port.UsageSceneFrom(ctx),
+				LLMConfigName:    llmConfigName,
+				PromptTokens:     promptTokens,
+				CompletionTokens: completionTokens,
+				TotalTokens:      totalTokens,
+				LLMCalls:         llmCalls,
+			})
+		}
 	}
 	return sb.String(), nil
 }
@@ -324,7 +357,9 @@ func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, conversationID st
 	// 解析 LLM 客户端（按 llmConfigName，空则 default）
 	llm, err := g.resolveLLM(ctx, llmConfigName)
 	if err != nil {
-		if onEvent != nil { onEvent(port.ToolEvent{Type: "error", Error: err.Error()}) }
+		if onEvent != nil {
+			onEvent(port.ToolEvent{Type: "error", Error: err.Error()})
+		}
 		return err
 	}
 
@@ -345,7 +380,9 @@ func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, conversationID st
 	// 构建 explorer Agent（有工具用 explorer，无工具用 llmagent）
 	var ag agent.Agent
 	agOpts := []llmagent.Option{llmagent.WithModel(llm)}
-	if systemPrompt != "" { agOpts = append(agOpts, llmagent.WithInstruction(systemPrompt)) }
+	if systemPrompt != "" {
+		agOpts = append(agOpts, llmagent.WithInstruction(systemPrompt))
+	}
 
 	if len(tools) > 0 {
 		ag = builtin.NewExplorer(
@@ -368,13 +405,19 @@ func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, conversationID st
 		sessionID = fmt.Sprintf("adhoc-tools-%d", hashString(task+":"+llmConfigName))
 	}
 	events, err := r.Run(ctx, "chat-user", sessionID, model.Message{Role: model.RoleUser, Content: task})
-	if err != nil { return fmt.Errorf("runner run: %w", err) }
+	if err != nil {
+		return fmt.Errorf("runner run: %w", err)
+	}
 
 	for evt := range events {
 		if evt.IsError() {
 			errMsg := "unknown"
-			if evt.Error != nil { errMsg = evt.Error.Error() }
-			if onEvent != nil { onEvent(port.ToolEvent{Type: "error", Error: errMsg}) }
+			if evt.Error != nil {
+				errMsg = evt.Error.Error()
+			}
+			if onEvent != nil {
+				onEvent(port.ToolEvent{Type: "error", Error: errMsg})
+			}
 			return fmt.Errorf("agent error: %s", errMsg)
 		}
 
@@ -422,12 +465,16 @@ func (g *TrpcAgentGenerator) RunWithTools(ctx context.Context, conversationID st
 		}
 	}
 
-	if onEvent != nil { onEvent(port.ToolEvent{Type: "finish"}) }
+	if onEvent != nil {
+		onEvent(port.ToolEvent{Type: "finish"})
+	}
 	return nil
 }
 
 func truncateStr(s string, maxLen int) string {
-	if len(s) <= maxLen { return s }
+	if len(s) <= maxLen {
+		return s
+	}
 	return s[:maxLen] + "..."
 }
 

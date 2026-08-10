@@ -55,8 +55,8 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 
 	var results []entity.MonitoringResult
 	for _, kw := range kws {
-		// 探测这个关键词
-		probeResult, pErr := uc.probe.Probe(ctx, port.ProbeInput{
+		// 探测这个关键词（用量计量上下文：租户 + 场景）
+		probeResult, pErr := uc.probe.Probe(port.WithUsageContext(ctx, in.TenantID, "monitor"), port.ProbeInput{
 			TenantID:    in.TenantID,
 			Keyword:     kw.Term,
 			EngineName:  in.EngineName,

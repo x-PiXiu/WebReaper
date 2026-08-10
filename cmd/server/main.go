@@ -13,15 +13,15 @@ import (
 
 	"gorm.io/gorm"
 
-	authadapter "webreaper/internal/adapter/auth"
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
+	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/crawler"
 	"webreaper/internal/adapter/crypto"
 	"webreaper/internal/adapter/embedding"
-	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/handler"
 	"webreaper/internal/adapter/lock"
+	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/qrlogin"
@@ -41,14 +41,14 @@ import (
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
-	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/orchestrate"
+	"webreaper/internal/usecase/port"
+	"webreaper/internal/usecase/process"
 	"webreaper/internal/usecase/scheduler"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
-	taskquery "webreaper/internal/usecase/taskquery"
 	taskuc "webreaper/internal/usecase/task"
-	"webreaper/internal/usecase/process"
+	taskquery "webreaper/internal/usecase/taskquery"
 )
 
 func main() {
@@ -177,7 +177,9 @@ func main() {
 	hasher := authadapter.NewBcryptHasher()
 	var tokenGen port.TokenGenerator = authadapter.NewJWTGenerator(cfg.JWT.Secret, cfg.JWT.Expiration)
 	var tokenParser *authadapter.JWTGenerator
-	if cfg.JWT.Secret != "" { tokenParser = tokenGen.(*authadapter.JWTGenerator) }
+	if cfg.JWT.Secret != "" {
+		tokenParser = tokenGen.(*authadapter.JWTGenerator)
+	}
 	registerUC := auth.NewRegisterUseCase(userRepo, hasher)
 	loginUC := auth.NewLoginUseCase(userRepo, hasher, tokenGen)
 
@@ -254,6 +256,15 @@ func main() {
 
 	// GEO 业务装配（商户端核心）。需要 DB + LLM 才启用。
 	geoRepos := initGEORpositories(cfg.DB)
+
+	// LLM 用量计量（经济系统基础）：所有 LLM 调用 token 落库（usages 表），
+	// 支撑后续套餐额度/账单/用量报表——租户与场景由调用方经 ctx 注入。
+	if geoRepos != nil {
+		if gen, ok := aiGenerator.(*ai.TrpcAgentGenerator); ok {
+			gen.SetUsageRecorder(repository.NewGormUsageRecorder(geoRepos.db))
+			log.Info("LLM 用量计量已启用（usages 表，按租户/场景记录 token）")
+		}
+	}
 	// 结构化数据用例（JSON-LD/llms.txt 生成）——纯逻辑零依赖，无 DB/LLM 也可用
 	structuredUC := structured.NewStructuredDataUseCase()
 	router.SetStructured(structuredUC)
@@ -334,19 +345,19 @@ func main() {
 			geoContentUC.SetURLSubmitter(indexNowSubmitter)
 		}
 		geoDiagnoseUC := geo.NewDiagnoseUseCase(geoRepos.brand, geoRepos.result, aiGenerator)
-			router.SetGEO(geoBrandUC, geoMonitorUC, geoRankUC, geoContentUC, geoDiagnoseUC)
+		router.SetGEO(geoBrandUC, geoMonitorUC, geoRankUC, geoContentUC, geoDiagnoseUC)
 
-			// 关键词蒸馏引擎：五种来源策略（策略模式 + 工厂）
-			brandWebSearcher := ai.NewBrandWebSearcher(webFetcher)
-			geoDistillUC := geo.NewKeywordDistillUseCase(
-				ai.NewBrandSource(aiGenerator, geoRepos.brand, brandWebSearcher), // 品牌信息+全网
-				ai.NewTextSource(aiGenerator),                                     // 用户文本
-				ai.NewSeedSource(aiGenerator),                                     // 种子词拓展
-				ai.NewFileSource(aiGenerator),                                     // 文件内容
-				ai.NewWebSource(aiGenerator, webFetcher),                          // 网络爬取
-			)
-			router.SetKeywordDistill(geoDistillUC)
-			log.Info("GEO 业务已启用（品牌监测/排行榜/内容优化/关键词生成/诊断/关键词蒸馏引擎）")
+		// 关键词蒸馏引擎：五种来源策略（策略模式 + 工厂）
+		brandWebSearcher := ai.NewBrandWebSearcher(webFetcher)
+		geoDistillUC := geo.NewKeywordDistillUseCase(
+			ai.NewBrandSource(aiGenerator, geoRepos.brand, brandWebSearcher), // 品牌信息+全网
+			ai.NewTextSource(aiGenerator),                                    // 用户文本
+			ai.NewSeedSource(aiGenerator),                                    // 种子词拓展
+			ai.NewFileSource(aiGenerator),                                    // 文件内容
+			ai.NewWebSource(aiGenerator, webFetcher),                         // 网络爬取
+		)
+		router.SetKeywordDistill(geoDistillUC)
+		log.Info("GEO 业务已启用（品牌监测/排行榜/内容优化/关键词生成/诊断/关键词蒸馏引擎）")
 	} else {
 		log.Info("GEO 业务未启用（需配置 DB + LLM_API_KEY）")
 	}
@@ -445,9 +456,12 @@ func main() {
 
 	go func() {
 		log.Info("HTTP 服务已启动", port.String("port", cfg.Server.Port))
-		if cfg.JWT.Secret == "" { log.Warn("JWT_SECRET 未配置，API 认证已禁用") }
+		if cfg.JWT.Secret == "" {
+			log.Warn("JWT_SECRET 未配置，API 认证已禁用")
+		}
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("服务启动失败", port.Err(err)); os.Exit(1)
+			log.Error("服务启动失败", port.Err(err))
+			os.Exit(1)
 		}
 	}()
 
@@ -479,7 +493,10 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 	}
 	log.Info("连接 MySQL", port.String("host", dbCfg.Host), port.String("db", dbCfg.Name))
 	db, err := repository.NewMySQLDBFromConfig(dbCfg)
-	if err != nil { log.Error("连接数据库失败", port.Err(err)); os.Exit(1) }
+	if err != nil {
+		log.Error("连接数据库失败", port.Err(err))
+		os.Exit(1)
+	}
 	log.Info("MySQL 连接成功")
 	return repository.NewGormDataItemRepository(db),
 		repository.NewGormAgentConfigRepository(db), repository.NewGormLLMConfigRepository(db),

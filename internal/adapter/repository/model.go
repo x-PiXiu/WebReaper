@@ -161,5 +161,7 @@ func allModels() []any {
 		// 发布账号/发布任务表（014_publish_accounts.sql）
 		&AccountPO{},
 		&PublishJobPO{},
+		// LLM 用量计量（经济系统基础，AutoMigrate 自动建表）
+		&UsagePO{},
 	}
 }
