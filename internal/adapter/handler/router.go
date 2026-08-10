@@ -412,6 +412,7 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.GET("/billing/subscriptions", r.HandleAdminListSubscriptions)
 				adminGroup.PUT("/billing/subscriptions/:tenant", r.HandleAdminAssignPlan) // 手动开通（线下收款）
 				adminGroup.GET("/billing/orders", r.HandleAdminListOrders)
+				adminGroup.GET("/billing/revenue", r.HandleAdminRevenueReport) // 收入概览
 			}
 			}
 		}
@@ -420,6 +421,7 @@ func (r *Router) Engine() *gin.Engine {
 	if r.billingUC != nil {
 		api.GET("/billing/plans", r.HandleListActivePlans)
 		api.GET("/billing/my-plan", r.HandleGetMyPlan)
+		api.GET("/billing/usage", r.HandleGetMyUsage) // 配额余量（进度条）
 		api.GET("/billing/orders", r.HandleListMyOrders)
 		api.POST("/billing/orders", r.HandleCreateOrder)              // 下单购买
 		api.POST("/billing/orders/:id/confirm", r.HandleConfirmOrder) // 确认支付（mock 自动/真实回调）

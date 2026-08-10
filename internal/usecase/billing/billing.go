@@ -229,3 +229,96 @@ func (uc *BillingUseCase) AssignPlan(ctx context.Context, tenantID, planID strin
 	}
 	return sub, nil
 }
+
+// ---- 收入报表（admin）----
+
+// RevenueSummary 收入概览（admin 计费后台仪表盘）。
+type RevenueSummary struct {
+	TotalRevenueCents  int               `json:"total_revenue_cents"`  // 累计已支付收入（分）
+	MonthRevenueCents  int               `json:"month_revenue_cents"`  // 当月收入（分）
+	PaidOrders         int               `json:"paid_orders"`          // 已支付订单数
+	ActiveSubscriptions int              `json:"active_subscriptions"` // 有效订阅数
+	PlanDistribution   map[string]int    `json:"plan_distribution"`    // plan_id → 订户数
+}
+
+// RevenueReport 生成收入概览（admin 收入仪表盘用）。
+func (uc *BillingUseCase) RevenueReport(ctx context.Context) (RevenueSummary, error) {
+	orders, err := uc.orderRepo.ListAll(ctx)
+	if err != nil {
+		return RevenueSummary{}, err
+	}
+	subs, err := uc.subRepo.ListAll(ctx)
+	if err != nil {
+		return RevenueSummary{}, err
+	}
+
+	now := time.Now()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	summary := RevenueSummary{
+		PlanDistribution: map[string]int{},
+	}
+	for _, o := range orders {
+		if o.Status == entity.OrderStatusPaid {
+			summary.TotalRevenueCents += o.AmountCents
+			summary.PaidOrders++
+			if !o.PaidAt.Before(monthStart) {
+				summary.MonthRevenueCents += o.AmountCents
+			}
+		}
+	}
+	for _, s := range subs {
+		if s.IsActive(now) {
+			summary.ActiveSubscriptions++
+			summary.PlanDistribution[s.PlanID]++
+		}
+	}
+	return summary, nil
+}
+
+// ---- 商户端用量查询 ----
+
+// MyUsageSummary 我的用量概览（商户端"我的套餐"页用量进度条用）。
+type MyUsageSummary struct {
+	Subscription *entity.Subscription  `json:"subscription"` // 当前订阅（nil=免费降级）
+	Plan         entity.Plan           `json:"plan"`         // 适用套餐
+	Usages       map[string]UsageEntry `json:"usages"`       // 场景→用量详情
+}
+
+// UsageEntry 单场景用量。
+type UsageEntry struct {
+	Limit int `json:"limit"` // 配额上限（-1=无限）
+	Used  int `json:"used"`  // 当前周期已用
+}
+
+// GetMyUsage 取租户用量概览（套餐 + 各场景配额余量）。
+// quotaGate 为 nil 时只返回套餐不含用量（降级）。
+func (uc *BillingUseCase) GetMyUsage(ctx context.Context, tenantID string, quotaGate port.QuotaStore) (MyUsageSummary, error) {
+	// 解析适用套餐（订阅优先，无则 free）
+	var plan entity.Plan
+	var sub *entity.Subscription
+	if s, err := uc.subRepo.FindByTenant(ctx, tenantID); err == nil && s.IsActive(time.Now()) {
+		if p, pErr := uc.planRepo.FindByID(ctx, s.PlanID); pErr == nil {
+			plan = p
+			sc := s
+			sub = &sc
+		}
+	}
+	if plan.ID == "" {
+		if p, err := uc.planRepo.FindByID(ctx, "plan-free"); err == nil {
+			plan = p
+		}
+	}
+
+	usages := map[string]UsageEntry{}
+	for scene := range plan.Quotas {
+		limit := plan.QuotaFor(scene)
+		if quotaGate != nil {
+			if l, used, err := quotaGate.QuotaFor(ctx, tenantID, scene); err == nil {
+				usages[scene] = UsageEntry{Limit: l, Used: used}
+				continue
+			}
+		}
+		usages[scene] = UsageEntry{Limit: limit, Used: 0}
+	}
+	return MyUsageSummary{Subscription: sub, Plan: plan, Usages: usages}, nil
+}

@@ -214,3 +214,38 @@ func (r *Router) HandleAdminAssignPlan(c *gin.Context) {
 	}
 	success(c, gin.H{"subscription": sub})
 }
+
+// ---- admin 收入报表 + 商户用量 ----
+
+// HandleAdminRevenueReport GET /admin/billing/revenue —— 收入概览（仪表盘用）。
+func (r *Router) HandleAdminRevenueReport(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	summary, err := r.billingUC.RevenueReport(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, summary)
+}
+
+// HandleGetMyUsage GET /billing/usage —— 我的用量（配额余量，商户端进度条用）。
+func (r *Router) HandleGetMyUsage(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	tenantID := middleware.CurrentTenantID(c)
+	if tenantID == "" {
+		fail(c, pkg.ErrInvalidArgument)
+		return
+	}
+	summary, err := r.billingUC.GetMyUsage(c.Request.Context(), tenantID, r.quotaGate)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, summary)
+}
