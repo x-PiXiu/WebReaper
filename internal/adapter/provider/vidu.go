@@ -48,8 +48,12 @@ func (p *ViduProvider) Submit(ctx context.Context, mode, prompt, materialURL str
 		"prompt": prompt,
 	}
 	if mode == "material" {
+		// 文档要求 images 为 URL 数组（图生视频：1 张；首尾帧/参考生视频：多张）
 		endpoint = "https://api.vidu.cn/ent/v2/img2video"
-		body["img_url"] = materialURL
+		if materialURL == "" {
+			return "", fmt.Errorf("图生视频缺少素材图 URL")
+		}
+		body["images"] = []string{materialURL}
 	}
 	payload, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(payload)))
