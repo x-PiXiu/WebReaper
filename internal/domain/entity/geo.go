@@ -18,8 +18,21 @@ type Brand struct {
 	Positioning  string   // 品牌定位（生成内容的提示词语料）
 	CoreSelling  []string // 核心卖点（优化内容的权威性维度）
 	Competitors  []string // 竞品名清单（监测时对比）
-	CreatedAt    time.Time
+	// BizType 业务类型："local"本地生意（餐厅/装修/理发——有门店，做附近同行 POI 对比）/
+	// "online"线上业务（SaaS/工具/网络公司——无地理约束，不做附近同行）。
+	// 空=local（兼容存量数据）。决定门店/附近同行/LocalContext/问法维度是否启用。
+	BizType   string
+	CreatedAt time.Time
 }
+
+// 业务类型常量。
+const (
+	BrandBizTypeLocal  = "local"  // 本地生意：门店必填 + 附近同行 + 本地问法 + NAP 内容
+	BrandBizTypeOnline = "online" // 线上业务：跳过门店/附近同行 + 品类问法 + 行业竞品蒸馏
+)
+
+// IsLocal 本地生意（默认；空值兼容为 local）。
+func (b Brand) IsLocal() bool { return b.BizType != BrandBizTypeOnline }
 
 // IsValid 领域规则：品牌必须有 ID、TenantID、名称。
 func (b Brand) IsValid() bool {

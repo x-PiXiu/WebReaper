@@ -314,6 +314,7 @@ func main() {
 		geoMonitorUC.SetStoreRepo(geoRepos.store)
 		geoMonitorUCRef = geoMonitorUC
 		geoRankUC := geo.NewRankUseCase(geoRepos.result)
+		geoRankUC.SetKeywordRepo(geoRepos.keyword) // Overview 的品牌关键词数（仪表盘排行）
 		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
 		geoContentUCRef = geoContentUC
 		// 免费规则评分器：优化前后对比用（不烧 token、可单测）

@@ -259,6 +259,89 @@ func poisToEntries(pois []port.POIStore) []MapRankEntry {
 	return entries
 }
 
+// CompetitorSuggestion 竞品推荐候选项（附近同行 POI 按评分/距离排序）。
+type CompetitorSuggestion struct {
+	Name      string  // 竞品名
+	Rating    float64 // 评分（越高越值得对标）
+	DistanceM int     // 距门店距离（米，越近越是真对手）
+	Address   string  // 地址
+	Category  string  // POI 类目
+}
+
+// SuggestCompetitors 从附近同行 POI 推荐竞品候选（用户建品牌时竞品常不全——自动补）。
+//
+// 策略：取门店中心点搜附近 POI（品牌名+卖点词）→ 按评分降序、距离升序排序 →
+// 排除品牌自身名 + 已有竞品 → 取 top N（默认 5）。
+// 业务分流：online 品牌（线上业务）无附近同行概念——返回空 + 错误提示走监测蒸馏。
+// 不消耗 nearby 配额（辅助推荐功能，地图 API 成本可接受）。
+func (uc *NearbyUseCase) SuggestCompetitors(ctx context.Context, tenantID, brandID string, limit int) ([]CompetitorSuggestion, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	brand, err := uc.brandRepo.FindByID(ctx, tenantID, brandID)
+	if err != nil {
+		return nil, fmt.Errorf("品牌不存在: %w", err)
+	}
+	// online 品牌：线上业务无"附近同行"概念（比"附近网络公司"无意义）
+	if !brand.IsLocal() {
+		return nil, errors.New("线上业务品牌无附近同行——竞品请从监测结果中 AI 提到的对手采纳")
+	}
+	if uc.searcher == nil {
+		return nil, errors.New("地图服务未配置（POI 搜索不可用）")
+	}
+	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)
+	if err != nil || !store.HasGeo() {
+		return nil, errors.New("品牌还没有已定位的门店——先创建门店并完成地理编码")
+	}
+	// 已有竞品 + 品牌自身名 → 排除集合
+	excluded := map[string]bool{brand.Name: true}
+	for _, c := range brand.Competitors {
+		excluded[c] = true
+	}
+
+	center := port.Location{Lat: store.Lat, Lng: store.Lng}
+	keywords := append([]string{brand.Name}, brand.Competitors...)
+	if len(brand.CoreSelling) > 0 {
+		keywords = append(keywords, brand.CoreSelling[0])
+	}
+	seen := map[string]bool{}
+	var pool []MapRankEntry
+	for _, kw := range uniqueStrings(keywords) {
+		if kw == "" {
+			continue
+		}
+		pois, pErr := uc.searcher.SearchNearby(ctx, center, kw, 0)
+		if pErr != nil {
+			continue
+		}
+		for _, e := range poisToEntries(pois) {
+			if excluded[e.Name] || seen[e.Name] || e.Name == "" {
+				continue
+			}
+			seen[e.Name] = true
+			pool = append(pool, e)
+		}
+	}
+	// 排序：评分降序（同分按距离升序）——高分近邻 = 最值得对标的真竞品
+	sort.SliceStable(pool, func(i, j int) bool {
+		if pool[i].Rating != pool[j].Rating {
+			return pool[i].Rating > pool[j].Rating
+		}
+		return pool[i].DistanceM < pool[j].DistanceM
+	})
+	if len(pool) > limit {
+		pool = pool[:limit]
+	}
+	out := make([]CompetitorSuggestion, 0, len(pool))
+	for _, e := range pool {
+		out = append(out, CompetitorSuggestion{
+			Name: e.Name, Rating: e.Rating, DistanceM: e.DistanceM,
+			Address: e.Address, Category: e.Category,
+		})
+	}
+	return out, nil
+}
+
 // fillDriveTimes 驾车耗时补全（P2）：批量测距（驾车 type=1，目的地=门店）。
 // 只对"有坐标且非零"的门店发起；失败（未配置/网络）跳过——只显示直线距离，不阻断。
 func (uc *NearbyUseCase) fillDriveTimes(ctx context.Context, dest port.Location, entries *[]MapRankEntry) {

@@ -6,6 +6,7 @@ package systemsettings
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"webreaper/internal/domain/entity"
@@ -81,5 +82,41 @@ func (uc *SystemSettingsUseCase) SetTenantAutoMonitor(ctx context.Context, tenan
 		TenantID: tenantID,
 		Key:      entity.TenantSettingKeyAutoMonitor,
 		Value:    value,
+	})
+}
+
+// ---- 租户级：自动盯盘配置（频率/采样/引擎/通知阈值）----
+
+// GetTenantAutoMonitorConfig 读某租户的盯盘配置（未配置返回默认——默认保守省额度）。
+func (uc *SystemSettingsUseCase) GetTenantAutoMonitorConfig(ctx context.Context, tenantID string) (entity.AutoMonitorConfig, error) {
+	def := entity.DefaultAutoMonitorConfig()
+	if uc.tenantSettingRepo == nil || tenantID == "" {
+		return def, nil
+	}
+	s, err := uc.tenantSettingRepo.Get(ctx, tenantID, entity.TenantSettingKeyAutoMonitorConfig)
+	if err != nil {
+		return def, nil // 未配置 = 默认
+	}
+	var cfg entity.AutoMonitorConfig
+	if json.Unmarshal([]byte(s.Value), &cfg) != nil {
+		return def, nil // 配置损坏 = 默认
+	}
+	return cfg.Valid(), nil
+}
+
+// SetTenantAutoMonitorConfig 写某租户的盯盘配置（校验后落库）。
+func (uc *SystemSettingsUseCase) SetTenantAutoMonitorConfig(ctx context.Context, tenantID string, cfg entity.AutoMonitorConfig) error {
+	if uc.tenantSettingRepo == nil {
+		return fmt.Errorf("租户设置仓储未配置")
+	}
+	cfg = cfg.Valid()
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("配置序列化失败: %w", err)
+	}
+	return uc.tenantSettingRepo.Save(ctx, entity.TenantSetting{
+		TenantID: tenantID,
+		Key:      entity.TenantSettingKeyAutoMonitorConfig,
+		Value:    string(b),
 	})
 }

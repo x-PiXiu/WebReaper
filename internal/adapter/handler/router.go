@@ -370,6 +370,7 @@ func (r *Router) Engine() *gin.Engine {
 			api.GET("/geo/brands", geoHandler.HandleListBrands)
 			api.POST("/geo/brands", geoHandler.HandleCreateBrand)
 			api.DELETE("/geo/brands/:id", geoHandler.HandleDeleteBrand)
+			api.PUT("/geo/brands/:id", geoHandler.HandleUpdateBrand) // 修改品牌信息（名称/定位/卖点/竞品/业务类型）
 			// 关键词（:id 即 brandId，handler 内用 c.Param("id") 取）
 			api.GET("/geo/brands/:id/keywords", geoHandler.HandleListKeywords)
 			api.POST("/geo/brands/:id/keywords", geoHandler.HandleAddKeyword)
@@ -409,6 +410,7 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/geo/brands/:id/store-locations/:storeId/re-geocode", geoHandler.HandleReGeocodeStoreLocation)
 			// 附近同行双榜（现实世界地图榜 + AI 竞品榜）
 			api.GET("/geo/brands/:id/nearby-competitors", geoHandler.HandleNearbyCompetitors)
+			api.GET("/geo/brands/:id/competitor-suggestions", geoHandler.HandleSuggestCompetitors) // 竞品自动推荐（附近同行 top N）
 			// 行动建议（P5-05：给老板"下一步做什么"）
 			api.GET("/geo/brands/:id/advice", geoHandler.HandleAdvice)
 			// 内容引用统计（P5-02：每篇被 AI 引用几次）

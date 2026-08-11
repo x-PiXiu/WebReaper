@@ -130,7 +130,17 @@ export interface Brand {
   positioning: string
   core_selling: string[]
   competitors: string[]
+  biz_type?: string  // local（本地生意，默认）/ online（线上业务）—— 决定门店/附近同行是否启用
   created_at: string
+}
+
+// 竞品推荐候选（附近同行 POI 按评分/距离排序）
+export interface CompetitorSuggestion {
+  name: string
+  rating: number
+  distance_m: number
+  address: string
+  category: string
 }
 
 // ---- GEO：门店档案（本地生活地基）----
@@ -435,4 +445,13 @@ export interface LocationTip {
   adcode: string
   location: string   // "lng,lat"
   poi_id: string
+}
+
+// ---- 自动盯盘配置（商户端可自控）----
+export interface AutoMonitorConfig {
+  frequency: 'daily' | 'half_day' | 'weekly' // 每天 / 每 12 小时 / 每周
+  sample_size: number        // 每关键词采样次数（3/5/10）
+  engine_name?: string       // 盯盘引擎（空=default）
+  notify_drop_threshold: number // 提及率下降通知阈值（百分点）
+  notify_overtake: boolean   // 竞品反超通知开关
 }

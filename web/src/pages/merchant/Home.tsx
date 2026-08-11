@@ -1,4 +1,5 @@
-import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message, Progress, Tooltip, List } from 'antd'
+import { useState } from 'react'
+import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message, Progress, Tooltip, List, Select, InputNumber } from 'antd'
 import { RocketOutlined, ArrowRightOutlined, AppstoreAddOutlined, SearchOutlined, RadarChartOutlined, FileTextOutlined, BellOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { Line, Pie } from '@ant-design/charts'
 import { useNavigate } from 'react-router-dom'
@@ -304,8 +305,11 @@ export default function MerchantHome() {
                   const brandName = brands[i]?.name || `品牌${i + 1}`
                   ;(o.trend || []).forEach((t: any) => {
                     if (t.mention_rate !== undefined && t.probed_at) {
+                      const d = new Date(t.probed_at)
+                      // x 轴用"月-日 时:分"而非日期：同一天多次监测（手动+自动盯盘）点不重叠
                       trendData.push({
-                        date: new Date(t.probed_at).toLocaleDateString(),
+                        date: `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+                        ts: d.getTime(),
                         rate: Math.round((t.mention_rate || 0) * 1000) / 10,
                         brand: brandName,
                       })
@@ -315,6 +319,8 @@ export default function MerchantHome() {
                 if (trendData.length === 0) {
                   return <div style={{ textAlign: 'center', padding: '60px 0' }}><Text type="secondary">暂无监测数据——前往「关键词管理」发起监测</Text></div>
                 }
+                // 按时间排序（Trend 已升序，双保险）
+                trendData.sort((a: any, b: any) => a.ts - b.ts)
                 return (
                   <Line
                     data={trendData}
@@ -326,6 +332,7 @@ export default function MerchantHome() {
                     point={{ size: 3, shape: 'circle' }}
                     yAxis={{ label: { formatter: (v: string) => v + '%' } }}
                     tooltip={{ formatter: (d: any) => ({ name: d.brand, value: d.rate + '%' }) }}
+                    xAxis={{ label: { autoRotate: true, style: { fontSize: 10 } } }}
                   />
                 )
               })()}
@@ -436,11 +443,12 @@ export default function MerchantHome() {
 }
 
 // AutoMonitorCard 自动盯盘控制卡片（商户端显眼入口）：
-// 状态 + 开关 + 频率/通知说明 + 套餐能力位提示。
-// 数据同 AutoMonitorBadge（tenant-auto-monitor）——开关复用租户级设置。
+// 状态 + 开关 + 高级设置（频率/采样/通知阈值——用户清楚"开启后发生什么"）。
+// 数据同 AutoMonitorBadge（tenant-auto-monitor）——开关与配置一次保存。
 function AutoMonitorCard() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const { data, isLoading } = useQuery({
     queryKey: ['tenant-auto-monitor'],
     queryFn: () => businessApi.getTenantAutoMonitor(),
@@ -450,14 +458,31 @@ function AutoMonitorCard() {
     queryFn: () => businessApi.getMyUsage().catch(() => null),
     staleTime: 60_000,
   })
-  const toggleMutation = useMutation({
-    mutationFn: (enabled: boolean) => businessApi.setTenantAutoMonitor(enabled),
+  // 本地表单状态（默认值来自服务端配置；未加载完成用默认）
+  const cfg = data?.config || { frequency: 'daily', sample_size: 5, notify_drop_threshold: 20, notify_overtake: true }
+  const [frequency, setFrequency] = useState<string>('daily')
+  const [sampleSize, setSampleSize] = useState<number>(5)
+  const [dropThreshold, setDropThreshold] = useState<number>(20)
+  const [notifyOvertake, setNotifyOvertake] = useState<boolean>(true)
+  const [loadedCfg, setLoadedCfg] = useState(false)
+  // 配置加载完成后同步到表单（只同步一次，避免每次渲染重置用户编辑）
+  if (data?.config && !loadedCfg) {
+    setLoadedCfg(true)
+    setFrequency(data.config.frequency || 'daily')
+    setSampleSize(data.config.sample_size || 5)
+    setDropThreshold(data.config.notify_drop_threshold || 20)
+    setNotifyOvertake(data.config.notify_overtake !== false)
+  }
+  const saveMutation = useMutation({
+    mutationFn: ({ enabled, cfg }: { enabled: boolean; cfg?: any }) =>
+      businessApi.setTenantAutoMonitor({ enabled, config: cfg }),
     onSuccess: () => {
-      message.success('自动盯盘已' + (data?.tenant_enabled ? '关闭' : '开启') + '（每日自动监测，趋势自动生长）')
+      message.success('自动盯盘设置已保存（按配置每日自动监测，趋势自动生长）')
       queryClient.invalidateQueries({ queryKey: ['tenant-auto-monitor'] })
     },
   })
 
+  const frequencyLabel: Record<string, string> = { daily: '每天 1 次', half_day: '每 12 小时', weekly: '每周 1 次' }
   const hasFeature = (usage?.plan?.features || []).includes('auto-monitor')
   const active = data?.platform_enabled && data?.tenant_enabled
   return (
@@ -470,26 +495,85 @@ function AutoMonitorCard() {
             {active ? '运行中' : data?.platform_enabled ? '已暂停' : '平台未开启'}
           </Tag>
         </Space>
-        {hasFeature ? (
-          <Switch
-            checked={!!data?.tenant_enabled}
-            disabled={!data?.platform_enabled}
-            loading={isLoading || toggleMutation.isPending}
-            onChange={(v) => toggleMutation.mutate(v)}
-            checkedChildren="开启" unCheckedChildren="关闭"
-          />
-        ) : (
-          <Button size="small" type="link" onClick={() => navigate('/m/my-plan')}>升级解锁 →</Button>
-        )}
+        <Space size={8}>
+          <Button size="small" type="link" onClick={() => setShowAdvanced(!showAdvanced)}>
+            {showAdvanced ? '收起设置 ↑' : '高级设置 ⚙'}
+          </Button>
+          {hasFeature ? (
+            <Switch
+              checked={!!data?.tenant_enabled}
+              disabled={!data?.platform_enabled}
+              loading={isLoading || saveMutation.isPending}
+              onChange={(v) => saveMutation.mutate({ enabled: v })}
+              checkedChildren="开启" unCheckedChildren="关闭"
+            />
+          ) : (
+            <Button size="small" type="link" onClick={() => navigate('/m/my-plan')}>升级解锁 →</Button>
+          )}
+        </Space>
       </div>
       <Text type="secondary" style={{ fontSize: 12, display: 'block', lineHeight: 1.7 }}>
-        每日自动监测你的全部关键词（默认引擎，每关键词 5 次采样）——趋势自动生长，无需手动点监测。
-        提及率显著下降或竞品反超时自动通知（见待办提醒）。
+        开启后系统按你设置的节奏自动监测全部关键词——趋势自动生长，无需手动点监测；
+        提及率下降或竞品反超时按阈值自动通知（见待办提醒）。
+        {showAdvanced && data?.platform_enabled && ` 当前：${frequencyLabel[cfg.frequency]} · 每关键词 ${cfg.sample_size} 次采样。`}
       </Text>
       {!data?.platform_enabled && (
         <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8, color: 'var(--wr-text-muted)' }}>
           平台总开关未开启（管理员在平台设置中控制）
         </Text>
+      )}
+
+      {/* 高级设置（用户清楚"开启后发生什么"）*/}
+      {showAdvanced && hasFeature && (
+        <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, background: 'var(--wr-bg-elevated)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <div>
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>监测频率</Text>
+              <Select
+                size="small" style={{ width: '100%' }} value={frequency}
+                onChange={setFrequency}
+                options={[
+                  { value: 'daily', label: '每天 1 次（省额度）' },
+                  { value: 'half_day', label: '每 12 小时（更灵敏）' },
+                  { value: 'weekly', label: '每周 1 次（最省）' },
+                ]}
+              />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>每关键词采样次数</Text>
+              <Select
+                size="small" style={{ width: '100%' }} value={sampleSize}
+                onChange={setSampleSize}
+                options={[
+                  { value: 3, label: '3 次（快测，省 token）' },
+                  { value: 5, label: '5 次（推荐，更准）' },
+                  { value: 10, label: '10 次（最准，烧 token）' },
+                ]}
+              />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>提及率下降通知阈值</Text>
+              <InputNumber
+                size="small" min={5} max={80} style={{ width: '100%' }} value={dropThreshold}
+                onChange={(v) => setDropThreshold(v || 20)} addonAfter="%"
+              />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>竞品反超通知</Text>
+              <Switch size="small" checked={notifyOvertake} onChange={setNotifyOvertake} checkedChildren="开" unCheckedChildren="关" />
+              <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>竞品提及率超过你时提醒</Text>
+            </div>
+          </div>
+          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button size="small" type="primary" loading={saveMutation.isPending}
+              onClick={() => saveMutation.mutate({
+                enabled: !!data?.tenant_enabled,
+                cfg: { frequency, sample_size: sampleSize, engine_name: '', notify_drop_threshold: dropThreshold, notify_overtake: notifyOvertake },
+              })}>
+              保存盯盘设置
+            </Button>
+          </div>
+        </div>
       )}
     </Card>
   )
@@ -505,7 +589,7 @@ function AutoMonitorBadge() {
   })
 
   const toggleMutation = useMutation({
-    mutationFn: (enabled: boolean) => businessApi.setTenantAutoMonitor(enabled),
+    mutationFn: (enabled: boolean) => businessApi.setTenantAutoMonitor({ enabled }),
     onSuccess: () => {
       message.success('自动盯盘已' + (data?.tenant_enabled ? '关闭' : '开启') + '（每日自动监测，趋势自动生长）')
       queryClient.invalidateQueries({ queryKey: ['tenant-auto-monitor'] })

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip } from '../types/api'
+import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -74,11 +74,18 @@ export const businessApi = {
   listBrands: () =>
     apiClient.get<unknown, Brand[]>('/api/v1/geo/brands'),
 
-  createBrand: (data: { name: string; positioning?: string; core_selling?: string[]; competitors?: string[] }) =>
+  createBrand: (data: { name: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string }) =>
     apiClient.post<unknown, Brand>('/api/v1/geo/brands', data),
+
+  updateBrand: (id: string, data: { name?: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string }) =>
+    apiClient.put<unknown, Brand>(`/api/v1/geo/brands/${id}`, data),
 
   deleteBrand: (id: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/geo/brands/${id}`),
+
+  // 竞品自动推荐（附近同行 POI 按评分/距离 top N，排除品牌自身+已有竞品）
+  suggestCompetitors: (brandId: string, limit?: number) =>
+    apiClient.get<unknown, CompetitorSuggestion[]>(`/api/v1/geo/brands/${brandId}/competitor-suggestions${limit ? '?limit=' + limit : ''}`),
 
   // ---- GEO 门店档案（本地生活地基）----
   listStoreLocations: (brandId: string) =>
@@ -289,9 +296,10 @@ export const businessApi = {
 
   // ---- 商户端自动盯盘（租户级）----
   getTenantAutoMonitor: () =>
-    apiClient.get<unknown, { tenant_enabled: boolean; platform_enabled: boolean }>('/api/v1/geo/monitor-auto'),
-  setTenantAutoMonitor: (enabled: boolean) =>
-    apiClient.put<unknown, { tenant_enabled: boolean }>('/api/v1/geo/monitor-auto', { enabled }),
+    apiClient.get<unknown, { tenant_enabled: boolean; platform_enabled: boolean; config: AutoMonitorConfig }>('/api/v1/geo/monitor-auto'),
+  // 开关 + 盯盘配置（频率/采样/通知阈值——一次保存）
+  setTenantAutoMonitor: (data: { enabled: boolean; config?: AutoMonitorConfig }) =>
+    apiClient.put<unknown, { tenant_enabled: boolean; config: AutoMonitorConfig }>('/api/v1/geo/monitor-auto', data),
 
   // ---- Tavily 搜索配置（管理端）----
   getTavilyStatus: () =>

@@ -390,11 +390,19 @@ type BrandRank struct {
 
 // RankUseCase 聚合监测结果，算出行业排名。
 type RankUseCase struct {
-	resultRepo port.MonitoringResultRepository
+	resultRepo  port.MonitoringResultRepository
+	keywordRepo port.KeywordRepository // 关键词计数（Overview.KeywordCount 用）
 }
 
 func NewRankUseCase(rr port.MonitoringResultRepository) *RankUseCase {
 	return &RankUseCase{resultRepo: rr}
+}
+
+// SetKeywordRepo 注入关键词仓储（可选；Overview 的品牌关键词数展示用）。
+func (uc *RankUseCase) SetKeywordRepo(kr port.KeywordRepository) {
+	if kr != nil {
+		uc.keywordRepo = kr
+	}
 }
 
 // BrandOverview 品牌的监测总览（仪表盘用）。
@@ -427,11 +435,18 @@ func (uc *RankUseCase) Overview(ctx context.Context, tenantID, brandID string, b
 	if count > 0 {
 		avg = sumRate / float64(count)
 	}
+	// 真实关键词数（修复：原实现误用 trend 结果条数——"0 个关键词"误导）
+	keywordCount := 0
+	if uc.keywordRepo != nil {
+		if kws, kErr := uc.keywordRepo.ListByBrand(ctx, tenantID, brandID); kErr == nil {
+			keywordCount = len(kws)
+		}
+	}
 	return BrandOverview{
 		BrandID:        brandID,
 		BrandName:      brandName,
 		AvgMentionRate: avg,
-		KeywordCount:   count,
+		KeywordCount:   keywordCount,
 		LastProbedAt:   lastAt,
 		Trend:          trend,
 	}, nil

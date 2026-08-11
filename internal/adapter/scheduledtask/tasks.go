@@ -6,6 +6,7 @@ package scheduledtask
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -85,7 +86,9 @@ func (t *DailyMonitorTask) SetNotifier(n *MonitorNotifier) {
 
 func (t *DailyMonitorTask) Name() string { return "daily-brand-monitor" }
 
-func (t *DailyMonitorTask) Interval() time.Duration { return 24 * time.Hour }
+// Interval 调度间隔：6 小时一轮（租户级频率 gate 控制实际盯盘节奏——
+// daily 租户每 24h 一次、half_day 每 12h、weekly 每 7 天；调度器 6h 保证 half_day 可达）。
+func (t *DailyMonitorTask) Interval() time.Duration { return 6 * time.Hour }
 
 // enabled 读取平台级开关（system_settings 优先；未配置回退默认值）。
 func (t *DailyMonitorTask) enabled(ctx context.Context) bool {
@@ -127,6 +130,61 @@ func (t *DailyMonitorTask) tenantEnabled(ctx context.Context, tenantID string) b
 	return s.Value != "false"
 }
 
+// tenantConfig 读租户盯盘配置（未配置/读取失败 → 默认：每日、5 采样、default 引擎）。
+func (t *DailyMonitorTask) tenantConfig(ctx context.Context, tenantID string) entity.AutoMonitorConfig {
+	cfg := entity.DefaultAutoMonitorConfig()
+	if t.tenantSettingRepo == nil {
+		return cfg
+	}
+	s, err := t.tenantSettingRepo.Get(ctx, tenantID, entity.TenantSettingKeyAutoMonitorConfig)
+	if err != nil {
+		return cfg
+	}
+	var c entity.AutoMonitorConfig
+	if json.Unmarshal([]byte(s.Value), &c) != nil {
+		return cfg
+	}
+	return c.Valid()
+}
+
+// frequencyDue 频率 gate：按上次执行时间判断本次是否该跑。
+// daily=距上次≥24h、half_day=≥12h、weekly=≥7 天；无记录=立即执行首次。
+func (t *DailyMonitorTask) frequencyDue(ctx context.Context, tenantID, frequency string) bool {
+	if t.tenantSettingRepo == nil {
+		return true
+	}
+	s, err := t.tenantSettingRepo.Get(ctx, tenantID, entity.TenantSettingKeyAutoMonitorLastRun)
+	if err != nil {
+		return true // 从未执行过：跑首次
+	}
+	last, pErr := time.Parse(time.RFC3339, s.Value)
+	if pErr != nil {
+		return true
+	}
+	var minGap time.Duration
+	switch frequency {
+	case "half_day":
+		minGap = 12 * time.Hour
+	case "weekly":
+		minGap = 7 * 24 * time.Hour
+	default: // daily
+		minGap = 24 * time.Hour
+	}
+	return time.Since(last) >= minGap
+}
+
+// markRun 记录租户本次盯盘执行时间（RFC3339）。
+func (t *DailyMonitorTask) markRun(ctx context.Context, tenantID string) {
+	if t.tenantSettingRepo == nil {
+		return
+	}
+	_ = t.tenantSettingRepo.Save(ctx, entity.TenantSetting{
+		TenantID: tenantID,
+		Key:      entity.TenantSettingKeyAutoMonitorLastRun,
+		Value:    time.Now().Format(time.RFC3339),
+	})
+}
+
 func (t *DailyMonitorTask) Execute(ctx context.Context) error {
 	if !t.enabled(ctx) {
 		return nil // 平台总闸关闭：空转（保留注册，开启后下个周期生效）
@@ -150,14 +208,25 @@ func (t *DailyMonitorTask) Execute(ctx context.Context) error {
 			}
 			continue
 		}
+		// 盯盘配置（频率 gate + 采样/引擎）：按租户个性化节奏执行
+		cfg := t.tenantConfig(ctx, b.TenantID)
+		if !t.frequencyDue(ctx, b.TenantID, cfg.Frequency) {
+			if !skippedTenants[b.TenantID] {
+				skippedTenants[b.TenantID] = true
+				skipped++
+			}
+			continue
+		}
 		// 变化通知基线：上一批监测的平均提及率（Trend 取最近记录）
 		beforeAvg := 0.0
 		if t.notifier != nil {
 			beforeAvg = t.notifier.BaselineAvg(ctx, b.TenantID, b.ID)
 		}
 		results, mErr := t.uc.Monitor(ctx, geo.MonitorInput{
-			TenantID: b.TenantID,
-			BrandID:  b.ID,
+			TenantID:   b.TenantID,
+			BrandID:    b.ID,
+			SampleSize: cfg.SampleSize, // 租户配置的每关键词采样数
+			EngineName: cfg.EngineName, // 租户配置的引擎（空=default）
 		})
 		if mErr != nil {
 			failed++
@@ -165,9 +234,11 @@ func (t *DailyMonitorTask) Execute(ctx context.Context) error {
 			continue
 		}
 		success++
-		// 变化通知：提及率显著下降 / 竞品反超 → 站内通知（主动唤醒）
+		// 记录本次执行时间（频率 gate）
+		t.markRun(ctx, b.TenantID)
+		// 变化通知：按租户配置的阈值（提及率显著下降 / 竞品反超）→ 站内通知
 		if t.notifier != nil {
-			t.notifier.EvaluateAndNotify(ctx, b.TenantID, b.Name, beforeAvg, results)
+			t.notifier.EvaluateAndNotify(ctx, b.TenantID, b.Name, beforeAvg, results, cfg.NotifyDropThreshold, cfg.NotifyOvertake)
 		}
 	}
 	t.logger.Info("每日自动监测完成",

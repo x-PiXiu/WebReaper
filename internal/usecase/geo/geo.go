@@ -68,6 +68,7 @@ type BrandInput struct {
 	Positioning string
 	CoreSelling []string
 	Competitors []string
+	BizType     string // local/online（空=local）
 }
 
 // Create 创建品牌。
@@ -83,6 +84,7 @@ func (uc *BrandUseCase) Create(ctx context.Context, tenantID string, in BrandInp
 		Positioning: in.Positioning,
 		CoreSelling: in.CoreSelling,
 		Competitors: in.Competitors,
+		BizType:     in.BizType,
 		CreatedAt:   now,
 	}
 	if !b.IsValid() {
@@ -127,6 +129,29 @@ func (uc *BrandUseCase) Delete(ctx context.Context, tenantID, brandID string) er
 		}
 	}
 	return uc.brandRepo.Delete(ctx, tenantID, brandID)
+}
+
+// Update 修改品牌信息（名称/定位/卖点/竞品/业务类型）。
+// 业务类型变更影响门店/附近同行/监测问法分流（local↔online 切换）。
+func (uc *BrandUseCase) Update(ctx context.Context, tenantID, brandID string, in BrandInput) (entity.Brand, error) {
+	old, err := uc.brandRepo.FindByID(ctx, tenantID, brandID)
+	if err != nil {
+		return entity.Brand{}, fmt.Errorf("品牌不存在: %w", err)
+	}
+	old.Name = in.Name
+	old.Positioning = in.Positioning
+	old.CoreSelling = in.CoreSelling
+	old.Competitors = in.Competitors
+	if in.BizType != "" {
+		old.BizType = in.BizType
+	}
+	if !old.IsValid() {
+		return entity.Brand{}, fmt.Errorf("品牌无效：name 不能为空")
+	}
+	if err := uc.brandRepo.Save(ctx, old); err != nil {
+		return entity.Brand{}, fmt.Errorf("update brand: %w", err)
+	}
+	return old, nil
 }
 
 // AddKeyword 给品牌添加关键词。
@@ -275,9 +300,14 @@ func (uc *BrandUseCase) GenerateKeywords(ctx context.Context, tenantID, brandID 
 
 // buildLocalKeywordContext 取品牌主门店并格式化为本地关键词上下文（纯文本，零失败风险）。
 // 未注入仓储/品牌无门店时返回空串（行为与改造前一致——不强制本地化）。
+// 业务分流（P0-2）：online 品牌（线上业务）无地理约束——跳过本地化，监测走品类词。
 // 位置优先级：商圈 > 区 > 城市（P1 商圈补全后，"望京"比"朝阳区"更贴近真实搜索意图）。
 func (uc *BrandUseCase) buildLocalKeywordContext(ctx context.Context, brandID string) string {
 	if uc.storeRepo == nil || brandID == "" {
+		return ""
+	}
+	// online 品牌：无门店/无地理约束，跳过（线上业务监测走品类词，非本地词）
+	if b, err := uc.brandRepo.FindByID(ctx, "", brandID); err == nil && !b.IsLocal() {
 		return ""
 	}
 	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)

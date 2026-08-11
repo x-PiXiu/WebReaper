@@ -45,8 +45,8 @@ func (r *Router) HandleSetAutoMonitor(c *gin.Context) {
 	success(c, gin.H{"auto_monitor_enabled": req.Enabled})
 }
 
-// HandleGetTenantAutoMonitor GET /api/v1/geo/monitor-auto —— 商户端自动盯盘状态。
-// 返回：租户开关（可自控）+ 平台总闸（管理员控制）。
+// HandleGetTenantAutoMonitor GET /api/v1/geo/monitor-auto —— 商户端自动盯盘状态 + 配置。
+// 返回：租户开关（可自控）+ 平台总闸（管理员控制）+ 盯盘配置（频率/采样/通知阈值）。
 func (r *Router) HandleGetTenantAutoMonitor(c *gin.Context) {
 	if r.settingsUC == nil {
 		fail(c, errNotConfigured("系统设置"))
@@ -59,13 +59,15 @@ func (r *Router) HandleGetTenantAutoMonitor(c *gin.Context) {
 		return
 	}
 	platformEnabled, _ := r.settingsUC.GetAutoMonitor(c.Request.Context())
+	cfg, _ := r.settingsUC.GetTenantAutoMonitorConfig(c.Request.Context(), tenantID)
 	success(c, gin.H{
 		"tenant_enabled":   tenantEnabled,   // 我的品牌是否参与自动监测（可切换）
 		"platform_enabled": platformEnabled, // 平台总闸（管理员控制，只读）
+		"config":           cfg,             // 盯盘配置（频率/采样/引擎/通知阈值）
 	})
 }
 
-// HandleSetTenantAutoMonitor PUT /api/v1/geo/monitor-auto —— 商户端自动盯盘开关。
+// HandleSetTenantAutoMonitor PUT /api/v1/geo/monitor-auto —— 商户端自动盯盘开关 + 配置。
 // 关闭后调度器跳过该租户的品牌（节省 LLM 额度）；平台总闸关闭时本开关无效。
 func (r *Router) HandleSetTenantAutoMonitor(c *gin.Context) {
 	if r.settingsUC == nil {
@@ -73,7 +75,8 @@ func (r *Router) HandleSetTenantAutoMonitor(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Enabled bool `json:"enabled"`
+		Enabled bool                     `json:"enabled"`
+		Config  *entity.AutoMonitorConfig `json:"config"` // 可选：同时更新盯盘配置
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -88,7 +91,14 @@ func (r *Router) HandleSetTenantAutoMonitor(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	success(c, gin.H{"tenant_enabled": req.Enabled})
+	if req.Config != nil {
+		if err := r.settingsUC.SetTenantAutoMonitorConfig(c.Request.Context(), tenantID, *req.Config); err != nil {
+			fail(c, err)
+			return
+		}
+	}
+	cfg, _ := r.settingsUC.GetTenantAutoMonitorConfig(c.Request.Context(), tenantID)
+	success(c, gin.H{"tenant_enabled": req.Enabled, "config": cfg})
 }
 
 // ---- 提示词模板管理（admin）----

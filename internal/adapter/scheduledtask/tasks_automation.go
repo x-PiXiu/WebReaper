@@ -140,12 +140,15 @@ type MonitorAlert struct {
 
 // EvaluateBrandMonitor 评估品牌监测变化（对比本次 vs 上次平均提及率 + 竞品反超）。
 //
-// 规则：
-//   - mention_drop：平均提及率下降 > 0.2（显著下滑，主动唤醒）
-//   - competitor_overtake：本次存在竞品提及率 > 品牌提及率 且 品牌 < 0.3
-func EvaluateBrandMonitor(brandName string, beforeAvg, afterAvg float64, competitorRates map[string]float64) []MonitorAlert {
+// 规则（阈值可由租户盯盘配置调整）：
+//   - mention_drop：平均提及率下降 > dropThresholdPct（默认 20pp，显著下滑主动唤醒）
+//   - competitor_overtake：竞品反超开关开 且 本次存在竞品提及率 > 品牌提及率 且 品牌 < 0.3
+func EvaluateBrandMonitor(brandName string, beforeAvg, afterAvg float64, competitorRates map[string]float64, dropThresholdPct int, notifyOvertake bool) []MonitorAlert {
 	var alerts []MonitorAlert
-	if beforeAvg-afterAvg > 0.2 {
+	if dropThresholdPct <= 0 {
+		dropThresholdPct = 20 // 默认：下降 20 个百分点通知
+	}
+	if beforeAvg-afterAvg > float64(dropThresholdPct)/100.0 {
 		alerts = append(alerts, MonitorAlert{
 			Type:  entity.NotificationTypeMentionDrop,
 			Title: fmt.Sprintf("「%s」AI 提及率显著下降", brandName),
@@ -153,7 +156,7 @@ func EvaluateBrandMonitor(brandName string, beforeAvg, afterAvg float64, competi
 				int((beforeAvg-afterAvg)*100), pct(beforeAvg), pct(afterAvg)),
 		})
 	}
-	if afterAvg < 0.3 {
+	if notifyOvertake && afterAvg < 0.3 {
 		for name, rate := range competitorRates {
 			if rate > afterAvg {
 				alerts = append(alerts, MonitorAlert{
@@ -191,8 +194,8 @@ func (n *MonitorNotifier) BaselineAvg(ctx context.Context, tenantID, brandID str
 }
 
 // EvaluateAndNotify 对某品牌执行变化评估并推送通知（监测完成后调用）。
-// beforeAvg 由调用方提供（上次监测的平均提及率）；本次结果来自 results。
-func (n *MonitorNotifier) EvaluateAndNotify(ctx context.Context, tenantID, brandName string, beforeAvg float64, results []entity.MonitoringResult) {
+// dropThresholdPct/notifyOvertake 来自租户盯盘配置（默认 20pp + 反超开）。
+func (n *MonitorNotifier) EvaluateAndNotify(ctx context.Context, tenantID, brandName string, beforeAvg float64, results []entity.MonitoringResult, dropThresholdPct int, notifyOvertake bool) {
 	if n.notify == nil || len(results) == 0 {
 		return
 	}
@@ -213,7 +216,7 @@ func (n *MonitorNotifier) EvaluateAndNotify(ctx context.Context, tenantID, brand
 	}
 	afterAvg := total / float64(cnt)
 
-	alerts := EvaluateBrandMonitor(brandName, beforeAvg, afterAvg, competitorRates)
+	alerts := EvaluateBrandMonitor(brandName, beforeAvg, afterAvg, competitorRates, dropThresholdPct, notifyOvertake)
 	for _, a := range alerts {
 		_ = n.notify.Push(ctx, tenantID, a.Type, a.Title, a.Content, "/m/keywords")
 	}

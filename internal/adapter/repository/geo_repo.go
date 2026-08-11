@@ -313,13 +313,15 @@ func (r *GormMonitoringResultRepository) LatestByTenant(ctx context.Context, ten
 	}
 	return out, nil
 }
+// Trend 取品牌近期监测趋势（升序：最旧在前、最新在末尾——
+// 前端约定 trend[len-1] 为最新一次，delta 计算依赖此顺序）。
 func (r *GormMonitoringResultRepository) Trend(ctx context.Context, tenantID, brandID string, limit int) ([]entity.MonitoringResult, error) {
 	var pos []MonitoringResultPO
 	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
 	if limit <= 0 {
 		limit = 30
 	}
-	if err := q.Where("brand_id = ?", brandID).Order("probed_at DESC").Limit(limit).Find(&pos).Error; err != nil {
+	if err := q.Where("brand_id = ?", brandID).Order("probed_at ASC").Limit(limit).Find(&pos).Error; err != nil {
 		return nil, err
 	}
 	out := make([]entity.MonitoringResult, 0, len(pos))

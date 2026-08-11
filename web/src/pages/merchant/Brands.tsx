@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Typography, Button, Modal, Form, Input, Space, message, Popconfirm, Empty, Checkbox, Spin, Tag, Table, Input as AntInput } from 'antd'
+import { Typography, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Empty, Checkbox, Spin, Tag, Table, Input as AntInput } from 'antd'
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, TagOutlined, EnvironmentOutlined, BulbOutlined, SearchOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -37,13 +37,14 @@ export default function Brands() {
     queryClient.invalidateQueries({ queryKey: ['geo-overviews'] })
   }
 
-  const handleCreateBrand = async (values: { name: string; positioning: string; core_selling: string; competitors: string }) => {
+  const handleCreateBrand = async (values: { name: string; positioning: string; core_selling: string; competitors: string; biz_type?: string }) => {
     try {
       await businessApi.createBrand({
         name: values.name,
         positioning: values.positioning,
         core_selling: values.core_selling ? values.core_selling.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean) : [],
         competitors: values.competitors ? values.competitors.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean) : [],
+        biz_type: values.biz_type || 'local',
       })
       message.success(`品牌「${values.name}」创建成功`)
       setBrandModalOpen(false)
@@ -194,7 +195,10 @@ export default function Brands() {
                         {brand.positioning}
                       </Text>
                     )}
-                    <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 6, alignItems: 'center' }}>
+                      <Tag color={brand.biz_type === 'online' ? 'blue' : 'green'} style={{ margin: 0, fontSize: 10 }}>
+                        {brand.biz_type === 'online' ? '💻 线上' : '🏪 本地'}
+                      </Tag>
                       <Text type="secondary" style={{ fontSize: 11 }}>
                         <TagOutlined style={{ marginRight: 3 }} />
                         {brand.core_selling?.length || 0} 卖点
@@ -314,9 +318,17 @@ export default function Brands() {
 
       {/* 创建品牌弹窗 */}
       <Modal title="创建品牌" open={brandModalOpen} onCancel={() => setBrandModalOpen(false)} footer={null} width={560}>
-        <Form form={brandForm} layout="vertical" onFinish={handleCreateBrand} requiredMark={false}>
+        <Form form={brandForm} layout="vertical" onFinish={handleCreateBrand} requiredMark={false} initialValues={{ biz_type: 'local' }}>
           <Form.Item label="品牌名" name="name" rules={[{ required: true, message: '请输入品牌名' }]}>
             <Input placeholder="如 某装修公司" />
+          </Form.Item>
+          <Form.Item label="业务类型" name="biz_type" tooltip="本地生意（餐厅/装修/理发）：有门店+附近同行对比+本地搜索词；线上业务（SaaS/工具/网络公司）：无地理约束+品类搜索词+行业竞品">
+            <Select
+              options={[
+                { value: 'local', label: '🏪 本地生意（有门店，做附近同行对比）' },
+                { value: 'online', label: '💻 线上业务（无门店，做行业竞品对比）' },
+              ]}
+            />
           </Form.Item>
           <Form.Item label="品牌定位" name="positioning" tooltip="描述品牌的核心价值，AI 生成内容时会参考">
             <TextArea placeholder="如 专注北京地区中高端家装，提供设计-施工-软装一站式服务" autoSize={{ minRows: 2, maxRows: 4 }} />
@@ -324,8 +336,8 @@ export default function Brands() {
           <Form.Item label="核心卖点" name="core_selling" tooltip="用逗号分隔，如：10年经验,环保材料,终身保修">
             <TextArea placeholder="10年经验, 环保材料, 终身保修" autoSize={{ minRows: 2 }} />
           </Form.Item>
-          <Form.Item label="竞品" name="competitors" tooltip="用逗号分隔，监测时会对比这些竞品的 AI 可见度">
-            <Input placeholder="竞品A, 竞品B, 竞品C" />
+          <Form.Item label="竞品" name="competitors" tooltip="用逗号分隔，监测时会对比这些竞品的 AI 可见度。创建后可在品牌详情用「从附近同行推荐」自动补充">
+            <Input placeholder="竞品A, 竞品B, 竞品C（可留空，后续自动推荐）" />
           </Form.Item>
           <Form.Item>
             <Space>

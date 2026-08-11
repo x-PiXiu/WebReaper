@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -78,6 +79,7 @@ func brandToView(b entity.Brand) gin.H {
 		"positioning":  b.Positioning,
 		"core_selling": b.CoreSelling,
 		"competitors":  b.Competitors,
+		"biz_type":     b.BizType,
 		"created_at":   b.CreatedAt,
 	}
 }
@@ -190,13 +192,15 @@ func (h *GEOHandler) HandleCreateBrand(c *gin.Context) {
 		Positioning string   `json:"positioning"`
 		CoreSelling []string `json:"core_selling"`
 		Competitors []string `json:"competitors"`
+		BizType     string   `json:"biz_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
 	brand, err := h.brandUC.Create(c.Request.Context(), middleware.CurrentTenantID(c), geo.BrandInput{
-		Name: req.Name, Positioning: req.Positioning, CoreSelling: req.CoreSelling, Competitors: req.Competitors,
+		Name: req.Name, Positioning: req.Positioning, CoreSelling: req.CoreSelling,
+		Competitors: req.Competitors, BizType: req.BizType,
 	})
 	if err != nil {
 		fail(c, err)
@@ -212,6 +216,30 @@ func (h *GEOHandler) HandleDeleteBrand(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"deleted": id})
+}
+
+// HandleUpdateBrand PUT /api/v1/geo/brands/:id —— 修改品牌信息（名称/定位/卖点/竞品/业务类型）。
+func (h *GEOHandler) HandleUpdateBrand(c *gin.Context) {
+	var req struct {
+		Name        string   `json:"name"`
+		Positioning string   `json:"positioning"`
+		CoreSelling []string `json:"core_selling"`
+		Competitors []string `json:"competitors"`
+		BizType     string   `json:"biz_type"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	brand, err := h.brandUC.Update(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), geo.BrandInput{
+		Name: req.Name, Positioning: req.Positioning, CoreSelling: req.CoreSelling,
+		Competitors: req.Competitors, BizType: req.BizType,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, brandToView(brand))
 }
 
 // ---- 关键词 ----
@@ -904,6 +932,35 @@ func (h *GEOHandler) HandleNearbyCompetitors(c *gin.Context) {
 		return
 	}
 	success(c, nearbyRankingToView(view))
+}
+
+// HandleSuggestCompetitors GET /api/v1/geo/brands/:id/competitor-suggestions
+// 竞品自动推荐（附近同行 POI 按评分/距离 top N，排除品牌自身+已有竞品）。
+// 业务分流：online 品牌返回错误提示走监测蒸馏；local 无门店提示先建门店。
+func (h *GEOHandler) HandleSuggestCompetitors(c *gin.Context) {
+	if h.nearbyUC == nil {
+		fail(c, fmt.Errorf("附近同行用例未注入"))
+		return
+	}
+	limit := 5
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 20 {
+			limit = n
+		}
+	}
+	suggestions, err := h.nearbyUC.SuggestCompetitors(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), limit)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	views := make([]gin.H, 0, len(suggestions))
+	for _, s := range suggestions {
+		views = append(views, gin.H{
+			"name": s.Name, "rating": s.Rating, "distance_m": s.DistanceM,
+			"address": s.Address, "category": s.Category,
+		})
+	}
+	success(c, views)
 }
 
 // HandleSuggestLocations GET /api/v1/geo/location/suggest?q=&city=&location=
