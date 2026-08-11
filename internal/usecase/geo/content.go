@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -193,7 +194,45 @@ func (uc *ContentUseCase) callGenerator(ctx context.Context, convID, llmConfigNa
 		}
 		return art.Content, nil
 	}
+	// JSON 解析失败兜底：LLM 可能返回了 JSON 但格式不合法（未转义换行等）
+	// 用正则提取 title 和 content 字段值，避免把整个 JSON 字符串当正文存储。
+	if extracted := extractJSONFields(out); extracted != "" {
+		return extracted, nil
+	}
 	return out, nil
+}
+
+// extractJSONFields 从可能不合法的 JSON 中正则提取 title/content 字段。
+// LLM 结构化输出偶尔含未转义换行导致 json.Unmarshal 失败——正则兜底提取。
+// 返回拼装好的 markdown（"# {title}\n\n{content}"），无法提取时返回空串。
+func extractJSONFields(raw string) string {
+	// 提取 "title":"..." 或 "title": "..."（支持值内含转义引号）
+	titleRe := regexp.MustCompile(`(?s)"title"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+	contentRe := regexp.MustCompile(`(?s)"content"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+
+	titleMatch := titleRe.FindStringSubmatch(raw)
+	contentMatch := contentRe.FindStringSubmatch(raw)
+	if len(contentMatch) < 2 {
+		return "" // content 是必填——提取不到就放弃
+	}
+
+	// 反转义 JSON 字符串转义序列（\n \" \\ 等）
+	unescape := func(s string) string {
+		s = strings.ReplaceAll(s, `\n`, "\n")
+		s = strings.ReplaceAll(s, `\"`, `"`)
+		s = strings.ReplaceAll(s, `\\`, `\`)
+		s = strings.ReplaceAll(s, `\t`, "\t")
+		return strings.TrimSpace(s)
+	}
+
+	content := unescape(contentMatch[1])
+	if len(titleMatch) >= 2 {
+		title := unescape(titleMatch[1])
+		if title != "" {
+			return "# " + title + "\n\n" + content
+		}
+	}
+	return content
 }
 
 // OptimizeInput 内容优化的输入。
