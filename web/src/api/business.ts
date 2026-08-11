@@ -367,4 +367,10 @@ export const businessApi = {
     apiClient.get<unknown, { config: Record<string, string> }>('/api/v1/admin/billing/payment-config'),
   adminSetPaymentConfig: (cfg: { gateway: string; pid: string; key: string; notify_url: string; return_url: string }) =>
     apiClient.put<unknown, { saved: boolean }>('/api/v1/admin/billing/payment-config', cfg),
+
+  // admin 提示词模板管理（格式指令/生成/优化 prompt 热更新）
+  adminListPromptTemplates: () =>
+    apiClient.get<unknown, { key: string; version: number; content: string; updated_at: string }[]>('/api/v1/admin/prompt-templates'),
+  adminUpdatePromptTemplate: (key: string, content: string) =>
+    apiClient.put<unknown, { key: string }>(`/api/v1/admin/prompt-templates/${key}`, { content }),
 }

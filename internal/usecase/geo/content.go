@@ -78,21 +78,34 @@ const (
 // 与 usecase 内部 fallback 同源——模板仓库清空/未 seed 时行为一致，不会漂移。
 func DefaultPromptTemplates() []entity.PromptTemplate {
 	now := time.Now()
-	return []entity.PromptTemplate{
+	templates := []entity.PromptTemplate{
 		{Key: entity.PromptKeyContentGenerate, Version: 1, Content: defaultGeneratePrompt, UpdatedAt: now},
 		{Key: entity.PromptKeyContentOptimize, Version: 1, Content: defaultOptimizePrompt, UpdatedAt: now},
 	}
+	// 格式模板（P1-5 admin 可编辑：seed 6 种格式指令到模板仓库——与 content_format.go 同源）
+	for key, preset := range entity.ContentFormats {
+		templates = append(templates, entity.PromptTemplate{
+			Key: entity.PromptKeyFormatPrefix + key, Version: 1, Content: preset.Instruction, UpdatedAt: now,
+		})
+	}
+	return templates
 }
 
 // systemPrompt 取系统提示词：模板仓库有记录用模板（可管理/可热更新），
 // 否则用内置默认。引擎偏好指令始终由代码拼接（业务规则不被模板绕过）。
 func (uc *ContentUseCase) systemPrompt(ctx context.Context, key, fallback, targetEngine, format string) string {
-	// 格式指令放在最前面 + "优先级最高"（修复：原实现追加在末尾被默认 prompt 的
-	// "字数 800-1500 字"覆盖——选小红书仍输出长文。现在格式要求显式优先于默认字数/结构）
+	// 格式指令放在最前面 + "优先级最高"——admin 可在管理后台编辑各格式指令（热更新）。
+	// 查询链：templateRepo.Get(geo_format_<key>) → 命中用模板 → 未命中回退 entity 硬编码 map
 	formatOverride := ""
 	if format != "" && format != "article" {
+		formatInstr := entity.BuildFormatInstruction(format) // entity 层兜底（纯函数，无仓储依赖）
+		if uc.templateRepo != nil {
+			if t, err := uc.templateRepo.Get(ctx, entity.PromptKeyFormatPrefix+format); err == nil && t.Content != "" {
+				formatInstr = t.Content // admin 自定义的格式指令（热更新生效）
+			}
+		}
 		formatOverride = "【重要·优先级最高】本次输出格式要求（覆盖下方其他字数/结构/标题要求）：\n" +
-			entity.BuildFormatInstruction(format) + "\n\n"
+			formatInstr + "\n\n"
 	}
 
 	var basePrompt string

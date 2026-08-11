@@ -23,4 +23,7 @@ type PromptTemplate struct {
 const (
 	PromptKeyContentGenerate = "content-generate" // 内容原创生成系统提示词
 	PromptKeyContentOptimize = "content-optimize" // 内容优化（GEO 改写）系统提示词
+	// 格式模板键前缀（geo_format_<key>——如 geo_format_xiaohongshu）。
+	// admin 可在管理后台编辑各格式的输出指令（字数/风格/结构），热更新无需发版。
+	PromptKeyFormatPrefix = "geo_format_"
 )
