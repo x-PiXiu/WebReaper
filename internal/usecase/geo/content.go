@@ -86,13 +86,13 @@ func DefaultPromptTemplates() []entity.PromptTemplate {
 
 // systemPrompt 取系统提示词：模板仓库有记录用模板（可管理/可热更新），
 // 否则用内置默认。引擎偏好指令始终由代码拼接（业务规则不被模板绕过）。
-func (uc *ContentUseCase) systemPrompt(ctx context.Context, key, fallback, targetEngine string) string {
+func (uc *ContentUseCase) systemPrompt(ctx context.Context, key, fallback, targetEngine, format string) string {
 	if uc.templateRepo != nil {
 		if t, err := uc.templateRepo.Get(ctx, key); err == nil && t.Content != "" {
-			return t.Content + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine)
+			return t.Content + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine) + "\n\n" + entity.BuildFormatInstruction(format)
 		}
 	}
-	return fallback + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine)
+	return fallback + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine) + "\n\n" + entity.BuildFormatInstruction(format)
 }
 
 // SetPromptTemplateRepo 注入提示词模板仓库（可选；未注入时用内置默认提示词）。
@@ -323,6 +323,7 @@ type OptimizeInput struct {
 	Keywords      []string // 多关键词组合模式（灵活模式：多个词合成一篇）
 	LLMConfigName string   // 用哪个 LLM 优化（空则 default）
 	TargetEngine  string   // 目标 AI 引擎偏好（chatgpt/perplexity/kimi/doubao；空=通用）
+	Format        string   // 内容格式（article/review/xiaohongshu/script/faq/comparison；空=article）
 }
 
 // OptimizeResult 是 Optimize 的返回结果：优化产物 + 前后对比反馈。
@@ -374,7 +375,7 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 		title = keywordDesc
 	}
 
-	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentOptimize, defaultOptimizePrompt, in.TargetEngine)
+	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentOptimize, defaultOptimizePrompt, in.TargetEngine, in.Format)
 
 	userPrompt := fmt.Sprintf("目标关键词：%s\n\n原始内容：\n%s", keywordDesc, in.OriginalText)
 	// 本地 GEO 信号（P0）：优化内容时附加门店 NAP 段落（可选注入，无门店则跳过）
@@ -599,6 +600,7 @@ type GenerateInput struct {
 	BrandInfo     string   // 品牌定位/卖点摘要（供 LLM 参考，让内容贴合品牌）
 	LLMConfigName string
 	TargetEngine  string // 目标 AI 引擎偏好（chatgpt/perplexity/kimi/doubao；空=通用）
+	Format        string // 内容格式（article/review/xiaohongshu/script/faq/comparison；空=article）
 	// UseDiagnose 是否按诊断建议生成（诊断→优化闭环 P5-03）。
 	// true 时先生成一次诊断报告，把改进建议注入 prompt——"先诊断再对症下药"。
 	// 诊断烧 token，仅在用户主动勾选时开启。
@@ -629,7 +631,7 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 	keywordDesc := strings.Join(in.Keywords, "、")
 	isMulti := len(in.Keywords) > 1
 
-	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentGenerate, defaultGeneratePrompt, in.TargetEngine)
+	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentGenerate, defaultGeneratePrompt, in.TargetEngine, in.Format)
 
 	modeHint := "围绕这个关键词创作一篇文章"
 	if isMulti {

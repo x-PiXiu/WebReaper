@@ -41,6 +41,17 @@ const ENGINE_OPTIONS = [
   { value: 'doubao', label: '豆包' },
 ]
 
+// 内容格式选择（P1-5：线下品牌需要点评/小红书/脚本等短内容，不只长文章）
+const FORMAT_OPTIONS = [
+  { value: '', label: '📄 SEO 文章（默认）' },
+  { value: 'review', label: '📝 点评文案（大众点评风格）' },
+  { value: 'xiaohongshu', label: '📕 小红书笔记（种草风格）' },
+  { value: 'script', label: '🎬 视频口播脚本' },
+  { value: 'faq', label: '❓ FAQ 问答集' },
+  { value: 'comparison', label: '⚖️ 对比评测' },
+]
+]
+
 export default function Content() {
   const queryClient = useQueryClient()
   const [selectedBrand, setSelectedBrand] = useState<string | undefined>()
@@ -49,6 +60,7 @@ export default function Content() {
   const [result, setResult] = useState<OptimizedContent | null>(null)
   const [genKeywords, setGenKeywords] = useState<string[]>([])
   const [targetEngine, setTargetEngine] = useState<string>('') // 目标 AI 引擎偏好
+  const [format, setFormat] = useState<string>('') // 内容格式（P1-5：文章/点评/小红书/脚本/FAQ/评测）
   const [useDiagnose, setUseDiagnose] = useState(false) // P5-03 诊断→优化闭环开关
   const [generating, setGenerating] = useState(false)
   const [drafting, setDrafting] = useState(false)
@@ -89,6 +101,7 @@ export default function Content() {
         keyword: genKeywords[0],
         original_text: originalText,
         target_engine: targetEngine || undefined,
+        format: format || undefined,
       })
       setResult(res)
       message.success('优化完成')
@@ -115,6 +128,7 @@ export default function Content() {
         keywords: genKeywords,
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
         target_engine: targetEngine || undefined,
+        format: format || undefined,
         use_diagnose: useDiagnose, // P5-03 诊断→优化闭环：先诊断再对症下药
       })
       setResult(res)
@@ -161,6 +175,7 @@ export default function Content() {
         keywords: [genKeywords[0]],
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
         target_engine: targetEngine || undefined,
+        format: format || undefined,
       })
       setOriginalText(res.optimized_text || '')
       message.success('素材已生成，你可以编辑后点击优化')
@@ -255,6 +270,20 @@ export default function Content() {
                     options={ENGINE_OPTIONS}
                     allowClear
                     placeholder="选择目标引擎（空=通用优化）"
+                  />
+                </div>
+                {/* 内容格式选择（P1-5）*/}
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                    内容格式
+                  </Text>
+                  <Select
+                    style={{ width: '100%' }}
+                    value={format || undefined}
+                    onChange={(v) => setFormat(v || '')}
+                    options={FORMAT_OPTIONS}
+                    allowClear
+                    placeholder="选择内容格式（默认 SEO 文章）"
                   />
                 </div>
 

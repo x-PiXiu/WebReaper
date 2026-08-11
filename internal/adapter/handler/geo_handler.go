@@ -406,6 +406,7 @@ func (h *GEOHandler) HandleOptimizeContent(c *gin.Context) {
 		Keyword       string `json:"keyword" binding:"required"`
 		LLMConfigName string `json:"llm_config_name"`
 		TargetEngine  string `json:"target_engine"`
+		Format        string `json:"format"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -419,6 +420,7 @@ func (h *GEOHandler) HandleOptimizeContent(c *gin.Context) {
 		Keyword:       req.Keyword,
 		LLMConfigName: req.LLMConfigName,
 		TargetEngine:  req.TargetEngine,
+		Format:        req.Format,
 	})
 	if err != nil {
 		fail(c, err)
@@ -547,6 +549,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		LLMConfigName string   `json:"llm_config_name"`
 		TargetEngine  string   `json:"target_engine"`
 		UseDiagnose   bool     `json:"use_diagnose"` // 诊断→优化闭环（P5-03）
+		Format        string   `json:"format"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -560,6 +563,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		LLMConfigName: req.LLMConfigName,
 		TargetEngine:  req.TargetEngine,
 		UseDiagnose:   req.UseDiagnose,
+		Format:        req.Format,
 	})
 	if err != nil {
 		fail(c, err)
@@ -578,6 +582,7 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 		BrandInfo     string   `json:"brand_info"`
 		LLMConfigName string   `json:"llm_config_name"`
 		TargetEngine  string   `json:"target_engine"`
+		Format        string   `json:"format"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -601,6 +606,7 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 		BrandInfo:     req.BrandInfo,
 		LLMConfigName: req.LLMConfigName,
 		TargetEngine:  req.TargetEngine,
+		Format:        req.Format,
 	}, func(delta string) {
 		// 只推正文 content delta（AI SDK text-delta 格式）
 		writeSSE(c.Writer, map[string]any{"type": "text-delta", "textDelta": delta})

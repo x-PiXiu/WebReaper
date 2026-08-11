@@ -192,14 +192,14 @@ export const businessApi = {
     apiClient.get<unknown, BrandOverview>(`/api/v1/geo/brands/${brandId}/overview${name ? '?name=' + encodeURIComponent(name) : ''}`),
 
   // ---- GEO 内容优化 ----
-  optimizeContent: (data: { brand_id: string; keyword_id?: string; original_text: string; keyword: string; llm_config_name?: string; target_engine?: string }) =>
+  optimizeContent: (data: { brand_id: string; keyword_id?: string; original_text: string; keyword: string; llm_config_name?: string; target_engine?: string; format?: string }) =>
     apiClient.post<unknown, OptimizedContent>('/api/v1/geo/optimize', data),
 
   listContents: (brandId: string) =>
     apiClient.get<unknown, OptimizedContent[]>(`/api/v1/geo/brands/${brandId}/contents`),
 
   // 从零生成内容（根据品牌信息+关键词，AI原创一篇 GEO 文章；支持单/多关键词组合）
-  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean }) =>
+  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean; format?: string }) =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/generate`, data),
 
   // 内容状态流转：draft ↔ published（published 后公开站可访问，AI 引擎可爬取）
