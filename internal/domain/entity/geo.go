@@ -18,11 +18,13 @@ type Brand struct {
 	Positioning  string   // 品牌定位（生成内容的提示词语料）
 	CoreSelling  []string // 核心卖点（优化内容的权威性维度）
 	Competitors  []string // 竞品名清单（监测时对比）
-	// BizType 业务类型："local"本地生意（餐厅/装修/理发——有门店，做附近同行 POI 对比）/
-	// "online"线上业务（SaaS/工具/网络公司——无地理约束，不做附近同行）。
-	// 空=local（兼容存量数据）。决定门店/附近同行/LocalContext/问法维度是否启用。
-	BizType   string
-	CreatedAt time.Time
+	// BizType 业务类型："local"本地生意 / "online"线上业务（详见常量注释）。
+	BizType string
+	// WebsiteURL 官网地址（online 品牌的"NAP"——替代地址/电话）。
+	// 内容生成时注入（"了解更多：https://..."）、收录提交用、公开站链接用。
+	// local 品牌也可填（官网 + 门店地址并存的场景）。
+	WebsiteURL string
+	CreatedAt  time.Time
 }
 
 // 业务类型常量。

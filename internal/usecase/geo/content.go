@@ -219,6 +219,19 @@ func (uc *ContentUseCase) buildStoreNAP(ctx context.Context, brandID string) str
 	return strings.Join(lines, "\n")
 }
 
+// buildOnlineNAP 取 online 品牌的官网 URL 并格式化为 prompt 段落（online 品牌的"NAP"）。
+// local 品牌或无 WebsiteURL 时返回空串（不注入）。与 buildStoreNAP 正交——两者可并存。
+func (uc *ContentUseCase) buildOnlineNAP(ctx context.Context, brandID string) string {
+	if uc.brandRepo == nil || brandID == "" {
+		return ""
+	}
+	b, err := uc.brandRepo.FindByID(ctx, "", brandID)
+	if err != nil || b.WebsiteURL == "" {
+		return ""
+	}
+	return fmt.Sprintf("品牌官网（内容中自然提及，引导用户访问）：\n- 官网：%s", b.WebsiteURL)
+}
+
 func NewContentUseCase(ai port.AIGenerator, sc port.GEOScorer, cr port.OptimizedContentRepository) *ContentUseCase {
 	return &ContentUseCase{aiGen: ai, scorer: sc, contentRepo: cr, ruleScorer: sc, logger: port.NopLogger{}}
 }
@@ -404,9 +417,12 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentOptimize, defaultOptimizePrompt, in.TargetEngine, in.Format)
 
 	userPrompt := fmt.Sprintf("目标关键词：%s\n\n原始内容：\n%s", keywordDesc, in.OriginalText)
-	// 本地 GEO 信号（P0）：优化内容时附加门店 NAP 段落（可选注入，无门店则跳过）
+	// 本地 GEO 信号（P0）：优化内容时附加门店 NAP 段落（local 品牌）/ 官网 URL（online 品牌）
 	if nap := uc.buildStoreNAP(ctx, in.BrandID); nap != "" {
 		userPrompt += "\n\n" + nap
+	}
+	if onlineNAP := uc.buildOnlineNAP(ctx, in.BrandID); onlineNAP != "" {
+		userPrompt += "\n\n" + onlineNAP
 	}
 
 	messages := []port.ChatMessage{
@@ -667,9 +683,12 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 目标关键词：%s
 
 请%s。`, in.BrandInfo, keywordDesc, modeHint)
-	// 本地 GEO 信号（P0）：生成内容时附加门店 NAP 段落（可选注入，无门店则跳过）
+	// 本地 GEO 信号（P0）：生成内容时附加门店 NAP（local）/ 官网 URL（online）
 	if nap := uc.buildStoreNAP(ctx, in.BrandID); nap != "" {
 		userPrompt += "\n\n" + nap
+	}
+	if onlineNAP := uc.buildOnlineNAP(ctx, in.BrandID); onlineNAP != "" {
+		userPrompt += "\n\n" + onlineNAP
 	}
 	// 诊断→优化闭环（P5-03）：用户勾选"按诊断建议生成"时注入改进建议
 	if in.UseDiagnose {

@@ -74,10 +74,10 @@ export const businessApi = {
   listBrands: () =>
     apiClient.get<unknown, Brand[]>('/api/v1/geo/brands'),
 
-  createBrand: (data: { name: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string }) =>
+  createBrand: (data: { name: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; website_url?: string }) =>
     apiClient.post<unknown, Brand>('/api/v1/geo/brands', data),
 
-  updateBrand: (id: string, data: { name?: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string }) =>
+  updateBrand: (id: string, data: { name?: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; website_url?: string }) =>
     apiClient.put<unknown, Brand>(`/api/v1/geo/brands/${id}`, data),
 
   deleteBrand: (id: string) =>

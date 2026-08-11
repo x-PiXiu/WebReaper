@@ -69,6 +69,7 @@ type BrandInput struct {
 	CoreSelling []string
 	Competitors []string
 	BizType     string // local/online（空=local）
+	WebsiteURL  string // 官网地址（online 品牌 NAP）
 }
 
 // Create 创建品牌。
@@ -85,6 +86,7 @@ func (uc *BrandUseCase) Create(ctx context.Context, tenantID string, in BrandInp
 		CoreSelling: in.CoreSelling,
 		Competitors: in.Competitors,
 		BizType:     in.BizType,
+		WebsiteURL: in.WebsiteURL,
 		CreatedAt:   now,
 	}
 	if !b.IsValid() {
@@ -153,6 +155,9 @@ func (uc *BrandUseCase) Update(ctx context.Context, tenantID, brandID string, in
 	}
 	if in.BizType != "" {
 		old.BizType = in.BizType
+	}
+	if in.WebsiteURL != "" {
+		old.WebsiteURL = in.WebsiteURL
 	}
 	if !old.IsValid() {
 		return entity.Brand{}, fmt.Errorf("品牌无效：name 不能为空")

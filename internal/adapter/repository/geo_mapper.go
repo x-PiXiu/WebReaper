@@ -10,7 +10,7 @@ func brandToPO(e entity.Brand) BrandPO {
 	return BrandPO{
 		ID: e.ID, TenantID: e.TenantID, Name: e.Name, Positioning: e.Positioning,
 		CoreSelling: toJSON(e.CoreSelling), Competitors: toJSON(e.Competitors),
-		BizType: e.BizType, CreatedAt: e.CreatedAt,
+		BizType: e.BizType, WebsiteURL: e.WebsiteURL, CreatedAt: e.CreatedAt,
 	}
 }
 
@@ -18,7 +18,7 @@ func brandFromPO(p BrandPO) entity.Brand {
 	return entity.Brand{
 		ID: p.ID, TenantID: p.TenantID, Name: p.Name, Positioning: p.Positioning,
 		CoreSelling: toStringSlice(p.CoreSelling), Competitors: toStringSlice(p.Competitors),
-		BizType: p.BizType, CreatedAt: p.CreatedAt,
+		BizType: p.BizType, WebsiteURL: p.WebsiteURL, CreatedAt: p.CreatedAt,
 	}
 }
 

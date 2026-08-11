@@ -18,7 +18,8 @@ type BrandPO struct {
 	Positioning  string         `gorm:"type:text"`
 	CoreSelling  datatypes.JSON `gorm:"type:json"`
 	Competitors  datatypes.JSON `gorm:"type:json"`
-	BizType      string         `gorm:"size:16;default:local"` // local/online（业务分流）
+	BizType      string         `gorm:"size:16;default:local"`  // local/online（业务分流）
+	WebsiteURL   string         `gorm:"size:256"`               // 官网地址（online 品牌 NAP）
 	CreatedAt    time.Time
 }
 

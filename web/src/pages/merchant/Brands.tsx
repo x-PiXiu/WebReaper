@@ -38,6 +38,7 @@ export default function Brands() {
       editForm.setFieldsValue({
         name: selectedBrand.name,
         biz_type: selectedBrand.biz_type || 'local',
+        website_url: selectedBrand.website_url || '',
         positioning: selectedBrand.positioning,
         core_selling: (selectedBrand.core_selling || []).join('、'),
         competitors: (selectedBrand.competitors || []).join('、'),
@@ -45,7 +46,7 @@ export default function Brands() {
     }
   }, [selectedBrand]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleCreateBrand = async (values: { name: string; positioning: string; core_selling: string; competitors: string; biz_type?: string }) => {
+  const handleCreateBrand = async (values: { name: string; positioning: string; core_selling: string; competitors: string; biz_type?: string; website_url?: string }) => {
     try {
       await businessApi.createBrand({
         name: values.name,
@@ -53,6 +54,7 @@ export default function Brands() {
         core_selling: values.core_selling ? values.core_selling.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean) : [],
         competitors: values.competitors ? values.competitors.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean) : [],
         biz_type: values.biz_type || 'local',
+        website_url: values.website_url || '',
       })
       message.success(`品牌「${values.name}」创建成功`)
       setBrandModalOpen(false)
@@ -79,6 +81,7 @@ export default function Brands() {
       const updated = await businessApi.updateBrand(selectedBrand.id, {
         name: values.name,
         biz_type: values.biz_type || 'local',
+        website_url: values.website_url || '',
         positioning: values.positioning,
         core_selling: values.core_selling ? values.core_selling.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
         competitors: values.competitors ? values.competitors.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
@@ -230,6 +233,9 @@ export default function Brands() {
                       { value: 'online', label: '💻 线上业务（无门店，做行业竞品对比）' },
                     ]} />
                   </Form.Item>
+                  <Form.Item label="官网地址" name="website_url" tooltip="online 品牌的 NAP——内容生成时注入'了解更多：https://...'">
+                    <Input placeholder="https://example.com（线上品牌必填，本地品牌可选）" />
+                  </Form.Item>
                   <Form.Item label="品牌定位" name="positioning">
                     <TextArea placeholder="描述品牌的核心价值" autoSize={{ minRows: 2, maxRows: 4 }} />
                   </Form.Item>
@@ -300,6 +306,9 @@ export default function Brands() {
               { value: 'local', label: '🏪 本地生意（有门店，做附近同行对比）' },
               { value: 'online', label: '💻 线上业务（无门店，做行业竞品对比）' },
             ]} />
+          </Form.Item>
+          <Form.Item label="官网地址" name="website_url" tooltip="online 品牌的 NAP——内容生成时注入'了解更多：https://...'">
+            <Input placeholder="https://example.com（线上品牌必填，本地品牌可选）" />
           </Form.Item>
           <Form.Item label="品牌定位" name="positioning" tooltip="描述品牌的核心价值，AI 生成内容时会参考">
             <TextArea placeholder="如 专注北京地区中高端家装，提供设计-施工-软装一站式服务" autoSize={{ minRows: 2, maxRows: 4 }} />

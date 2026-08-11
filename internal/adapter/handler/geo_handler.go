@@ -80,6 +80,7 @@ func brandToView(b entity.Brand) gin.H {
 		"core_selling": b.CoreSelling,
 		"competitors":  b.Competitors,
 		"biz_type":     b.BizType,
+		"website_url":  b.WebsiteURL,
 		"created_at":   b.CreatedAt,
 	}
 }
@@ -193,6 +194,7 @@ func (h *GEOHandler) HandleCreateBrand(c *gin.Context) {
 		CoreSelling []string `json:"core_selling"`
 		Competitors []string `json:"competitors"`
 		BizType     string   `json:"biz_type"`
+		WebsiteURL string   `json:"website_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -200,7 +202,7 @@ func (h *GEOHandler) HandleCreateBrand(c *gin.Context) {
 	}
 	brand, err := h.brandUC.Create(c.Request.Context(), middleware.CurrentTenantID(c), geo.BrandInput{
 		Name: req.Name, Positioning: req.Positioning, CoreSelling: req.CoreSelling,
-		Competitors: req.Competitors, BizType: req.BizType,
+		Competitors: req.Competitors, BizType: req.BizType, WebsiteURL: req.WebsiteURL,
 	})
 	if err != nil {
 		fail(c, err)
@@ -226,6 +228,7 @@ func (h *GEOHandler) HandleUpdateBrand(c *gin.Context) {
 		CoreSelling []string `json:"core_selling"`
 		Competitors []string `json:"competitors"`
 		BizType     string   `json:"biz_type"`
+		WebsiteURL string   `json:"website_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -233,7 +236,7 @@ func (h *GEOHandler) HandleUpdateBrand(c *gin.Context) {
 	}
 	brand, err := h.brandUC.Update(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), geo.BrandInput{
 		Name: req.Name, Positioning: req.Positioning, CoreSelling: req.CoreSelling,
-		Competitors: req.Competitors, BizType: req.BizType,
+		Competitors: req.Competitors, BizType: req.BizType, WebsiteURL: req.WebsiteURL,
 	})
 	if err != nil {
 		fail(c, err)
@@ -809,6 +812,7 @@ func (h *GEOHandler) HandleCreateStoreLocation(c *gin.Context) {
 		Hours      string `json:"hours"`
 		PriceLevel string `json:"price_level"`
 		BizType    string `json:"biz_type"`
+		WebsiteURL string `json:"website_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -844,6 +848,7 @@ func (h *GEOHandler) HandleUpdateStoreLocation(c *gin.Context) {
 		Hours      string `json:"hours"`
 		PriceLevel string `json:"price_level"`
 		BizType    string `json:"biz_type"`
+		WebsiteURL string `json:"website_url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)

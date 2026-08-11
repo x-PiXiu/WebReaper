@@ -130,7 +130,8 @@ export interface Brand {
   positioning: string
   core_selling: string[]
   competitors: string[]
-  biz_type?: string  // local（本地生意，默认）/ online（线上业务）—— 决定门店/附近同行是否启用
+  biz_type?: string  // local（本地生意，默认）/ online（线上业务）
+  website_url?: string  // 官网地址（online 品牌 NAP）
   created_at: string
 }
 
