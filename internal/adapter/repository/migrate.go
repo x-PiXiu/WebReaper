@@ -68,6 +68,12 @@ func RunMigrations(db *gorm.DB) error {
 			return fmt.Errorf("record migration %s: %w", m.version, err)
 		}
 	}
+
+	// 兼容性修复：对齐 PO 与实际表结构的列名/列差异（幂等——列已存在则跳过）。
+	// 根因：早期迁移（022）建的列名与后来修改的 GORM PO 不一致。
+	if err := fixColumnMismatches(db); err != nil {
+		return fmt.Errorf("fix column mismatches: %w", err)
+	}
 	return nil
 }
 
@@ -153,4 +159,61 @@ func PendingMigrationsCount(db *gorm.DB) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+// columnExists 检查列是否存在（幂等 ALTER 的前置条件）。
+func columnExists(db *gorm.DB, table, column string) bool {
+	var n int64
+	db.Raw("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?", table, column).Scan(&n)
+	return n > 0
+}
+
+// fixColumnMismatches 修复 PO 与实际表结构的列名/列差异（幂等）。
+//
+// 根因：早期迁移 022 建的列名与后来修改的 GORM PO 不一致：
+//   - tenant_settings: `key` → setting_key（PO 用 SettingKey）
+//   - usages: feature → scene（PO 用 Scene），缺 user_id/llm_config_name/llm_calls，多 cost_credits
+//
+// 幂等：每次启动都跑，列已对齐的 ALTER 被 columnExists 跳过。
+func fixColumnMismatches(db *gorm.DB) error {
+	type fix struct {
+		check  func() bool
+		exec   string
+	}
+
+	// tenant_settings: `key` → setting_key
+	if columnExists(db, "tenant_settings", "key") && !columnExists(db, "tenant_settings", "setting_key") {
+		if err := db.Exec("ALTER TABLE tenant_settings CHANGE COLUMN `key` setting_key VARCHAR(64) NOT NULL").Error; err != nil {
+			return fmt.Errorf("fix tenant_settings.key→setting_key: %w", err)
+		}
+	}
+
+	// usages: feature → scene
+	if columnExists(db, "usages", "feature") && !columnExists(db, "usages", "scene") {
+		if err := db.Exec("ALTER TABLE usages CHANGE COLUMN feature scene VARCHAR(32) NOT NULL DEFAULT ''").Error; err != nil {
+			return fmt.Errorf("fix usages.feature→scene: %w", err)
+		}
+	}
+
+	// usages: 加缺失列（PO 有但迁移没建）
+	for col, ddl := range map[string]string{
+		"user_id":         "ADD COLUMN user_id VARCHAR(64) NOT NULL DEFAULT '' AFTER tenant_id",
+		"llm_config_name": "ADD COLUMN llm_config_name VARCHAR(64) NOT NULL DEFAULT '' AFTER scene",
+		"llm_calls":       "ADD COLUMN llm_calls INT NOT NULL DEFAULT 0 AFTER total_tokens",
+	} {
+		if !columnExists(db, "usages", col) {
+			if err := db.Exec("ALTER TABLE usages " + ddl).Error; err != nil {
+				return fmt.Errorf("fix usages add %s: %w", col, err)
+			}
+		}
+	}
+
+	// usages: 删多余列 cost_credits（PO 没有）
+	if columnExists(db, "usages", "cost_credits") {
+		if err := db.Exec("ALTER TABLE usages DROP COLUMN cost_credits").Error; err != nil {
+			return fmt.Errorf("fix usages drop cost_credits: %w", err)
+		}
+	}
+
+	return nil
 }

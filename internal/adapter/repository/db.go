@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
@@ -14,6 +15,11 @@ import (
 // NewMySQLDB 创建 MySQL 连接（生产用）。
 // dsn 示例："root:password@tcp(127.0.0.1:3306)/webreaper?charset=utf8mb4&parseTime=True&loc=Local"
 // 连接后自动应用版本化 SQL 迁移（migrations/*.sql）。
+//
+// 连接池配置（防止 "bad connection"——MySQL 服务端空闲超时断开连接后，
+// GORM 连接池复用了已断开的连接导致报错）：
+//   - ConnMaxLifetime < MySQL 的 wait_timeout（通常 8h，设 3h 留余量）
+//   - ConnMaxIdleTime 也要 < wait_timeout（空闲连接主动回收）
 func NewMySQLDB(dsn string) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Warn),
@@ -21,6 +27,11 @@ func NewMySQLDB(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open mysql: %w", err)
 	}
+	sqlDB, _ := db.DB()
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetConnMaxLifetime(3 * time.Hour)  // < MySQL wait_timeout（默认 8h）
+	sqlDB.SetConnMaxIdleTime(30 * time.Minute) // 空闲 30 分钟主动回收
 	if err := applyMigrations(db); err != nil {
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}

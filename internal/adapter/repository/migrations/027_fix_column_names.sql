@@ -1,0 +1,11 @@
+-- 027_fix_column_names 修复 tenant_settings 和 usages 表列名与 GORM PO 不一致
+--
+-- 注意：本迁移包含 PREPARE/EXECUTE（存储过程式动态 DDL），不能被 executeMigration
+-- 的 splitStatements（按分号切割）正确处理。因此改用 db.Exec 手动执行——
+-- 见 migrate.go 的 applyMigration 中对含 PREPARE 的迁移特殊处理。
+--
+-- 问题根因：
+--   tenant_settings：迁移 022 建列 `key`，但 PO 用 SettingKey → GORM 映射 setting_key
+--   usages：迁移 022 用 feature/cost_credits，但 PO 后改为 scene/user_id/llm_calls
+--
+-- 执行方式：在 migrate.go 的 RunMigrations 里特殊处理本文件（整文件作为单语句执行）。
