@@ -553,6 +553,10 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 	// 提取标题：AI 生成的文章通常以 markdown 标题开头，取首个标题行作发布标题。
 	// 标题非空校验（P0）：LLM 未按格式输出标题时用关键词兜底，保证发布字段完整。
 	title := pkg.ExtractTitle(content)
+	// 标题截断（防止 DB VARCHAR(256) 溢出——AI 偶尔生成长标题）
+	if len([]rune(title)) > 200 {
+		title = string([]rune(title)[:200])
+	}
 	if len(title) < 4 {
 		title = keywordDesc // 兜底：用关键词作标题
 		uc.logger.Warn("生成内容缺少标题，已用关键词兜底",
