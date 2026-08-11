@@ -243,6 +243,65 @@ func dedupeMapRanking(entries []MapRankEntry) []MapRankEntry {
 	}
 	return out
 }
+
+// SuggestCompetitorsFromMonitoring 从监测结果蒸馏竞品候选（P0-4 竞品自动沉淀）。
+//
+// 策略：查品牌最近监测结果 → 聚合 CompetitorRates（取每竞品最大提及率）→
+// 排除品牌自身 + 已有竞品 → 按提及率降序取 top N。
+// 对 local/online 都适用——online 品牌的核心竞品来源（AI 回答中提到的对手自动沉淀）。
+func (uc *NearbyUseCase) SuggestCompetitorsFromMonitoring(ctx context.Context, tenantID, brandID string, limit int) ([]CompetitorSuggestion, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	brand, err := uc.brandRepo.FindByID(ctx, tenantID, brandID)
+	if err != nil {
+		return nil, fmt.Errorf("品牌不存在: %w", err)
+	}
+	results, err := uc.resultRepo.LatestByBrand(ctx, tenantID, brandID)
+	if err != nil || len(results) == 0 {
+		return nil, errors.New("还没有监测数据——发起监测后，AI 回答中提到的对手会自动推荐为竞品候选")
+	}
+	// 聚合竞品提及率（跨关键词/引擎取最大值）
+	rates := make(map[string]float64)
+	for _, r := range results {
+		for name, rate := range r.CompetitorRates {
+			if rate > rates[name] {
+				rates[name] = rate
+			}
+		}
+	}
+	// 排除品牌自身 + 已有竞品
+	excluded := map[string]bool{brand.Name: true}
+	for _, c := range brand.Competitors {
+		excluded[c] = true
+	}
+	type candidate struct {
+		name string
+		rate float64
+	}
+	var pool []candidate
+	for name, rate := range rates {
+		if excluded[name] || name == "" || len(name) < 2 {
+			continue
+		}
+		pool = append(pool, candidate{name, rate})
+	}
+	sort.SliceStable(pool, func(i, j int) bool { return pool[i].rate > pool[j].rate })
+	if len(pool) > limit {
+		pool = pool[:limit]
+	}
+	out := make([]CompetitorSuggestion, 0, len(pool))
+	for _, c := range pool {
+		out = append(out, CompetitorSuggestion{
+			Name:     c.name,
+			Rating:   c.rate, // 提及率（0-1）——前端显示为百分比
+			Category: "监测识别",
+			Address:  fmt.Sprintf("AI 回答中提及率 %.0f%%", c.rate*100),
+		})
+	}
+	return out, nil
+}
+
 // poisToEntries POI 列表 → 地图榜条目（P2：附带驾车耗时占位，fillDriveTimes 补全）。
 func poisToEntries(pois []port.POIStore) []MapRankEntry {
 	entries := make([]MapRankEntry, 0, len(pois))

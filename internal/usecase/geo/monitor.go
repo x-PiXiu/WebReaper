@@ -61,10 +61,14 @@ func (uc *MonitorUseCase) SetStoreRepo(r port.StoreLocationRepository) {
 }
 
 // buildLocalContext 取品牌主门店并格式化为位置上下文（纯文本，零失败风险）。
-// 位置优先级：商圈 > 区 > 城市（P1 商圈补全后，问法从"朝阳区有什么川菜馆"
-// 精确到"望京有什么川菜馆"——商圈级最贴近真实本地决策）。
+// 业务分流（P0-2）：online 品牌无地理约束——跳过位置问法，监测走品类词。
+// 位置优先级：商圈 > 区 > 城市。
 func (uc *MonitorUseCase) buildLocalContext(ctx context.Context, brandID string) string {
 	if uc.storeRepo == nil || brandID == "" {
+		return ""
+	}
+	// online 品牌：无门店/无地理约束，跳过本地化（监测走品类词，非本地词）
+	if b, err := uc.brandRepo.FindByID(ctx, "", brandID); err == nil && !b.IsLocal() {
 		return ""
 	}
 	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)
@@ -256,7 +260,9 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 	}
 
 	// 问法池（v2）：LLM 生成一次真实问法（品牌上下文），单引擎取 0 号分片
-	pool := uc.buildQuestions(ctx, brand, kw.Term, uc.buildLocalContext(ctx, brand.ID))
+	// 位置上下文缓存一次（修复：原代码 buildLocalContext 重复调了两次）
+	localCtx := uc.buildLocalContext(ctx, brand.ID)
+	pool := uc.buildQuestions(ctx, brand, kw.Term, localCtx)
 	probeResult, pErr := uc.probe.Probe(ctx, port.ProbeInput{
 		TenantID:       in.TenantID,
 		Keyword:        kw.Term,
@@ -265,7 +271,7 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 		Competitors:    brand.Competitors,
 		SampleSize:     sampleSize,
 		SelfBaseDomain: uc.selfBaseDomain,            // 归因 P5-01：统计自营站被引用次数
-		LocalContext:   uc.buildLocalContext(ctx, brand.ID), // 本地生活 P0：位置型问法
+		LocalContext:   localCtx,                     // 本地生活 P0：位置型问法
 		Questions:      port.ShardQuestions(pool, 0, sampleSize), // v2 问法池分片
 	})
 	if pErr != nil {
@@ -351,25 +357,33 @@ func (uc *MonitorUseCase) MonitorMultiEngine(ctx context.Context, tenantID, keyw
 		if pErr != nil {
 			continue // 单个引擎失败不中断
 		}
+		// 竞品列表 + 竞品提及率（修复 BUG：原实现只填 mentionedCompetitors 没算 rates）
 		var mentionedCompetitors []string
-		for name := range probeResult.Competitors {
-			mentionedCompetitors = append(mentionedCompetitors, name)
+		competitorRates := make(map[string]float64)
+		if probeResult.SampleCount > 0 {
+			for name, cnt := range probeResult.Competitors {
+				mentionedCompetitors = append(mentionedCompetitors, name)
+				competitorRates[name] = float64(cnt) / float64(probeResult.SampleCount)
+			}
 		}
 		result := entity.MonitoringResult{
-			ID:           fmt.Sprintf("mr-%d-%s", time.Now().UnixNano(), engineName),
-			TenantID:     tenantID,
-			BrandID:      brand.ID,
-			KeywordID:    kw.ID,
-			EngineName:   engineName,
-			SampleCount:  probeResult.SampleCount,
-			MentionCount: probeResult.MentionCount,
-			MentionRate:  probeResult.MentionRate,
-			AvgPosition:  probeResult.AvgPosition,
-			Sentiment:    probeResult.Sentiment,
-			Competitors:  mentionedCompetitors,
-			Confidence:   probeResult.Confidence,
-			ProbedAt:     time.Now(),
-			RawSample:    probeResult.RawSample,
+			ID:              fmt.Sprintf("mr-%d-%s", time.Now().UnixNano(), engineName),
+			TenantID:        tenantID,
+			BrandID:         brand.ID,
+			KeywordID:       kw.ID,
+			EngineName:      engineName,
+			SampleCount:     probeResult.SampleCount,
+			MentionCount:    probeResult.MentionCount,
+			MentionRate:     probeResult.MentionRate,
+			AvgPosition:     probeResult.AvgPosition,
+			Sentiment:       probeResult.Sentiment,
+			Competitors:     mentionedCompetitors,
+			CompetitorRates: competitorRates,
+			Confidence:      probeResult.Confidence,
+			ProbedAt:        time.Now(),
+			RawSample:       probeResult.RawSample,
+			Sources:         probeResult.Sources,
+			SelfSourceCount: probeResult.SelfSourceCount,
 		}
 		if err := uc.resultRepo.Save(ctx, result); err != nil {
 			return nil, fmt.Errorf("监测结果保存失败（%s/%s）: %w", kw.Term, engineName, err)

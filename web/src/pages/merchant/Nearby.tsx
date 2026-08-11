@@ -174,14 +174,31 @@ export default function Nearby() {
                 options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
               />
               {selectedBrand && (
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  品牌定位：{selectedBrand.positioning || '未填写'} · 竞品：{selectedBrand.competitors?.join('、') || '未填写'}
-                </Text>
+                <Space direction="vertical" size={0}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    品牌定位：{selectedBrand.positioning || '未填写'} · 竞品：{selectedBrand.competitors?.join('、') || '未填写'}
+                  </Text>
+                  {selectedBrand.biz_type === 'online' && (
+                    <Text type="warning" style={{ fontSize: 12 }}>
+                      ⚠️ 线上业务品牌——门店/附近同行功能不适用（线上业务无地理约束，竞品请用「品牌管理 → 从监测结果推荐」）
+                    </Text>
+                  )}
+                </Space>
               )}
             </Space>
           </Card>
 
-          {brandId && (
+          {/* BizType 门控：online 品牌显示提示，不渲染门店/双榜（P0-3）*/}
+          {selectedBrand?.biz_type === 'online' ? (
+            <Card className="wr-glass-card" style={{ textAlign: 'center', padding: '40px 0' }}>
+              <Empty description="线上业务品牌无需门店与附近同行管理">
+                <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
+                  线上业务的 GEO 核心是行业关键词监测 + 内容优化——<br />
+                  请前往「关键词管理」发起监测，在「品牌管理」用「从监测结果推荐」获取竞品。
+                </Text>
+              </Empty>
+            </Card>
+          ) : brandId && (
             <Card
               className="wr-glass-card"
               style={{ marginBottom: 16 }}

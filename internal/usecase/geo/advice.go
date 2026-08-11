@@ -40,28 +40,30 @@ func (uc *AdviceUseCase) GetAdvice(ctx context.Context, tenantID, brandID string
 	if err != nil {
 		return nil, fmt.Errorf("品牌不存在: %w", err)
 	}
-	_ = brand
 
 	var advices []Advice
 	add := func(level, msg, page string) {
 		advices = append(advices, Advice{Level: level, Message: msg, Page: page})
 	}
 
-	// ---- 门店维度（本地生活地基）----
-	stores, _ := uc.storeRepo.ListByBrand(ctx, tenantID, brandID)
-	if len(stores) == 0 {
-		add("high", "还没有门店档案——创建门店（地址/电话/营业时间）后，AI 回答本地问题时才找得到你", "/m/nearby")
-	} else {
-		pending := 0
-		for _, s := range stores {
-			if !s.HasGeo() {
-				pending++
+	// ---- 门店维度（本地生活地基——仅 local 品牌）----
+	// BizType 分流（P0-2）：online 品牌无门店也无需门店，跳过门店相关建议（消除误导）
+	if brand.IsLocal() {
+		stores, _ := uc.storeRepo.ListByBrand(ctx, tenantID, brandID)
+		if len(stores) == 0 {
+			add("high", "还没有门店档案——创建门店（地址/电话/营业时间）后，AI 回答本地问题时才找得到你", "/m/nearby")
+		} else {
+			pending := 0
+			for _, s := range stores {
+				if !s.HasGeo() {
+					pending++
+				}
 			}
-		}
-		if pending == len(stores) {
-			add("high", "门店地址尚未定位成功（未配置地图服务或地址无法解析）——重试定位后即可使用附近同行排名", "/m/nearby")
+			if pending == len(stores) {
+				add("high", "门店地址尚未定位成功（未配置地图服务或地址无法解析）——重试定位后即可使用附近同行排名", "/m/nearby")
 		}
 	}
+	} // close if brand.IsLocal()
 
 	// ---- 监测维度（AI 声量 + 归因）----
 	results, _ := uc.resultRepo.LatestByBrand(ctx, tenantID, brandID)

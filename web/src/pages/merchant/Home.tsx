@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message, Progress, Tooltip, List, Select, InputNumber } from 'antd'
-import { RocketOutlined, ArrowRightOutlined, AppstoreAddOutlined, SearchOutlined, RadarChartOutlined, FileTextOutlined, BellOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { RocketOutlined, ArrowRightOutlined, RadarChartOutlined, BellOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { Line, Pie } from '@ant-design/charts'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -10,13 +10,17 @@ import type { Brand } from '../../types/api'
 
 const { Title, Text } = Typography
 
-// 空状态「10 分钟快速见效」引导步骤
-const QUICK_START_STEPS = [
-  { key: 'brand', title: '创建品牌', desc: '填写定位/卖点/竞品', path: '/m/brands', icon: <AppstoreAddOutlined /> },
-  { key: 'keyword', title: '添加关键词', desc: 'AI 生成或蒸馏获取', path: '/m/keywords', icon: <SearchOutlined /> },
-  { key: 'monitor', title: '立即监测', desc: '看 AI 怎么评价你', path: '/m/keywords', icon: <RadarChartOutlined /> },
-  { key: 'content', title: '生成内容', desc: '优化 AI 可见度', path: '/m/content', icon: <FileTextOutlined /> },
-]
+// 渐进式 Onboarding 步骤（基于实际数据判断 done/pending，非硬编码）
+// 从 overviews + brands 推导，无需额外查询
+function useOnboardingSteps(brands: any[], ovData: any[]) {
+  const hasBrands = brands.length > 0
+  const hasCompetitors = brands.some((b: any) => (b.competitors?.length || 0) > 0)
+  const hasKeywords = ovData.some((o: any) => (o.keyword_count || 0) > 0)
+  const hasMonitor = ovData.some((o: any) => (o.trend?.length || 0) > 0)
+  const allDone = hasBrands && hasCompetitors && hasKeywords && hasMonitor
+  const doneCount = [hasBrands, hasCompetitors, hasKeywords, hasMonitor].filter(Boolean).length
+  return { hasBrands, hasCompetitors, hasKeywords, hasMonitor, allDone, doneCount }
+}
 
 function rateColor(rate: number): string {
   if (rate >= 0.8) return 'var(--wr-success)'
@@ -95,10 +99,15 @@ export default function MerchantHome() {
             </Text>
           </div>
 
-          {/* 快速见效步骤 */}
+          {/* 快速见效步骤（内联，不再用常量——渐进式 Onboarding 已移到有品牌时的引导条）*/}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 32 }}>
-            {QUICK_START_STEPS.map((s, i) => (
-              <div key={s.key} style={{
+            {[
+              { title: '创建品牌', desc: '填写定位/卖点/竞品', path: '/m/brands' },
+              { title: '添加关键词', desc: 'AI 生成或蒸馏获取', path: '/m/keywords' },
+              { title: '立即监测', desc: '看 AI 怎么评价你', path: '/m/keywords' },
+              { title: '生成内容', desc: '优化 AI 可见度', path: '/m/content' },
+            ].map((s, i) => (
+              <div key={i} style={{
                 padding: 16, borderRadius: 12,
                 border: '1px solid var(--wr-border)', background: 'var(--wr-bg-elevated)',
                 display: 'flex', flexDirection: 'column', gap: 6, position: 'relative',
@@ -128,6 +137,14 @@ export default function MerchantHome() {
   }
 
   const ovData = (overviews.data || []) as any[]
+
+  // 渐进式 Onboarding：基于数据判断步骤完成度（有品牌但未完成全流程时显示引导条）
+  const steps = useOnboardingSteps(brands, ovData)
+  const [onboardingDismissed, setOnboardingDismissed] = useState(
+    typeof window !== 'undefined' && localStorage.getItem('wr-onboarding-dismissed') === '1'
+  )
+  const showOnboarding = !steps.allDone && !onboardingDismissed && brands.length > 0
+
   const totalAvg = ovData.length > 0
     ? ovData.reduce((s: number, o: any) => s + (o.avg_mention_rate || 0), 0) / ovData.length
     : 0
@@ -169,6 +186,48 @@ export default function MerchantHome() {
           <h1>数据驾驶舱</h1>
           <p>你的品牌在 AI 搜索引擎中的可见度 · {brands.length} 个品牌 · {totalKeywords} 个监测关键词</p>
         </div>
+
+        {/* 渐进式 Onboarding 引导条（有品牌但未完成全流程时显示）*/}
+        {showOnboarding && (
+          <Card className="wr-glass-card" style={{ marginBottom: 16, borderColor: 'rgba(124,108,255,0.2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{ flexShrink: 0 }}>
+                <Progress type="circle" percent={(steps.doneCount / 4) * 100} size={48} strokeColor="var(--wr-primary)" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 6 }}>
+                  🚀 快速配置向导 · 已完成 {steps.doneCount}/4 步
+                </Text>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {[
+                    { done: steps.hasBrands, label: '创建品牌', path: '/m/brands' },
+                    { done: steps.hasCompetitors, label: '配置竞品', path: '/m/brands' },
+                    { done: steps.hasKeywords, label: '添加关键词', path: '/m/keywords' },
+                    { done: steps.hasMonitor, label: '发起监测', path: '/m/keywords' },
+                  ].map((s, i) => (
+                    <Button
+                      key={i}
+                      size="small"
+                      type={s.done ? 'default' : 'dashed'}
+                      style={{ fontSize: 12 }}
+                      icon={s.done ? <CheckCircleOutlined style={{ color: 'var(--wr-success)' }} /> : undefined}
+                      onClick={() => navigate(s.path)}
+                    >
+                      {s.done ? '' : `${i + 1}. `}{s.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <Button
+                size="small" type="text"
+                onClick={() => {
+                  setOnboardingDismissed(true)
+                  localStorage.setItem('wr-onboarding-dismissed', '1')
+                }}
+              >关闭引导</Button>
+            </div>
+          </Card>
+        )}
 
         {/* 核心指标卡（6 张）*/}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }} className="wr-stagger">

@@ -136,6 +136,13 @@ func (uc *DiagnoseUseCase) generateSuggestions(ctx context.Context, brand entity
 		suggestions = append(suggestions, "尚未配置竞品，建议补充竞品信息以便对比分析和针对性优化")
 	}
 
+	// BizType 分流（P0-2）：本地化建议维度（仅 local 品牌）
+	if brand.IsLocal() {
+		suggestions = append(suggestions, "本地品牌建议优化门店 NAP 信息（地址/电话/营业时间一致）——AI 回答'附近有什么'类问题时依赖本地信号")
+	} else {
+		suggestions = append(suggestions, "线上品牌建议多发行业对比/功能评测类内容——用户搜索品类词时，AI 优先引用有对比分析的文章")
+	}
+
 	// LLM 生成更具体的建议（可选，增强）
 	if uc.aiGen != nil && len(suggestions) > 0 {
 		llmSugg := uc.llmSuggestions(ctx, brand, avgRate, sourceCount, competitors, suggestions)

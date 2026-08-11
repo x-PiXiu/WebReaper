@@ -347,6 +347,7 @@ func main() {
 		geoStoreUC.SetLocator(geoLocator)
 		// 内容生成注入门店 NAP（地址/营业时间/电话——本地信任信号，P0-04）
 		geoContentUC.SetStoreRepo(geoRepos.store)
+		geoContentUC.SetBrandRepo(geoRepos.brand) // BizType 分流（online 跳过线下 NAP）
 		geoNearbyUC := geo.NewNearbyUseCase(geoRepos.brand, geoRepos.store, geoRepos.result)
 		geoNearbyUC.SetPOISearcher(geoPOISearcher)
 		geoNearbyUC.SetDistanceMeasurer(geoMeasurer) // P2 驾车耗时（未配置自动降级）

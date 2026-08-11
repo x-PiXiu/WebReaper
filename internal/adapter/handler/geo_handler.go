@@ -935,8 +935,9 @@ func (h *GEOHandler) HandleNearbyCompetitors(c *gin.Context) {
 }
 
 // HandleSuggestCompetitors GET /api/v1/geo/brands/:id/competitor-suggestions
-// 竞品自动推荐（附近同行 POI 按评分/距离 top N，排除品牌自身+已有竞品）。
-// 业务分流：online 品牌返回错误提示走监测蒸馏；local 无门店提示先建门店。
+// 竞品自动推荐——两种来源（?source=poi|monitoring）：
+//   poi（默认）：附近同行 POI 按评分/距离 top N（仅 local 品牌）
+//   monitoring：监测结果 CompetitorRates 蒸馏（local/online 都适用——online 核心竞品来源）
 func (h *GEOHandler) HandleSuggestCompetitors(c *gin.Context) {
 	if h.nearbyUC == nil {
 		fail(c, fmt.Errorf("附近同行用例未注入"))
@@ -948,7 +949,14 @@ func (h *GEOHandler) HandleSuggestCompetitors(c *gin.Context) {
 			limit = n
 		}
 	}
-	suggestions, err := h.nearbyUC.SuggestCompetitors(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), limit)
+	source := c.DefaultQuery("source", "poi")
+	var suggestions []geo.CompetitorSuggestion
+	var err error
+	if source == "monitoring" {
+		suggestions, err = h.nearbyUC.SuggestCompetitorsFromMonitoring(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), limit)
+	} else {
+		suggestions, err = h.nearbyUC.SuggestCompetitors(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), limit)
+	}
 	if err != nil {
 		fail(c, err)
 		return

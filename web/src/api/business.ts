@@ -83,9 +83,14 @@ export const businessApi = {
   deleteBrand: (id: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/geo/brands/${id}`),
 
-  // 竞品自动推荐（附近同行 POI 按评分/距离 top N，排除品牌自身+已有竞品）
-  suggestCompetitors: (brandId: string, limit?: number) =>
-    apiClient.get<unknown, CompetitorSuggestion[]>(`/api/v1/geo/brands/${brandId}/competitor-suggestions${limit ? '?limit=' + limit : ''}`),
+  // 竞品自动推荐——两种来源：poi（附近同行，local only）/ monitoring（监测结果蒸馏，local+online）
+  suggestCompetitors: (brandId: string, source?: string, limit?: number) => {
+    const params = new URLSearchParams()
+    if (source) params.set('source', source)
+    if (limit) params.set('limit', String(limit))
+    const qs = params.toString()
+    return apiClient.get<unknown, CompetitorSuggestion[]>(`/api/v1/geo/brands/${brandId}/competitor-suggestions${qs ? '?' + qs : ''}`)
+  },
 
   // ---- GEO 门店档案（本地生活地基）----
   listStoreLocations: (brandId: string) =>

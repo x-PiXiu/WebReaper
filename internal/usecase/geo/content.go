@@ -37,6 +37,7 @@ type ContentUseCase struct {
 	templateRepo  port.PromptTemplateRepository // 提示词模板（可选；nil=内置默认）
 	quotaGate     port.QuotaStore             // 配额检查门（可选；nil=不检查）
 	storeRepo     port.StoreLocationRepository // 门店档案（可选；nil=不注入 NAP 信号）
+	brandRepo     port.BrandRepository         // 品牌仓储（可选；BizType 分流——online 跳过线下 NAP）
 	diagnoseUC    *DiagnoseUseCase            // GEO 诊断（可选；诊断→优化闭环 P5-03）
 }
 
@@ -126,6 +127,13 @@ func (uc *ContentUseCase) SetStoreRepo(r port.StoreLocationRepository) {
 	}
 }
 
+// SetBrandRepo 注入品牌仓储（可选；BizType 分流——online 品牌跳过线下 NAP 注入）。
+func (uc *ContentUseCase) SetBrandRepo(r port.BrandRepository) {
+	if r != nil {
+		uc.brandRepo = r
+	}
+}
+
 // SetDiagnoseUC 注入 GEO 诊断用例（可选；诊断→优化闭环 P5-03）。
 // 注入后 Generate 带 UseDiagnose=true 时先生成诊断报告，把改进建议注入
 // 内容生成 prompt——"诊断（为什么没被引用）→ 优化（按建议生成）"闭环打通。
@@ -159,6 +167,12 @@ func (uc *ContentUseCase) buildDiagnoseHints(ctx context.Context, tenantID, bran
 func (uc *ContentUseCase) buildStoreNAP(ctx context.Context, brandID string) string {
 	if uc.storeRepo == nil || brandID == "" {
 		return ""
+	}
+	// BizType 分流（P0-2）：online 品牌（线上业务）无线下门店——跳过地址/电话 NAP
+	if uc.brandRepo != nil {
+		if b, err := uc.brandRepo.FindByID(ctx, "", brandID); err == nil && !b.IsLocal() {
+			return ""
+		}
 	}
 	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)
 	if err != nil {

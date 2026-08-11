@@ -91,15 +91,17 @@ export default function Brands() {
     }
   }
 
-  // 从附近同行推荐竞品（local 品牌；online 返回错误提示）
-  const handleSuggestCompetitors = async () => {
+  // 推荐竞品（source=poi 附近同行 / source=monitoring 监测结果蒸馏）
+  const [suggestSource, setSuggestSource] = useState<string>('poi')
+  const handleSuggestCompetitors = async (source: string = 'poi') => {
     if (!selectedBrand) return
+    setSuggestSource(source)
     setCompSuggestOpen(true)
     setCheckedComps([])
     setSuggestions([])
     setLoadingSuggest(true)
     try {
-      const res = await businessApi.suggestCompetitors(selectedBrand.id, 8)
+      const res = await businessApi.suggestCompetitors(selectedBrand.id, source, 8)
       setSuggestions(res || [])
     } catch (e) {
       message.error('推荐失败：' + ((e as Error)?.message || ''))
@@ -249,13 +251,14 @@ export default function Brands() {
                     <Text strong style={{ fontSize: 16 }}>竞品管理</Text>
                     <Tag color="purple">{selectedBrand.competitors?.length || 0}</Tag>
                   </Space>
-                  {selectedBrand.biz_type !== 'online' ? (
-                    <Button size="small" type="primary" ghost icon={<RadarChartOutlined />} onClick={handleSuggestCompetitors}>
+                  {selectedBrand.biz_type !== 'online' && (
+                    <Button size="small" type="primary" ghost icon={<RadarChartOutlined />} onClick={() => handleSuggestCompetitors('poi')}>
                       从附近同行推荐
                     </Button>
-                  ) : (
-                    <Text type="secondary" style={{ fontSize: 11 }}>线上业务：竞品从监测结果中 AI 提到的对手自动沉淀</Text>
                   )}
+                  <Button size="small" type="primary" ghost icon={<SearchOutlined />} onClick={() => handleSuggestCompetitors('monitoring')}>
+                    从监测结果推荐
+                  </Button>
                 </div>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12, lineHeight: 1.6 }}>
                   竞品是监测时的对比坐标系——「你的 AI 提及率 vs 竞品」让商户知道差距。
@@ -318,7 +321,7 @@ export default function Brands() {
 
       {/* 竞品推荐弹窗（附近同行 POI 按评分/距离排序） */}
       <Modal
-        title={`从附近同行推荐竞品 · ${selectedBrand?.name || ''}`}
+        title={`竞品推荐 · ${suggestSource === 'monitoring' ? '从监测结果' : '从附近同行'} · ${selectedBrand?.name || ''}`}
         open={compSuggestOpen}
         onCancel={() => setCompSuggestOpen(false)}
         footer={
@@ -332,12 +335,14 @@ export default function Brands() {
         width={560}
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
-          附近同行 POI 按评分降序+距离升序推荐（已排除品牌自身和已有竞品）。勾选要采纳的竞品。
+          {suggestSource === 'monitoring'
+            ? '监测时 AI 回答中提到的对手（按提及率降序，已排除品牌自身和已有竞品）。勾选要采纳的竞品。'
+            : '附近同行 POI 按评分降序+距离升序推荐（已排除品牌自身和已有竞品）。勾选要采纳的竞品。'}
         </Text>
         {loadingSuggest ? (
-          <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="正在搜索附近同行..." /></div>
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin tip={suggestSource === 'monitoring' ? '正在从监测结果蒸馏...' : '正在搜索附近同行...'} /></div>
         ) : suggestions.length === 0 ? (
-          <Empty description="暂无推荐——需先创建门店并完成地理编码" style={{ padding: 24 }} />
+          <Empty description={suggestSource === 'monitoring' ? '暂无推荐——需先发起监测' : '暂无推荐——需先创建门店并完成地理编码'} style={{ padding: 24 }} />
         ) : (
           <Checkbox.Group value={checkedComps} onChange={(values) => setCheckedComps(values as string[])} style={{ width: '100%' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -345,9 +350,15 @@ export default function Brands() {
                 <Checkbox key={s.name} value={s.name} style={{ marginLeft: 0 }}>
                   <Space size={8}>
                     <Text strong style={{ fontSize: 13 }}>{s.name}</Text>
-                    {s.rating > 0 && <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>⭐ {s.rating}</Tag>}
-                    <Text type="secondary" style={{ fontSize: 11 }}>📍 {s.distance_m < 1000 ? s.distance_m + '米' : (s.distance_m / 1000).toFixed(1) + '公里'}</Text>
-                    {s.category && <Text type="secondary" style={{ fontSize: 10 }}>{s.category.split(';')[0]}</Text>}
+                    {suggestSource === 'monitoring' ? (
+                      <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>提及率 {s.address}</Tag>
+                    ) : (
+                      <>
+                        {s.rating > 0 && <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>⭐ {s.rating}</Tag>}
+                        {s.distance_m > 0 && <Text type="secondary" style={{ fontSize: 11 }}>📍 {s.distance_m < 1000 ? s.distance_m + '米' : (s.distance_m / 1000).toFixed(1) + '公里'}</Text>}
+                      </>
+                    )}
+                    {s.category && suggestSource !== 'monitoring' && <Text type="secondary" style={{ fontSize: 10 }}>{s.category.split(';')[0]}</Text>}
                   </Space>
                 </Checkbox>
               ))}
