@@ -50,7 +50,6 @@ const FORMAT_OPTIONS = [
   { value: 'faq', label: '❓ FAQ 问答集' },
   { value: 'comparison', label: '⚖️ 对比评测' },
 ]
-]
 
 export default function Content() {
   const queryClient = useQueryClient()
