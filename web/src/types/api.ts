@@ -42,6 +42,7 @@ export interface LLMConfig {
   api_key: string
   base_url: string   // 如 https://api.minimaxi.com/v1
   model: string      // 如 MiniMax-M2.5
+  cost_per_mtok: number // 每百万 tokens 参考成本（分；成本分析按引擎细分）
 }
 
 // ---- 聊天会话（后端持久化，按用户隔离）----
@@ -363,8 +364,8 @@ export interface Plan {
   features: string[]
   status: string               // active / archived
   sort_order: number
-  created_at: string
-  updated_at: string
+  created_at?: string          // 仅响应返回；保存请求不发送（后端维护）
+  updated_at?: string          // 仅响应返回；保存请求不发送（后端维护）
 }
 
 export interface Subscription {

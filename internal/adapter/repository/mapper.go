@@ -114,14 +114,14 @@ func agentConfigFromPO(p AgentConfigPO) entity.AgentConfig {
 func llmConfigToPO(e entity.LLMConfig) LLMConfigPO {
 	return LLMConfigPO{
 		Name: e.Name, Provider: e.Provider, APIKey: e.APIKey,
-		BaseURL: e.BaseURL, Model: e.Model,
+		BaseURL: e.BaseURL, Model: e.Model, CostPerMTok: e.CostPerMTok,
 	}
 }
 
 func llmConfigFromPO(p LLMConfigPO) entity.LLMConfig {
 	return entity.LLMConfig{
 		Name: p.Name, Provider: p.Provider, APIKey: p.APIKey,
-		BaseURL: p.BaseURL, Model: p.Model,
+		BaseURL: p.BaseURL, Model: p.Model, CostPerMTok: p.CostPerMTok,
 	}
 }
 

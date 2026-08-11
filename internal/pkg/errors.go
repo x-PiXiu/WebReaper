@@ -23,5 +23,6 @@ var (
 	ErrAlreadyPublished = errors.New("content already published to this platform")
 	// ErrQuotaExceeded 配额耗尽（套餐用量超出当月限额）。
 	// 经济系统专用：handler 层映射为 HTTP 402 Payment Required。
-	ErrQuotaExceeded = errors.New("quota exceeded for current billing period")
+	// 文案直接面向商户（客户端拦截器 40201 会进一步引导升级套餐）。
+	ErrQuotaExceeded = errors.New("本月配额已用完，请升级套餐或等待下月重置")
 )

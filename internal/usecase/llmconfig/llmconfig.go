@@ -25,21 +25,26 @@ func NewLLMConfigUseCase(repo port.LLMConfigRepository) *LLMConfigUseCase {
 
 // CreateInput 创建 LLM 配置的输入。
 type CreateInput struct {
-	Name     string
-	Provider string
-	APIKey   string
-	BaseURL  string
-	Model    string
+	Name        string
+	Provider    string
+	APIKey      string
+	BaseURL     string
+	Model       string
+	CostPerMTok int
 }
 
 // Create 创建 LLM 配置：校验 + 持久化。
 func (uc *LLMConfigUseCase) Create(ctx context.Context, in CreateInput) (entity.LLMConfig, error) {
 	cfg := entity.LLMConfig{
-		Name:     in.Name,
-		Provider: in.Provider,
-		APIKey:   in.APIKey,
-		BaseURL:  in.BaseURL,
-		Model:    in.Model,
+		Name:        in.Name,
+		Provider:    in.Provider,
+		APIKey:      in.APIKey,
+		BaseURL:     in.BaseURL,
+		Model:       in.Model,
+		CostPerMTok: in.CostPerMTok,
+	}
+	if cfg.CostPerMTok <= 0 {
+		cfg.CostPerMTok = 100 // 默认 ¥1/百万 tokens（与全局参考价一致）
 	}
 	if !cfg.IsValid() {
 		return entity.LLMConfig{}, fmt.Errorf("llm config 无效：name / api_key / model 不能为空")
@@ -57,10 +62,11 @@ func (uc *LLMConfigUseCase) List(ctx context.Context) ([]entity.LLMConfig, error
 
 // UpdateInput 修改 LLM 配置的输入（部分更新语义：nil = 保留原值）。
 type UpdateInput struct {
-	Provider *string
-	APIKey   *string
-	BaseURL  *string
-	Model    *string
+	Provider    *string
+	APIKey      *string
+	BaseURL     *string
+	Model       *string
+	CostPerMTok *int
 }
 
 // Update 修改 LLM 配置：先取原值，应用部分更新，校验后持久化。
@@ -82,6 +88,9 @@ func (uc *LLMConfigUseCase) Update(ctx context.Context, name string, in UpdateIn
 	}
 	if in.Model != nil {
 		old.Model = *in.Model
+	}
+	if in.CostPerMTok != nil {
+		old.CostPerMTok = *in.CostPerMTok
 	}
 	if !old.IsValid() {
 		return entity.LLMConfig{}, fmt.Errorf("llm config 无效：name / api_key / model 不能为空")

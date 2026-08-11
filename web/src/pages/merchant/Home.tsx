@@ -214,6 +214,13 @@ export default function MerchantHome() {
           </Col>
         </Row>
 
+        {/* 自动盯盘控制（商户端显眼入口：状态/开关/说明/套餐提示）*/}
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          <Col span={24}>
+            <AutoMonitorCard />
+          </Col>
+        </Row>
+
         {/* 待办 + 配额用量横条（每次进来第一眼看到的运营信号）*/}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           {/* 待办：未读通知 */}
@@ -425,6 +432,66 @@ export default function MerchantHome() {
         </Row>
       </div>
     </div>
+  )
+}
+
+// AutoMonitorCard 自动盯盘控制卡片（商户端显眼入口）：
+// 状态 + 开关 + 频率/通知说明 + 套餐能力位提示。
+// 数据同 AutoMonitorBadge（tenant-auto-monitor）——开关复用租户级设置。
+function AutoMonitorCard() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const { data, isLoading } = useQuery({
+    queryKey: ['tenant-auto-monitor'],
+    queryFn: () => businessApi.getTenantAutoMonitor(),
+  })
+  const { data: usage } = useQuery({
+    queryKey: ['my-usage'],
+    queryFn: () => businessApi.getMyUsage().catch(() => null),
+    staleTime: 60_000,
+  })
+  const toggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => businessApi.setTenantAutoMonitor(enabled),
+    onSuccess: () => {
+      message.success('自动盯盘已' + (data?.tenant_enabled ? '关闭' : '开启') + '（每日自动监测，趋势自动生长）')
+      queryClient.invalidateQueries({ queryKey: ['tenant-auto-monitor'] })
+    },
+  })
+
+  const hasFeature = (usage?.plan?.features || []).includes('auto-monitor')
+  const active = data?.platform_enabled && data?.tenant_enabled
+  return (
+    <Card className="wr-glass-card" styles={{ body: { padding: 16 } }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <Space size={6}>
+          <RadarChartOutlined style={{ color: 'var(--wr-primary)' }} />
+          <Text strong style={{ fontSize: 14 }}>自动盯盘</Text>
+          <Tag color={active ? 'success' : data?.platform_enabled ? 'warning' : 'default'} style={{ fontSize: 11, margin: 0 }}>
+            {active ? '运行中' : data?.platform_enabled ? '已暂停' : '平台未开启'}
+          </Tag>
+        </Space>
+        {hasFeature ? (
+          <Switch
+            checked={!!data?.tenant_enabled}
+            disabled={!data?.platform_enabled}
+            loading={isLoading || toggleMutation.isPending}
+            onChange={(v) => toggleMutation.mutate(v)}
+            checkedChildren="开启" unCheckedChildren="关闭"
+          />
+        ) : (
+          <Button size="small" type="link" onClick={() => navigate('/m/my-plan')}>升级解锁 →</Button>
+        )}
+      </div>
+      <Text type="secondary" style={{ fontSize: 12, display: 'block', lineHeight: 1.7 }}>
+        每日自动监测你的全部关键词（默认引擎，每关键词 5 次采样）——趋势自动生长，无需手动点监测。
+        提及率显著下降或竞品反超时自动通知（见待办提醒）。
+      </Text>
+      {!data?.platform_enabled && (
+        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8, color: 'var(--wr-text-muted)' }}>
+          平台总开关未开启（管理员在平台设置中控制）
+        </Text>
+      )}
+    </Card>
   )
 }
 

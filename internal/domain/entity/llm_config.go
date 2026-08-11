@@ -16,6 +16,10 @@ type LLMConfig struct {
 	APIKey   string // API 密钥
 	BaseURL  string // API 端点，如 https://api.minimaxi.com/v1
 	Model    string // 模型名，如 MiniMax-M2.5
+	// CostPerMTok 每百万 tokens 参考成本（分；默认 100 = ¥1/百万 tokens）。
+	// 按引擎差异化（豆包 ~20、DeepSeek ~20、GPT 级 ~300）——成本分析按引擎细分
+	// （P1-1：监测接入多引擎后，成本报表不能再按全局单一参考价估算）。
+	CostPerMTok int
 }
 
 // IsValid 领域规则：有效的 LLM 配置必须有名称、API Key 和模型名。

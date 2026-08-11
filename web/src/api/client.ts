@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios'
-import { message as antdMessage } from 'antd'
+import { message as antdMessage, Modal as antdModal } from 'antd'
 import { getToken, useAuthStore } from '../store/auth'
 import { clearQueryCache } from '../main'
 import type { ApiEnvelope } from '../types/api'
@@ -9,6 +9,7 @@ import type { ApiEnvelope } from '../types/api'
 // 匹配后端契约：
 //   - 请求拦截：从 store 读 token，附 Authorization: Bearer xxx
 //   - 响应拦截：解包信封 {code,msg,data}；code!==0 抛错+提示；401 清 token 跳登录
+//   - 40201 配额超限：弹"去升级"引导（友好化——不把服务端原始错误直接甩给用户）
 
 export const apiClient = axios.create({
   baseURL: '/', // 走 Vite proxy，/api/* 被转发到后端
@@ -24,6 +25,31 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
+// 配额超限统一引导：Modal 带"去升级"跳套餐页（不弹原始服务端错误）。
+// 页面 catch 里仍会收到 reject 的友好 Error（"配额已用完"），可作轻提示。
+// 防抖：多引擎监测/批量操作会同时收到多个 402——5 秒窗口内只弹一次引导。
+let quotaPromptShown = false
+let quotaPromptTimer: ReturnType<typeof setTimeout> | null = null
+function promptQuotaExceeded() {
+  if (quotaPromptShown) {
+    return // 防抖：已有引导弹窗
+  }
+  quotaPromptShown = true
+  if (quotaPromptTimer) clearTimeout(quotaPromptTimer)
+  quotaPromptTimer = setTimeout(() => {
+    quotaPromptShown = false
+  }, 5000)
+  antdModal.confirm({
+    title: '本月配额已用完',
+    content: '当前套餐的可用次数已用完——升级套餐可解锁更多监测/生成次数，或等待下月自动重置。',
+    okText: '去升级',
+    cancelText: '知道了',
+    onOk: () => {
+      window.location.href = '/m/my-plan'
+    },
+  })
+}
+
 // 响应拦截：解包信封
 apiClient.interceptors.response.use(
   (response) => {
@@ -33,7 +59,12 @@ apiClient.interceptors.response.use(
       if (env.code === 0) {
         return env.data // 直接返回 data，调用方无需再解包
       }
-      // 业务错误：提示并抛错
+      if (env.code === 40201) {
+        // 配额超限：友好引导（不显示服务端原始 msg）
+        promptQuotaExceeded()
+        return Promise.reject(new Error('配额已用完'))
+      }
+      // 其他业务错误：提示并抛错（msg 已是面向用户的中文文案）
       antdMessage.error(env.msg || '请求失败')
       return Promise.reject(new Error(env.msg || `业务错误 ${env.code}`))
     }
@@ -50,6 +81,11 @@ apiClient.interceptors.response.use(
       // 用 location 跳转避免在拦截器里耦合 router
       window.location.href = '/login'
       return Promise.reject(new Error('未授权'))
+    }
+    if (status === 402) {
+      // HTTP 层 402（非信封错误路径）：同样友好引导
+      promptQuotaExceeded()
+      return Promise.reject(new Error('配额已用完'))
     }
     const msg = error.response?.data?.msg || error.message || '网络错误'
     antdMessage.error(msg)

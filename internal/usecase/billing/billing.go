@@ -28,6 +28,7 @@ type BillingUseCase struct {
 	settingRepo port.SystemSettingRepository // 支付网关运行时配置（admin 后台设置）
 	usageStats port.UsageStatsQueryer // 用量统计（可选；X-01 成本分析用）
 	perMTokenCents int                // 每百万 tokens 参考成本（分；0=不估算金额，只报 token）
+	llmCfgRepo port.LLMConfigRepository // P1-1：按引擎单价成本分析（可选；未注入时用全局参考价兜底）
 }
 
 func NewBillingUseCase(plan port.PlanRepository, sub port.SubscriptionRepository, order port.OrderRepository) *BillingUseCase {
@@ -51,9 +52,18 @@ func (uc *BillingUseCase) SetUsageStats(q port.UsageStatsQueryer) {
 
 // SetReferencePricePerMToken 设置每百万 tokens 参考成本（分；0=只报 token 不估算金额）。
 // 配置依赖：不同 LLM 模型单价不同（如 MiniMax M2.5 约 ¥1/百万 tokens），
-// 运营按实际模型从 .env 配置（LLM_COST_PER_MToken）。
+// 运营按实际模型从 .env 配置（LLM_COST_PER_MToken）——兜底单价；
+// 引擎级单价见 SetLLMConfigRepo（P1-1：监测多引擎后按引擎细分）。
 func (uc *BillingUseCase) SetReferencePricePerMToken(cents int) {
 	uc.perMTokenCents = cents
+}
+
+// SetLLMConfigRepo 注入 LLM 配置仓储（可选；P1-1 按引擎单价成本分析——
+// 豆包 ¥0.2 vs GPT 级 ¥3 的差异在报表中体现；未注入时回退全局参考价）。
+func (uc *BillingUseCase) SetLLMConfigRepo(r port.LLMConfigRepository) {
+	if r != nil {
+		uc.llmCfgRepo = r
+	}
 }
 
 // SetSettingRepo 注入系统设置仓储（可选；用于支付网关运行时配置管理）。
@@ -165,7 +175,11 @@ func (uc *BillingUseCase) SavePlan(ctx context.Context, p entity.Plan) (entity.P
 		p.Status = entity.PlanStatusActive
 	}
 	now := time.Now()
-	if p.CreatedAt.IsZero() {
+	// 更新已有套餐：保留原 CreatedAt（编辑名称/配额不应改动创建时间——
+	// handler DTO 不接收时间字段，编辑时不能把创建时间重置为 now）
+	if existing, err := uc.planRepo.FindByID(ctx, p.ID); err == nil && !existing.CreatedAt.IsZero() {
+		p.CreatedAt = existing.CreatedAt
+	} else if p.CreatedAt.IsZero() {
 		p.CreatedAt = now
 	}
 	p.UpdatedAt = now
@@ -456,15 +470,29 @@ type SceneCost struct {
 // CostAnalysis 成本分析报告（admin 运营报表）。
 type CostAnalysis struct {
 	Days           int   // 统计窗口（天）
-	PerMTokenCents int   // 参考单价（分/百万 tokens）
+	PerMTokenCents int   // 兜底参考单价（分/百万 tokens）
 	Scenes         []SceneCost
+	// EngineCosts 按引擎细分成本（P1-1：多引擎监测后单价不同——豆包 vs GPT 级）。
+	// 引擎单价来自 llm_configs.cost_per_mtok；未注入 llmCfgRepo 时为空（回退全局价）。
+	EngineCosts    []EngineCost
 	TotalCalls     int
 	TotalTokens    int64
 	TotalCostCents int   // 估算总成本（分）
 }
 
+// EngineCost 单引擎成本明细（P1-1）。
+type EngineCost struct {
+	LLMConfigName string // 引擎名（空 = 未标记引擎的历史数据）
+	Calls         int
+	TotalTokens   int64
+	PerMTokenCents int  // 该引擎单价（分/百万 tokens）
+	EstCostCents  int
+}
+
 // CostAnalysis 生成近 N 天按场景的成本分析（X-01 商业闭环收口）。
 // 数据源：usages 表按场景聚合（SumBySceneSince）；估算成本 = tokens × 参考单价。
+// P1-1 增强：同时按引擎分组（SumBySceneAndConfigSince），单价取 llm_configs 配置，
+// 未配置的引擎/未注入仓储回退全局参考价。
 // 未注入 usageStats 时返回空报告（降级不报错）。
 func (uc *BillingUseCase) CostAnalysis(ctx context.Context, days int) (CostAnalysis, error) {
 	if uc.usageStats == nil {
@@ -490,6 +518,31 @@ func (uc *BillingUseCase) CostAnalysis(ctx context.Context, days int) (CostAnaly
 		report.TotalCalls += s.Calls
 		report.TotalTokens += s.TotalTokens
 		report.TotalCostCents += cost
+	}
+
+	// P1-1：按引擎细分（每引擎单价不同——成本报表的决策价值）
+	engineRows, eErr := uc.usageStats.SumBySceneAndConfigSince(ctx, since)
+	if eErr == nil && len(engineRows) > 0 {
+		priceCache := make(map[string]int) // 引擎名 → 单价（分/百万 tokens）
+		for _, row := range engineRows {
+			price := uc.perMTokenCents
+			if uc.llmCfgRepo != nil && row.LLMConfigName != "" {
+				if cached, ok := priceCache[row.LLMConfigName]; ok {
+					price = cached
+				} else if cfg, fErr := uc.llmCfgRepo.FindByName(ctx, row.LLMConfigName); fErr == nil && cfg.CostPerMTok > 0 {
+					price = cfg.CostPerMTok
+					priceCache[row.LLMConfigName] = price
+				}
+			}
+			cost := 0
+			if price > 0 && row.TotalTokens > 0 {
+				cost = int(row.TotalTokens * int64(price) / 1_000_000)
+			}
+			report.EngineCosts = append(report.EngineCosts, EngineCost{
+				LLMConfigName: row.LLMConfigName, Calls: row.Calls, TotalTokens: row.TotalTokens,
+				PerMTokenCents: price, EstCostCents: cost,
+			})
+		}
 	}
 	return report, nil
 }

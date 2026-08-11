@@ -172,6 +172,10 @@ export const businessApi = {
   monitorKeyword: (data: { keyword_id: string; engine_name?: string; sample_size?: number }) =>
     apiClient.post<unknown, MonitoringResult>('/api/v1/geo/monitor-keyword', data),
 
+  // 多引擎批量监测（采样矩阵：每引擎独立采样——"豆包测 3 次 vs 千问测 3 次"对比）
+  monitorMulti: (data: { keyword_id: string; engine_names: string[]; sample_size?: number }) =>
+    apiClient.post<unknown, MonitoringResult[]>('/api/v1/geo/monitor-multi', data),
+
   getBrandOverview: (brandId: string, name?: string) =>
     apiClient.get<unknown, BrandOverview>(`/api/v1/geo/brands/${brandId}/overview${name ? '?name=' + encodeURIComponent(name) : ''}`),
 

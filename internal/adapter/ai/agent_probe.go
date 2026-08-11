@@ -16,22 +16,29 @@ import (
 // AgentProbe 是 port.AIEngineProbe 的"Agent 自主搜索"实现。
 //
 // 优化版设计：
-//   - 默认 sampleSize=1（只跑 1 次 Agent 搜索+综合，而非多次重复）
-//   - 但 Agent 的搜索内容覆盖 10 个多样化问法（丰富的搜索视角）
+//   - 默认 sampleSize=5（对齐 Monitor 默认；每次采样用不同问法——采样矩阵的"问法维度"）
+//   - 问法由 ProbeQuestioner 生成并随机打乱（修复"5 次搜索词全一样"的同质化问题）
 //   - 解析提及用 default 引擎（固定），搜索用用户选的引擎（分离，避免自判）
 type AgentProbe struct {
-	aiGen port.AIGenerator
+	aiGen      port.AIGenerator
+	questioner *ProbeQuestioner
 }
 
 func NewAgentProbe(ai port.AIGenerator) *AgentProbe {
-	return &AgentProbe{aiGen: ai}
+	return &AgentProbe{aiGen: ai, questioner: NewProbeQuestioner()}
 }
 
 // Probe 让 Agent 自主搜索关键词并综合回答，解析品牌提及。
 func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeResult, error) {
 	sampleSize := in.SampleSize
 	if sampleSize <= 0 {
-		sampleSize = 1 // 默认 1 次（1 次 Agent 搜索就够，搜索内容本身已覆盖 10 个问法视角）
+		sampleSize = 5 // 默认 5 次采样（每次一问法，多样化覆盖）
+	}
+	// 采样矩阵·问法维度：优先用预生成问法池（LLM 生成，引擎分片隔离防缓存）；
+	// 池为空（生成失败/未注入）→ 模板问法兜底（随机打乱，兼容旧行为）
+	questions := in.Questions
+	if len(questions) == 0 {
+		questions = p.questioner.Questions(in.Keyword, sampleSize, in.LocalContext)
 	}
 
 	allBrandNames := append([]string{in.BrandName}, in.Aliases...)
@@ -44,9 +51,9 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 	totalSamples := 0 // 实际成功采样数（用于置信度）
 
 	for i := 0; i < sampleSize; i++ {
-		// 构造丰富的搜索任务——不是只问一个词，而是给 Agent 一组相关搜索方向
-		searchContext := p.buildSearchContext(in.Keyword, in.LocalContext)
-		task := searchContext
+		question := questions[i%len(questions)]
+		// 构造丰富的搜索任务——不是只问一个词，而是模拟"不同用户的不同问法"
+		task := p.buildSearchTask(question)
 
 		// systemPrompt：让 Agent 知道它是 AI 搜索引擎，要联网搜索
 		systemPrompt := "你是一个 AI 搜索引擎。用户提问时，你应该先调用搜索工具搜索相关信息，" +
@@ -68,7 +75,25 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 				}
 			},
 		)
-		if err != nil || agentErr != nil {
+		if (err != nil || agentErr != nil || strings.TrimSpace(answerBuilder.String()) == "") && i < sampleSize-1 {
+			// 搜索工具失败率高（网络/工具抖动）——同采样重试 1 次，稳定实际采样数
+			answerBuilder.Reset()
+			agentErr = nil
+			retryErr := p.aiGen.RunWithTools(ctx, "", in.EngineName, task, systemPrompt,
+				searchTools,
+				func(evt port.ToolEvent) {
+					if evt.Type == "text-delta" && evt.Text != "" {
+						answerBuilder.WriteString(evt.Text)
+					}
+					if evt.Type == "error" && evt.Error != "" {
+						agentErr = fmt.Errorf("%s", evt.Error)
+					}
+				},
+			)
+			if retryErr != nil || agentErr != nil {
+				continue
+			}
+		} else if err != nil || agentErr != nil {
 			continue
 		}
 		answer := strings.TrimSpace(answerBuilder.String())
@@ -78,10 +103,11 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		// 过滤模型推理过程的 think 标签（展示与解析都不应看到思考过程）
 		answer = pkg.StripThinkTags(answer)
 		totalSamples++
-		allAnswers = append(allAnswers, fmt.Sprintf("【搜索：%s】\n%s", in.Keyword, answer))
+		// 前缀标注实际问法（报告里"提问 + 回答"一一对应）
+		allAnswers = append(allAnswers, fmt.Sprintf("【问：%s】\n%s", question, answer))
 
-		// P2-③：解析用 default 引擎（固定），搜索用用户选的引擎——分离避免自判
-		analysis := analyzeMention(ctx, p.aiGen, answer, in.BrandName, allBrandNames, in.Competitors, "")
+		// 解析用 AnalyzerName（默认 default 引擎），与搜索引擎分离——避免自判
+		analysis := analyzeMention(ctx, p.aiGen, answer, in.BrandName, allBrandNames, in.Competitors, in.AnalyzerName)
 		if analysis.Mentioned {
 			mentionCount++
 			if analysis.Position > 0 {
@@ -147,16 +173,10 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 	}, nil
 }
 
-// buildSearchContext 构造中立的搜索任务——不引导"推荐"，让 Agent 自然地搜索和回答。
-// localContext 非空时附加位置限定（本地生活 P0 补全）——搜索"望京附近有什么川菜馆"
-// 这类真实本地场景，Agent 会优先检索本地相关内容。
-func (p *AgentProbe) buildSearchContext(keyword, localContext string) string {
-	base := fmt.Sprintf("搜索并介绍「%s」相关的内容。先搜索了解这个话题，然后根据搜索到的信息做个介绍。", keyword)
-	if localContext != "" {
-		base = fmt.Sprintf("搜索并介绍「%s附近有什么%s」相关的内容，重点看%s本地的选择。先搜索了解，然后根据搜索到的信息做个介绍。",
-			localContext, keyword, localContext)
-	}
-	return base
+// buildSearchTask 把问法包装成搜索任务——中立的搜索指令，不引导"推荐"，
+// 让 Agent 自然地搜索和回答（问法本身已含本地化信息）。
+func (p *AgentProbe) buildSearchTask(question string) string {
+	return fmt.Sprintf("用户问：%s\n请先搜索了解这个话题，然后根据搜索到的信息给出全面回答。", question)
 }
 
 // analyzeMention 分析回答里的品牌提及——消除"确认偏误"（包级函数：AgentProbe/DirectProbe 共用）。

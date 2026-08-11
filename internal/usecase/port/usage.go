@@ -29,11 +29,22 @@ type SceneUsage struct {
 	TotalTokens int64   // token 总量（非 LLM 场景为 0）
 }
 
+// SceneConfigUsage 按场景 + 引擎聚合的用量统计（P1-1：多引擎成本分析）。
+type SceneConfigUsage struct {
+	Scene         string
+	LLMConfigName string // 空 = 未标记引擎的历史数据
+	Calls         int
+	TotalTokens   int64
+}
+
 // UsageStatsQueryer 用量统计查询（成本分析/运营报表——商业闭环成本侧）。
 // 由 UsageRecorder 实现者一并实现（同数据源 usages 表）。
 type UsageStatsQueryer interface {
 	// SumBySceneSince 统计指定时间点以来的用量（按场景分组，token 降序）。
 	SumBySceneSince(ctx context.Context, since time.Time) ([]SceneUsage, error)
+	// SumBySceneAndConfigSince 按场景 + 引擎分组（P1-1：成本报表按引擎细分——
+	// 豆包 ¥0.2 vs GPT 级 ¥3 的单价差异需要在报表中体现）。
+	SumBySceneAndConfigSince(ctx context.Context, since time.Time) ([]SceneConfigUsage, error)
 }
 
 // ---- 上下文传递（租户/场景）：调用方声明，记录方消费 ----

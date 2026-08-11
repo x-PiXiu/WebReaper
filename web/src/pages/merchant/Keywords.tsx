@@ -1,7 +1,10 @@
-import { useState } from 'react'
-import { Card, Typography, Button, Table, Tag, Space, message, Input, Select, Tabs, Upload, Checkbox, Empty, Spin, Popconfirm, Progress } from 'antd'
+import { useState, isValidElement, cloneElement } from 'react'
+import type { ReactNode, CSSProperties, ComponentType, ReactElement } from 'react'
+import { Card, Typography, Button, Table, Tag, Space, message, Input, Select, Tabs, Upload, Checkbox, Empty, Spin, Popconfirm, Collapse } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
 import { Line } from '@ant-design/charts'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { mentionDelta, deltaView, markLastPoint } from '../../utils/geo'
@@ -17,6 +20,56 @@ function rateColor(rate: number): string {
   if (rate >= 0.5) return 'var(--wr-accent)'
   if (rate >= 0.2) return 'var(--wr-warning)'
   return 'var(--wr-danger)'
+}
+
+// ---- 监测详情展示辅助（纯 UI 组件，无业务副作用）----
+
+/** 情感元信息（emoji + 语义色）。 */
+function sentimentMeta(s: string): { label: string; emoji: string; color: string } {
+  if (s === 'positive') return { label: '正面', emoji: '😊', color: 'var(--wr-success)' }
+  if (s === 'negative') return { label: '负面', emoji: '😞', color: 'var(--wr-danger)' }
+  return { label: '中性', emoji: '😐', color: 'var(--wr-text-muted)' }
+}
+
+/** 统计小格：label + 大数字 + 可选 sub（引擎详情卡四维度）。 */
+function StatBlock({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
+  return (
+    <div style={{ padding: '8px 12px', borderRadius: 10, background: 'var(--wr-bg-elevated)', border: '1px solid rgba(124,108,255,0.08)' }}>
+      <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>{label}</Text>
+      <Text style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2, color: color || 'var(--wr-text-primary)' }}>{value}</Text>
+      {sub && <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>{sub}</Text>}
+    </div>
+  )
+}
+
+/** 对比条：品牌/竞品一行（名称 + 进度条 + 百分比）。 */
+function CompareBar({ name, rate, barColor, textColor, nameColor, isMine }: {
+  name: string; rate: number; barColor: string; textColor: string; nameColor?: string; isMine?: boolean
+}) {
+  const pct = Math.min(100, Math.round(rate * 100))
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 12, minWidth: 76, fontWeight: isMine ? 700 : 500, color: nameColor || 'var(--wr-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>
+        {isMine && <span style={{ marginRight: 4 }}>🛡️</span>}{name}
+      </span>
+      <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--wr-bg-hover)', overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: 4, opacity: isMine ? 1 : 0.85, transition: 'width 500ms ease' }} />
+      </div>
+      <Text style={{ fontSize: 12, minWidth: 42, textAlign: 'right', fontWeight: 700, color: textColor }}>{pct}%</Text>
+    </div>
+  )
+}
+
+/** 把 raw_sample 按【搜索：xxx】问法标记拆成采样气泡（每问法一段，首行是问法头）。 */
+function splitSamples(raw: string): { header: string; body: string }[] {
+  const parts = raw.split(/(?=【搜索：|【问：)/).map((s) => s.trim()).filter(Boolean)
+  if (parts.length <= 1) return [{ header: '', body: raw }]
+  return parts.map((p) => {
+    const nl = p.indexOf('\n')
+    const header = nl >= 0 ? p.slice(0, nl).trim() : ''
+    const body = nl >= 0 ? p.slice(nl).trim() : p
+    return { header, body }
+  })
 }
 
 export default function Keywords() {
@@ -37,7 +90,8 @@ export default function Keywords() {
   const [fileName, setFileName] = useState('')
   const [monitoringKwId, setMonitoringKwId] = useState<string | null>(null) // 正在监测的关键词
   const [monitoringAll, setMonitoringAll] = useState(false) // 一键监测全部
-  const [selectedEngine, setSelectedEngine] = useState<string>('') // 监测用的 LLM 引擎（空=default）
+  // 采样矩阵·引擎维度：多选引擎 = 每引擎独立采样对比（空=default 单引擎）
+  const [selectedEngines, setSelectedEngines] = useState<string[]>([])
   const [intentFilter, setIntentFilter] = useState<string>('') // 意图筛选（空=全部）
 
   const { data: brands = [] } = useQuery({ queryKey: ['geo-brands'], queryFn: () => businessApi.listBrands() })
@@ -132,12 +186,18 @@ export default function Keywords() {
     } catch {}
   }
 
-  // 单关键词即时监测（用选中的引擎）
+  // 单关键词即时监测（采样矩阵：0/1 引擎 → 单引擎；多引擎 → 每引擎独立采样对比）
   const handleMonitorKeyword = async (keywordId: string) => {
     setMonitoringKwId(keywordId)
+    const engines = selectedEngines.filter(Boolean)
     try {
-      await businessApi.monitorKeyword({ keyword_id: keywordId, sample_size: 3, engine_name: selectedEngine })
-      message.success(`监测完成（引擎：${selectedEngine || 'default'}）`)
+      if (engines.length > 1) {
+        await businessApi.monitorMulti({ keyword_id: keywordId, engine_names: engines, sample_size: 3 })
+        message.success(`多引擎监测完成：${engines.join(' + ')}（各 3 次采样）`)
+      } else {
+        await businessApi.monitorKeyword({ keyword_id: keywordId, sample_size: 3, engine_name: engines[0] || '' })
+        message.success(`监测完成（引擎：${engines[0] || 'default'}）`)
+      }
       queryClient.invalidateQueries({ queryKey: ['geo-monitor-results'] })
       queryClient.invalidateQueries({ queryKey: ['geo-overviews'] })
     } catch (e) {
@@ -154,23 +214,28 @@ export default function Keywords() {
       return
     }
     setMonitoringAll(true)
+    const engines = selectedEngines.filter(Boolean)
     let success = 0
     for (const kw of displayedKeywords) {
       setMonitoringKwId(kw.id)
       try {
-        await businessApi.monitorKeyword({ keyword_id: kw.id, sample_size: 3, engine_name: selectedEngine })
+        if (engines.length > 1) {
+          await businessApi.monitorMulti({ keyword_id: kw.id, engine_names: engines, sample_size: 3 })
+        } else {
+          await businessApi.monitorKeyword({ keyword_id: kw.id, sample_size: 3, engine_name: engines[0] || '' })
+        }
         success++
       } catch {}
     }
     setMonitoringKwId(null)
     setMonitoringAll(false)
-    message.success(`批量监测完成：${success}/${displayedKeywords.length} 成功（引擎：${selectedEngine || 'default'}）`)
+    message.success(`批量监测完成：${success}/${displayedKeywords.length} 成功（引擎：${engines.length > 1 ? engines.join(' + ') : engines[0] || 'default'}）`)
     queryClient.invalidateQueries({ queryKey: ['geo-monitor-results'] })
     queryClient.invalidateQueries({ queryKey: ['geo-overviews'] })
   }
 
   // 蒸馏来源面板
-  const sourcePanels: Record<string, React.ReactNode> = {
+  const sourcePanels: Record<string, ReactNode> = {
     brand: (
       <div>
         <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
@@ -342,11 +407,13 @@ export default function Keywords() {
                         options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
                       />
                       <Select
-                        style={{ width: 180 }}
-                        placeholder="监测引擎（空=default）"
+                        style={{ width: 240 }}
+                        mode="multiple"
+                        maxTagCount={2}
+                        placeholder="监测引擎（空=default；多选=各引擎独立采样对比）"
                         allowClear
-                        value={selectedEngine || undefined}
-                        onChange={(v) => setSelectedEngine(v || '')}
+                        value={selectedEngines}
+                        onChange={(v) => setSelectedEngines(v || [])}
                         options={llmConfigs.map((l: LLMConfig) => ({ value: l.name, label: `${l.name}（${l.model}）` }))}
                       />
                       <Select
@@ -453,76 +520,110 @@ export default function Keywords() {
                                 )
                               })()}
 
-                              <Text strong style={{ fontSize: 13, marginBottom: 8, display: 'block' }}>各 AI 引擎检测详情</Text>
-                              {results.map((r: MonitoringResult) => {
-                                // 竞品对比（坐标系：我 X% vs 竞品 Y%——付费说服力核心）
-                                const compRates = Object.entries(r.competitor_rates || {})
-                                  .sort((a, b) => b[1] - a[1])
-                                  .slice(0, 4)
-                                // 证据高亮词：品牌名 + 竞品名（"AI 提到你了"亲眼可见）
-                                const brandName = brandMap.get(r.brand_id) || ''
-                                const highlightWords = [brandName, ...(r.competitors || [])].filter(Boolean)
+                              <Text strong style={{ fontSize: 13, marginBottom: 10, display: 'block' }}>各 AI 引擎检测详情（点击引擎头部可折叠）</Text>
+                              {(() => {
+                                // 按引擎分组：每引擎一个折叠面板（展示最新记录 + 历史条数徽章）。
+                                // 同一引擎多次监测的历史记录合并——面板不随记录数爆炸，趋势图已承载历史。
+                                const byEng = new Map<string, MonitoringResult[]>()
+                                results.forEach((rr: MonitoringResult) => {
+                                  const eng = rr.engine_name || 'default'
+                                  const arr = byEng.get(eng)
+                                  if (arr) arr.push(rr)
+                                  else byEng.set(eng, [rr])
+                                })
+                                const engineGroups: { eng: string; latest: MonitoringResult; count: number }[] = []
+                                byEng.forEach((arr, eng) => {
+                                  arr.sort((a, b) => new Date(b.probed_at).getTime() - new Date(a.probed_at).getTime())
+                                  engineGroups.push({ eng, latest: arr[0], count: arr.length })
+                                })
                                 return (
-                                <div key={r.id} style={{ marginBottom: 12, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 10 }}>
-                                  {/* 引擎标识 + 五维度 */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
-                                    <Tag color="purple" style={{ margin: 0, minWidth: 70, textAlign: 'center' }}>{r.engine_name || 'default'}</Tag>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      <Text type="secondary" style={{ fontSize: 11 }}>提及率</Text>
-                                      <div style={{ width: 100 }}>
-                                        <Progress percent={Math.round(r.mention_rate * 100)} size="small" strokeColor={rateColor(r.mention_rate)} format={() => `${(r.mention_rate * 100).toFixed(0)}%`} />
+                                <Collapse
+                                  className="wr-engine-collapse"
+                                  defaultActiveKey={engineGroups.map((g) => g.eng)}
+                                  items={engineGroups.map((g) => {
+                                    const r = g.latest
+                                    // 竞品对比（坐标系：我 X% vs 竞品 Y%——付费说服力核心）
+                                    const compRates = Object.entries(r.competitor_rates || {})
+                                      .sort((a, b) => b[1] - a[1])
+                                      .slice(0, 4)
+                                    // 证据高亮词：品牌名（绿）与竞品名（橙）分开着色——"提到你"和"提到对手"一眼区分
+                                    const brandName = brandMap.get(r.brand_id) || ''
+                                    const sm = sentimentMeta(r.sentiment || '')
+                                    const ratePct = Math.round(r.mention_rate * 100)
+                                    const position = r.avg_position > 0 ? `#${r.avg_position}` : '未被提及'
+                                    const samples = splitSamples(r.raw_sample || '')
+                                    return {
+                                      key: g.eng,
+                                    // 引擎头部（折叠栏）：标识 + 引擎名 + 采样 + 情感 + 提及率大字
+                                    label: (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', paddingRight: 16 }}>
+                                        <span style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>AI</span>
+                                        <Text strong style={{ fontSize: 13 }}>{r.engine_name || 'default'}</Text>
+                                        <span style={{ fontSize: 11, color: 'var(--wr-text-muted)', background: 'var(--wr-bg-hover)', padding: '2px 9px', borderRadius: 10 }}>{r.sample_count} 次采样</span>
+                                        {g.count > 1 && (
+                                          <span style={{ fontSize: 11, color: 'var(--wr-text-muted)', background: 'rgba(124,108,255,0.12)', padding: '2px 9px', borderRadius: 10 }}>共监测 {g.count} 次</span>
+                                        )}
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: sm.color, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                          {sm.emoji} {sm.label}
+                                        </span>
+                                        <span style={{ marginLeft: 'auto', fontSize: 18, fontWeight: 800, color: rateColor(r.mention_rate), lineHeight: 1 }}>
+                                          {ratePct}%
+                                        </span>
                                       </div>
-                                    </div>
-                                    <Text style={{ fontSize: 12, fontWeight: 600 }}>{r.avg_position > 0 ? `排名 #${r.avg_position}` : '未被提及'}</Text>
-                                    <Tag style={{ margin: 0 }} color={r.sentiment === 'positive' ? 'success' : r.sentiment === 'negative' ? 'error' : 'default'}>
-                                      {r.sentiment === 'positive' ? '正面' : r.sentiment === 'negative' ? '负面' : '中性'}
-                                    </Tag>
-                                    <Text type="secondary" style={{ fontSize: 11 }}>置信 {(r.confidence * 100).toFixed(0)}%</Text>
-                                  </div>
-
-                                  {/* 竞品提及率对比条（坐标系：用户需要"我 45% vs 竞品 80%"才知道自己好不好）*/}
-                                  {compRates.length > 0 && (
-                                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: 'rgba(0,0,0,0.12)' }}>
-                                      <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 6 }}>
-                                        提及率对比（{r.sample_count} 次采样）
-                                      </Text>
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                        {/* 我的品牌 */}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                          <Text style={{ fontSize: 12, minWidth: 70, fontWeight: 600, color: 'var(--wr-primary)' }}>{brandName || '我'}</Text>
-                                          <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--wr-bg-hover)', overflow: 'hidden' }}>
-                                            <div style={{ width: `${Math.min(100, r.mention_rate * 100)}%`, height: '100%', background: 'var(--wr-gradient)', borderRadius: 3 }} />
-                                          </div>
-                                          <Text style={{ fontSize: 11, minWidth: 42, textAlign: 'right', fontWeight: 600 }}>{(r.mention_rate * 100).toFixed(0)}%</Text>
+                                    ),
+                                    children: (
+                                      <div>
+                                        {/* 五维度统计网格 */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginBottom: 12 }}>
+                                          <StatBlock label="提及率" value={`${ratePct}%`} color={rateColor(r.mention_rate)} sub={`${r.mention_count}/${r.sample_count} 次提到`} />
+                                          <StatBlock label="AI 排名" value={position} sub={position === '未被提及' ? '未被 AI 推荐' : '回答中平均位次'} />
+                                          <StatBlock label="置信度" value={`${Math.round((r.confidence || 0) * 100)}%`} sub="采样可信度" />
+                                          <StatBlock label="竞品提及" value={`${compRates.length} 家`} sub={compRates[0] ? `最多：${compRates[0][0]}` : '暂无竞品数据'} />
                                         </div>
-                                        {/* 竞品 */}
-                                        {compRates.map(([name, rate]) => (
-                                          <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <Text style={{ fontSize: 12, minWidth: 70, color: 'var(--wr-text-secondary)' }} ellipsis>{name}</Text>
-                                            <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--wr-bg-hover)', overflow: 'hidden' }}>
-                                              <div style={{ width: `${Math.min(100, rate * 100)}%`, height: '100%', background: 'var(--wr-warning)', borderRadius: 3, opacity: 0.85 }} />
-                                            </div>
-                                            <Text style={{ fontSize: 11, minWidth: 42, textAlign: 'right', color: 'var(--wr-text-muted)' }}>{(rate * 100).toFixed(0)}%</Text>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
 
-                                  {/* AI 生成的回答内容（证据高亮：品牌/竞品名出现处 <mark>）*/}
-                                  {r.raw_sample && (
-                                    <div style={{ marginTop: 8, padding: 10, background: 'rgba(0,0,0,0.15)', borderRadius: 8 }}>
-                                      <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 4 }}>
-                                        AI 回答内容（{r.mention_count}/{r.sample_count} 次采样中提到品牌——高亮处为你的品牌/竞品）
-                                      </Text>
-                                      <Text style={{ whiteSpace: 'pre-wrap', fontSize: 12, color: 'var(--wr-text-secondary)', lineHeight: 1.6, display: 'block' }}>
-                                        <HighlightMentions text={r.raw_sample} words={highlightWords} />
-                                      </Text>
-                                    </div>
-                                  )}
-                                </div>
+                                        {/* 竞品提及率对比条（坐标系：用户需要"我 45% vs 竞品 80%"才知道自己好不好）*/}
+                                        {compRates.length > 0 && (
+                                          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--wr-bg-elevated)' }}>
+                                            <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 8 }}>
+                                              📊 提及率对比（{r.sample_count} 次采样）
+                                            </Text>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                              <CompareBar name={brandName || '我'} rate={r.mention_rate || 0} isMine barColor="var(--wr-gradient)" textColor={rateColor(r.mention_rate)} nameColor="var(--wr-primary)" />
+                                              {compRates.map(([name, rate]) => (
+                                                <CompareBar key={name} name={name} rate={rate} barColor="var(--wr-warning)" textColor="var(--wr-text-muted)" />
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {/* AI 生成的回答内容（Markdown 渲染 + 证据高亮）——按采样问法拆成对话气泡 */}
+                                        {samples.length > 0 && (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                            <Text type="secondary" style={{ fontSize: 10 }}>
+                                              💬 AI 回答内容（{r.mention_count}/{r.sample_count} 次采样中提到品牌——高亮处为你的品牌/竞品）
+                                            </Text>
+                                            {samples.map((s, i) => (
+                                              <div key={i} style={{ borderRadius: 10, background: 'rgba(0,0,0,0.14)', overflow: 'hidden' }}>
+                                                {s.header && (
+                                                  <div style={{ padding: '6px 12px', background: 'rgba(124,108,255,0.10)', borderBottom: '1px solid rgba(124,108,255,0.10)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                    <span style={{ fontSize: 10, color: 'var(--wr-primary)' }}>🔎</span>
+                                                    <Text strong style={{ fontSize: 11, color: 'var(--wr-primary)' }}>{s.header}</Text>
+                                                  </div>
+                                                )}
+                                                <div style={{ padding: '10px 14px' }}>
+                                                  <MarkdownContent text={s.body} brand={[brandName]} competitors={r.competitors || []} />
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ),
+                                  }
+                                })}
+                                />
                                 )
-                              })}
+                              })()}
                             </div>
                           )
                         },
@@ -585,44 +686,108 @@ export default function Keywords() {
   )
 }
 
-// HighlightMentions 证据高亮：把文本中出现的品牌/竞品名用 <mark> 包裹（绿色底纹）。
-// 安全实现：split 分段渲染 React 节点，不用 dangerouslySetInnerHTML（防 XSS）。
-// 用途：AI 回答原文中"提到你的地方"亲眼可见——最强付费证据。
-function HighlightMentions({ text, words }: { text: string; words: string[] }) {
-  const cleanWords = [...new Set(words.filter((w) => w && w.length >= 2))]
-  if (cleanWords.length === 0) return <>{text}</>
+// ---- Markdown 渲染（AI 回答正文）----
+//
+// 方案：react-markdown + remark-gfm（表格/列表/粗体）渲染 AI 回答；
+// 品牌/竞品证据高亮通过"私有区字符标记 + components 扫描"实现：
+//   - 预处理把品牌/竞品词替换为 \uE000..\uE003 标记（不会出现在 markdown 文本中）
+//   - 自定义 components 递归扫描渲染后的 children，把标记拆成 <mark class="hl-brand|hl-comp">
+// 安全性：react-markdown 组件树渲染（无 dangerouslySetInnerHTML），天然防 XSS。
 
-  // 按词频降序，避免短词覆盖长词
-  const sorted = [...cleanWords].sort((a, b) => b.length - a.length)
-  // 构造一次扫描的分段：用最长的词优先匹配
-  const segments: React.ReactNode[] = []
+const BRAND_S = '\uE000'
+const BRAND_E = '\uE001'
+const COMP_S = '\uE002'
+const COMP_E = '\uE003'
+
+/** 预处理：品牌/竞品词 → 私有区标记（最长词优先，避免短词覆盖长词）。 */
+function preMark(text: string, brand: string[], competitors: string[]): string {
+  const brandWords = [...new Set(brand.filter((w) => w && w.length >= 2))]
+  const compWords = [...new Set(competitors.filter((w) => w && w.length >= 2))]
+  const words = [...brandWords, ...compWords].sort((a, b) => b.length - a.length)
+  if (words.length === 0) return text
+  let out = ''
   let rest = text
-  let key = 0
   while (rest.length > 0) {
     let matched: { word: string; index: number } | null = null
-    for (const w of sorted) {
+    for (const w of words) {
       const idx = rest.indexOf(w)
       if (idx >= 0 && (matched === null || idx < matched.index)) {
         matched = { word: w, index: idx }
       }
     }
     if (!matched) {
-      segments.push(rest)
+      out += rest
       break
     }
-    if (matched.index > 0) segments.push(rest.slice(0, matched.index))
-    segments.push(
-      <mark key={key++} style={{
-        background: 'rgba(74, 222, 128, 0.22)',
-        color: 'var(--wr-success)',
-        padding: '0 2px',
-        borderRadius: 3,
-        fontWeight: 600,
-      }}>
-        {matched.word}
-      </mark>
-    )
+    if (matched.index > 0) out += rest.slice(0, matched.index)
+    const isBrand = brandWords.includes(matched.word)
+    out += (isBrand ? BRAND_S : COMP_S) + matched.word + (isBrand ? BRAND_E : COMP_E)
     rest = rest.slice(matched.index + matched.word.length)
   }
-  return <>{segments}</>
+  return out
+}
+
+/** 拆分私有区标记 → <mark> 节点（品牌绿 / 竞品橙，样式在 index.css .wr-md mark）。 */
+function splitMarked(text: string, keyBase: number): ReactNode[] {
+  const nodes: ReactNode[] = []
+  let rest = text
+  let key = keyBase
+  while (rest.length > 0) {
+    let match: { start: number; end: number; mine: boolean } | null = null
+    for (const [s, e, mine] of [[BRAND_S, BRAND_E, true], [COMP_S, COMP_E, false]] as const) {
+      const i = rest.indexOf(s)
+      if (i >= 0 && (match === null || i < match.start)) {
+        const j = rest.indexOf(e, i + 1)
+        if (j > i) match = { start: i, end: j + 1, mine }
+      }
+    }
+    if (!match) {
+      nodes.push(rest)
+      break
+    }
+    if (match.start > 0) nodes.push(rest.slice(0, match.start))
+    nodes.push(
+      <mark key={key++} className={match.mine ? 'hl-brand' : 'hl-comp'}>{rest.slice(match.start + 1, match.end - 1)}</mark>
+    )
+    rest = rest.slice(match.end)
+  }
+  return nodes
+}
+
+/** 递归扫描渲染后的组件树，把文本节点中的标记拆成高亮 mark（保持元素结构）。 */
+function scanHighlight(children: ReactNode, keyBase: number): ReactNode {
+  if (typeof children === 'string') {
+    return splitMarked(children, keyBase)
+  }
+  if (Array.isArray(children)) {
+    return children.map((c, i) => scanHighlight(c, keyBase + i))
+  }
+  if (isValidElement(children)) {
+    const el = children as ReactElement<{ children?: ReactNode }>
+    return cloneElement(el, { children: scanHighlight(el.props.children, keyBase) })
+  }
+  return children
+}
+
+/** 覆盖所有可能含文本的 markdown 元素，统一扫描高亮标记。 */
+function wrapScan({ children }: { children?: ReactNode }) {
+  return <>{scanHighlight(children, 0)}</>
+}
+
+const mdComponents: Record<string, ComponentType<{ children?: ReactNode }>> = {
+  p: wrapScan, li: wrapScan, h1: wrapScan, h2: wrapScan, h3: wrapScan, h4: wrapScan, h5: wrapScan, h6: wrapScan,
+  strong: wrapScan, em: wrapScan, del: wrapScan, blockquote: wrapScan, td: wrapScan, th: wrapScan,
+}
+
+/** MarkdownContent：AI 回答正文 Markdown 渲染（GFM 表格/列表）+ 品牌绿/竞品橙证据高亮。 */
+function MarkdownContent({ text, brand, competitors, style }: {
+  text: string; brand: string[]; competitors: string[]; style?: CSSProperties
+}) {
+  return (
+    <div className="wr-md" style={style}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents as any}>
+        {preMark(text, brand, competitors)}
+      </ReactMarkdown>
+    </div>
+  )
 }

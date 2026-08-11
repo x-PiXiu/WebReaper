@@ -34,17 +34,32 @@ func (r *Router) HandleAdminListPlans(c *gin.Context) {
 }
 
 // HandleAdminSavePlan POST /admin/billing/plans —— 创建或更新套餐。
+// 用 DTO 绑定而非 entity.Plan：CreatedAt/UpdatedAt 由后端维护，
+// 前端不传时间字段（避免空字符串触发 time.Time RFC3339 解析失败）。
 func (r *Router) HandleAdminSavePlan(c *gin.Context) {
 	if r.billingUC == nil {
 		fail(c, errNotConfigured("计费"))
 		return
 	}
-	var p entity.Plan
-	if err := c.ShouldBindJSON(&p); err != nil {
+	var req struct {
+		ID         string         `json:"id" binding:"required"`
+		Name       string         `json:"name" binding:"required"`
+		Level      string         `json:"level" binding:"required"`
+		PriceCents int            `json:"price_cents"`
+		Quotas     map[string]int `json:"quotas"`
+		Features   []string       `json:"features"`
+		Status     string         `json:"status"`
+		SortOrder  int            `json:"sort_order"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数解析失败: " + err.Error()})
 		return
 	}
-	saved, err := r.billingUC.SavePlan(c.Request.Context(), p)
+	saved, err := r.billingUC.SavePlan(c.Request.Context(), entity.Plan{
+		ID: req.ID, Name: req.Name, Level: req.Level,
+		PriceCents: req.PriceCents, Quotas: req.Quotas, Features: req.Features,
+		Status: req.Status, SortOrder: req.SortOrder,
+	})
 	if err != nil {
 		fail(c, err)
 		return

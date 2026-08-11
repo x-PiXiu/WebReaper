@@ -76,6 +76,34 @@ func (r *GormUsageRecorder) SumBySceneSince(ctx context.Context, since time.Time
 	return out, nil
 }
 
+// SumBySceneAndConfigSince 实现 port.UsageStatsQueryer：按场景 + 引擎分组（P1-1）。
+// 成本报表按引擎细分——每引擎单价（cost_per_mtok）不同，全局参考价会误导运营决策。
+func (r *GormUsageRecorder) SumBySceneAndConfigSince(ctx context.Context, since time.Time) ([]port.SceneConfigUsage, error) {
+	var rows []struct {
+		Scene         string
+		LLMConfigName string
+		Calls         int
+		TotalTokens   int64
+	}
+	err := r.db.WithContext(ctx).Model(&UsagePO{}).
+		Select("scene AS scene, llm_config_name AS llm_config_name, COUNT(*) AS calls, COALESCE(SUM(total_tokens), 0) AS total_tokens").
+		Where("created_at >= ?", since).
+		Group("scene, llm_config_name").
+		Order("total_tokens DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]port.SceneConfigUsage, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, port.SceneConfigUsage{
+			Scene: row.Scene, LLMConfigName: row.LLMConfigName,
+			Calls: row.Calls, TotalTokens: row.TotalTokens,
+		})
+	}
+	return out, nil
+}
+
 // UsagePO LLM 用量持久化对象（usages 表，AutoMigrate 建表）。
 type UsagePO struct {
 	ID               string    `gorm:"primaryKey;size:64"`

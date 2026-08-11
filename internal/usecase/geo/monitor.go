@@ -26,10 +26,21 @@ type MonitorUseCase struct {
 	// 注入后监测自动携带门店位置（LocalContext）——问"望京附近有什么川菜馆"，
 	// 测的是本地生意而非泛化品牌声量。
 	storeRepo port.StoreLocationRepository
+	// questionGen 问法池生成器（可选；采样矩阵·问法维度 v2）：
+	// 注入后监测前按品牌/卖点/竞品/地址 LLM 生成问法池，多引擎分片隔离防缓存；
+	// 未注入/生成失败 → probe 内部模板问法兜底（零失败风险）。
+	questionGen port.ProbeQuestionGenerator
 }
 
 func NewMonitorUseCase(br port.BrandRepository, kr port.KeywordRepository, rr port.MonitoringResultRepository, probe port.AIEngineProbe) *MonitorUseCase {
 	return &MonitorUseCase{brandRepo: br, keywordRepo: kr, resultRepo: rr, probe: probe}
+}
+
+// SetQuestionGenerator 注入问法池生成器（可选；v2 去缓存：LLM 生成真实问法，引擎分片）。
+func (uc *MonitorUseCase) SetQuestionGenerator(g port.ProbeQuestionGenerator) {
+	if g != nil {
+		uc.questionGen = g
+	}
 }
 
 // SetSelfBaseDomain 注入自营公开站域名（可选；归因 P5-01）。
@@ -68,6 +79,27 @@ func (uc *MonitorUseCase) SetQuotaGate(g port.QuotaStore) {
 	if g != nil {
 		uc.quotaGate = g
 	}
+}
+
+// buildQuestions 生成问法池（v2：LLM 按品牌上下文生成真实问法；一次生成多引擎分片）。
+// 失败/未注入返回 nil——probe 内部模板问法兜底，监测永不因问法生成中断（零失败风险）。
+func (uc *MonitorUseCase) buildQuestions(ctx context.Context, brand entity.Brand, keyword string, localCtx string) []string {
+	if uc.questionGen == nil {
+		return nil
+	}
+	qs, err := uc.questionGen.Generate(ctx, port.QuestionGenInput{
+		BrandName:    brand.Name,
+		Positioning:  brand.Positioning,
+		CoreSelling:  brand.CoreSelling,
+		Competitors:  brand.Competitors,
+		Keyword:      keyword,
+		LocalContext: localCtx,
+		Count:        8, // 问法池 8 个：覆盖常见采样数（3/5）且多引擎分片错位
+	})
+	if err != nil || len(qs) == 0 {
+		return nil // 降级：模板问法
+	}
+	return qs
 }
 
 // MonitorInput 监测的输入。
@@ -111,6 +143,9 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 	// 本地位置上下文（P0 补全）：一次监测查一次门店，注入位置型问法
 	localCtx := uc.buildLocalContext(ctx, in.BrandID)
 	for _, kw := range kws {
+		// 问法池（v2）：每关键词 LLM 生成一次真实问法（品牌/卖点/竞品/地址融入），
+		// 单引擎取池子 0 号分片（错位起点）
+		pool := uc.buildQuestions(ctx, brand, kw.Term, localCtx)
 		// 探测这个关键词（用量计量上下文：租户 + 场景）
 		probeResult, pErr := uc.probe.Probe(port.WithUsageContext(ctx, in.TenantID, "monitor"), port.ProbeInput{
 			TenantID:       in.TenantID,
@@ -121,6 +156,7 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 			SampleSize:     sampleSize,
 			SelfBaseDomain: uc.selfBaseDomain, // 归因 P5-01：统计自营站被引用次数
 			LocalContext:   localCtx,          // 本地生活 P0：位置型问法
+			Questions:      port.ShardQuestions(pool, 0, sampleSize), // v2 问法池分片
 		})
 		if pErr != nil {
 			// 单个关键词探测失败不中断整体（降级：记一个空结果）
@@ -154,7 +190,9 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 			ProbedAt:        time.Now(),
 			RawSample:       probeResult.RawSample,
 		}
-		_ = uc.resultRepo.Save(ctx, result)
+		if err := uc.resultRepo.Save(ctx, result); err != nil {
+			return nil, fmt.Errorf("监测结果保存失败（%s/%s）: %w", kw.Term, in.EngineName, err)
+		}
 		results = append(results, result)
 	}
 	return results, nil
@@ -190,6 +228,16 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 		return entity.MonitoringResult{}, fmt.Errorf("tenant_id 不能为空")
 	}
 
+	// 配额检查（X-01 补齐：单关键词刷新同样烧 LLM——与全量 Monitor 同口径计费）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, in.TenantID, "monitor"); err != nil {
+			return entity.MonitoringResult{}, err
+		}
+	}
+	// 用量计量上下文：probe 内部的 LLM 调用（提问/解析）落 monitor scene——
+	// usages 行数即配额计数（每次 LLM 调用 1 行），进成本报表
+	ctx = port.WithUsageContext(ctx, in.TenantID, "monitor")
+
 	// 直接按 ID 查关键词（O(1) 而非遍历所有品牌×关键词）
 	kw, err := uc.keywordRepo.FindByID(ctx, in.TenantID, in.KeywordID)
 	if err != nil {
@@ -207,13 +255,18 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 		sampleSize = 3 // 快测默认 3 次采样：单次采样是噪声（AI 随机性），数字不稳用户不信
 	}
 
+	// 问法池（v2）：LLM 生成一次真实问法（品牌上下文），单引擎取 0 号分片
+	pool := uc.buildQuestions(ctx, brand, kw.Term, uc.buildLocalContext(ctx, brand.ID))
 	probeResult, pErr := uc.probe.Probe(ctx, port.ProbeInput{
-		TenantID:    in.TenantID,
-		Keyword:     kw.Term,
-		EngineName:  in.EngineName,
-		BrandName:   brand.Name,
-		Competitors: brand.Competitors,
-		SampleSize:  sampleSize,
+		TenantID:       in.TenantID,
+		Keyword:        kw.Term,
+		EngineName:     in.EngineName,
+		BrandName:      brand.Name,
+		Competitors:    brand.Competitors,
+		SampleSize:     sampleSize,
+		SelfBaseDomain: uc.selfBaseDomain,            // 归因 P5-01：统计自营站被引用次数
+		LocalContext:   uc.buildLocalContext(ctx, brand.ID), // 本地生活 P0：位置型问法
+		Questions:      port.ShardQuestions(pool, 0, sampleSize), // v2 问法池分片
 	})
 	if pErr != nil {
 		return entity.MonitoringResult{}, pErr
@@ -246,18 +299,28 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 		Sources:         probeResult.Sources,          // 引用来源（归因 P5-01）
 		SelfSourceCount: probeResult.SelfSourceCount,  // 自营站被引用次数
 	}
-	_ = uc.resultRepo.Save(ctx, result)
+	if err := uc.resultRepo.Save(ctx, result); err != nil {
+		return entity.MonitoringResult{}, fmt.Errorf("监测结果保存失败: %w", err)
+	}
 	return result, nil
 }
 
-// MonitorMultiEngine 对同一关键词用多个引擎批量监测（一次调用产生多条不同引擎的结果）。
+// MonitorMultiEngine 对同一关键词用多个引擎批量监测（采样矩阵：一次调用=每引擎独立采样）。
 // engineNames 为空时用所有配置的 LLM。
 func (uc *MonitorUseCase) MonitorMultiEngine(ctx context.Context, tenantID, keywordID string, engineNames []string, sampleSize int) ([]entity.MonitoringResult, error) {
 	if len(engineNames) == 0 {
 		return nil, fmt.Errorf("至少指定一个引擎")
 	}
+	// 配额检查（X-01 补齐：多引擎监测 = 引擎数 × 采样数 LLM 调用，按次计费）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, tenantID, "monitor"); err != nil {
+			return nil, err
+		}
+	}
+	// 计量上下文：probe 内部 LLM 调用落 monitor scene（usages 行数即配额计数）
+	ctx = port.WithUsageContext(ctx, tenantID, "monitor")
 	if sampleSize <= 0 {
-		sampleSize = 1
+		sampleSize = 3 // 采样矩阵：每引擎默认 3 次采样（有统计意义且成本可控）
 	}
 	kw, err := uc.keywordRepo.FindByID(ctx, tenantID, keywordID)
 	if err != nil {
@@ -269,14 +332,21 @@ func (uc *MonitorUseCase) MonitorMultiEngine(ctx context.Context, tenantID, keyw
 	}
 
 	var results []entity.MonitoringResult
-	for _, engineName := range engineNames {
+	// 本地位置上下文（P0 补全）：一次查门店，所有引擎注入位置型问法
+	localCtx := uc.buildLocalContext(ctx, brand.ID)
+	// 问法池（v2 去缓存核心）：LLM 按品牌上下文生成一次真实问法，
+	// 每引擎取不同分片（ShardQuestions 错位起点）——引擎间问法隔离，缓存互不命中
+	pool := uc.buildQuestions(ctx, brand, kw.Term, localCtx)
+	for i, engineName := range engineNames {
 		probeResult, pErr := uc.probe.Probe(ctx, port.ProbeInput{
-			TenantID:    tenantID,
-			Keyword:     kw.Term,
-			EngineName:  engineName,
-			BrandName:   brand.Name,
-			Competitors: brand.Competitors,
-			SampleSize:  sampleSize,
+			TenantID:       tenantID,
+			EngineName:     engineName,
+			BrandName:      brand.Name,
+			Competitors:    brand.Competitors,
+			SampleSize:     sampleSize,
+			SelfBaseDomain: uc.selfBaseDomain, // 归因 P5-01
+			LocalContext:   localCtx,          // 本地生活 P0：位置型问法
+			Questions:      port.ShardQuestions(pool, i, sampleSize), // 引擎 i 分片
 		})
 		if pErr != nil {
 			continue // 单个引擎失败不中断
@@ -301,7 +371,9 @@ func (uc *MonitorUseCase) MonitorMultiEngine(ctx context.Context, tenantID, keyw
 			ProbedAt:     time.Now(),
 			RawSample:    probeResult.RawSample,
 		}
-		_ = uc.resultRepo.Save(ctx, result)
+		if err := uc.resultRepo.Save(ctx, result); err != nil {
+			return nil, fmt.Errorf("监测结果保存失败（%s/%s）: %w", kw.Term, engineName, err)
+		}
 		results = append(results, result)
 	}
 	return results, nil

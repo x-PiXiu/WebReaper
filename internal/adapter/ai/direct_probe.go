@@ -25,14 +25,15 @@ import (
 //     无需为每个引擎写专属 SDK 适配器
 //
 // 解析复用 analyzeMention（LLM 客观列品牌 + Go 代码匹配，消除确认偏误），
-// 解析用 default 引擎（与直测引擎分离，避免自判）。
+// 解析用 AnalyzerName 指定的引擎（默认 default——与直测引擎分离，避免自判）。
 type DirectProbe struct {
-	aiGen port.AIGenerator
+	aiGen      port.AIGenerator
+	questioner *ProbeQuestioner
 }
 
 // NewDirectProbe 创建真实引擎直测适配器。
 func NewDirectProbe(ai port.AIGenerator) *DirectProbe {
-	return &DirectProbe{aiGen: ai}
+	return &DirectProbe{aiGen: ai, questioner: NewProbeQuestioner()}
 }
 
 // Probe 对一个关键词直接问真实 AI 引擎，采样 N 次，解析品牌提及。
@@ -42,8 +43,12 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		sampleSize = 3 // 真实直测比 Agent 搜索快（不爬网），可多采样
 	}
 
-	// 多样化问法（避免 AI 因缓存返回相同答案，提高统计有效性）
-	questions := generateProbeQuestions(in.Keyword, sampleSize, in.LocalContext)
+	// 采样矩阵·问法维度：优先用预生成问法池（LLM 生成，引擎分片隔离防缓存）；
+	// 池为空（生成失败/未注入）→ 模板问法兜底（随机打乱）
+	questions := in.Questions
+	if len(questions) == 0 {
+		questions = p.questioner.Questions(in.Keyword, sampleSize, in.LocalContext)
+	}
 
 	// 所有品牌名（主品牌 + 别名）
 	allBrandNames := append([]string{in.BrandName}, in.Aliases...)
@@ -76,8 +81,8 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		totalSamples++
 		allAnswers = append(allAnswers, fmt.Sprintf("【问：%s】\n%s", question, answer))
 
-		// 解析提及（用 default 引擎解析，与直测引擎分离——避免自判）
-		analysis := analyzeMention(ctx, p.aiGen, answer, in.BrandName, allBrandNames, in.Competitors, "")
+		// 解析提及（用 AnalyzerName 指定引擎，默认 default——与直测引擎分离，避免自判）
+		analysis := analyzeMention(ctx, p.aiGen, answer, in.BrandName, allBrandNames, in.Competitors, in.AnalyzerName)
 		if analysis.Mentioned {
 			mentionCount++
 			if analysis.Position > 0 {
@@ -157,33 +162,4 @@ func computeProbeConfidence(rawSample string, sampleCount int) float64 {
 		score = 1.0
 	}
 	return score
-}
-
-// generateProbeQuestions 生成多样化问法（原词 + 同义改写），避免缓存重复答案。
-// localContext 非空时插入位置型问法（本地生活 P0 补全）——
-// "望京附近有什么川菜馆"这类问法测的是真实本地决策场景（餐饮命脉）：
-//   - 位置词放前面（如"望京附近有什么川菜馆"），AI 会优先按本地检索
-//   - 本地问法优先于泛化问法（采样轮换时先命中本地场景）
-// 注意：关键词若已含位置（"北京装修公司哪家好"），本地问法拼接会冗余——
-// 用"关键词含区名则跳过本地问法"的启发式避免（区名来自 localContext 末段）。
-func generateProbeQuestions(keyword string, count int, localContext string) []string {
-	base := []string{
-		keyword,
-		"推荐一些" + keyword,
-		keyword + "哪家好",
-		"有了解过" + keyword + "吗",
-		"关于" + keyword + "，你有什么推荐的",
-	}
-	if localContext != "" {
-		local := []string{
-			localContext + "附近有什么" + keyword,
-			keyword + "，" + localContext + "哪家好",
-			localContext + "有什么值得推荐的" + keyword,
-		}
-		base = append(local, base...)
-	}
-	if count <= len(base) {
-		return base[:count]
-	}
-	return base
 }

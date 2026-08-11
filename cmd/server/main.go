@@ -304,6 +304,9 @@ func main() {
 		log.Info("GEO 监测引擎：RoutingProbe（真实引擎直测 + Agent 模拟兜底）")
 
 		geoMonitorUC := geo.NewMonitorUseCase(geoRepos.brand, geoRepos.keyword, geoRepos.result, geoProbe)
+		// 采样矩阵·问法维度 v2（去缓存）：LLM 按品牌/卖点/竞品/门店地址生成真实问法池，
+		// 多引擎分片隔离（相同 prompt 不跨引擎命中缓存）；生成失败时 probe 内部模板兜底
+		geoMonitorUC.SetQuestionGenerator(ai.NewLLMQuestionGenerator(aiGenerator))
 		// 归因生命线（P5-01）：注入自营公开站域名——探测统计"AI 回答引用的来源里
 		// 包含自营站内容的次数"，回答"我们做的内容到底有没有被 AI 引用"。
 		geoMonitorUC.SetSelfBaseDomain(cfg.Server.PublicBaseURL)
@@ -477,6 +480,8 @@ func main() {
 		// X-01 商业闭环成本侧：成本分析（admin 报表）——参考单价来自 LLM_COST_PER_MToken
 		billingUC.SetUsageStats(usageRecorder)
 		billingUC.SetReferencePricePerMToken(cfg.LLM.CostPerMTokenCents)
+		// P1-1：按引擎单价成本分析（llm_configs.cost_per_mtok——豆包 vs GPT 级差异化）
+		billingUC.SetLLMConfigRepo(llmConfigRepo)
 		quotaGate := quota.NewGate(planRepo, subRepo, usageRecorder)
 		router.SetQuotaGate(quotaGate) // ChatHandler 等无独立 usecase 的端点用
 		if geoContentUCRef != nil {
@@ -561,6 +566,11 @@ func main() {
 	if geoMonitorUCRef != nil && geoRepos != nil && cfg.LLM.IsConfigured() && cfg.Server.AutoMonitorEnabled {
 		monUC := geoMonitorUCRef
 		dailyTask := scheduledtask.NewDailyMonitorTask(monUC, geoRepos.brand, settingRepo, tenantSettingRepo, cfg.Server.AutoMonitorEnabled, log)
+		// 套餐能力位门禁：auto-monitor 是付费能力（free 无）——免费用户不参与自动盯盘
+		dailyTask.SetPlanGate(
+			repository.NewGormPlanRepository(geoRepos.db),
+			repository.NewGormSubscriptionRepository(geoRepos.db),
+		)
 		if notifyUC != nil {
 			dailyTask.SetNotifier(scheduledtask.NewMonitorNotifier(geoRepos.result, notifyUC, log))
 		}

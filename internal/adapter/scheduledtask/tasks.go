@@ -38,10 +38,12 @@ func (t *AccountHealthTask) Execute(ctx context.Context) error {
 
 // DailyMonitorTask 每日对全平台所有品牌执行一次监测（提及率趋势自动生长）。
 //
-// 设计要点（两级开关）：
+// 设计要点（两级开关 + 套餐门禁）：
 //   - 平台级总闸：system_settings.auto_monitor_enabled（管理后台「平台设置」页）
 //   - 租户级开关：tenant_settings.auto_monitor_enabled（商户端可自行关闭，
 //     避免消耗自己的 LLM 额度）——关闭的租户跳过
+//   - 套餐门禁：订阅套餐须含 auto-monitor 能力位（free 无 / pro / team 有）——
+//     免费用户不参与自动盯盘（避免静默消耗其配额）
 //   - 开关未配置时回退构造时传入的默认值
 //   - 通过品牌仓储 ListAll 枚举全平台品牌（admin 旁路视角）
 //   - 单个品牌失败不中断其余；分布式部署由调度器锁保证单实例执行
@@ -50,6 +52,8 @@ type DailyMonitorTask struct {
 	brandRepo         port.BrandRepository
 	settingRepo       port.SystemSettingRepository
 	tenantSettingRepo port.TenantSettingRepository // 租户开关（nil=全部租户都监测）
+	planRepo          port.PlanRepository         // 套餐能力位门禁（nil=不检查）
+	subRepo           port.SubscriptionRepository
 	notifier          *MonitorNotifier             // 变化通知（nil=不通知）
 	defaultEnabled    bool                         // 平台开关未配置时的兜底（.env AUTO_MONITOR_ENABLED）
 	logger            port.Logger
@@ -60,6 +64,15 @@ func NewDailyMonitorTask(uc *geo.MonitorUseCase, brandRepo port.BrandRepository,
 		uc: uc, brandRepo: brandRepo, settingRepo: settingRepo,
 		tenantSettingRepo: tenantSettingRepo,
 		defaultEnabled:    defaultEnabled, logger: logger,
+	}
+}
+
+// SetPlanGate 注入套餐能力位门禁（可选；P2：auto-monitor 是付费能力——
+// 免费用户不参与自动盯盘，避免静默消耗配额；未注入=全部租户可盯）。
+func (t *DailyMonitorTask) SetPlanGate(planRepo port.PlanRepository, subRepo port.SubscriptionRepository) {
+	if planRepo != nil && subRepo != nil {
+		t.planRepo = planRepo
+		t.subRepo = subRepo
 	}
 }
 
@@ -84,8 +97,26 @@ func (t *DailyMonitorTask) enabled(ctx context.Context) bool {
 	return t.defaultEnabled
 }
 
-// tenantEnabled 读取租户级开关（未配置默认开启；仓储 nil 则全部开启）。
+// tenantEnabled 租户级判断：套餐能力位 + 租户开关。
+//   - 套餐门禁：订阅套餐须含 auto-monitor 能力位（free 无 → 跳过，不消耗配额）
+//   - 租户开关：tenant_settings.auto_monitor_enabled（未配置默认开启）
 func (t *DailyMonitorTask) tenantEnabled(ctx context.Context, tenantID string) bool {
+	if t.planRepo != nil && t.subRepo != nil {
+		hasFeature := false
+		if sub, err := t.subRepo.FindByTenant(ctx, tenantID); err == nil && sub.IsActive(time.Now()) {
+			if plan, pErr := t.planRepo.FindByID(ctx, sub.PlanID); pErr == nil {
+				for _, f := range plan.Features {
+					if f == "auto-monitor" {
+						hasFeature = true
+						break
+					}
+				}
+			}
+		}
+		if !hasFeature {
+			return false // 套餐无 auto-monitor 能力位：跳过（免费用户不消耗配额）
+		}
+	}
 	if t.tenantSettingRepo == nil {
 		return true
 	}

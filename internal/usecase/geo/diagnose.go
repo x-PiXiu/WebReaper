@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/port"
 )
 
@@ -177,6 +178,8 @@ func (uc *DiagnoseUseCase) llmSuggestions(ctx context.Context, brand entity.Bran
 	if err != nil {
 		return nil
 	}
+	// 部分模型输出 <think> 思考块——剥离后再按行解析，避免碎片混入建议
+	resp = pkg.StripThinkTags(resp)
 	var out []string
 	for _, line := range strings.Split(resp, "\n") {
 		line = strings.TrimSpace(line)

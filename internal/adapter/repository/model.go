@@ -59,8 +59,10 @@ type LLMConfigPO struct {
 	APIKey    string `gorm:"column:api_key;size:256"`
 	BaseURL   string `gorm:"column:base_url;size:256"`
 	Model     string `gorm:"size:64"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// CostPerMTok 每百万 tokens 参考成本（分；P1-1 按引擎差异化成本分析）。
+	CostPerMTok int `gorm:"column:cost_per_mtok;default:100"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (LLMConfigPO) TableName() string { return "llm_configs" }

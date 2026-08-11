@@ -67,6 +67,7 @@ func DefaultPlans() []entity.Plan {
 				"auto-monitor",  // 自动盯盘
 				"scheduled-publish", // 定时发送
 				"index-verify", // 收录验证
+				"multi-engine", // 多引擎监测（豆包/千问/DeepSeek 对比——P1-2）
 			},
 			Status:    entity.PlanStatusActive,
 			CreatedAt: now, UpdatedAt: now,
@@ -86,6 +87,7 @@ func DefaultPlans() []entity.Plan {
 				"auto-monitor",
 				"scheduled-publish",
 				"index-verify",
+				"multi-engine", // 多引擎监测不限
 				"video",         // 视频生成
 				"multi-account", // 多账号矩阵
 				"rag-enhance",   // RAG 内容增强

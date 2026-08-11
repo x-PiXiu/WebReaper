@@ -94,11 +94,12 @@ func agentConfigToView(cfg entity.AgentConfig) gin.H {
 
 func llmConfigToView(cfg entity.LLMConfig) gin.H {
 	return gin.H{
-		"name":     cfg.Name,
-		"provider": cfg.Provider,
-		"api_key":  cfg.APIKey,
-		"base_url": cfg.BaseURL,
-		"model":    cfg.Model,
+		"name":           cfg.Name,
+		"provider":       cfg.Provider,
+		"api_key":        cfg.APIKey,
+		"base_url":       cfg.BaseURL,
+		"model":          cfg.Model,
+		"cost_per_mtok":  cfg.CostPerMTok,
 	}
 }
 
@@ -117,11 +118,12 @@ func (r *Router) handleListLLMConfigs(c *gin.Context) {
 
 func (r *Router) handleCreateLLMConfig(c *gin.Context) {
 	var req struct {
-		Name     string `json:"name" binding:"required"`
-		Provider string `json:"provider"`
-		APIKey   string `json:"api_key" binding:"required"`
-		BaseURL  string `json:"base_url"`
-		Model    string `json:"model"`
+		Name        string `json:"name" binding:"required"`
+		Provider    string `json:"provider"`
+		APIKey      string `json:"api_key" binding:"required"`
+		BaseURL     string `json:"base_url"`
+		Model       string `json:"model"`
+		CostPerMTok int    `json:"cost_per_mtok"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -129,7 +131,7 @@ func (r *Router) handleCreateLLMConfig(c *gin.Context) {
 	}
 	cfg, err := r.llmCfgUC.Create(c.Request.Context(), llmconfig.CreateInput{
 		Name: req.Name, Provider: req.Provider, APIKey: req.APIKey,
-		BaseURL: req.BaseURL, Model: req.Model,
+		BaseURL: req.BaseURL, Model: req.Model, CostPerMTok: req.CostPerMTok,
 	})
 	if err != nil {
 		fail(c, err)
@@ -150,10 +152,11 @@ func (r *Router) handleDeleteLLMConfig(c *gin.Context) {
 func (r *Router) handleUpdateLLMConfig(c *gin.Context) {
 	name := c.Param("name")
 	var req struct {
-		Provider *string `json:"provider"`
-		APIKey   *string `json:"api_key"`
-		BaseURL  *string `json:"base_url"`
-		Model    *string `json:"model"`
+		Provider    *string `json:"provider"`
+		APIKey      *string `json:"api_key"`
+		BaseURL     *string `json:"base_url"`
+		Model       *string `json:"model"`
+		CostPerMTok *int    `json:"cost_per_mtok"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -161,7 +164,7 @@ func (r *Router) handleUpdateLLMConfig(c *gin.Context) {
 	}
 	cfg, err := r.llmCfgUC.Update(c.Request.Context(), name, llmconfig.UpdateInput{
 		Provider: req.Provider, APIKey: req.APIKey,
-		BaseURL: req.BaseURL, Model: req.Model,
+		BaseURL: req.BaseURL, Model: req.Model, CostPerMTok: req.CostPerMTok,
 	})
 	if err != nil {
 		fail(c, err)

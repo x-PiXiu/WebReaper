@@ -117,10 +117,15 @@ func TestSeedPlans_CompatibleUpgrade(t *testing.T) {
 
 type fakeUsageStats struct {
 	scenes []port.SceneUsage
+	configs []port.SceneConfigUsage
 }
 
 func (f *fakeUsageStats) SumBySceneSince(ctx context.Context, since time.Time) ([]port.SceneUsage, error) {
 	return f.scenes, nil
+}
+
+func (f *fakeUsageStats) SumBySceneAndConfigSince(ctx context.Context, since time.Time) ([]port.SceneConfigUsage, error) {
+	return f.configs, nil
 }
 
 func TestBillingUseCase_CostAnalysis(t *testing.T) {

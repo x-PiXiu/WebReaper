@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card, Table, Tag, Typography, Button, Modal, Form, Input, Select, Space, Switch, message } from 'antd'
+import { Card, Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, Switch, message } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
 import type { AgentConfig, LLMConfig } from '../types/api'
@@ -100,6 +100,7 @@ export default function AgentConfigs() {
       api_key: record.api_key,
       base_url: record.base_url,
       model: record.model,
+      cost_per_mtok: record.cost_per_mtok,
     })
     setLlmModalOpen(true)
   }
@@ -119,6 +120,7 @@ export default function AgentConfigs() {
           api_key: values.api_key,
           base_url: values.base_url,
           model: values.model,
+          cost_per_mtok: values.cost_per_mtok,
         })
         message.success(`LLM 配置 ${editingLLM} 已更新`)
       } else {
@@ -374,6 +376,10 @@ export default function AgentConfigs() {
           </Form.Item>
           <Form.Item label="模型名" name="model" rules={editingLLM ? [] : [{ required: true, message: '请输入模型名' }]}>
             <Input placeholder={editingLLM ? '留空则不修改' : '如 MiniMax-M2.5、deepseek-chat、gpt-4o-mini'} style={{ fontFamily: 'monospace' }} />
+          </Form.Item>
+          <Form.Item label="每百万 tokens 成本（分）" name="cost_per_mtok"
+            tooltip="成本分析按引擎细分的单价（默认 100 = ¥1/百万 tokens；豆包/DeepSeek 约 20，GPT 级约 300）">
+            <InputNumber min={1} max={10000} style={{ width: '100%' }} placeholder="如 100" />
           </Form.Item>
           <Form.Item>
             <Space>

@@ -83,7 +83,8 @@ export default function AdminBilling() {
       id: planModal?.id || `plan-${v.level}-${Date.now()}`,
       name: v.name, level: v.level, price_cents: v.price_cents || 0,
       quotas, features, status: v.status || 'active', sort_order: v.sort_order || 0,
-      created_at: planModal?.created_at || '', updated_at: '',
+      // 时间字段由后端维护（created_at 保留原值 / updated_at 自动刷新）——
+      // 前端不发送，避免空字符串触发 time.Time 解析失败
     })
   }
 

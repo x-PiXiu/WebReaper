@@ -580,3 +580,35 @@ pre code.hljs {
 /* 步骤条（视频工作台等流水线）*/
 .wr-steps .ant-steps-item-title { font-size: 13px; color: var(--wr-text-secondary) !important; }
 .wr-steps .ant-steps-item-description { font-size: 12px; }
+
+/* ===== 监测详情：Markdown 渲染（AI 回答正文）+ 引擎折叠 ===== */
+
+/* Markdown 内容容器（监测详情 AI 回答气泡正文） */
+.wr-md { font-size: 12px; color: var(--wr-text-secondary); line-height: 1.7; word-break: break-word; }
+.wr-md p { margin: 6px 0; }
+.wr-md h1, .wr-md h2, .wr-md h3, .wr-md h4 { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--wr-text-primary); }
+.wr-md h1 { font-size: 15px; }
+.wr-md ul, .wr-md ol { margin: 6px 0; padding-left: 20px; }
+.wr-md li { margin: 3px 0; }
+.wr-md table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+.wr-md th, .wr-md td { border: 1px solid var(--wr-bg-hover); padding: 5px 9px; text-align: left; }
+.wr-md th { background: var(--wr-bg-hover); font-weight: 600; color: var(--wr-text-primary); }
+.wr-md tr:nth-child(even) td { background: rgba(0, 0, 0, 0.08); }
+.wr-md code { background: var(--wr-bg-hover); padding: 1px 5px; border-radius: 4px; font-size: 11px; font-family: 'Cascadia Code', Consolas, monospace; }
+.wr-md pre { background: var(--wr-bg-hover); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+.wr-md pre code { background: transparent; padding: 0; }
+.wr-md blockquote { border-left: 3px solid var(--wr-primary); margin: 8px 0; padding: 2px 0 2px 12px; color: var(--wr-text-muted); }
+.wr-md a { color: var(--wr-accent); text-decoration: underline; }
+.wr-md hr { border: none; border-top: 1px solid var(--wr-bg-hover); margin: 10px 0; }
+
+/* 证据高亮：品牌绿 / 竞品橙（Markdown 渲染内 <mark>） */
+.wr-md mark.hl-brand { background: rgba(74, 222, 128, 0.22); color: var(--wr-success); padding: 0 2px; border-radius: 3px; font-weight: 600; }
+.wr-md mark.hl-comp { background: rgba(251, 146, 60, 0.22); color: var(--wr-warning); padding: 0 2px; border-radius: 3px; font-weight: 600; }
+
+/* 引擎折叠面板（Collapse 定制：渐变边框卡片风） */
+.wr-engine-collapse { background: transparent; border: none; }
+.wr-engine-collapse .ant-collapse-item { margin-bottom: 14px; border-radius: 14px !important; overflow: hidden; border: 1px solid rgba(124, 108, 255, 0.16) !important; background: var(--wr-card-bg); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18); }
+.wr-engine-collapse .ant-collapse-header { background: linear-gradient(135deg, rgba(124, 108, 255, 0.12), rgba(34, 211, 238, 0.05)); padding: 10px 14px !important; align-items: center !important; }
+.wr-engine-collapse .ant-collapse-header .ant-collapse-arrow { font-size: 12px !important; color: var(--wr-text-muted); }
+.wr-engine-collapse .ant-collapse-content { background: transparent !important; border-top: 1px solid rgba(124, 108, 255, 0.10) !important; }
+.wr-engine-collapse .ant-collapse-content-box { padding: 12px 14px !important; }

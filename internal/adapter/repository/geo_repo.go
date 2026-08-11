@@ -295,17 +295,20 @@ func (r *GormMonitoringResultRepository) LatestByBrand(ctx context.Context, tena
 func (r *GormMonitoringResultRepository) LatestByTenant(ctx context.Context, tenantID string) ([]entity.MonitoringResult, error) {
 	var pos []MonitoringResultPO
 	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
-	if err := q.Order("keyword_id, engine_name, probed_at DESC").Find(&pos).Error; err != nil {
+	// 按时间倒序取全部（限 500 条防膨胀），Go 层按 (keyword, engine) 分组保留最近 5 条——
+	// 修复：仅保留 1 条会导致"变化对比 delta"永远算不出、详情无历史记录。
+	// 前端按 keyword_id 分组后自行排序（sortByTime），组内顺序无要求。
+	if err := q.Order("probed_at DESC").Limit(500).Find(&pos).Error; err != nil {
 		return nil, err
 	}
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	var out []entity.MonitoringResult
 	for _, p := range pos {
 		key := p.KeywordID + "|" + p.EngineName
-		if seen[key] {
+		if seen[key] >= 5 { // 每组保留最近 5 条（趋势/对比足够，防详情爆炸）
 			continue
 		}
-		seen[key] = true
+		seen[key]++
 		out = append(out, monitoringResultFromPO(p))
 	}
 	return out, nil
