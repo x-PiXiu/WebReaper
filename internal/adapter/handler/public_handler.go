@@ -123,14 +123,16 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		}
 	}
 
-	// 生成 JSON-LD（Article/FAQPage 自动推断），内嵌为 <script> 标签。
-	// 注入作者署名（品牌名）+ 品牌简介——让搜索引擎识别内容的权威来源。
+	// 生成 JSON-LD：公开文章页固定 Article 类型（避免"套餐/价格"等 GEO 常见词误判 Product），
+	// 但保留 FAQ 结构检测（有问答的内容用 FAQPage 更利于 AI 摘要引用）。
+	// 注入作者署名（品牌名）——让搜索引擎识别内容的权威来源（E-E-A-T Expertise/Authority）。
 	sd, _ := h.structured.GenerateJSONLD(c.Request.Context(), structured.StructuredDataInput{
-		Title:    title,
-		Content:  cleanText,
-		URL:      h.baseURL + "/public/articles/" + content.ID,
-		Author:   brandName,
-		BrandName: brandName,
+		Title:        title,
+		Content:      cleanText,
+		URL:          h.baseURL + "/public/articles/" + content.ID,
+		Author:       brandName,
+		BrandName:    brandName,
+		ForceArticle: true, // 公开文章页固定 Article（GEO 内容就是文章）
 	})
 	jsonldTag := ""
 	if sd.JSONLD != "" {

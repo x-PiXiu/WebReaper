@@ -40,8 +40,9 @@ var (
 		"frequently asked", "questions and answers",
 	}
 	productKeywords = []string{
-		"产品", "价格", "售价", "购买", "下单", "规格", "参数", "型号", "优惠", "套餐",
-		"product", "price", "buy", "specification", "model number",
+		// 收紧：去掉 GEO 内容常见的"套餐/价格/优惠"——它们在 GEO 文章里频繁出现但不代表是产品页
+		"产品详情", "产品参数", "规格参数", "型号", "product details",
+		"price:", "buy now", "add to cart", "specification",
 	}
 	howToKeywords = []string{
 		// 注意：不含 "方法"——"方法论"等名词会误命中，导致普通文章被判成教程

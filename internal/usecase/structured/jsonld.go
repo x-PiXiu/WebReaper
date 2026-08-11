@@ -12,12 +12,13 @@ import (
 
 // jsonldInput 是 JSON-LD 生成的输入（用例内部结构，纯数据）。
 type jsonldInput struct {
-	Title       string    // 页面标题
-	Content     string    // 正文（用于生成 description 和 FAQ 提取）
-	URL         string    // 页面 URL（可选）
-	Author      string    // 作者（可选）
-	BrandName   string    // 品牌/组织名（Organization/Product 用）
-	PublishDate time.Time // 发布日期（可选）
+	Title        string    // 页面标题
+	Content      string    // 正文（用于生成 description 和 FAQ 提取）
+	URL          string    // 页面 URL（可选）
+	Author       string    // 作者（可选）
+	BrandName    string    // 品牌/组织名（Organization/Product 用）
+	PublishDate  time.Time // 发布日期（可选）
+	ForceArticle bool      // 固定为 Article（公开文章页——避免"套餐/价格"等词误判 Product）
 }
 
 // buildJSONLD 按类型构建 JSON-LD 文本（纯函数，可单测；不调 LLM）。
@@ -28,7 +29,21 @@ type jsonldInput struct {
 //   - 数据从结构化输入来（标题/内容/品牌），无需 LLM——这是"结构化"闭环
 //     与"内容生成"（LLM）的分工：LLM 管内容，代码管结构。
 func buildJSONLD(in jsonldInput) (entity.StructuredData, error) {
-	st := inferSchemaType(in.Content)
+	// ForceArticle：公开文章页固定 Article（GEO 内容就是文章——"套餐/价格"等词
+	// 不应把它判成 Product）。FAQPage 的问答结构检测仍保留（FAQPage 比 Article 更利于 AI 引用）。
+	var st entity.SchemaType
+	if in.ForceArticle {
+		st = entity.SchemaArticle
+		// 但仍检查 FAQ 结构（有明确问答的内容用 FAQPage 更利于 AI 摘要引用）
+		if containsAnyWord(strings.ToLower(in.Content), faqKeywords) {
+			pairs := extractFAQPairs(in.Content)
+			if len(pairs) >= 2 {
+				st = entity.SchemaFAQPage
+			}
+		}
+	} else {
+		st = inferSchemaType(in.Content)
+	}
 	data := map[string]any{
 		"@context": "https://schema.org",
 		"@type":    string(st),

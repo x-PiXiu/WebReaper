@@ -25,6 +25,7 @@ type StructuredDataInput struct {
 	Author      string    // 作者（可选）
 	BrandName   string    // 品牌/组织名（可选；Organization/Product 用）
 	PublishDate time.Time // 发布日期（可选）
+	ForceArticle bool     // 固定为 Article 类型（公开文章页用——避免"套餐/价格"等词误判 Product）
 }
 
 // StructuredDataUseCase 是结构化数据生成用例。
@@ -45,12 +46,13 @@ func (uc *StructuredDataUseCase) GenerateJSONLD(ctx context.Context, in Structur
 		return entity.StructuredData{}, fmt.Errorf("content is required")
 	}
 	return buildJSONLD(jsonldInput{
-		Title:       strings.TrimSpace(in.Title),
-		Content:     in.Content,
-		URL:         strings.TrimSpace(in.URL),
-		Author:      strings.TrimSpace(in.Author),
-		BrandName:   strings.TrimSpace(in.BrandName),
-		PublishDate: in.PublishDate,
+		Title:        strings.TrimSpace(in.Title),
+		Content:      in.Content,
+		URL:          strings.TrimSpace(in.URL),
+		Author:       strings.TrimSpace(in.Author),
+		BrandName:    strings.TrimSpace(in.BrandName),
+		PublishDate:  in.PublishDate,
+		ForceArticle: in.ForceArticle,
 	})
 }
 
