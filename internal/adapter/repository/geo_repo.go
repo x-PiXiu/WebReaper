@@ -51,6 +51,19 @@ func (r *GormBrandRepository) FindByID(ctx context.Context, tenantID, id string)
 	return brandFromPO(po), nil
 }
 
+// FindPublishedByID 公开查询：按 ID 查品牌（不限租户——公开站渲染用）。
+func (r *GormBrandRepository) FindPublishedByID(ctx context.Context, id string) (entity.Brand, error) {
+	var po BrandPO
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.Brand{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.Brand{}, err
+	}
+	return brandFromPO(po), nil
+}
+
 func (r *GormBrandRepository) ListByTenant(ctx context.Context, tenantID string) ([]entity.Brand, error) {
 	var pos []BrandPO
 	q := applyTenantScope(r.db.WithContext(ctx), tenantID)

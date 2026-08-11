@@ -116,6 +116,16 @@ func ComputeConfidenceEx(answerLength, sampleCount, sourceCount int) float64 {
 //   3. Structure    结构化：标题层级、列表、FAQ
 //   4. Uniqueness   独特性：与全网内容的差异化
 //   5. Recency      时效性：信息是否最新
+//
+// 发布门槛（保护公开站整体权重——低质量内容会拖累全站收录）：
+//   - Score.Total < MinPublishScore（30）：拒绝发布
+//   - 30 ≤ Score.Total < WarnPublishScore（50）：允许但记日志警告
+//   - Score.Total == 0：跳过检查（兼容无评分的历史数据）
+const (
+	MinPublishScore  = 30.0 // 低于此分拒绝发布（硬门槛）
+	WarnPublishScore = 50.0 // 低于此分允许但警告（软门槛）
+)
+
 type GEOScore struct {
 	Total       float64
 	Authority   float64

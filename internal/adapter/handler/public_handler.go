@@ -29,6 +29,7 @@ import (
 // 只依赖 port 仓储 + 结构化用例（纯查询 + 纯生成，无写操作、无认证）。
 type PublicHandler struct {
 	contentRepo         port.OptimizedContentRepository
+	brandRepo           port.BrandRepository             // 品牌信息（公开文章页作者署名用）
 	structured          *structured.StructuredDataUseCase
 	baseURL             string                       // 公开站点根地址（如 https://example.com），生成绝对 URL
 	indexNowKey         string                       // IndexNow 密钥（静态注入，启动时值）
@@ -36,11 +37,11 @@ type PublicHandler struct {
 }
 
 // NewPublicHandler 创建公开站点处理器。
-func NewPublicHandler(repo port.OptimizedContentRepository, structuredUC *structured.StructuredDataUseCase, baseURL string) *PublicHandler {
+func NewPublicHandler(repo port.OptimizedContentRepository, brandRepo port.BrandRepository, structuredUC *structured.StructuredDataUseCase, baseURL string) *PublicHandler {
 	if baseURL == "" {
 		baseURL = "http://localhost:8082"
 	}
-	return &PublicHandler{contentRepo: repo, structured: structuredUC, baseURL: baseURL}
+	return &PublicHandler{contentRepo: repo, brandRepo: brandRepo, structured: structuredUC, baseURL: baseURL}
 }
 
 // SetIndexNowKey 注入 IndexNow 密钥（启用 /public/indexnow-key.txt 托管端点）。
@@ -72,7 +73,10 @@ const articlePageTemplate = `<!DOCTYPE html>
   blockquote{border-left:4px solid #6366f1;margin-left:0;padding-left:16px;color:#555}
   a{color:#6366f1}
   .meta{color:#8a8aa0;font-size:0.9em;margin-bottom:32px}
-  .footer{margin-top:64px;padding-top:16px;border-top:1px solid #eee;color:#aaa;font-size:0.85em}
+  .author-box{margin-top:48px;padding:20px;background:#f8f8fc;border-radius:12px}
+  .author-box .author-name{font-weight:600;font-size:1.05em;color:#1a1a2e}
+  .author-box .author-desc{color:#666;font-size:0.9em;margin-top:4px;line-height:1.7}
+  .footer{margin-top:24px;padding-top:16px;border-top:1px solid #eee;color:#aaa;font-size:0.85em}
 </style>
 </head>
 <body>
@@ -80,6 +84,12 @@ const articlePageTemplate = `<!DOCTYPE html>
   <h1>{{.Title}}</h1>
   <div class="meta">{{.Meta}}</div>
   {{.ContentHTML}}
+  {{if .BrandName}}
+  <div class="author-box">
+    <div class="author-name">本文由 {{.BrandName}} 提供</div>
+    {{if .BrandDesc}}<div class="author-desc">{{.BrandDesc}}</div>{{end}}
+  </div>
+  {{end}}
 </article>
 <div class="footer">本文由 WebReaper GEO 引擎生成并发布</div>
 </body>
@@ -104,12 +114,23 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 	// 公开渲染（正文/描述/JSON-LD/llms.txt）必须保证零泄漏——统一在此清洗一次。
 	cleanText := pkg.StripThinkTags(content.OptimizedText)
 
+	// 查品牌信息（作者署名 + JSON-LD author/publisher——增强 E-E-A-T 中的 Expertise/Authority）
+	brandName, brandDesc := "", ""
+	if h.brandRepo != nil && content.BrandID != "" {
+		if brand, bErr := h.brandRepo.FindPublishedByID(c.Request.Context(), content.BrandID); bErr == nil {
+			brandName = brand.Name
+			brandDesc = brand.Positioning // 品牌定位作为简介
+		}
+	}
+
 	// 生成 JSON-LD（Article/FAQPage 自动推断），内嵌为 <script> 标签。
-	// 标题兜底后仍失败（如正文异常）不阻断页面——JSON-LD 是增强项。
+	// 注入作者署名（品牌名）+ 品牌简介——让搜索引擎识别内容的权威来源。
 	sd, _ := h.structured.GenerateJSONLD(c.Request.Context(), structured.StructuredDataInput{
-		Title:   title,
-		Content: cleanText,
-		URL:     h.baseURL + "/public/articles/" + content.ID,
+		Title:    title,
+		Content:  cleanText,
+		URL:      h.baseURL + "/public/articles/" + content.ID,
+		Author:   brandName,
+		BrandName: brandName,
 	})
 	jsonldTag := ""
 	if sd.JSONLD != "" {
@@ -129,6 +150,8 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		"Meta":        fmt.Sprintf("GEO 优化内容 · 关键词可见度评分 %d", int(content.Score.Total)),
 		"ContentHTML": template.HTML(public.RenderMarkdown(cleanText)),
 		"JSONLD":      template.HTML(jsonldTag),
+		"BrandName":   brandName,
+		"BrandDesc":   brandDesc,
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render error")
 	}

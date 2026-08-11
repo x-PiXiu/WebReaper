@@ -14,6 +14,8 @@ import (
 type BrandRepository interface {
 	Save(ctx context.Context, b entity.Brand) error
 	FindByID(ctx context.Context, tenantID, id string) (entity.Brand, error)
+	// FindPublishedByID 公开查询：按 ID 查品牌（公开站用，不限定租户）。
+	FindPublishedByID(ctx context.Context, id string) (entity.Brand, error)
 	ListByTenant(ctx context.Context, tenantID string) ([]entity.Brand, error)
 	Delete(ctx context.Context, tenantID, id string) error
 	// Count 统计品牌总数（平台总览用，admin 看全局）。

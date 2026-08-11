@@ -8,11 +8,12 @@ type Field struct {
 	Value any
 }
 
-// String / Int / Bool / Err 是常用类型的构造便利函数。
-func String(key, val string) Field    { return Field{Key: key, Value: val} }
-func Int(key string, val int) Field   { return Field{Key: key, Value: val} }
-func Bool(key string, val bool) Field { return Field{Key: key, Value: val} }
-func Err(err error) Field             { return Field{Key: "error", Value: err} }
+// String / Int / Float64 / Bool / Err 是常用类型的构造便利函数。
+func String(key, val string) Field       { return Field{Key: key, Value: val} }
+func Int(key string, val int) Field      { return Field{Key: key, Value: val} }
+func Float64(key string, val float64) Field { return Field{Key: key, Value: val} }
+func Bool(key string, val bool) Field    { return Field{Key: key, Value: val} }
+func Err(err error) Field                { return Field{Key: "error", Value: err} }
 
 // Logger 是日志抽象接口（横切关注点的边界）。
 //

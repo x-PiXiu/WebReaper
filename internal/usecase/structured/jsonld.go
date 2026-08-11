@@ -40,8 +40,10 @@ func buildJSONLD(in jsonldInput) (entity.StructuredData, error) {
 		if desc := extractDescription(in.Content); desc != "" {
 			data["description"] = desc
 		}
+		// 作者署名（Organization 而非 Person——品牌发文是组织行为）
 		if in.Author != "" {
-			data["author"] = map[string]any{"@type": "Person", "name": in.Author}
+			data["author"] = map[string]any{"@type": "Organization", "name": in.Author}
+			data["publisher"] = map[string]any{"@type": "Organization", "name": in.BrandName}
 		}
 		if in.PublishDate.IsZero() == false {
 			data["datePublished"] = in.PublishDate.Format("2006-01-02")

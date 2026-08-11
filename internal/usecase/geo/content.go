@@ -366,6 +366,17 @@ func (uc *ContentUseCase) AdminSetStatus(ctx context.Context, contentID, status 
 	if oc.Status == status {
 		return oc, nil // 幂等
 	}
+	// 发布质量门槛（admin 也受约束——保护平台整体收录权重）
+	if status == "published" && oc.Score.Total > 0 && oc.Score.Total < entity.MinPublishScore {
+		return entity.OptimizedContent{}, fmt.Errorf(
+			"%w: GEO 评分 %.0f 过低（需 ≥%.0f 才能发布）",
+			pkg.ErrInvalidArgument, oc.Score.Total, entity.MinPublishScore,
+		)
+	}
+	if status == "published" && oc.Score.Total > 0 && oc.Score.Total < entity.WarnPublishScore {
+		uc.logger.Warn("admin 低分内容发布",
+			port.String("content_id", oc.ID), port.Float64("score", oc.Score.Total))
+	}
 	oc.Status = status
 	if status == "published" {
 		// 发布即进入"待收录"（收录验证任务每日查询后回写 indexed）
@@ -423,6 +434,22 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 	}
 	if oc.Status == status {
 		return oc, nil // 幂等：已是目标状态直接返回
+	}
+
+	// 发布质量门槛：低于 MinPublishScore 拒绝发布（保护公开站整体权重）
+	// Score.Total == 0 跳过（兼容无评分的历史数据）
+	if status == "published" && oc.Score.Total > 0 && oc.Score.Total < entity.MinPublishScore {
+		return entity.OptimizedContent{}, fmt.Errorf(
+			"%w: GEO 评分 %.0f 过低（需 ≥%.0f 才能发布），请优化内容质量后再试",
+			pkg.ErrInvalidArgument, oc.Score.Total, entity.MinPublishScore,
+		)
+	}
+	// 低分警告（30-50）：允许发布但记日志
+	if status == "published" && oc.Score.Total > 0 && oc.Score.Total < entity.WarnPublishScore {
+		uc.logger.Warn("低分内容发布（建议优化）",
+			port.String("content_id", oc.ID),
+			port.Float64("score", oc.Score.Total),
+		)
 	}
 
 	oc.Status = status

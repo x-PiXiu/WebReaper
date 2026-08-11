@@ -235,7 +235,7 @@ func main() {
 	var indexNowSubmitter port.URLSubmitter
 	var indexingUC *indexing.IndexingUseCase
 	if geoRepos != nil {
-		publicHandler := handler.NewPublicHandler(geoRepos.content, structuredUC, cfg.Server.PublicBaseURL)
+		publicHandler := handler.NewPublicHandler(geoRepos.content, geoRepos.brand, structuredUC, cfg.Server.PublicBaseURL)
 		router.SetPublic(publicHandler)
 
 		// 收录配置加载器：DB（system_settings）优先，env 兜底（main 装配层职责）

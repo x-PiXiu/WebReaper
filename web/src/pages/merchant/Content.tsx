@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin } from 'antd'
+import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Popconfirm } from 'antd'
 import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -484,9 +484,23 @@ export default function Content() {
                       ) : (
                         <>
                           <Text type="secondary" style={{ fontSize: 12 }}>草稿——发布后 AI 引擎可爬取此内容</Text>
-                          <Button size="small" type="primary" style={{ fontSize: 12 }} onClick={() => handleSetStatus(result, 'published')}>
-                            发布到公开站
-                          </Button>
+                          {(result.score?.total ?? 0) > 0 && (result.score?.total ?? 0) < 30 ? (
+                            <Tooltip title={`GEO 评分 ${result.score?.total?.toFixed(0)} 过低（需 ≥30），请优化后再发布`}>
+                              <Button size="small" disabled style={{ fontSize: 12 }}>
+                                评分过低，无法发布
+                              </Button>
+                            </Tooltip>
+                          ) : (result.score?.total ?? 0) > 0 && (result.score?.total ?? 0) < 50 ? (
+                            <Popconfirm title={`评分 ${result.score?.total?.toFixed(0)} 偏低，确定发布？`} onConfirm={() => handleSetStatus(result, 'published')}>
+                              <Button size="small" style={{ fontSize: 12, background: 'var(--wr-warning)', borderColor: 'var(--wr-warning)', color: '#fff' }}>
+                                发布到公开站
+                              </Button>
+                            </Popconfirm>
+                          ) : (
+                            <Button size="small" type="primary" style={{ fontSize: 12 }} onClick={() => handleSetStatus(result, 'published')}>
+                              发布到公开站
+                            </Button>
+                          )}
                         </>
                       )}
                     </div>
@@ -559,8 +573,12 @@ export default function Content() {
                               下线
                             </Button>
                           </>
+                        ) : (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 30 ? (
+                          <Tooltip title={`评分 ${c.score?.total?.toFixed(0)} 过低，无法发布`}>
+                            <Button size="small" disabled style={{ fontSize: 12 }}>发布</Button>
+                          </Tooltip>
                         ) : (
-                          <Button size="small" type="primary" ghost style={{ fontSize: 12 }} onClick={() => handleSetStatus(c, 'published')}>
+                          <Button size="small" type="primary" ghost style={{ fontSize: 12, borderColor: (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 50 ? 'var(--wr-warning)' : undefined, color: (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 50 ? 'var(--wr-warning)' : undefined }} onClick={() => handleSetStatus(c, 'published')}>
                             发布到公开站
                           </Button>
                         )}
