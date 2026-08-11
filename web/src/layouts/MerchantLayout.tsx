@@ -13,6 +13,7 @@ import {
   CrownOutlined,
   RadarChartOutlined,
   EnvironmentOutlined,
+  BellOutlined,
 } from '@ant-design/icons'
 
 // 商户端布局：分组导航（资产 / 可见度 / 创作 / 运营）。
@@ -44,6 +45,7 @@ const baseMenu: NavItem[] = [
     key: 'operation', label: '运营',
     children: [
       { key: '/m/distribution', label: '分发中心', icon: <ExportOutlined /> },
+      { key: '/m/notifications', label: '通知中心', icon: <BellOutlined /> },
       { key: '/m/chat', label: 'AI 对话', icon: <MessageOutlined /> },
       { key: '/m/my-plan', label: '我的套餐', icon: <CrownOutlined /> },
     ],

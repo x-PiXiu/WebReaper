@@ -210,6 +210,10 @@ export const businessApi = {
   deleteContent: (brandId: string, contentId: string) =>
     apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/geo/brands/${brandId}/contents/${contentId}`),
 
+  // 商户端自助补提交收录（IndexNow——重新通知搜索引擎抓取已发布内容）
+  resubmitIndex: (brandId: string, contentId: string) =>
+    apiClient.post<unknown, { submitted: boolean }>(`/api/v1/geo/brands/${brandId}/contents/${contentId}/resubmit-index`),
+
   // ---- GEO 平台账号（扫码绑定）----
   listAccounts: () =>
     apiClient.get<unknown, Account[]>('/api/v1/geo/accounts'),

@@ -15,6 +15,7 @@ import VideoWorkbench from './pages/merchant/Video'
 import MyPlan from './pages/merchant/MyPlan'
 import Visibility from './pages/merchant/Visibility'
 import Nearby from './pages/merchant/Nearby'
+import Notifications from './pages/merchant/Notifications'
 // 管理端额外页面
 import AdminUsers from './pages/admin/Users'
 import Indexing from './pages/admin/Indexing'
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="/m/distribution" element={<Distribution />} />
           <Route path="/m/my-plan" element={<MyPlan />} />
           <Route path="/m/chat" element={<Chat />} />
+          <Route path="/m/notifications" element={<Notifications />} />
         </Route>
 
         {/* 管理后台路由组（role=admin）*/}

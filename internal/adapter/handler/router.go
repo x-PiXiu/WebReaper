@@ -395,6 +395,7 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/geo/brands/:id/contents/generate-stream", geoHandler.HandleGenerateContentStream) // SSE 流式生成
 			api.POST("/geo/brands/:id/contents/:contentId/status", geoHandler.HandleSetContentStatus) // 状态流转 draft↔published
 			api.DELETE("/geo/brands/:id/contents/:contentId", geoHandler.HandleDeleteContent) // 删除内容（管理后台/工作台）
+			api.POST("/geo/brands/:id/contents/:contentId/resubmit-index", geoHandler.HandleResubmitIndex) // 商户端自助补提交收录
 			// GEO 诊断
 			api.POST("/geo/brands/:id/diagnose", geoHandler.HandleDiagnose)
 			// 关键词蒸馏（按来源：品牌/文本/种子/文件/网络）

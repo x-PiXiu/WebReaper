@@ -163,6 +163,7 @@ func optimizedContentToView(c entity.OptimizedContent) gin.H {
 		"version":        c.Version,
 		"score":          geoScoreToView(c.Score),
 		"status":         c.Status,
+		"index_status":   c.IndexStatus,
 		"created_at":     c.CreatedAt,
 	}
 }
@@ -474,6 +475,17 @@ func (h *GEOHandler) HandleDeleteContent(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"deleted": true})
+}
+
+// HandleResubmitIndex POST /api/v1/geo/brands/:id/contents/:contentId/resubmit-index
+// 商户端自助补提交收录（IndexNow）——重新通知搜索引擎抓取已发布内容。
+func (h *GEOHandler) HandleResubmitIndex(c *gin.Context) {
+	contentID := c.Param("contentId")
+	if err := h.contentUC.ResubmitIndex(c.Request.Context(), middleware.CurrentTenantID(c), contentID); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"submitted": true})
 }
 
 // HandleAdminListBrands GET /api/v1/admin/brands —— 全平台品牌列表（admin 旁路）。

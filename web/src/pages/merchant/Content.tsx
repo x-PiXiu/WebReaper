@@ -63,6 +63,7 @@ export default function Content() {
   const [useDiagnose, setUseDiagnose] = useState(false) // P5-03 诊断→优化闭环开关
   const [generating, setGenerating] = useState(false)
   const [drafting, setDrafting] = useState(false)
+  const [resubmitting, setResubmitting] = useState<string | null>(null) // 收录补提交 loading
 
   const { data: brands = [] } = useQuery({
     queryKey: ['geo-brands'],
@@ -594,6 +595,19 @@ export default function Content() {
                           <>
                             <Button size="small" type="link" icon={<ExportOutlined />} href={`/public/articles/${c.id}`} target="_blank" style={{ fontSize: 12 }}>
                               公开页
+                            </Button>
+                            <Button size="small" type="link" style={{ fontSize: 12 }} loading={resubmitting === c.id}
+                              onClick={async () => {
+                                setResubmitting(c.id)
+                                try {
+                                  await businessApi.resubmitIndex(selectedBrand!, c.id)
+                                  message.success('已重新提交收录通知（搜索引擎抓取约需 1-2 周）')
+                                  queryClient.invalidateQueries({ queryKey: ['geo-contents'] })
+                                } catch (e) {
+                                  message.error('提交失败：' + ((e as Error)?.message || ''))
+                                } finally { setResubmitting(null) }
+                              }}>
+                              补提交收录
                             </Button>
                             <Button size="small" type="text" danger style={{ fontSize: 12 }} onClick={() => handleSetStatus(c, 'draft')}>
                               下线

@@ -634,6 +634,29 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 	return oc, nil
 }
 
+// ResubmitIndex 商户端自助补提交收录（IndexNow）——重新通知搜索引擎抓取指定已发布内容。
+// 仅 published 内容可补提交；未配置 urlSubmitter 时返回友好提示而非报错。
+func (uc *ContentUseCase) ResubmitIndex(ctx context.Context, tenantID, contentID string) error {
+	oc, err := uc.contentRepo.FindByID(ctx, tenantID, contentID)
+	if err != nil {
+		return fmt.Errorf("内容不存在: %w", err)
+	}
+	if oc.Status != "published" {
+		return fmt.Errorf("仅已发布内容可补提交收录（当前状态: %s）", oc.Status)
+	}
+	if uc.urlSubmitter == nil || uc.publicBaseURL == "" {
+		return fmt.Errorf("收录服务未配置——请联系管理员在平台设置中配置 IndexNow 密钥")
+	}
+	publicURL := strings.TrimRight(uc.publicBaseURL, "/") + "/public/articles/" + oc.ID
+	if err := uc.urlSubmitter.SubmitURLs(ctx, []string{publicURL}); err != nil {
+		return fmt.Errorf("收录提交失败: %w", err)
+	}
+	// 重置收录状态为 pending（等待下一轮验证任务回写）
+	oc.IndexStatus = entity.IndexStatusPending
+	_ = uc.contentRepo.Save(ctx, oc)
+	return nil
+}
+
 // GenerateInput 从零生成内容的输入（不需要原始素材，AI 根据品牌+关键词原创）。
 type GenerateInput struct {
 	TenantID      string
