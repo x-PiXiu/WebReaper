@@ -87,12 +87,25 @@ func DefaultPromptTemplates() []entity.PromptTemplate {
 // systemPrompt 取系统提示词：模板仓库有记录用模板（可管理/可热更新），
 // 否则用内置默认。引擎偏好指令始终由代码拼接（业务规则不被模板绕过）。
 func (uc *ContentUseCase) systemPrompt(ctx context.Context, key, fallback, targetEngine, format string) string {
+	// 格式指令放在最前面 + "优先级最高"（修复：原实现追加在末尾被默认 prompt 的
+	// "字数 800-1500 字"覆盖——选小红书仍输出长文。现在格式要求显式优先于默认字数/结构）
+	formatOverride := ""
+	if format != "" && format != "article" {
+		formatOverride = "【重要·优先级最高】本次输出格式要求（覆盖下方其他字数/结构/标题要求）：\n" +
+			entity.BuildFormatInstruction(format) + "\n\n"
+	}
+
+	var basePrompt string
 	if uc.templateRepo != nil {
 		if t, err := uc.templateRepo.Get(ctx, key); err == nil && t.Content != "" {
-			return t.Content + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine) + "\n\n" + entity.BuildFormatInstruction(format)
+			basePrompt = t.Content
+		} else {
+			basePrompt = fallback
 		}
+	} else {
+		basePrompt = fallback
 	}
-	return fallback + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine) + "\n\n" + entity.BuildFormatInstruction(format)
+	return formatOverride + basePrompt + "\n\n" + entity.BuildEnginePrefInstruction(targetEngine)
 }
 
 // SetPromptTemplateRepo 注入提示词模板仓库（可选；未注入时用内置默认提示词）。
