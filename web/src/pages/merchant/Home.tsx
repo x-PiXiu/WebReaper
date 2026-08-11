@@ -40,6 +40,10 @@ function rateLabel(rate: number): string {
 // 数据源：brands + 各品牌 overview（租户级已有接口组合，无新后端依赖）。
 export default function MerchantHome() {
   const navigate = useNavigate()
+  // Onboarding dismiss 状态必须在所有条件 return 之前（React Hooks 规则）
+  const [onboardingDismissed, setOnboardingDismissed] = useState(
+    typeof window !== 'undefined' && localStorage.getItem('wr-onboarding-dismissed') === '1'
+  )
   const { data: brands = [], isLoading } = useQuery({
     queryKey: ['geo-brands'],
     queryFn: () => businessApi.listBrands(),
@@ -140,9 +144,6 @@ export default function MerchantHome() {
 
   // 渐进式 Onboarding：基于数据判断步骤完成度（有品牌但未完成全流程时显示引导条）
   const steps = useOnboardingSteps(brands, ovData)
-  const [onboardingDismissed, setOnboardingDismissed] = useState(
-    typeof window !== 'undefined' && localStorage.getItem('wr-onboarding-dismissed') === '1'
-  )
   const showOnboarding = !steps.allDone && !onboardingDismissed && brands.length > 0
 
   const totalAvg = ovData.length > 0
