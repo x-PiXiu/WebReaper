@@ -3,7 +3,6 @@ import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Ro
 import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import { getToken } from '../../store/auth'
 import type { Brand, Keyword, OptimizedContent } from '../../types/api'
 
 const { Text, Paragraph } = Typography
@@ -92,7 +91,8 @@ export default function Content() {
     }
   }
 
-  // 从零生成内容（SSE 流式：用户实时看到文章逐字输出）
+  // 从零生成内容（非流式：走结构化 JSON 输出，标题/正文零解析成本）
+  // GEO 内容生成用非流式——结构化输出更可控；流式只给 Chat 用
   const handleGenerate = async () => {
     if (!selectedBrand || genKeywords.length === 0) {
       message.warning('请选择品牌并至少选择一个关键词')
@@ -100,50 +100,18 @@ export default function Content() {
     }
     setGenerating(true)
     setResult(null)
-    let accText = ''
-    setResult({ optimized_text: '', score: { total: 0, authority: 0, specificity: 0, structure: 0, uniqueness: 0, recency: 0 } } as OptimizedContent)
 
     try {
       const brandInfo = brands.find((b: Brand) => b.id === selectedBrand)
-      const token = getToken()
-      const res = await fetch(`/api/v1/geo/brands/${selectedBrand}/contents/generate-stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({
-          keywords: genKeywords,
-          brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
-          target_engine: targetEngine || undefined,
-        }),
+      const res = await businessApi.generateContent(selectedBrand, {
+        keywords: genKeywords,
+        brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
+        target_engine: targetEngine || undefined,
       })
-      if (res.status === 401) { message.error('登录已过期'); setGenerating(false); return }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-      const reader = res.body?.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-      while (reader) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() || ''
-        for (const ln of lines) {
-          if (!ln.startsWith('data: ')) continue
-          try {
-            const e = JSON.parse(ln.slice(6))
-            if (e.type === 'text-delta' && e.textDelta) {
-              accText += e.textDelta
-              setResult({ optimized_text: accText, score: { total: 0, authority: 0, specificity: 0, structure: 0, uniqueness: 0, recency: 0 } } as OptimizedContent)
-            } else if (e.type === 'result' && e.data) {
-              setResult(e.data)
-            } else if (e.type === 'error') {
-              message.error(e.error || '生成失败')
-            }
-          } catch {}
-        }
-      }
+      setResult(res)
       const modeLabel = genKeywords.length > 1 ? `（${genKeywords.length} 个关键词组合）` : ''
-      message.success(`内容生成成功${modeLabel}`)
+      const scoreLabel = res.score?.total ? `，GEO 评分 ${res.score.total.toFixed(0)}` : ''
+      message.success(`内容生成成功${modeLabel}${scoreLabel}`)
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
     } catch (e) {
       message.error('生成失败：' + ((e as Error)?.message || ''))
