@@ -132,16 +132,25 @@ func (uc *BrandUseCase) Delete(ctx context.Context, tenantID, brandID string) er
 }
 
 // Update 修改品牌信息（名称/定位/卖点/竞品/业务类型）。
+// PATCH 语义：空字段保留原值（只传 competitors 不会清空 name/positioning）。
 // 业务类型变更影响门店/附近同行/监测问法分流（local↔online 切换）。
 func (uc *BrandUseCase) Update(ctx context.Context, tenantID, brandID string, in BrandInput) (entity.Brand, error) {
 	old, err := uc.brandRepo.FindByID(ctx, tenantID, brandID)
 	if err != nil {
 		return entity.Brand{}, fmt.Errorf("品牌不存在: %w", err)
 	}
-	old.Name = in.Name
-	old.Positioning = in.Positioning
-	old.CoreSelling = in.CoreSelling
-	old.Competitors = in.Competitors
+	if in.Name != "" {
+		old.Name = in.Name
+	}
+	if in.Positioning != "" {
+		old.Positioning = in.Positioning
+	}
+	if in.CoreSelling != nil {
+		old.CoreSelling = in.CoreSelling
+	}
+	if in.Competitors != nil {
+		old.Competitors = in.Competitors
+	}
 	if in.BizType != "" {
 		old.BizType = in.BizType
 	}

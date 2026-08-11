@@ -1,11 +1,11 @@
-import { useState } from 'react'
-import { Typography, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Empty, Checkbox, Spin, Tag, Table, Input as AntInput } from 'antd'
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, TagOutlined, EnvironmentOutlined, BulbOutlined, SearchOutlined } from '@ant-design/icons'
+import { useState, useEffect } from 'react'
+import { Typography, Button, Modal, Form, Input, Select, Space, message, Popconfirm, Empty, Checkbox, Spin, Tag, Input as AntInput } from 'antd'
+import { PlusOutlined, DeleteOutlined, TagOutlined, EnvironmentOutlined, BulbOutlined, SearchOutlined, RadarChartOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import type { Brand } from '../../types/api'
+import type { Brand, CompetitorSuggestion } from '../../types/api'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 export default function Brands() {
@@ -13,29 +13,37 @@ export default function Brands() {
   const [brandModalOpen, setBrandModalOpen] = useState(false)
   const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null)
   const [brandForm] = Form.useForm()
-  const [kwForm] = Form.useForm()
-  const [kwModalOpen, setKwModalOpen] = useState(false)
-  const [genKwModalOpen, setGenKwModalOpen] = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [generatedKeywords, setGeneratedKeywords] = useState<string[]>([])
-  const [checkedKeywords, setCheckedKeywords] = useState<string[]>([])
+  const [editForm] = Form.useForm()
   const [searchText, setSearchText] = useState('')
+  // 竞品推荐
+  const [compSuggestOpen, setCompSuggestOpen] = useState(false)
+  const [suggestions, setSuggestions] = useState<CompetitorSuggestion[]>([])
+  const [checkedComps, setCheckedComps] = useState<string[]>([])
+  const [loadingSuggest, setLoadingSuggest] = useState(false)
+  const [savingBrand, setSavingBrand] = useState(false)
 
   const { data: brands = [] } = useQuery({
     queryKey: ['geo-brands'],
     queryFn: () => businessApi.listBrands(),
   })
 
-  const { data: keywords = [] } = useQuery({
-    queryKey: ['geo-keywords', selectedBrand?.id],
-    queryFn: () => businessApi.listKeywords(selectedBrand!.id),
-    enabled: !!selectedBrand,
-  })
-
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['geo-brands'] })
     queryClient.invalidateQueries({ queryKey: ['geo-overviews'] })
   }
+
+  // 选中品牌时同步编辑表单
+  useEffect(() => {
+    if (selectedBrand) {
+      editForm.setFieldsValue({
+        name: selectedBrand.name,
+        biz_type: selectedBrand.biz_type || 'local',
+        positioning: selectedBrand.positioning,
+        core_selling: (selectedBrand.core_selling || []).join('、'),
+        competitors: (selectedBrand.competitors || []).join('、'),
+      })
+    }
+  }, [selectedBrand]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCreateBrand = async (values: { name: string; positioning: string; core_selling: string; competitors: string; biz_type?: string }) => {
     try {
@@ -62,49 +70,59 @@ export default function Brands() {
     } catch {}
   }
 
-  const handleAddKeyword = async (values: { term: string; intent: string }) => {
+  // 保存品牌编辑（名称/定位/卖点/竞品/业务类型）
+  const handleSaveBrand = async () => {
     if (!selectedBrand) return
     try {
-      await businessApi.addKeyword(selectedBrand.id, { term: values.term, intent: values.intent || 'informational' })
-      message.success('关键词已添加')
-      setKwModalOpen(false)
-      kwForm.resetFields()
-      queryClient.invalidateQueries({ queryKey: ['geo-keywords', selectedBrand.id] })
-    } catch {}
-  }
-
-  const handleGenerateKeywords = async () => {
-    if (!selectedBrand) return
-    setGenerating(true)
-    setGeneratedKeywords([])
-    setCheckedKeywords([])
-    setGenKwModalOpen(true)
-    try {
-      const res = await businessApi.generateKeywords(selectedBrand.id)
-      const kws = Array.isArray(res) ? res : (res?.keywords || [])
-      setGeneratedKeywords(kws)
-      if (kws.length === 0) {
-        message.warning('AI 未生成关键词，可能是 LLM 配置问题')
-      }
-    } catch (e) {
-      message.error('生成关键词失败：' + ((e as Error)?.message || ''))
-    } finally {
-      setGenerating(false)
+      const values = await editForm.validateFields()
+      setSavingBrand(true)
+      const updated = await businessApi.updateBrand(selectedBrand.id, {
+        name: values.name,
+        biz_type: values.biz_type || 'local',
+        positioning: values.positioning,
+        core_selling: values.core_selling ? values.core_selling.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
+        competitors: values.competitors ? values.competitors.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
+      })
+      message.success('品牌信息已保存')
+      setSelectedBrand(updated)
+      invalidate()
+    } catch {} finally {
+      setSavingBrand(false)
     }
   }
 
-  const handleAddGeneratedKeywords = async () => {
-    if (!selectedBrand || checkedKeywords.length === 0) {
-      message.warning('请至少勾选一个关键词')
+  // 从附近同行推荐竞品（local 品牌；online 返回错误提示）
+  const handleSuggestCompetitors = async () => {
+    if (!selectedBrand) return
+    setCompSuggestOpen(true)
+    setCheckedComps([])
+    setSuggestions([])
+    setLoadingSuggest(true)
+    try {
+      const res = await businessApi.suggestCompetitors(selectedBrand.id, 8)
+      setSuggestions(res || [])
+    } catch (e) {
+      message.error('推荐失败：' + ((e as Error)?.message || ''))
+    } finally {
+      setLoadingSuggest(false)
+    }
+  }
+
+  // 采纳勾选的竞品（合并到品牌竞品列表，去重）
+  const handleAdoptCompetitors = async () => {
+    if (!selectedBrand || checkedComps.length === 0) {
+      message.warning('请至少勾选一个竞品')
       return
     }
+    const existing = new Set(selectedBrand.competitors || [])
+    const merged = [...(selectedBrand.competitors || []), ...checkedComps.filter((c) => !existing.has(c))]
     try {
-      for (const term of checkedKeywords) {
-        await businessApi.addKeyword(selectedBrand.id, { term, intent: 'informational' })
-      }
-      message.success(`已添加 ${checkedKeywords.length} 个关键词`)
-      setGenKwModalOpen(false)
-      queryClient.invalidateQueries({ queryKey: ['geo-keywords', selectedBrand.id] })
+      const updated = await businessApi.updateBrand(selectedBrand.id, { competitors: merged })
+      message.success(`已采纳 ${checkedComps.length} 个竞品`)
+      setSelectedBrand(updated)
+      editForm.setFieldsValue({ competitors: merged.join('、') })
+      setCompSuggestOpen(false)
+      invalidate()
     } catch {}
   }
 
@@ -113,29 +131,21 @@ export default function Brands() {
     (b.positioning || '').toLowerCase().includes(searchText.toLowerCase())
   )
 
-  const kwColumns = [
-    { title: '关键词', dataIndex: 'term', key: 'term', render: (t: string) => <Text strong>{t}</Text> },
-    { title: '意图', dataIndex: 'intent', key: 'intent', width: 120, render: (i: string) => <Tag color="cyan">{i || '-'}</Tag> },
-  ]
-
   return (
     <div className="wr-page-content" style={{ paddingTop: 0 }}>
-      {/* 页面标题区（Linear 式）*/}
       <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
           <h1>品牌管理</h1>
-          <p>管理品牌资产与关键词，AI 据此监测可见度并生成优化内容</p>
+          <p>管理品牌资产与竞品——关键词管理请前往「关键词管理」页</p>
         </div>
         <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>
           创建品牌
         </Button>
       </div>
 
-      {/* 左右分栏：品牌列表 + 详情面板（玻璃卡片）*/}
       <div style={{ display: 'flex', gap: 16, minHeight: 'calc(100vh - 200px)' }}>
         {/* 左：品牌列表 */}
         <div className="wr-glass-card" style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: 16 }}>
-          {/* 搜索框 */}
           <AntInput
             prefix={<SearchOutlined style={{ color: 'var(--wr-text-muted)' }} />}
             placeholder="搜索品牌名或定位"
@@ -144,19 +154,11 @@ export default function Brands() {
             allowClear
             style={{ marginBottom: 4 }}
           />
-
-          {/* 品牌列表 */}
           <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
             {filteredBrands.length === 0 ? (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={searchText ? '未找到匹配品牌' : '暂无品牌'}
-                style={{ padding: 40 }}
-              >
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={searchText ? '未找到匹配品牌' : '暂无品牌'} style={{ padding: 40 }}>
                 {!searchText && (
-                  <Button type="primary" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>
-                    创建第一个品牌
-                  </Button>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>创建第一个品牌</Button>
                 )}
               </Empty>
             ) : (
@@ -167,45 +169,30 @@ export default function Brands() {
                     key={brand.id}
                     onClick={() => setSelectedBrand(brand)}
                     style={{
-                      padding: '14px 16px',
-                      borderRadius: 10,
-                      cursor: 'pointer',
+                      padding: '14px 16px', borderRadius: 10, cursor: 'pointer',
                       background: isSelected ? 'var(--wr-primary-bg)' : 'var(--wr-bg-surface)',
                       border: `1px solid ${isSelected ? 'var(--wr-primary)' : 'var(--wr-border)'}`,
                       transition: 'all 200ms cubic-bezier(0.2, 0, 0, 1)',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <Text strong style={{ fontSize: 15, color: isSelected ? 'var(--wr-primary-hover)' : 'var(--wr-text-primary)' }}>
-                        {brand.name}
-                      </Text>
+                      <Text strong style={{ fontSize: 15, color: isSelected ? 'var(--wr-primary-hover)' : 'var(--wr-text-primary)' }}>{brand.name}</Text>
                       <Popconfirm title="删除品牌及其关键词？" onConfirm={() => handleDeleteBrand(brand.id)}>
-                        <Button
-                          size="small"
-                          type="text"
-                          danger
-                          icon={<DeleteOutlined />}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ opacity: 0.5 }}
-                        />
+                        <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} style={{ opacity: 0.5 }} />
                       </Popconfirm>
                     </div>
                     {brand.positioning && (
-                      <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {brand.positioning}
-                      </Text>
+                      <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand.positioning}</Text>
                     )}
                     <div style={{ display: 'flex', gap: 12, marginTop: 6, alignItems: 'center' }}>
                       <Tag color={brand.biz_type === 'online' ? 'blue' : 'green'} style={{ margin: 0, fontSize: 10 }}>
                         {brand.biz_type === 'online' ? '💻 线上' : '🏪 本地'}
                       </Tag>
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        <TagOutlined style={{ marginRight: 3 }} />
-                        {brand.core_selling?.length || 0} 卖点
+                        <TagOutlined style={{ marginRight: 3 }} />{brand.core_selling?.length || 0} 卖点
                       </Text>
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        <EnvironmentOutlined style={{ marginRight: 3 }} />
-                        {brand.competitors?.length || 0} 竞品
+                        <EnvironmentOutlined style={{ marginRight: 3 }} />{brand.competitors?.length || 0} 竞品
                       </Text>
                     </div>
                   </div>
@@ -215,102 +202,85 @@ export default function Brands() {
           </div>
         </div>
 
-        {/* 右：品牌详情 + 关键词管理 */}
+        {/* 右：品牌详情编辑 + 竞品管理 */}
         <div style={{ flex: 1, minWidth: 0 }}>
           {selectedBrand ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* 品牌信息区（玻璃卡片）*/}
+              {/* 品牌信息编辑卡片 */}
               <div className="wr-glass-card" style={{ padding: 24 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <Title level={4} style={{ margin: 0, fontSize: 22 }}>{selectedBrand.name}</Title>
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() => setSelectedBrand(null)}
-                  >
-                    关闭
-                  </Button>
-                </div>
-
-                {selectedBrand.positioning && (
-                  <div style={{ marginBottom: 16 }}>
-                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-                      <BulbOutlined /> 品牌定位
-                    </Text>
-                    <Text style={{ fontSize: 14, lineHeight: 1.6 }}>{selectedBrand.positioning}</Text>
-                  </div>
-                )}
-
-                {selectedBrand.core_selling && selectedBrand.core_selling.length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-                      <TagOutlined /> 核心卖点
-                    </Text>
-                    <Space size={6} wrap>
-                      {selectedBrand.core_selling.map((s, i) => (
-                        <Tag key={i} color="blue">{s}</Tag>
-                      ))}
-                    </Space>
-                  </div>
-                )}
-
-                {selectedBrand.competitors && selectedBrand.competitors.length > 0 && (
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-                      <EnvironmentOutlined /> 竞品
-                    </Text>
-                    <Space size={6} wrap>
-                      {selectedBrand.competitors.map((c, i) => (
-                        <Tag key={i}>{c}</Tag>
-                      ))}
-                    </Space>
-                  </div>
-                )}
-              </div>
-
-              {/* 关键词管理区（玻璃卡片）*/}
-              <div className="wr-glass-card" style={{ padding: 24, flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Space>
-                    <Text strong style={{ fontSize: 16 }}>关键词</Text>
-                    <Tag color="blue">{keywords.length}</Tag>
+                    <BulbOutlined style={{ color: 'var(--wr-primary)' }} />
+                    <Text strong style={{ fontSize: 16 }}>品牌信息</Text>
+                    <Tag color={selectedBrand.biz_type === 'online' ? 'blue' : 'green'} style={{ fontSize: 10 }}>
+                      {selectedBrand.biz_type === 'online' ? '💻 线上业务' : '🏪 本地生意'}
+                    </Tag>
                   </Space>
-                  <Space>
-                    <Button size="small" icon={<PlusOutlined />} onClick={() => setKwModalOpen(true)}>手动添加</Button>
-                    <Button size="small" type="primary" icon={<ThunderboltOutlined />} onClick={handleGenerateKeywords}>AI 生成</Button>
-                  </Space>
+                  <Button size="small" type="text" onClick={() => setSelectedBrand(null)}>关闭</Button>
                 </div>
+                <Form form={editForm} layout="vertical" requiredMark={false}>
+                  <Form.Item label="品牌名" name="name" rules={[{ required: true, message: '请输入品牌名' }]}>
+                    <Input placeholder="品牌名" />
+                  </Form.Item>
+                  <Form.Item label="业务类型" name="biz_type" tooltip="本地生意：有门店+附近同行+本地搜索词；线上业务：无地理约束+品类搜索词">
+                    <Select options={[
+                      { value: 'local', label: '🏪 本地生意（有门店，做附近同行对比）' },
+                      { value: 'online', label: '💻 线上业务（无门店，做行业竞品对比）' },
+                    ]} />
+                  </Form.Item>
+                  <Form.Item label="品牌定位" name="positioning">
+                    <TextArea placeholder="描述品牌的核心价值" autoSize={{ minRows: 2, maxRows: 4 }} />
+                  </Form.Item>
+                  <Form.Item label="核心卖点" name="core_selling" tooltip="用顿号或逗号分隔">
+                    <TextArea placeholder="10年经验、环保材料、终身保修" autoSize={{ minRows: 2 }} />
+                  </Form.Item>
+                  <Form.Item label="竞品" name="competitors" tooltip="用顿号或逗号分隔。可点击下方「从附近同行推荐」自动补充">
+                    <TextArea placeholder="竞品A、竞品B、竞品C" autoSize={{ minRows: 1 }} />
+                  </Form.Item>
+                  <Button type="primary" loading={savingBrand} onClick={handleSaveBrand}>保存品牌信息</Button>
+                </Form>
+              </div>
 
-                <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
-                  添加用户可能搜索的关键词，AI 会据此监测品牌可见度并生成优化内容
-                </Text>
-
-                {keywords.length === 0 ? (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="暂无关键词"
-                    style={{ padding: 24 }}
-                  >
-                    <Button size="small" type="primary" icon={<ThunderboltOutlined />} onClick={handleGenerateKeywords}>
-                      AI 生成关键词
+              {/* 竞品管理卡片 */}
+              <div className="wr-glass-card" style={{ padding: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Space>
+                    <RadarChartOutlined style={{ color: 'var(--wr-accent)' }} />
+                    <Text strong style={{ fontSize: 16 }}>竞品管理</Text>
+                    <Tag color="purple">{selectedBrand.competitors?.length || 0}</Tag>
+                  </Space>
+                  {selectedBrand.biz_type !== 'online' ? (
+                    <Button size="small" type="primary" ghost icon={<RadarChartOutlined />} onClick={handleSuggestCompetitors}>
+                      从附近同行推荐
                     </Button>
-                  </Empty>
+                  ) : (
+                    <Text type="secondary" style={{ fontSize: 11 }}>线上业务：竞品从监测结果中 AI 提到的对手自动沉淀</Text>
+                  )}
+                </div>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12, lineHeight: 1.6 }}>
+                  竞品是监测时的对比坐标系——「你的 AI 提及率 vs 竞品」让商户知道差距。
+                  {selectedBrand.biz_type !== 'online' && '本地品牌可一键从附近同行 POI（按评分/距离）推荐竞品候选。'}
+                </Text>
+                {selectedBrand.competitors && selectedBrand.competitors.length > 0 ? (
+                  <Space size={6} wrap>
+                    {selectedBrand.competitors.map((c, i) => (
+                      <Tag key={i} closable color="orange" onClose={async () => {
+                        const remaining = selectedBrand.competitors!.filter((_, idx) => idx !== i)
+                        const updated = await businessApi.updateBrand(selectedBrand.id, { competitors: remaining })
+                        setSelectedBrand(updated)
+                        editForm.setFieldsValue({ competitors: remaining.join('、') })
+                        invalidate()
+                      }}>{c}</Tag>
+                    ))}
+                  </Space>
                 ) : (
-                  <Table dataSource={keywords} columns={kwColumns} rowKey="id" pagination={{ pageSize: 10, size: 'small' }} size="small" />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无竞品——手动添加或从附近同行推荐" style={{ padding: 20 }} />
                 )}
               </div>
             </div>
           ) : (
-            <div className="wr-glass-card" style={{
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="选择左侧品牌查看详情和管理关键词"
-              />
+            <div className="wr-glass-card" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择左侧品牌查看详情和编辑" />
             </div>
           )}
         </div>
@@ -323,12 +293,10 @@ export default function Brands() {
             <Input placeholder="如 某装修公司" />
           </Form.Item>
           <Form.Item label="业务类型" name="biz_type" tooltip="本地生意（餐厅/装修/理发）：有门店+附近同行对比+本地搜索词；线上业务（SaaS/工具/网络公司）：无地理约束+品类搜索词+行业竞品">
-            <Select
-              options={[
-                { value: 'local', label: '🏪 本地生意（有门店，做附近同行对比）' },
-                { value: 'online', label: '💻 线上业务（无门店，做行业竞品对比）' },
-              ]}
-            />
+            <Select options={[
+              { value: 'local', label: '🏪 本地生意（有门店，做附近同行对比）' },
+              { value: 'online', label: '💻 线上业务（无门店，做行业竞品对比）' },
+            ]} />
           </Form.Item>
           <Form.Item label="品牌定位" name="positioning" tooltip="描述品牌的核心价值，AI 生成内容时会参考">
             <TextArea placeholder="如 专注北京地区中高端家装，提供设计-施工-软装一站式服务" autoSize={{ minRows: 2, maxRows: 4 }} />
@@ -348,68 +316,48 @@ export default function Brands() {
         </Form>
       </Modal>
 
-      {/* 添加关键词弹窗 */}
-      <Modal title="添加关键词" open={kwModalOpen} onCancel={() => setKwModalOpen(false)} footer={null} width={480}>
-        <Form form={kwForm} layout="vertical" onFinish={handleAddKeyword} requiredMark={false}>
-          <Form.Item label="关键词/搜索词" name="term" rules={[{ required: true, message: '请输入关键词' }]}
-            tooltip="用户可能搜的词，如「北京装修公司哪家好」">
-            <Input placeholder="北京装修公司哪家好" />
-          </Form.Item>
-          <Form.Item label="搜索意图" name="intent" tooltip="informational=了解信息, transactional=想交易, local=找本地服务">
-            <Input placeholder="informational / transactional / local" defaultValue="informational" />
-          </Form.Item>
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit">添加</Button>
-              <Button onClick={() => setKwModalOpen(false)}>取消</Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* AI 生成关键词弹窗 */}
+      {/* 竞品推荐弹窗（附近同行 POI 按评分/距离排序） */}
       <Modal
-        title="AI 生成关键词"
-        open={genKwModalOpen}
-        onCancel={() => setGenKwModalOpen(false)}
+        title={`从附近同行推荐竞品 · ${selectedBrand?.name || ''}`}
+        open={compSuggestOpen}
+        onCancel={() => setCompSuggestOpen(false)}
         footer={
           <Space>
-            <Button onClick={() => setGenKwModalOpen(false)}>取消</Button>
-            <Button type="primary" onClick={handleAddGeneratedKeywords} disabled={checkedKeywords.length === 0}>
-              添加勾选的 {checkedKeywords.length} 个
+            <Button onClick={() => setCompSuggestOpen(false)}>取消</Button>
+            <Button type="primary" onClick={handleAdoptCompetitors} disabled={checkedComps.length === 0}>
+              采纳勾选的 {checkedComps.length} 个
             </Button>
           </Space>
         }
-        width={520}
+        width={560}
       >
-        <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
-          根据品牌「{selectedBrand?.name}」的定位和核心卖点，AI 生成的候选关键词。勾选要添加的。
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
+          附近同行 POI 按评分降序+距离升序推荐（已排除品牌自身和已有竞品）。勾选要采纳的竞品。
         </Text>
-        {generating ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin tip="AI 正在生成候选关键词..." />
-          </div>
-        ) : generatedKeywords.length === 0 ? (
-          <Empty description="未能生成关键词，请手动添加" />
+        {loadingSuggest ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin tip="正在搜索附近同行..." /></div>
+        ) : suggestions.length === 0 ? (
+          <Empty description="暂无推荐——需先创建门店并完成地理编码" style={{ padding: 24 }} />
         ) : (
-          <Checkbox.Group
-            value={checkedKeywords}
-            onChange={(values) => setCheckedKeywords(values as string[])}
-            style={{ width: '100%' }}
-          >
+          <Checkbox.Group value={checkedComps} onChange={(values) => setCheckedComps(values as string[])} style={{ width: '100%' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {generatedKeywords.map((kw) => (
-                <Checkbox key={kw} value={kw} style={{ marginLeft: 0 }}>
-                  <Text>{kw}</Text>
+              {suggestions.map((s) => (
+                <Checkbox key={s.name} value={s.name} style={{ marginLeft: 0 }}>
+                  <Space size={8}>
+                    <Text strong style={{ fontSize: 13 }}>{s.name}</Text>
+                    {s.rating > 0 && <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>⭐ {s.rating}</Tag>}
+                    <Text type="secondary" style={{ fontSize: 11 }}>📍 {s.distance_m < 1000 ? s.distance_m + '米' : (s.distance_m / 1000).toFixed(1) + '公里'}</Text>
+                    {s.category && <Text type="secondary" style={{ fontSize: 10 }}>{s.category.split(';')[0]}</Text>}
+                  </Space>
                 </Checkbox>
               ))}
             </div>
           </Checkbox.Group>
         )}
-        {generatedKeywords.length > 0 && (
+        {suggestions.length > 0 && (
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--wr-border)' }}>
-            <Button size="small" type="link" onClick={() => setCheckedKeywords(generatedKeywords)}>全选</Button>
-            <Button size="small" type="link" onClick={() => setCheckedKeywords([])}>清空</Button>
+            <Button size="small" type="link" onClick={() => setCheckedComps(suggestions.map(s => s.name))}>全选</Button>
+            <Button size="small" type="link" onClick={() => setCheckedComps([])}>清空</Button>
           </div>
         )}
       </Modal>
