@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/port"
 )
 
 // GormUsageRecorder port.UsageRecorder 的 GORM 实现（LLM 用量落库）。
@@ -49,6 +50,30 @@ func (r *GormUsageRecorder) CountSince(ctx context.Context, tenantID, scene stri
 		Where("tenant_id = ? AND scene = ? AND created_at >= ?", tenantID, scene, since).
 		Count(&n).Error
 	return int(n), err
+}
+
+// SumBySceneSince 实现 port.UsageStatsQueryer：按场景聚合用量（X-01 成本分析）。
+// Scene 为空的历史数据归入 "" 组（老版本未打场景标），成本报表可见并可忽略。
+func (r *GormUsageRecorder) SumBySceneSince(ctx context.Context, since time.Time) ([]port.SceneUsage, error) {
+	var rows []struct {
+		Scene       string
+		Calls       int
+		TotalTokens int64
+	}
+	err := r.db.WithContext(ctx).Model(&UsagePO{}).
+		Select("scene AS scene, COUNT(*) AS calls, COALESCE(SUM(total_tokens), 0) AS total_tokens").
+		Where("created_at >= ?", since).
+		Group("scene").
+		Order("total_tokens DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]port.SceneUsage, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, port.SceneUsage{Scene: row.Scene, Calls: row.Calls, TotalTokens: row.TotalTokens})
+	}
+	return out, nil
 }
 
 // UsagePO LLM 用量持久化对象（usages 表，AutoMigrate 建表）。

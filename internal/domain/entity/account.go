@@ -87,6 +87,9 @@ type PublishJob struct {
 	// ScheduledAt 排期发布时间（零值 = 立即发布）。
 	// 将来时间 = 定时发送：任务落库 pending，调度任务到期后自动执行发布。
 	ScheduledAt time.Time
+	// StoreAddress 门店地址（本地生活 P3：内容层本地曝光信号）。
+	// 发布时非空则正文尾部附加"📍 地址"，并留档供平台定位（P4 暂缓）。
+	StoreAddress string
 }
 
 // IsValid 领域规则。

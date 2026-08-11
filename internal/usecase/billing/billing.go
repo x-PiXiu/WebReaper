@@ -26,6 +26,8 @@ type BillingUseCase struct {
 	orderRepo  port.OrderRepository
 	payment    port.PaymentGateway   // 可选：nil=线下模式（admin 手动开通）
 	settingRepo port.SystemSettingRepository // 支付网关运行时配置（admin 后台设置）
+	usageStats port.UsageStatsQueryer // 用量统计（可选；X-01 成本分析用）
+	perMTokenCents int                // 每百万 tokens 参考成本（分；0=不估算金额，只报 token）
 }
 
 func NewBillingUseCase(plan port.PlanRepository, sub port.SubscriptionRepository, order port.OrderRepository) *BillingUseCase {
@@ -37,6 +39,21 @@ func (uc *BillingUseCase) SetPaymentGateway(g port.PaymentGateway) {
 	if g != nil {
 		uc.payment = g
 	}
+}
+
+// SetUsageStats 注入用量统计查询器（可选；X-01 成本分析——收入侧 RevenueReport 已存在，
+// 补成本侧后"收入 vs 成本"双报表，商业闭环收口）。
+func (uc *BillingUseCase) SetUsageStats(q port.UsageStatsQueryer) {
+	if q != nil {
+		uc.usageStats = q
+	}
+}
+
+// SetReferencePricePerMToken 设置每百万 tokens 参考成本（分；0=只报 token 不估算金额）。
+// 配置依赖：不同 LLM 模型单价不同（如 MiniMax M2.5 约 ¥1/百万 tokens），
+// 运营按实际模型从 .env 配置（LLM_COST_PER_MToken）。
+func (uc *BillingUseCase) SetReferencePricePerMToken(cents int) {
+	uc.perMTokenCents = cents
 }
 
 // SetSettingRepo 注入系统设置仓储（可选；用于支付网关运行时配置管理）。
@@ -424,4 +441,55 @@ func (uc *BillingUseCase) GetMyUsage(ctx context.Context, tenantID string, quota
 		usages[scene] = UsageEntry{Limit: limit, Used: 0}
 	}
 	return MyUsageSummary{Subscription: sub, Plan: plan, Usages: usages}, nil
+}
+
+// ---- X-01 成本分析（商业闭环成本侧）----
+
+// SceneCost 单场景成本条目。
+type SceneCost struct {
+	Scene        string
+	Calls        int     // LLM 调用次数（或业务动作计数）
+	TotalTokens  int64   // token 总量（非 LLM 场景为 0）
+	EstCostCents int     // 估算成本（分；perMTokenCents=0 时为 0）
+}
+
+// CostAnalysis 成本分析报告（admin 运营报表）。
+type CostAnalysis struct {
+	Days           int   // 统计窗口（天）
+	PerMTokenCents int   // 参考单价（分/百万 tokens）
+	Scenes         []SceneCost
+	TotalCalls     int
+	TotalTokens    int64
+	TotalCostCents int   // 估算总成本（分）
+}
+
+// CostAnalysis 生成近 N 天按场景的成本分析（X-01 商业闭环收口）。
+// 数据源：usages 表按场景聚合（SumBySceneSince）；估算成本 = tokens × 参考单价。
+// 未注入 usageStats 时返回空报告（降级不报错）。
+func (uc *BillingUseCase) CostAnalysis(ctx context.Context, days int) (CostAnalysis, error) {
+	if uc.usageStats == nil {
+		return CostAnalysis{Days: days, PerMTokenCents: uc.perMTokenCents}, nil
+	}
+	if days <= 0 {
+		days = 30
+	}
+	since := time.Now().AddDate(0, 0, -days)
+	scenes, err := uc.usageStats.SumBySceneSince(ctx, since)
+	if err != nil {
+		return CostAnalysis{}, err
+	}
+	report := CostAnalysis{Days: days, PerMTokenCents: uc.perMTokenCents}
+	for _, s := range scenes {
+		cost := 0
+		if uc.perMTokenCents > 0 && s.TotalTokens > 0 {
+			cost = int(s.TotalTokens * int64(uc.perMTokenCents) / 1_000_000)
+		}
+		report.Scenes = append(report.Scenes, SceneCost{
+			Scene: s.Scene, Calls: s.Calls, TotalTokens: s.TotalTokens, EstCostCents: cost,
+		})
+		report.TotalCalls += s.Calls
+		report.TotalTokens += s.TotalTokens
+		report.TotalCostCents += cost
+	}
+	return report, nil
 }

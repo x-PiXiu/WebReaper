@@ -19,10 +19,48 @@ type MonitorUseCase struct {
 	resultRepo  port.MonitoringResultRepository
 	probe       port.AIEngineProbe // AI 引擎探测适配器
 	quotaGate   port.QuotaStore   // 配额检查门（可选；nil=不检查）
+	// selfBaseDomain 自营公开站域名（归因 P5-01）：注入后探测统计
+	// "AI 回答引用的来源里包含自营站内容的次数"——回答内容 GEO 是否真实生效。
+	selfBaseDomain string
+	// storeRepo 门店档案（可选；本地生活 P0 补全）：
+	// 注入后监测自动携带门店位置（LocalContext）——问"望京附近有什么川菜馆"，
+	// 测的是本地生意而非泛化品牌声量。
+	storeRepo port.StoreLocationRepository
 }
 
 func NewMonitorUseCase(br port.BrandRepository, kr port.KeywordRepository, rr port.MonitoringResultRepository, probe port.AIEngineProbe) *MonitorUseCase {
 	return &MonitorUseCase{brandRepo: br, keywordRepo: kr, resultRepo: rr, probe: probe}
+}
+
+// SetSelfBaseDomain 注入自营公开站域名（可选；归因 P5-01）。
+// 传参为域名（如 content.example.com）或完整 URL（内部提取域名）。
+func (uc *MonitorUseCase) SetSelfBaseDomain(publicBaseURL string) {
+	if publicBaseURL == "" {
+		return
+	}
+	uc.selfBaseDomain = publicBaseURL
+}
+
+// SetStoreRepo 注入门店档案仓储（可选；本地生活 P0 补全）。
+// 注入后监测自动携带门店位置上下文（LocalContext）——位置型问法测本地决策场景。
+func (uc *MonitorUseCase) SetStoreRepo(r port.StoreLocationRepository) {
+	if r != nil {
+		uc.storeRepo = r
+	}
+}
+
+// buildLocalContext 取品牌主门店并格式化为位置上下文（纯文本，零失败风险）。
+// 位置优先级：商圈 > 区 > 城市（P1 商圈补全后，问法从"朝阳区有什么川菜馆"
+// 精确到"望京有什么川菜馆"——商圈级最贴近真实本地决策）。
+func (uc *MonitorUseCase) buildLocalContext(ctx context.Context, brandID string) string {
+	if uc.storeRepo == nil || brandID == "" {
+		return ""
+	}
+	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)
+	if err != nil {
+		return ""
+	}
+	return localContextFromStore(store)
 }
 
 // SetQuotaGate 注入配额检查门（可选；未注入时不检查配额——向后兼容）。
@@ -70,15 +108,19 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 	}
 
 	var results []entity.MonitoringResult
+	// 本地位置上下文（P0 补全）：一次监测查一次门店，注入位置型问法
+	localCtx := uc.buildLocalContext(ctx, in.BrandID)
 	for _, kw := range kws {
 		// 探测这个关键词（用量计量上下文：租户 + 场景）
 		probeResult, pErr := uc.probe.Probe(port.WithUsageContext(ctx, in.TenantID, "monitor"), port.ProbeInput{
-			TenantID:    in.TenantID,
-			Keyword:     kw.Term,
-			EngineName:  in.EngineName,
-			BrandName:   brand.Name,
-			Competitors: brand.Competitors,
-			SampleSize:  sampleSize,
+			TenantID:       in.TenantID,
+			Keyword:        kw.Term,
+			EngineName:     in.EngineName,
+			BrandName:      brand.Name,
+			Competitors:    brand.Competitors,
+			SampleSize:     sampleSize,
+			SelfBaseDomain: uc.selfBaseDomain, // 归因 P5-01：统计自营站被引用次数
+			LocalContext:   localCtx,          // 本地生活 P0：位置型问法
 		})
 		if pErr != nil {
 			// 单个关键词探测失败不中断整体（降级：记一个空结果）
@@ -201,6 +243,8 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 		Confidence:      probeResult.Confidence,
 		ProbedAt:        time.Now(),
 		RawSample:       probeResult.RawSample,
+		Sources:         probeResult.Sources,          // 引用来源（归因 P5-01）
+		SelfSourceCount: probeResult.SelfSourceCount,  // 自营站被引用次数
 	}
 	_ = uc.resultRepo.Save(ctx, result)
 	return result, nil

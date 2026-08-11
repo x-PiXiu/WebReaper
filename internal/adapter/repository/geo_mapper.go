@@ -30,6 +30,28 @@ func keywordFromPO(p KeywordPO) entity.Keyword {
 	return entity.Keyword{ID: p.ID, TenantID: p.TenantID, BrandID: p.BrandID, Term: p.Term, Intent: p.Intent, CreatedAt: p.CreatedAt}
 }
 
+func storeLocationToPO(e entity.StoreLocation) StoreLocationPO {
+	return StoreLocationPO{
+		ID: e.ID, TenantID: e.TenantID, BrandID: e.BrandID, Name: e.Name,
+		Address: e.Address, City: e.City, District: e.District, Adcode: e.Adcode,
+		Lat: e.Lat, Lng: e.Lng, Phone: e.Phone, Hours: e.Hours,
+		PriceLevel: e.PriceLevel, BizType: e.BizType, BusinessArea: e.BusinessArea,
+		GeoStatus: e.GeoStatus,
+		CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
+	}
+}
+
+func storeLocationFromPO(p StoreLocationPO) entity.StoreLocation {
+	return entity.StoreLocation{
+		ID: p.ID, TenantID: p.TenantID, BrandID: p.BrandID, Name: p.Name,
+		Address: p.Address, City: p.City, District: p.District, Adcode: p.Adcode,
+		Lat: p.Lat, Lng: p.Lng, Phone: p.Phone, Hours: p.Hours,
+		PriceLevel: p.PriceLevel, BizType: p.BizType, BusinessArea: p.BusinessArea,
+		GeoStatus: p.GeoStatus,
+		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+}
+
 func monitoringResultToPO(e entity.MonitoringResult) MonitoringResultPO {
 	return MonitoringResultPO{
 		ID: e.ID, TenantID: e.TenantID, BrandID: e.BrandID, KeywordID: e.KeywordID,
@@ -38,6 +60,7 @@ func monitoringResultToPO(e entity.MonitoringResult) MonitoringResultPO {
 		Competitors: toJSON(e.Competitors), CompetitorRates: toFloatMap(e.CompetitorRates),
 		Confidence: e.Confidence, ProbedAt: e.ProbedAt,
 		RawSample: e.RawSample,
+		Sources: toJSON(e.Sources), SelfSourceCount: e.SelfSourceCount,
 	}
 }
 
@@ -49,6 +72,7 @@ func monitoringResultFromPO(p MonitoringResultPO) entity.MonitoringResult {
 		Competitors: toStringSlice(p.Competitors), CompetitorRates: toFloatMapFromJSON(p.CompetitorRates),
 		Confidence: p.Confidence, ProbedAt: p.ProbedAt,
 		RawSample: p.RawSample,
+		Sources: toStringSlice(p.Sources), SelfSourceCount: p.SelfSourceCount,
 	}
 }
 

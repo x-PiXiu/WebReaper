@@ -25,6 +25,11 @@ type GEOHandler struct {
 	contentUC  *geo.ContentUseCase
 	diagnoseUC *geo.DiagnoseUseCase
 	distillUC  *geo.KeywordDistillUseCase
+	storeUC    *geo.StoreLocationUseCase // 门店档案（可选注入）
+	nearbyUC   *geo.NearbyUseCase        // 附近同行双榜（可选注入）
+	adviceUC   *geo.AdviceUseCase        // 行动建议（可选注入，P5-05）
+	citationUC *geo.CitationUseCase      // 内容引用统计（可选注入，P5-02）
+	inputTipper port.InputTipper         // 地址联想（可选注入，P1；未注入→空列表降级）
 }
 
 func NewGEOHandler(br *geo.BrandUseCase, mo *geo.MonitorUseCase, ra *geo.RankUseCase, co *geo.ContentUseCase, du *geo.DiagnoseUseCase) *GEOHandler {
@@ -34,6 +39,33 @@ func NewGEOHandler(br *geo.BrandUseCase, mo *geo.MonitorUseCase, ra *geo.RankUse
 // SetDistillUC 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
 func (h *GEOHandler) SetDistillUC(uc *geo.KeywordDistillUseCase) {
 	h.distillUC = uc
+}
+
+// SetStoreUC 注入门店档案用例（可选；未注入则门店端点不注册）。
+func (h *GEOHandler) SetStoreUC(uc *geo.StoreLocationUseCase) {
+	h.storeUC = uc
+}
+
+// SetNearbyUC 注入附近同行用例（可选；未注入则双榜端点不注册）。
+func (h *GEOHandler) SetNearbyUC(uc *geo.NearbyUseCase) {
+	h.nearbyUC = uc
+}
+
+// SetAdviceUC 注入行动建议用例（可选；未注入则建议端点不注册）。
+func (h *GEOHandler) SetAdviceUC(uc *geo.AdviceUseCase) {
+	h.adviceUC = uc
+}
+
+// SetCitationUC 注入内容引用统计用例（可选；未注入则引用端点不注册）。
+func (h *GEOHandler) SetCitationUC(uc *geo.CitationUseCase) {
+	h.citationUC = uc
+}
+
+// SetInputTipper 注入地址联想服务（可选；未注入则联想端点返回空列表，表单纯手输）。
+func (h *GEOHandler) SetInputTipper(t port.InputTipper) {
+	if t != nil {
+		h.inputTipper = t
+	}
 }
 
 // ---- DTO 转换（实体 → API 响应，PascalCase → snake_case）----
@@ -486,6 +518,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		BrandInfo     string   `json:"brand_info"`
 		LLMConfigName string   `json:"llm_config_name"`
 		TargetEngine  string   `json:"target_engine"`
+		UseDiagnose   bool     `json:"use_diagnose"` // 诊断→优化闭环（P5-03）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -498,6 +531,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		BrandInfo:     req.BrandInfo,
 		LLMConfigName: req.LLMConfigName,
 		TargetEngine:  req.TargetEngine,
+		UseDiagnose:   req.UseDiagnose,
 	})
 	if err != nil {
 		fail(c, err)
@@ -679,4 +713,262 @@ func (h *GEOHandler) HandleDeleteKeyword(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"deleted": id})
+}
+
+// ---- 门店档案（本地生活 GEO 地基，P0）----
+
+func storeLocationToView(s entity.StoreLocation) gin.H {
+	return gin.H{
+		"id":          s.ID,
+		"tenant_id":   s.TenantID,
+		"brand_id":    s.BrandID,
+		"name":        s.Name,
+		"address":     s.Address,
+		"city":        s.City,
+		"district":    s.District,
+		"adcode":      s.Adcode,
+		"lat":         s.Lat,
+		"lng":         s.Lng,
+		"phone":       s.Phone,
+		"hours":       s.Hours,
+		"price_level": s.PriceLevel,
+		"biz_type":    s.BizType,
+		"geo_status":  s.GeoStatus,
+		"has_geo":     s.HasGeo(),
+		"created_at":  s.CreatedAt,
+		"updated_at":  s.UpdatedAt,
+	}
+}
+
+func storeLocationsToView(ss []entity.StoreLocation) []gin.H {
+	out := make([]gin.H, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, storeLocationToView(s))
+	}
+	return out
+}
+
+// HandleListStoreLocations GET /api/v1/geo/brands/:id/store-locations
+func (h *GEOHandler) HandleListStoreLocations(c *gin.Context) {
+	if h.storeUC == nil {
+		fail(c, fmt.Errorf("门店档案用例未注入"))
+		return
+	}
+	stores, err := h.storeUC.List(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, storeLocationsToView(stores))
+}
+
+// HandleCreateStoreLocation POST /api/v1/geo/brands/:id/store-locations
+func (h *GEOHandler) HandleCreateStoreLocation(c *gin.Context) {
+	if h.storeUC == nil {
+		fail(c, fmt.Errorf("门店档案用例未注入"))
+		return
+	}
+	var req struct {
+		Name       string `json:"name"`
+		Address    string `json:"address" binding:"required"`
+		Phone      string `json:"phone"`
+		Hours      string `json:"hours"`
+		PriceLevel string `json:"price_level"`
+		BizType    string `json:"biz_type"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	loc, err := h.storeUC.Create(c.Request.Context(), geo.StoreLocationInput{
+		TenantID:   middleware.CurrentTenantID(c),
+		BrandID:    c.Param("id"),
+		Name:       req.Name,
+		Address:    req.Address,
+		Phone:      req.Phone,
+		Hours:      req.Hours,
+		PriceLevel: req.PriceLevel,
+		BizType:    req.BizType,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, storeLocationToView(loc))
+}
+
+// HandleUpdateStoreLocation PUT /api/v1/geo/brands/:id/store-locations/:storeId
+func (h *GEOHandler) HandleUpdateStoreLocation(c *gin.Context) {
+	if h.storeUC == nil {
+		fail(c, fmt.Errorf("门店档案用例未注入"))
+		return
+	}
+	var req struct {
+		Name       string `json:"name"`
+		Address    string `json:"address"`
+		Phone      string `json:"phone"`
+		Hours      string `json:"hours"`
+		PriceLevel string `json:"price_level"`
+		BizType    string `json:"biz_type"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	loc, err := h.storeUC.Update(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), c.Param("storeId"), geo.StoreLocationInput{
+		TenantID:   middleware.CurrentTenantID(c),
+		BrandID:    c.Param("id"),
+		Name:       req.Name,
+		Address:    req.Address,
+		Phone:      req.Phone,
+		Hours:      req.Hours,
+		PriceLevel: req.PriceLevel,
+		BizType:    req.BizType,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, storeLocationToView(loc))
+}
+
+// HandleDeleteStoreLocation DELETE /api/v1/geo/brands/:id/store-locations/:storeId
+func (h *GEOHandler) HandleDeleteStoreLocation(c *gin.Context) {
+	if h.storeUC == nil {
+		fail(c, fmt.Errorf("门店档案用例未注入"))
+		return
+	}
+	if err := h.storeUC.Delete(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), c.Param("storeId")); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"deleted": c.Param("storeId")})
+}
+
+// HandleReGeocodeStoreLocation POST /api/v1/geo/brands/:id/store-locations/:storeId/re-geocode
+// 重试地理编码（配置地图服务后，为 pending/failed 门店补齐坐标）。
+func (h *GEOHandler) HandleReGeocodeStoreLocation(c *gin.Context) {
+	if h.storeUC == nil {
+		fail(c, fmt.Errorf("门店档案用例未注入"))
+		return
+	}
+	loc, err := h.storeUC.ReGeocode(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("storeId"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, storeLocationToView(loc))
+}
+
+// ---- 附近同行双榜（现实世界 + AI 世界，P2）----
+
+func nearbyRankingToView(v geo.NearbyRanking) gin.H {
+	mapRanking := make([]gin.H, 0, len(v.MapRanking))
+	for _, e := range v.MapRanking {
+		mapRanking = append(mapRanking, gin.H{
+			"name": e.Name, "address": e.Address, "distance_m": e.DistanceM,
+			"rating": e.Rating, "category": e.Category, "open_status": e.OpenStatus,
+			"lat": e.Lat, "lng": e.Lng,
+			// 门店卡扩展（v5 show_fields=business,navi）
+			"city_name": e.CityName, "ad_name": e.AdName, "cost": e.Cost,
+			"business_area": e.BusinessArea, "open_time_today": e.OpenTimeToday,
+			"tag": e.Tag, "tel": e.Tel, "entr_location": e.EntrLocation, "photo_url": e.PhotoURL,
+			// 驾车耗时（P2 距离测量补全）
+			"drive_distance_m": e.DriveDistanceM, "drive_duration_sec": e.DriveDurationSec,
+		})
+	}
+	aiRanking := make([]gin.H, 0, len(v.AIRanking))
+	for _, e := range v.AIRanking {
+		aiRanking = append(aiRanking, gin.H{"name": e.Name, "rate": e.Rate, "sample_cnt": e.SampleCnt})
+	}
+	return gin.H{
+		"store":          storeLocationToView(v.Store),
+		"map_ranking":    mapRanking,
+		"ai_ranking":     aiRanking,
+		"own_rate":       v.OwnRate,
+		"map_available":  v.MapAvailable,
+		"search_keyword": v.SearchKeyword,
+	}
+}
+
+// HandleNearbyCompetitors GET /api/v1/geo/brands/:id/nearby-competitors
+// 可选 query 参数：types（POI 分类编码，如 050000 餐饮——按类目扫描竞品）。
+func (h *GEOHandler) HandleNearbyCompetitors(c *gin.Context) {
+	if h.nearbyUC == nil {
+		fail(c, fmt.Errorf("附近同行用例未注入"))
+		return
+	}
+	view, err := h.nearbyUC.GetRanking(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), c.Query("types"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, nearbyRankingToView(view))
+}
+
+// HandleSuggestLocations GET /api/v1/geo/location/suggest?q=&city=&location=
+// 地址联想（P1 输入提示）：门店建档表单"边输入边联想"，免手输地址。
+// city：citycode/adcode（空=全国）；location："lng,lat" 附近优先（需 city 非空）。
+func (h *GEOHandler) HandleSuggestLocations(c *gin.Context) {
+	if h.inputTipper == nil {
+		success(c, []gin.H{}) // 未注入（未配置地图服务）→ 空列表，表单退化为纯手输
+		return
+	}
+	q := c.Query("q")
+	if len([]rune(q)) < 1 {
+		success(c, []gin.H{})
+		return
+	}
+	tips, err := h.inputTipper.InputTips(c.Request.Context(), q, c.Query("city"), c.Query("location"))
+	if err != nil {
+		success(c, []gin.H{}) // 联想失败降级为空（不阻断建档流程）
+		return
+	}
+	view := make([]gin.H, 0, len(tips))
+	for _, t := range tips {
+		view = append(view, gin.H{
+			"name": t.Name, "address": t.Address, "district": t.District,
+			"adcode": t.Adcode, "location": t.Location, "poi_id": t.POIID,
+		})
+	}
+	success(c, view)
+}
+
+// ---- 行动建议（P5-05：给老板"下一步做什么"）----
+
+// HandleAdvice GET /api/v1/geo/brands/:id/advice
+// 基于监测/门店/内容数据规则生成可执行建议（零 LLM 成本，可单测）。
+func (h *GEOHandler) HandleAdvice(c *gin.Context) {
+	if h.adviceUC == nil {
+		fail(c, fmt.Errorf("行动建议用例未注入"))
+		return
+	}
+	advices, err := h.adviceUC.GetAdvice(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	view := make([]gin.H, 0, len(advices))
+	for _, a := range advices {
+		view = append(view, gin.H{"level": a.Level, "message": a.Message, "page": a.Page})
+	}
+	success(c, gin.H{"advices": view})
+}
+
+// ---- 内容引用统计（P5-02 校准基础设施）----
+
+// HandleContentCitations GET /api/v1/geo/brands/:id/citations
+// 统计每篇内容被 AI 回答引用的次数（归因细化到篇——"哪篇内容真正起作用"）。
+// 返回 {content_id: 引用次数} 映射。
+func (h *GEOHandler) HandleContentCitations(c *gin.Context) {
+	if h.citationUC == nil {
+		fail(c, fmt.Errorf("内容引用统计用例未注入"))
+		return
+	}
+	counts, err := h.citationUC.GetByBrand(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, counts)
 }

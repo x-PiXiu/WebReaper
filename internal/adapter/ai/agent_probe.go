@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -38,12 +39,13 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 	positionSum := 0
 	sentimentPos, sentimentNeg := 0, 0
 	competitorMentions := make(map[string]int)
+	sourceSet := make(map[string]bool) // P5-01：跨采样合并来源（去重）
 	var allAnswers []string
 	totalSamples := 0 // 实际成功采样数（用于置信度）
 
 	for i := 0; i < sampleSize; i++ {
 		// 构造丰富的搜索任务——不是只问一个词，而是给 Agent 一组相关搜索方向
-		searchContext := p.buildSearchContext(in.Keyword)
+		searchContext := p.buildSearchContext(in.Keyword, in.LocalContext)
 		task := searchContext
 
 		// systemPrompt：让 Agent 知道它是 AI 搜索引擎，要联网搜索
@@ -94,6 +96,10 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		for comp, cnt := range analysis.CompetitorMentions {
 			competitorMentions[comp] += cnt
 		}
+		// P5-01：合并来源（去重）
+		for _, s := range analysis.Sources {
+			sourceSet[s] = true
+		}
 	}
 
 	// 聚合统计
@@ -119,6 +125,11 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 	// 置信度：基于回答长度+采样成功+搜索源数（而非固定 sampleCount/5）
 	answerLen := len([]rune(rawSample))
 	confidence := entity.ComputeConfidenceEx(answerLen, totalSamples, totalSamples)
+	// P5-01：来源列表（去重保序）+ 自营站引用计数（归因）
+	sources := make([]string, 0, len(sourceSet))
+	for s := range sourceSet {
+		sources = append(sources, s)
+	}
 
 	return port.ProbeResult{
 		SampleCount:          totalSamples,
@@ -131,12 +142,21 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		SourceCount:          totalSamples,
 		BrandAppearanceCount: mentionCount,
 		Confidence:           confidence, // 基于信息量的置信度
+		Sources:              sources,
+		SelfSourceCount:      countSelfSources(sources, in.SelfBaseDomain),
 	}, nil
 }
 
 // buildSearchContext 构造中立的搜索任务——不引导"推荐"，让 Agent 自然地搜索和回答。
-func (p *AgentProbe) buildSearchContext(keyword string) string {
-	return fmt.Sprintf("搜索并介绍「%s」相关的内容。先搜索了解这个话题，然后根据搜索到的信息做个介绍。", keyword)
+// localContext 非空时附加位置限定（本地生活 P0 补全）——搜索"望京附近有什么川菜馆"
+// 这类真实本地场景，Agent 会优先检索本地相关内容。
+func (p *AgentProbe) buildSearchContext(keyword, localContext string) string {
+	base := fmt.Sprintf("搜索并介绍「%s」相关的内容。先搜索了解这个话题，然后根据搜索到的信息做个介绍。", keyword)
+	if localContext != "" {
+		base = fmt.Sprintf("搜索并介绍「%s附近有什么%s」相关的内容，重点看%s本地的选择。先搜索了解，然后根据搜索到的信息做个介绍。",
+			localContext, keyword, localContext)
+	}
+	return base
 }
 
 // analyzeMention 分析回答里的品牌提及——消除"确认偏误"（包级函数：AgentProbe/DirectProbe 共用）。
@@ -146,18 +166,21 @@ func (p *AgentProbe) buildSearchContext(keyword string) string {
 //   而是让 LLM 客观列出"回答里提到了哪些品牌/产品/平台"，然后在 Go 代码里检查目标品牌是否在列表中。
 //
 // 解析 LLM 用 default 引擎（P2-③：与搜索引擎分离，避免自判）。
+// P5-01 扩展：同时让 LLM 列出回答中出现的来源（链接/网站名）——这是客观事实（回答里
+// 确实写了哪些链接），无确认偏误风险；正则 extractURLs 做兜底。
 func analyzeMention(ctx context.Context, aiGen port.AIGenerator, answer, brandName string, aliases, competitors []string, llmConfigName string) mentionAnalysis {
 	systemPrompt := "你是内容分析专家。阅读一段文字，客观列出其中提到的所有品牌名、产品名、平台名、网站名。只返回 JSON。"
 	userPrompt := fmt.Sprintf(`阅读以下内容，列出其中提到的所有品牌/产品/平台/工具的名称（不要遗漏，不要添加未提及的）。
 
 返回 JSON 格式：
-{"brands":[{"name":"品牌名","position":1,"sentiment":"positive"}]}
+{"brands":[{"name":"品牌名","position":1,"sentiment":"positive"}],"sources":["来源链接或网站名"]}
 
 position：该品牌在文中的推荐优先级排名。排在最前面/最被推荐的=1，其次=2，以此类推。
   判断依据：是否被详细展开介绍、是否被放在标题/开头、是否被推荐为重点。
   如果只是简单列举没展开，所有列举的给相同的中等排名（如都填3）。
   如果未被提及不要列入。
 sentiment：文中对该品牌的评价倾向（positive/neutral/negative）。如果只是列举没有评价则为 neutral。
+sources：文中明确提到的来源——链接（http/https）、网站名、平台名、文献名。未提到任何来源则返回空数组。不要推断、不要添加。
 
 内容：
 %s`, answer)
@@ -169,11 +192,18 @@ sentiment：文中对该品牌的评价倾向（positive/neutral/negative）。�
 	convID := fmt.Sprintf("agent-analyze-%d", time.Now().UnixNano())
 	resp, err := aiGen.ChatStream(ctx, convID, llmConfigName, messages, nil)
 	if err != nil {
-		return fallbackStringMatch(answer, brandName, aliases, competitors)
+		ma := fallbackStringMatch(answer, brandName, aliases, competitors)
+		ma.Sources = extractURLs(answer)
+		return ma
 	}
 
 	// 在 Go 代码里检查目标品牌是否在 LLM 列出的品牌列表中（而非让 LLM 判断"是否提到X"）
-	return matchBrandFromList(resp, brandName, aliases, competitors)
+	ma := matchBrandFromList(resp, brandName, aliases, competitors)
+	// P5-01 兜底：LLM 没返回 sources 时用正则提取 URL（双保险）
+	if len(ma.Sources) == 0 {
+		ma.Sources = extractURLs(answer)
+	}
+	return ma
 }
 
 // matchBrandFromList 从 LLM 返回的品牌列表 JSON 中，检查目标品牌是否被提及。
@@ -207,11 +237,28 @@ func matchBrandFromList(resp, brandName string, aliases, competitors []string) m
 	}
 
 	var parsed struct {
-		Brands []brandEntry `json:"brands"`
+		Brands  []brandEntry `json:"brands"`
+		Sources []string     `json:"sources"` // P5-01：回答中提到的来源链接/网站名
 	}
 	if err := json.Unmarshal([]byte(jsonBlock), &parsed); err != nil {
 		// JSON 解析失败，降级到字符串匹配
-		return fallbackStringMatch(resp, brandName, aliases, competitors)
+		ma := fallbackStringMatch(resp, brandName, aliases, competitors)
+		ma.Sources = extractURLs(resp)
+		return ma
+	}
+
+	// P5-01 来源解析：LLM 提取（客观事实，无偏）+ URL 正则兜底，去重
+	sourceSet := make(map[string]bool)
+	for _, s := range parsed.Sources {
+		if s = strings.TrimSpace(s); s != "" {
+			sourceSet[s] = true
+		}
+	}
+	for _, u := range extractURLs(resp) {
+		sourceSet[u] = true
+	}
+	for s := range sourceSet {
+		ma.Sources = append(ma.Sources, s)
 	}
 
 	// 在品牌列表中查找目标品牌（模糊匹配：包含即可，不区分大小写）
@@ -281,6 +328,43 @@ type mentionAnalysis struct {
 	Sentiment             string
 	CompetitorMentions    map[string]int
 	SourceAppearanceCount int // 品牌在检索源里出现的文章数
+	Sources               []string // P5-01：回答中提到的来源（链接/网站名，去重）
+}
+
+// extractURLs 从文本正则提取 http/https 链接（去重，保序）——P5-01 兜底。
+// LLM 可能漏列来源，URL 是客观可正则提取的（回答里出现的链接不会"看错"）。
+func extractURLs(s string) []string {
+	re := regexp.MustCompile(`https?://[^\s\)\]\}，。；、""''<>]+`)
+	seen := make(map[string]bool)
+	var out []string
+	for _, m := range re.FindAllString(s, -1) {
+		u := strings.TrimRight(m, ".,;:!?")
+		if u == "" || seen[u] {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
+}
+
+// countSelfSources 统计来源中包含自营公开站域名的次数（P5-01 归因）。
+// 域名匹配用"包含"（子域/路径前缀均视为自营站内容）。
+func countSelfSources(sources []string, selfBaseDomain string) int {
+	if selfBaseDomain == "" {
+		return 0
+	}
+	domain := strings.ToLower(strings.TrimSpace(selfBaseDomain))
+	domain = strings.TrimPrefix(domain, "https://")
+	domain = strings.TrimPrefix(domain, "http://")
+	domain = strings.TrimSuffix(domain, "/")
+	count := 0
+	for _, s := range sources {
+		if strings.Contains(strings.ToLower(s), domain) {
+			count++
+		}
+	}
+	return count
 }
 
 // extractJSONBlock 从字符串中提取第一个 {...} JSON 块（括号配平，处理嵌套）。

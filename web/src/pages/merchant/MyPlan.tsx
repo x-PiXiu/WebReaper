@@ -139,6 +139,9 @@ export default function MyPlan() {
                           <Text key={k} type="secondary" style={{ fontSize: 12 }}>{sceneLabels[k] || k}：{v === -1 ? '无限' : v} 次/月</Text>
                         ))}
                       </Space>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        配额按 LLM 调用次数计：1 次监测（1 关键词×1 引擎×5 采样）≈ 10 次
+                      </Text>
                     </div>
                   }
                 />

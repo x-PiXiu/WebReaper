@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -229,6 +230,28 @@ func (r *Router) HandleAdminRevenueReport(c *gin.Context) {
 		return
 	}
 	success(c, summary)
+}
+
+// HandleAdminCostAnalysis GET /admin/billing/cost-analysis —— 成本分析（X-01）。
+// 近 N 天按场景聚合 LLM 调用次数/tokens/估算成本——"收入 vs 成本"双报表收口。
+// 参考单价来自 LLM_COST_PER_MToken 配置（分/百万 tokens；0=只报 token 不估算金额）。
+func (r *Router) HandleAdminCostAnalysis(c *gin.Context) {
+	if r.billingUC == nil {
+		fail(c, errNotConfigured("计费"))
+		return
+	}
+	days := 30
+	if v := c.Query("days"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	report, err := r.billingUC.CostAnalysis(c.Request.Context(), days)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, report)
 }
 
 // HandleGetMyUsage GET /billing/usage —— 我的用量（配额余量，商户端进度条用）。

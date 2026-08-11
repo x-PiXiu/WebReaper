@@ -9,6 +9,7 @@ import {
   MessageOutlined,
   CrownOutlined,
   RadarChartOutlined,
+  EnvironmentOutlined,
 } from '@ant-design/icons'
 
 // 商户端布局：分组导航（资产 / 可见度 / 创作 / 运营）。
@@ -26,6 +27,7 @@ const merchantMenu: NavItem[] = [
     key: 'visibility', label: 'AI 可见度',
     children: [
       { key: '/m/visibility', label: '可见度总览', icon: <RadarChartOutlined /> },
+      { key: '/m/nearby', label: '附近同行', icon: <EnvironmentOutlined /> },
     ],
   },
   {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Popconfirm } from 'antd'
+import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Popconfirm, Switch } from 'antd'
 import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -49,6 +49,7 @@ export default function Content() {
   const [result, setResult] = useState<OptimizedContent | null>(null)
   const [genKeywords, setGenKeywords] = useState<string[]>([])
   const [targetEngine, setTargetEngine] = useState<string>('') // 目标 AI 引擎偏好
+  const [useDiagnose, setUseDiagnose] = useState(false) // P5-03 诊断→优化闭环开关
   const [generating, setGenerating] = useState(false)
   const [drafting, setDrafting] = useState(false)
 
@@ -64,6 +65,13 @@ export default function Content() {
   const { data: contents = [] } = useQuery({
     queryKey: ['geo-contents', selectedBrand],
     queryFn: () => businessApi.listContents(selectedBrand!),
+    enabled: !!selectedBrand,
+  })
+
+  // P5-02 内容引用统计：每篇被 AI 回答引用几次（归因细化到篇）
+  const { data: citations = {} } = useQuery({
+    queryKey: ['geo-citations', selectedBrand],
+    queryFn: () => businessApi.getContentCitations(selectedBrand!).catch(() => ({}) as Record<string, number>),
     enabled: !!selectedBrand,
   })
 
@@ -107,11 +115,12 @@ export default function Content() {
         keywords: genKeywords,
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
         target_engine: targetEngine || undefined,
+        use_diagnose: useDiagnose, // P5-03 诊断→优化闭环：先诊断再对症下药
       })
       setResult(res)
       const modeLabel = genKeywords.length > 1 ? `（${genKeywords.length} 个关键词组合）` : ''
       const scoreLabel = res.score?.total ? `，GEO 评分 ${res.score.total.toFixed(0)}` : ''
-      message.success(`内容生成成功${modeLabel}${scoreLabel}`)
+      message.success(`内容生成成功${modeLabel}${scoreLabel}${useDiagnose ? '（已按诊断建议优化）' : ''}`)
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
     } catch (e) {
       message.error('生成失败：' + ((e as Error)?.message || ''))
@@ -247,6 +256,22 @@ export default function Content() {
                     allowClear
                     placeholder="选择目标引擎（空=通用优化）"
                   />
+                </div>
+
+                {/* P5-03 诊断→优化闭环：先诊断再对症下药 */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Space size={6}>
+                      <Text strong>按诊断建议生成</Text>
+                      <Tag color={useDiagnose ? 'gold' : 'default'} style={{ margin: 0, fontSize: 11 }}>
+                        {useDiagnose ? '已开启' : '可选'}
+                      </Tag>
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      先生成诊断报告，把改进建议直接注入文章（诊断消耗更多算力）
+                    </Text>
+                  </div>
+                  <Switch checked={useDiagnose} onChange={setUseDiagnose} />
                 </div>
 
                 {/* 内容编辑区——美化版 */}
@@ -515,6 +540,11 @@ export default function Content() {
                           )}
                           {c.status === 'published' && c.index_status === 'pending' && (
                             <Tag color="warning" style={{ margin: 0, fontSize: 11 }}>待收录</Tag>
+                          )}
+                          {citations[c.id] > 0 && (
+                            <Tooltip title={`AI 回答引用了这篇内容 ${citations[c.id]} 次——内容 GEO 的直接效果证据`}>
+                              <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>被引用 {citations[c.id]} 次</Tag>
+                            </Tooltip>
                           )}
                         </Space>
                         <Text type="secondary" style={{ fontSize: 12 }}>v{c.version}</Text>

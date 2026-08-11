@@ -36,6 +36,17 @@ type KeywordRepository interface {
 	Count(ctx context.Context) (int, error)
 }
 
+// StoreLocationRepository 门店档案仓储（本地生活 GEO 地基）。
+type StoreLocationRepository interface {
+	Save(ctx context.Context, s entity.StoreLocation) error
+	FindByID(ctx context.Context, tenantID, id string) (entity.StoreLocation, error)
+	ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.StoreLocation, error)
+	// FindPrimaryByBrand 取品牌主门店（公开内容站 NAP 注入/周边搜索中心点用；
+	// 不限租户——公开查询，取该品牌最早创建的门店）。
+	FindPrimaryByBrand(ctx context.Context, brandID string) (entity.StoreLocation, error)
+	Delete(ctx context.Context, tenantID, id string) error
+}
+
 // MonitoringResultRepository 监测结果仓储（核心数据资产）。
 type MonitoringResultRepository interface {
 	Save(ctx context.Context, r entity.MonitoringResult) error

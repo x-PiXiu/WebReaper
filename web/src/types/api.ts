@@ -132,6 +132,68 @@ export interface Brand {
   created_at: string
 }
 
+// ---- GEO：门店档案（本地生活地基）----
+export interface StoreLocation {
+  id: string
+  tenant_id: string
+  brand_id: string
+  name: string
+  address: string
+  city: string
+  district: string
+  adcode: string
+  lat: number
+  lng: number
+  phone: string
+  hours: string
+  price_level: string
+  biz_type: string          // LocalBusiness/Restaurant/Cafe/Bar/Store
+  geo_status: string        // pending/ok/failed
+  has_geo: boolean
+  created_at: string
+  updated_at: string
+}
+
+// ---- GEO：附近同行双榜（现实世界地图榜 + AI 竞品榜）----
+export interface MapRankEntry {
+  name: string
+  address: string
+  distance_m: number
+  rating: number            // 0=无评分数据
+  category: string
+  open_status: string
+  lat: number
+  lng: number
+  // 门店卡扩展（v5 show_fields=business,navi）
+  city_name?: string
+  ad_name?: string
+  cost?: string             // 人均消费
+  business_area?: string    // 商圈
+  open_time_today?: string  // 今日营业时间
+  tag?: string              // 特色菜（美食 POI）
+  tel?: string              // 电话
+  entr_location?: string    // 入口经纬度
+  photo_url?: string        // 首张照片
+  // 驾车耗时（P2 距离测量补全；0=未测得）
+  drive_distance_m?: number   // 驾车距离（米）
+  drive_duration_sec?: number // 驾车耗时（秒）
+}
+
+export interface AIRankEntry {
+  name: string
+  rate: number              // 竞品平均提及率（0~1）
+  sample_cnt: number
+}
+
+export interface NearbyRanking {
+  store: StoreLocation | null
+  map_ranking: MapRankEntry[]
+  ai_ranking: AIRankEntry[]
+  own_rate: number          // 自己的 AI 提及率（-1=无数据）
+  map_available: boolean
+  search_keyword: string
+}
+
 // ---- GEO：关键词 ----
 export interface Keyword {
   id: string
@@ -159,6 +221,15 @@ export interface MonitoringResult {
   confidence: number
   probed_at: string
   raw_sample: string
+  sources: string[]          // 引用来源（链接/平台名，P5-01 归因）
+  self_source_count: number  // 自营公开站被引用次数（>0 = 内容真的被 AI 引用）
+}
+
+// ---- GEO：行动建议（P5-05）----
+export interface Advice {
+  level: 'high' | 'medium' | 'low'
+  message: string
+  page: string
 }
 
 // ---- GEO：品牌监测总览 ----
@@ -327,6 +398,23 @@ export interface RevenueSummary {
   plan_distribution: Record<string, number>
 }
 
+// ---- X-01 成本分析（admin 报表：收入 vs 成本双报表）----
+export interface SceneCost {
+  scene: string
+  calls: number            // LLM 调用次数（或业务动作计数）
+  total_tokens: number     // token 总量（非 LLM 场景为 0）
+  est_cost_cents: number   // 估算成本（分）
+}
+
+export interface CostAnalysis {
+  days: number
+  per_m_token_cents: number  // 参考单价（分/百万 tokens）
+  scenes: SceneCost[]
+  total_calls: number
+  total_tokens: number
+  total_cost_cents: number   // 估算总成本（分）
+}
+
 export interface UsageEntry {
   limit: number                // -1=无限
   used: number
@@ -336,4 +424,14 @@ export interface MyUsageSummary {
   subscription: Subscription | null
   plan: Plan
   usages: Record<string, UsageEntry>
+}
+
+// ---- 地址联想（P1 输入提示）----
+export interface LocationTip {
+  name: string
+  address: string
+  district: string
+  adcode: string
+  location: string   // "lng,lat"
+  poi_id: string
 }

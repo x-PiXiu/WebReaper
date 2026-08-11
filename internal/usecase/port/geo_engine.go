@@ -17,6 +17,14 @@ type ProbeInput struct {
 	Aliases     []string // 品牌别名（AI 可能用简称/全称，监测时一起匹配）
 	Competitors []string // 竞品名（同时监测对比）
 	SampleSize  int      // 采样次数（默认 5，越多越准但越贵）
+	// SelfBaseDomain 自营公开站域名（如 content.example.com，归因生命线 P5-01）。
+	// 非空时探测统计 AI 回答引用的来源里包含该域名的次数（self_source_count）——
+	// 回答"我们做的内容到底有没有被 AI 引用"这个续费生命线问题。
+	SelfBaseDomain string
+	// LocalContext 本地位置上下文（如"朝阳区望京"；本地生活 P0 补全，可选）。
+	// 非空时探测问法加入位置型提问（"望京附近有什么川菜馆"）——测的是"本地生意"
+	// 而非泛化品牌声量。由 MonitorUseCase 从门店档案注入。
+	LocalContext string
 }
 
 // ProbeResult 是一次探测的统计结果。
@@ -31,6 +39,12 @@ type ProbeResult struct {
 	SourceCount  int     // 搜索源文章数
 	BrandAppearanceCount int // 品牌在检索源里出现的文章数
 	Confidence   float64 // 置信度（由 Probe 实现按信息量计算，不再固定 sampleCount/5）
+	// Sources 回答中提到的来源（链接/平台名，去重；P5-01 引用来源追踪）。
+	// 归因：AI"提到你"≠"引用你的内容"——有了来源才能回答"我的文章被引用了几次"。
+	Sources []string
+	// SelfSourceCount 来源中包含自营公开站域名的次数（P5-01）。
+	// >0 意味着 AI 回答实际引用了我们发布的内容——这是内容 GEO 的直接效果证据。
+	SelfSourceCount int
 }
 
 // AIEngineProbe 是 AI 引擎监测适配器的接口（边界）。

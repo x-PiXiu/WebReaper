@@ -26,6 +26,56 @@ func (b Brand) IsValid() bool {
 	return b.ID != "" && b.TenantID != "" && b.Name != ""
 }
 
+// StoreLocation 是品牌的线下门店位置（本地生活 GEO 的地基）。
+//
+// 设计动机（本地化改造 P0）：
+//   - Brand 是"品牌资产"，StoreLocation 是"物理位置"——餐饮等实体业态的
+//     GEO 本质是本地搜索：AI 回答"附近有什么吃的"时引用的是有 NAP 信号的
+//     门店信息，而不是抽象品牌。
+//   - Lat/Lng/City/District/Adcode 由地理编码服务（GeoLocator 适配器）回填，
+//     实体层不依赖任何地图 SDK——纯数据 + 领域规则。
+//   - GeoStatus 标记编码状态：pending（待编码/待重试）/ ok / failed，
+//     未配置地图服务时门店可正常创建（地址先落库），后续配置后重试。
+type StoreLocation struct {
+	ID         string
+	TenantID   string
+	BrandID    string
+	Name       string  // 门店名（默认品牌名）
+	Address    string  // 详细地址（地理编码的输入，如"北京市朝阳区望京街10号"）
+	City       string  // 城市（地理编码回填）
+	District   string  // 区/县（地理编码回填）
+	Adcode     string  // 行政区划代码（地理编码回填）
+	Lat        float64 // 纬度（地理编码回填）
+	Lng        float64 // 经度（地理编码回填）
+	Phone      string  // 联系电话
+	Hours      string  // 营业时间（如"10:00-22:00"）
+	PriceLevel string  // 人均消费档位
+	BizType    string  // 业态（LocalBusiness/Restaurant/Cafe/Bar/Store；JSON-LD @type 用，默认 LocalBusiness）
+	// BusinessArea 所属商圈（如"望京"；P1 逆地理编码回填）。
+	// 本地关键词生成/监测问法用它精确到商圈级——"望京有什么川菜馆"。
+	BusinessArea string
+	GeoStatus  string  // pending/ok/failed（见 GeoStatus* 常量）
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// 门店地理编码状态常量（迁移 028 列 geo_status）。
+const (
+	GeoStatusPending = "pending" // 待编码（未配置地图服务或编码失败，可重试）
+	GeoStatusOK      = "ok"      // 已编码（Lat/Lng/区划齐全）
+	GeoStatusFailed  = "failed"  // 编码失败（地址无法解析，可改地址后重试）
+)
+
+// IsValid 领域规则：门店必须有 ID、TenantID、BrandID、地址。
+func (s StoreLocation) IsValid() bool {
+	return s.ID != "" && s.TenantID != "" && s.BrandID != "" && s.Address != ""
+}
+
+// HasGeo 领域规则：是否已有可用的地理编码结果（周边搜索/发布定位的前提）。
+func (s StoreLocation) HasGeo() bool {
+	return s.GeoStatus == GeoStatusOK && s.Lat != 0 && s.Lng != 0
+}
+
 // Keyword 是商户要监测/优化的搜索词。
 type Keyword struct {
 	ID        string
@@ -65,6 +115,12 @@ type MonitoringResult struct {
 	Confidence   float64 // 置信度（采样次数少则低）
 	ProbedAt     time.Time
 	RawSample    string  // 原始回答摘录（留证，便于复核；不存全量以省空间）
+	// Sources 回答中提到的来源（链接/平台名，去重；归因生命线 P5-01）。
+	// 归因核心：AI"提到品牌"≠"引用我们的内容"——sources 让两者可区分。
+	Sources []string
+	// SelfSourceCount 来源中包含自营公开站域名的次数（P5-01）。
+	// >0 = AI 回答实际引用了我们发布的内容——内容 GEO 的直接效果证据。
+	SelfSourceCount int
 }
 
 // MentionRateLabel 领域规则：把提及率映射为可读等级（纯函数，零依赖）。

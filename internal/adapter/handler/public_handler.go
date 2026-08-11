@@ -15,9 +15,11 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	geoadapter "webreaper/internal/adapter/geo" // 静态地图 URL 拼装（P2）
 	"webreaper/internal/adapter/public"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
@@ -30,10 +32,12 @@ import (
 type PublicHandler struct {
 	contentRepo         port.OptimizedContentRepository
 	brandRepo           port.BrandRepository             // 品牌信息（公开文章页作者署名用）
+	storeRepo           port.StoreLocationRepository     // 门店档案（可选；文章页 NAP 信息块 + JSON-LD 门店节点用）
 	structured          *structured.StructuredDataUseCase
 	baseURL             string                       // 公开站点根地址（如 https://example.com），生成绝对 URL
 	indexNowKey         string                       // IndexNow 密钥（静态注入，启动时值）
 	indexNowKeyProvider func(context.Context) string // 动态读取（运行时可调配置；优先于静态值）
+	staticMapKey        string                       // 高德静态地图 Key（可选；门店位置图 302 用）
 }
 
 // NewPublicHandler 创建公开站点处理器。
@@ -42,6 +46,42 @@ func NewPublicHandler(repo port.OptimizedContentRepository, brandRepo port.Brand
 		baseURL = "http://localhost:8082"
 	}
 	return &PublicHandler{contentRepo: repo, brandRepo: brandRepo, structured: structuredUC, baseURL: baseURL}
+}
+
+// SetStoreRepo 注入门店档案仓储（可选；本地生活 P0——文章页展示 NAP 信息块
+// 并在 JSON-LD 中输出门店节点，未注入时行为与改造前一致）。
+func (h *PublicHandler) SetStoreRepo(r port.StoreLocationRepository) {
+	if r != nil {
+		h.storeRepo = r
+	}
+}
+
+// SetStaticMapKey 注入高德静态地图 Key（可选；P2——/public/store-map/:brandId 302 到
+// 高德静态图 URL，Key 不暴露给浏览器）。未配置时该端点返回 404。
+func (h *PublicHandler) SetStaticMapKey(key string) {
+	h.staticMapKey = key
+}
+
+// GetStoreMap GET /public/store-map/:brandId —— 品牌主门店位置静态图（302 到高德）。
+// 参数为品牌 ID（FindPrimaryByBrand 取主门店；文章页 StoreMapURL 即以 brandID 拼接）。
+// Key 只存在于服务端拼接的 URL 中，浏览器拿到的是 302 后的图片响应。
+func (h *PublicHandler) GetStoreMap(c *gin.Context) {
+	if h.staticMapKey == "" || h.storeRepo == nil {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+	store, err := h.storeRepo.FindPrimaryByBrand(c.Request.Context(), c.Param("brandId"))
+	if err != nil || !store.HasGeo() {
+		c.String(http.StatusNotFound, "not found")
+		return
+	}
+	label := store.Name
+	if label == "" {
+		label = store.Address
+	}
+	// 尺寸 400*300（高德格式），zoom=15（街道级），图钉 + 门店名标签
+	mapURL := geoadapter.StaticMapURL(h.staticMapKey, store.Lat, store.Lng, label, "400*300", 15)
+	c.Redirect(http.StatusFound, mapURL)
 }
 
 // SetIndexNowKey 注入 IndexNow 密钥（启用 /public/indexnow-key.txt 托管端点）。
@@ -76,6 +116,8 @@ const articlePageTemplate = `<!DOCTYPE html>
   .author-box{margin-top:48px;padding:20px;background:#f8f8fc;border-radius:12px}
   .author-box .author-name{font-weight:600;font-size:1.05em;color:#1a1a2e}
   .author-box .author-desc{color:#666;font-size:0.9em;margin-top:4px;line-height:1.7}
+  .store-box{margin-top:32px;padding:18px 20px;background:#f0f7ff;border:1px solid #dbeafe;border-radius:12px;line-height:1.9}
+  .store-box .store-title{font-weight:600;margin-bottom:6px;color:#1a1a2e}
   .footer{margin-top:24px;padding-top:16px;border-top:1px solid #eee;color:#aaa;font-size:0.85em}
 </style>
 </head>
@@ -84,6 +126,15 @@ const articlePageTemplate = `<!DOCTYPE html>
   <h1>{{.Title}}</h1>
   <div class="meta">{{.Meta}}</div>
   {{.ContentHTML}}
+  {{if .StoreInfo}}
+  <div class="store-box">
+    <div class="store-title">📍 {{.StoreName}}</div>
+    {{.StoreInfo}}
+    {{if .StoreMapURL}}
+    <img src="{{.StoreMapURL}}" alt="门店位置" style="max-width:100%;height:auto;margin-top:12px;border-radius:8px" loading="lazy">
+    {{end}}
+  </div>
+  {{end}}
   {{if .BrandName}}
   <div class="author-box">
     <div class="author-name">本文由 {{.BrandName}} 提供</div>
@@ -126,6 +177,14 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 	// 生成 JSON-LD：公开文章页固定 Article 类型（避免"套餐/价格"等 GEO 常见词误判 Product），
 	// 但保留 FAQ 结构检测（有问答的内容用 FAQPage 更利于 AI 摘要引用）。
 	// 注入作者署名（品牌名）——让搜索引擎识别内容的权威来源（E-E-A-T Expertise/Authority）。
+	// 本地生活 P0：品牌有关联门店时传入门店信息——JSON-LD 升级为 @graph 双节点
+	// （[Article, LocalBusiness/Restaurant]），地址/电话/营业时间/坐标是本地搜索的核心信号。
+	var store *entity.StoreLocation
+	if h.storeRepo != nil && content.BrandID != "" {
+		if s, sErr := h.storeRepo.FindPrimaryByBrand(c.Request.Context(), content.BrandID); sErr == nil {
+			store = &s
+		}
+	}
 	sd, _ := h.structured.GenerateJSONLD(c.Request.Context(), structured.StructuredDataInput{
 		Title:        title,
 		Content:      cleanText,
@@ -133,10 +192,34 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		Author:       brandName,
 		BrandName:    brandName,
 		ForceArticle: true, // 公开文章页固定 Article（GEO 内容就是文章）
+		Store:        store,
 	})
 	jsonldTag := ""
 	if sd.JSONLD != "" {
 		jsonldTag = `<script type="application/ld+json">` + sd.JSONLD + `</script>`
+	}
+
+	// 门店 NAP 信息块（本地生活 P0）：文章页展示地址/电话/营业时间——
+	// 用户看到"去哪吃"，爬虫看到结构化地址，双重价值。
+	storeName, storeInfo, storeMapURL := "", "", ""
+	if store != nil {
+		storeName = store.Name
+		var lines []string
+		lines = append(lines, "地址："+store.Address)
+		if store.Hours != "" {
+			lines = append(lines, "营业时间："+store.Hours)
+		}
+		if store.Phone != "" {
+			lines = append(lines, "电话："+store.Phone)
+		}
+		if store.PriceLevel != "" {
+			lines = append(lines, "人均消费档位："+store.PriceLevel)
+		}
+		storeInfo = strings.Join(lines, "<br>")
+		// 门店位置静态图（P2）：走服务端 302 端点，Key 不暴露
+		if store.HasGeo() && h.staticMapKey != "" {
+			storeMapURL = h.baseURL + "/public/store-map/" + content.BrandID
+		}
 	}
 
 	tpl, err := template.New("article").Parse(articlePageTemplate)
@@ -154,6 +237,9 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		"JSONLD":      template.HTML(jsonldTag),
 		"BrandName":   brandName,
 		"BrandDesc":   brandDesc,
+		"StoreName":   storeName,
+		"StoreInfo":   template.HTML(storeInfo),
+		"StoreMapURL": storeMapURL,
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render error")
 	}

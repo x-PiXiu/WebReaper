@@ -32,6 +32,7 @@ type Config struct {
 	Telemetry TelemetryConfig
 	Tavily    TavilyConfig
 	Baidu     BaiduConfig
+	AMap      AMapConfig // 高德地图（本地生活 GEO：地理编码 + 周边 POI 搜索）
 }
 
 // TelemetryConfig 链路追踪配置（OpenTelemetry）。
@@ -141,6 +142,10 @@ type LLMConfig struct {
 	APIKey   string
 	BaseURL  string // API 端点，如 https://api.minimaxi.com/v1
 	Model    string // 模型名，如 MiniMax-M2.5
+	// CostPerMTokenCents 每百万 tokens 参考成本（分；0=成本报表只报 token 不估算金额）。
+	// 成本分析（admin /admin/billing/cost-analysis）用——运营按实际模型单价配置，
+	// 例：MiniMax M2.5 约 ¥1/百万 tokens → 100。
+	CostPerMTokenCents int
 }
 
 // IsConfigured 判断 LLM 是否已配置（API Key 非空）。
@@ -206,6 +211,22 @@ func (c BaiduConfig) IsConfigured() bool {
 	return c.Site != "" && c.Token != ""
 }
 
+// AMapConfig 高德地图服务配置（本地生活 GEO：地理编码 + 周边 POI 搜索）。
+// 申请：https://console.amap.com/ 创建 Web 服务 Key（个人开发者日配额约 5000 次，
+// SaaS 初期够用；商用场景需核实商业授权条款——见计划文档 § 合规）。
+// 不配置则降级：门店照常创建（geo_status=pending），附近同行只显示 AI 榜。
+type AMapConfig struct {
+	APIKey string
+	// APIVersion 周边搜索接口版本："v5"（默认，推荐——show_fields 精确取字段、
+	// 含评分/人均/商圈/营业时间）或 "v3"（旧版，兼容保留作降级开关）。
+	APIVersion string
+}
+
+// IsConfigured 判断高德地图是否已配置。
+func (c AMapConfig) IsConfigured() bool {
+	return c.APIKey != ""
+}
+
 // JWTConfig 认证配置（本轮预留）。
 type JWTConfig struct {
 	Secret     string
@@ -248,6 +269,7 @@ func Load() Config {
 			APIKey:   os.Getenv("LLM_API_KEY"),
 			BaseURL:  getenvDefault("LLM_BASE_URL", "https://api.minimaxi.com/v1"),
 			Model:    getenvDefault("LLM_MODEL", "MiniMax-M2.5"),
+			CostPerMTokenCents: getenvInt("LLM_COST_PER_MToken", 100), // 默认 ¥1/百万 tokens
 		},
 		Tavily: TavilyConfig{
 			APIKey: os.Getenv("TAVILY_API_KEY"),
@@ -255,6 +277,10 @@ func Load() Config {
 		Baidu: BaiduConfig{
 			Site:  os.Getenv("BAIDU_SITE"),
 			Token: os.Getenv("BAIDU_TOKEN"),
+		},
+		AMap: AMapConfig{
+			APIKey:     os.Getenv("AMAP_API_KEY"),
+			APIVersion: getenvDefault("AMAP_API_VERSION", "v5"), // v5 推荐；v3 兼容保留
 		},
 		JWT: JWTConfig{
 			Secret:     os.Getenv("JWT_SECRET"),

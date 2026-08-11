@@ -41,6 +41,7 @@ type PublishJobPO struct {
 	PreMentionRate  float64   `gorm:"type:decimal(5,2)"`
 	PostMentionRate float64   `gorm:"type:decimal(5,2)"`
 	ScheduledAt     time.Time `gorm:"index"` // 排期发布时间（零值=立即）
+	StoreAddress    string    `gorm:"size:256"` // 门店地址（本地生活 P3：内容层本地曝光信号）
 }
 
 func (PublishJobPO) TableName() string { return "geo_publish_jobs" }

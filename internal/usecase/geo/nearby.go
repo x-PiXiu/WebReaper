@@ -1,0 +1,294 @@
+package geo
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+
+	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/port"
+)
+
+// ============ 附近同行用例（现实世界双榜）============
+
+// NearbyUseCase 编排"附近同行对比排名"：
+//   地图榜（现实世界）：以门店位置为中心，POI 周边搜索同行业门店（距离/评分）
+//   AI 榜（虚拟世界）：监测结果里竞品的提及率（谁在 AI 引擎里更响）
+// 双榜对照让老板同时看到"物理距离上的对手"和"AI 声量上的对手"。
+type NearbyUseCase struct {
+	brandRepo   port.BrandRepository
+	storeRepo   port.StoreLocationRepository
+	resultRepo  port.MonitoringResultRepository
+	searcher    port.POISearcher // 可选；nil/未配置时降级只显示 AI 榜
+	measurer    port.DistanceMeasurer // 可选；P2 驾车耗时（未配置时只显示直线距离）
+	quotaGate   port.QuotaStore  // 配额检查门（可选；X-01：nearby 场景，地图 API 有成本）
+	usageRec    port.UsageRecorder // 可选；nearby 场景计量（非 LLM 调用，配额计数用）
+}
+
+func NewNearbyUseCase(brandRepo port.BrandRepository, storeRepo port.StoreLocationRepository, resultRepo port.MonitoringResultRepository) *NearbyUseCase {
+	return &NearbyUseCase{brandRepo: brandRepo, storeRepo: storeRepo, resultRepo: resultRepo}
+}
+
+// SetPOISearcher 注入周边搜索器（可选；未注入/未配置时降级只显示 AI 榜）。
+func (uc *NearbyUseCase) SetPOISearcher(s port.POISearcher) {
+	if s != nil {
+		uc.searcher = s
+	}
+}
+
+// SetDistanceMeasurer 注入距离测量器（可选；P2——地图榜"驾车耗时"，未注入时只显示直线距离）。
+func (uc *NearbyUseCase) SetDistanceMeasurer(m port.DistanceMeasurer) {
+	if m != nil {
+		uc.measurer = m
+	}
+}
+
+// SetQuotaGate 注入配额检查门（可选；X-01 经济系统收口——nearby 场景按次限额）。
+// 地图 POI 搜索是第三方 API 调用（有成本），超限返回 ErrQuotaExceeded → HTTP 402。
+func (uc *NearbyUseCase) SetQuotaGate(g port.QuotaStore) {
+	if g != nil {
+		uc.quotaGate = g
+	}
+}
+
+// SetUsageRecorder 注入用量记录器（可选；nearby 场景配额计数数据源）。
+// 地图搜索不烧 LLM token，记一条 TotalTokens=0 的 usage 作为"业务动作计数"。
+func (uc *NearbyUseCase) SetUsageRecorder(r port.UsageRecorder) {
+	if r != nil {
+		uc.usageRec = r
+	}
+}
+
+// NearbyRanking 附近同行双榜视图（API 契约由 handler 转换）。
+type NearbyRanking struct {
+	Store       entity.StoreLocation // 主门店（无门店时 IsValid()==false，前端提示先建门店）
+	MapRanking  []MapRankEntry       // 地图榜：按距离升序
+	AIRanking   []AIRankEntry        // AI 榜：按提及率降序
+	OwnRate     float64              // 自己的 AI 提及率（最近监测均值；无数据为 -1）
+	MapAvailable bool                // 地图服务是否可用（false=未配置/搜索失败，降级提示）
+	SearchKeyword string             // 实际使用的搜索词（调试/展示用）
+}
+
+// MapRankEntry 地图榜条目。
+type MapRankEntry struct {
+	Name       string
+	Address    string
+	DistanceM  int     // 距门店距离（米）
+	Rating     float64 // 评分（0=无数据）
+	Category   string
+	OpenStatus string
+	Lat, Lng   float64
+	// ---- 门店卡扩展（v5 show_fields=business,navi；无数据留空）----
+	CityName      string // 所属城市
+	AdName        string // 所属区县
+	Cost          string // 人均消费
+	BusinessArea  string // 所属商圈
+	OpenTimeToday string // 今日营业时间
+	Tag           string // 特色菜（美食 POI）
+	Tel           string // 联系电话
+	EntrLocation  string // 入口经纬度（导航到达点）
+	PhotoURL      string // 首张照片
+	// ---- 驾车耗时（P2 距离测量补全；0=未测得）----
+	DriveDistanceM  int // 驾车距离（米）
+	DriveDurationSec int // 驾车耗时（秒）
+}
+
+// AIRankEntry AI 榜条目。
+type AIRankEntry struct {
+	Name      string  // 竞品名
+	Rate      float64 // 平均提及率（0-1）
+	SampleCnt int     // 统计的采样次数（数据量）
+}
+
+// GetRanking 生成品牌附近同行双榜。
+//
+// 流程：取品牌 + 主门店 → 无门店则报错提示先建门店 → 周边搜索（品牌名 + 核心卖点 +
+// 手动竞品名；types 非空时额外按 POI 类型扫描，如 050000 餐饮大类）→ 驾车耗时补全 →
+// 聚合最新监测结果里的竞品提及率 → 双榜返回。
+// 任一部分失败都不阻断整体：地图服务不可用 → 只返回 AI 榜（MapAvailable=false）。
+// types：可选 POI 分类编码（六位，多个用 | 分隔）——按类目扫描不依赖名称命中；
+// 前端"附近同行"页可传（如餐饮=050000）。
+func (uc *NearbyUseCase) GetRanking(ctx context.Context, tenantID, brandID, types string) (NearbyRanking, error) {
+	// 配额检查（X-01：nearby 场景按次限额——地图 POI API 有成本；超限 402）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, tenantID, "nearby"); err != nil {
+			return NearbyRanking{}, err
+		}
+	}
+	// 业务动作计数（配额数据源：非 LLM 调用，TotalTokens=0；失败不阻断）
+	if uc.usageRec != nil && tenantID != "" {
+		_ = uc.usageRec.RecordUsage(ctx, entity.UsageRecord{TenantID: tenantID, Scene: "nearby"})
+	}
+
+	brand, err := uc.brandRepo.FindByID(ctx, tenantID, brandID)
+	if err != nil {
+		return NearbyRanking{}, fmt.Errorf("品牌不存在: %w", err)
+	}
+	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)
+	if err != nil {
+		// 无门店 = 本地功能未启用，明确报错引导建门店
+		return NearbyRanking{}, errors.New("该品牌还没有门店——先创建门店档案，即可查看附近同行排名")
+	}
+
+	view := NearbyRanking{Store: store, OwnRate: -1}
+
+	// ---- 地图榜（现实世界）----
+	if uc.searcher != nil && store.HasGeo() {
+		center := port.Location{Lat: store.Lat, Lng: store.Lng}
+		// 搜索词：品牌名 + 核心卖点（品类词）+ 手动竞品名（合并去重，各搜一次并集）——
+		// 品牌名能命中同类门店，竞品名能精确命中对手，卖点词补全品类命中。
+		keywords := append([]string{brand.Name}, brand.Competitors...)
+		if len(brand.CoreSelling) > 0 {
+			keywords = append(keywords, brand.CoreSelling[0])
+		}
+		keywords = uniqueStrings(keywords)
+		for _, kw := range keywords {
+			if kw == "" {
+				continue
+			}
+			pois, pErr := uc.searcher.SearchNearby(ctx, center, kw, 0)
+			if pErr != nil {
+				if errors.Is(pErr, port.ErrGeoNotConfigured) {
+					break // 地图服务未配置——降级只显示 AI 榜
+				}
+				continue // 单个词失败不阻断（网络抖动等）
+			}
+			view.SearchKeyword = kw
+			view.MapRanking = append(view.MapRanking, poisToEntries(pois)...)
+		}
+		// POI 类型扫描（P1）：types 非空时按分类编码搜索（大类自动含中/小类）——
+		// 不依赖品牌/竞品名命中的全量竞品扫描
+		if types != "" {
+			if pois, tErr := uc.searcher.SearchNearbyByType(ctx, center, types, 0); tErr == nil {
+				view.MapRanking = append(view.MapRanking, poisToEntries(pois)...)
+				if view.SearchKeyword == "" {
+					view.SearchKeyword = "类型:" + types
+				}
+			}
+		}
+		// 去重（多搜索词可能命中同一门店）+ 按距离升序
+		view.MapRanking = dedupeMapRanking(view.MapRanking)
+		sort.SliceStable(view.MapRanking, func(i, j int) bool {
+			return view.MapRanking[i].DistanceM < view.MapRanking[j].DistanceM
+		})
+		view.MapAvailable = len(view.MapRanking) > 0
+		// 驾车耗时补全（P2）：有坐标的门店批量测距（驾车=type 1；失败跳过只显示直线距离）
+		uc.fillDriveTimes(ctx, center, &view.MapRanking)
+	} else if uc.searcher != nil && !store.HasGeo() {
+		// 门店存在但坐标缺失（pending）——提示重试地理编码
+		view.MapAvailable = false
+	}
+
+	// ---- AI 榜（虚拟世界：监测结果竞品提及率）----
+	latest, rErr := uc.resultRepo.LatestByBrand(ctx, tenantID, brandID)
+	if rErr == nil && len(latest) > 0 {
+		rateSum, rateCnt, sampleSum := 0.0, 0, 0
+		compMap := make(map[string]struct {
+			rateSum float64
+			cnt     int
+		})
+		for _, r := range latest {
+			if r.MentionRate > 0 {
+				rateSum += r.MentionRate
+				rateCnt++
+				sampleSum += r.SampleCount
+			}
+			for name, rate := range r.CompetitorRates {
+				c := compMap[name]
+				c.rateSum += rate
+				c.cnt++
+				compMap[name] = c
+			}
+		}
+		if rateCnt > 0 {
+			view.OwnRate = rateSum / float64(rateCnt)
+		}
+		view.AIRanking = make([]AIRankEntry, 0, len(compMap))
+		for name, c := range compMap {
+			view.AIRanking = append(view.AIRanking, AIRankEntry{Name: name, Rate: c.rateSum / float64(c.cnt), SampleCnt: c.cnt})
+		}
+		sort.SliceStable(view.AIRanking, func(i, j int) bool {
+			return view.AIRanking[i].Rate > view.AIRanking[j].Rate
+		})
+		if len(view.AIRanking) > 10 {
+			view.AIRanking = view.AIRanking[:10]
+		}
+	}
+	return view, nil
+}
+
+func uniqueStrings(ss []string) []string {	seen := make(map[string]bool)
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+func dedupeMapRanking(entries []MapRankEntry) []MapRankEntry {
+	seen := make(map[string]bool)
+	out := make([]MapRankEntry, 0, len(entries))
+	for _, e := range entries {
+		key := e.Name + "|" + e.Address
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, e)
+	}
+	return out
+}
+// poisToEntries POI 列表 → 地图榜条目（P2：附带驾车耗时占位，fillDriveTimes 补全）。
+func poisToEntries(pois []port.POIStore) []MapRankEntry {
+	entries := make([]MapRankEntry, 0, len(pois))
+	for _, p := range pois {
+		entries = append(entries, MapRankEntry{
+			Name: p.Name, Address: p.Address, DistanceM: p.Distance,
+			Rating: p.Rating, Category: p.Category, OpenStatus: p.OpenStatus,
+			Lat: p.Lat, Lng: p.Lng,
+			CityName: p.CityName, AdName: p.AdName, Cost: p.Cost,
+			BusinessArea: p.BusinessArea, OpenTimeToday: p.OpenTimeToday,
+			Tag: p.Tag, Tel: p.Tel, EntrLocation: p.EntrLocation, PhotoURL: p.PhotoURL,
+		})
+	}
+	return entries
+}
+
+// fillDriveTimes 驾车耗时补全（P2）：批量测距（驾车 type=1，目的地=门店）。
+// 只对"有坐标且非零"的门店发起；失败（未配置/网络）跳过——只显示直线距离，不阻断。
+func (uc *NearbyUseCase) fillDriveTimes(ctx context.Context, dest port.Location, entries *[]MapRankEntry) {
+	if uc.measurer == nil || len(*entries) == 0 {
+		return
+	}
+	// 收集有坐标的起点（最多 100 个——高德批量上限）
+	type idxLoc struct {
+		idx int
+		loc port.Location
+	}
+	var origins []port.Location
+	index := make([]idxLoc, 0, len(*entries))
+	for i, e := range *entries {
+		if e.Lat != 0 && e.Lng != 0 && len(origins) < 100 {
+			origins = append(origins, port.Location{Lat: e.Lat, Lng: e.Lng})
+			index = append(index, idxLoc{idx: i, loc: port.Location{Lat: e.Lat, Lng: e.Lng}})
+		}
+	}
+	if len(origins) == 0 {
+		return
+	}
+	results, err := uc.measurer.MeasureDistances(ctx, origins, dest, 1) // 1=驾车（考虑路况）
+	if err != nil {
+		return // 未配置/失败：只显示直线距离
+	}
+	for _, r := range results {
+		if r.OriginIdx >= 0 && r.OriginIdx < len(index) {
+			(*entries)[index[r.OriginIdx].idx].DriveDistanceM = r.DistanceM
+			(*entries)[index[r.OriginIdx].idx].DriveDurationSec = r.DurationSec
+		}
+	}
+}

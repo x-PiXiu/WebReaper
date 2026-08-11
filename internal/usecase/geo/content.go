@@ -36,6 +36,8 @@ type ContentUseCase struct {
 	ragRetriever  port.ContentRAGRetriever    // RAG 检索（可选；nil=纯 LLM 推断）
 	templateRepo  port.PromptTemplateRepository // 提示词模板（可选；nil=内置默认）
 	quotaGate     port.QuotaStore             // 配额检查门（可选；nil=不检查）
+	storeRepo     port.StoreLocationRepository // 门店档案（可选；nil=不注入 NAP 信号）
+	diagnoseUC    *DiagnoseUseCase            // GEO 诊断（可选；诊断→优化闭环 P5-03）
 }
 
 // 内置默认提示词模板（模板仓库无记录时的兜底，与 seed 内容一致）。
@@ -113,6 +115,68 @@ func (uc *ContentUseCase) SetRAGRetriever(r port.ContentRAGRetriever) {
 	if r != nil {
 		uc.ragRetriever = r
 	}
+}
+
+// SetStoreRepo 注入门店档案仓储（可选；本地生活改造 P0）。
+// 注入后生成/优化内容时自动附加门店 NAP（地址/营业时间/电话）段落——
+// 让文章携带本地信任信号，AI 回答"附近/本地"问题时更可能引用。
+func (uc *ContentUseCase) SetStoreRepo(r port.StoreLocationRepository) {
+	if r != nil {
+		uc.storeRepo = r
+	}
+}
+
+// SetDiagnoseUC 注入 GEO 诊断用例（可选；诊断→优化闭环 P5-03）。
+// 注入后 Generate 带 UseDiagnose=true 时先生成诊断报告，把改进建议注入
+// 内容生成 prompt——"诊断（为什么没被引用）→ 优化（按建议生成）"闭环打通。
+func (uc *ContentUseCase) SetDiagnoseUC(d *DiagnoseUseCase) {
+	if d != nil {
+		uc.diagnoseUC = d
+	}
+}
+
+// buildDiagnoseHints 运行一次诊断并取改进建议（P5-03）。
+// 诊断本身烧 token（RAG + LLM 建议），仅在用户主动勾选时调用；
+// 失败降级为空（不阻断生成——诊断是增强项）。
+func (uc *ContentUseCase) buildDiagnoseHints(ctx context.Context, tenantID, brandID, keyword string) []string {
+	if uc.diagnoseUC == nil {
+		return nil
+	}
+	ctx2, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	report, err := uc.diagnoseUC.Diagnose(ctx2, DiagnoseInput{TenantID: tenantID, BrandID: brandID})
+	if err != nil || len(report.Suggestions) == 0 {
+		return nil
+	}
+	if len(report.Suggestions) > 4 {
+		return report.Suggestions[:4] // 取前 4 条，避免 prompt 过长
+	}
+	return report.Suggestions
+}
+
+// buildStoreNAP 取品牌主门店并格式化为 prompt 段落（纯文本，零失败风险）。
+// 未注入仓储/品牌无门店时返回空串（不注入 NAP，行为与改造前一致）。
+func (uc *ContentUseCase) buildStoreNAP(ctx context.Context, brandID string) string {
+	if uc.storeRepo == nil || brandID == "" {
+		return ""
+	}
+	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)
+	if err != nil {
+		return ""
+	}
+	var lines []string
+	lines = append(lines, "门店信息（本地 GEO 信号——必须如实融入文章，不得编造）：")
+	lines = append(lines, "- 地址："+store.Address)
+	if store.Hours != "" {
+		lines = append(lines, "- 营业时间："+store.Hours)
+	}
+	if store.Phone != "" {
+		lines = append(lines, "- 联系电话："+store.Phone)
+	}
+	if store.PriceLevel != "" {
+		lines = append(lines, "- 人均消费档位："+store.PriceLevel)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func NewContentUseCase(ai port.AIGenerator, sc port.GEOScorer, cr port.OptimizedContentRepository) *ContentUseCase {
@@ -299,6 +363,10 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentOptimize, defaultOptimizePrompt, in.TargetEngine)
 
 	userPrompt := fmt.Sprintf("目标关键词：%s\n\n原始内容：\n%s", keywordDesc, in.OriginalText)
+	// 本地 GEO 信号（P0）：优化内容时附加门店 NAP 段落（可选注入，无门店则跳过）
+	if nap := uc.buildStoreNAP(ctx, in.BrandID); nap != "" {
+		userPrompt += "\n\n" + nap
+	}
 
 	messages := []port.ChatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -517,6 +585,10 @@ type GenerateInput struct {
 	BrandInfo     string   // 品牌定位/卖点摘要（供 LLM 参考，让内容贴合品牌）
 	LLMConfigName string
 	TargetEngine  string // 目标 AI 引擎偏好（chatgpt/perplexity/kimi/doubao；空=通用）
+	// UseDiagnose 是否按诊断建议生成（诊断→优化闭环 P5-03）。
+	// true 时先生成一次诊断报告，把改进建议注入 prompt——"先诊断再对症下药"。
+	// 诊断烧 token，仅在用户主动勾选时开启。
+	UseDiagnose bool
 }
 
 // Generate 从零生成内容：根据品牌信息 + 关键词，AI 原创一篇 GEO 优化文章。
@@ -553,6 +625,16 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 目标关键词：%s
 
 请%s。`, in.BrandInfo, keywordDesc, modeHint)
+	// 本地 GEO 信号（P0）：生成内容时附加门店 NAP 段落（可选注入，无门店则跳过）
+	if nap := uc.buildStoreNAP(ctx, in.BrandID); nap != "" {
+		userPrompt += "\n\n" + nap
+	}
+	// 诊断→优化闭环（P5-03）：用户勾选"按诊断建议生成"时注入改进建议
+	if in.UseDiagnose {
+		if hints := uc.buildDiagnoseHints(ctx, in.TenantID, in.BrandID, in.Keywords[0]); len(hints) > 0 {
+			userPrompt += "\n\n诊断改进建议（必须逐条落实在文章中，与品牌信息保持一致）：\n- " + strings.Join(hints, "\n- ")
+		}
+	}
 
 		// RAG 增强：生成前检索"品牌 + 关键词"真实信息注入 prompt（可选，失败降级为纯 LLM）。
 		// "不编造数据"从口号变能力——LLM 引用真实检索资料创作，权威性维度显著提升。

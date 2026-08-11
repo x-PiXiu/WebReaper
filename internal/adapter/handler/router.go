@@ -54,6 +54,11 @@ type Router struct {
 	geoContentUC *geo.ContentUseCase
 	geoDiagnoseUC *geo.DiagnoseUseCase
 	geoDistillUC *geo.KeywordDistillUseCase // 关键词蒸馏用例（可选）
+	geoStoreUC   *geo.StoreLocationUseCase  // 门店档案用例（本地生活地基，可选）
+	geoNearbyUC  *geo.NearbyUseCase         // 附近同行双榜用例（可选）
+	geoAdviceUC  *geo.AdviceUseCase         // 行动建议用例（可选，P5-05）
+	geoCitationUC *geo.CitationUseCase      // 内容引用统计用例（可选，P5-02）
+	inputTipper   port.InputTipper          // 地址联想（可选，P1；未注入→空列表降级）
 	// 结构化数据用例（JSON-LD/llms.txt）——通过 SetStructured 注入，可选
 	structuredUC *structured.StructuredDataUseCase
 	// 公开内容站处理器——通过 SetPublic 注入，可选
@@ -82,6 +87,28 @@ type Router struct {
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
 func (r *Router) SetKeywordDistill(uc *geo.KeywordDistillUseCase) {
 	r.geoDistillUC = uc
+}
+
+// SetGeoLocal 注入门店档案 + 附近同行用例（可选；未注入则对应端点不注册）。
+// 与 SetGEO 分离——门店/附近同行是本地生活改造新增的独立用例，晚装配不污染原 GEO 装配。
+func (r *Router) SetGeoLocal(storeUC *geo.StoreLocationUseCase, nearbyUC *geo.NearbyUseCase) {
+	r.geoStoreUC = storeUC
+	r.geoNearbyUC = nearbyUC
+}
+
+// SetAdvice 注入行动建议用例（可选；未注入则建议端点不注册）。
+func (r *Router) SetAdvice(uc *geo.AdviceUseCase) {
+	r.geoAdviceUC = uc
+}
+
+// SetCitation 注入内容引用统计用例（可选；未注入则引用端点不注册）。
+func (r *Router) SetCitation(uc *geo.CitationUseCase) {
+	r.geoCitationUC = uc
+}
+
+// SetInputTipper 注入地址联想服务（可选；未注入则联想端点返回空列表，表单纯手输）。
+func (r *Router) SetInputTipper(t port.InputTipper) {
+	r.inputTipper = t
 }
 
 // SetStructured 注入结构化数据用例（可选；未注入则结构化端点不注册）。
@@ -236,6 +263,7 @@ func (r *Router) Engine() *gin.Engine {
 		e.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
 		e.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
 		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
+		e.GET("/public/store-map/:brandId", r.publicHandler.GetStoreMap) // 品牌主门店位置静态图（302 到高德）
 		e.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
 		// IndexNow 协议要求的根目录密钥文件：https://<domain>/{key}.txt（文件名=密钥）
 		e.GET("/:key.txt", r.publicHandler.GetIndexNowKeyFile)
@@ -322,6 +350,22 @@ func (r *Router) Engine() *gin.Engine {
 			if r.geoDistillUC != nil {
 				geoHandler.SetDistillUC(r.geoDistillUC)
 			}
+			// 注入本地生活能力（门店档案 + 附近同行双榜，可选）
+			if r.geoStoreUC != nil {
+				geoHandler.SetStoreUC(r.geoStoreUC)
+			}
+			if r.geoNearbyUC != nil {
+				geoHandler.SetNearbyUC(r.geoNearbyUC)
+			}
+			if r.geoAdviceUC != nil {
+				geoHandler.SetAdviceUC(r.geoAdviceUC)
+			}
+			if r.geoCitationUC != nil {
+				geoHandler.SetCitationUC(r.geoCitationUC)
+			}
+			if r.inputTipper != nil {
+				geoHandler.SetInputTipper(r.inputTipper)
+			}
 			// 品牌 CRUD（Gin 同层 wildcard 参数名必须统一，全部用 :id）
 			api.GET("/geo/brands", geoHandler.HandleListBrands)
 			api.POST("/geo/brands", geoHandler.HandleCreateBrand)
@@ -357,6 +401,20 @@ func (r *Router) Engine() *gin.Engine {
 			// 关键词管理（跨品牌聚合列表 + 删除）
 			api.GET("/geo/keywords", geoHandler.HandleListAllKeywords)
 			api.DELETE("/geo/keywords/:id", geoHandler.HandleDeleteKeyword)
+			// 门店档案（本地生活 GEO 地基；路由参数 :storeId 为门店 ID）
+			api.GET("/geo/brands/:id/store-locations", geoHandler.HandleListStoreLocations)
+			api.POST("/geo/brands/:id/store-locations", geoHandler.HandleCreateStoreLocation)
+			api.PUT("/geo/brands/:id/store-locations/:storeId", geoHandler.HandleUpdateStoreLocation)
+			api.DELETE("/geo/brands/:id/store-locations/:storeId", geoHandler.HandleDeleteStoreLocation)
+			api.POST("/geo/brands/:id/store-locations/:storeId/re-geocode", geoHandler.HandleReGeocodeStoreLocation)
+			// 附近同行双榜（现实世界地图榜 + AI 竞品榜）
+			api.GET("/geo/brands/:id/nearby-competitors", geoHandler.HandleNearbyCompetitors)
+			// 行动建议（P5-05：给老板"下一步做什么"）
+			api.GET("/geo/brands/:id/advice", geoHandler.HandleAdvice)
+			// 内容引用统计（P5-02：每篇被 AI 引用几次）
+			api.GET("/geo/brands/:id/citations", geoHandler.HandleContentCitations)
+			// 地址联想（P1 输入提示：门店建档表单边输入边联想）
+			api.GET("/geo/location/suggest", geoHandler.HandleSuggestLocations)
 		}
 
 		// 结构化数据端点（JSON-LD 生成 / llms.txt 生成）——纯逻辑，无 DB/LLM 依赖
@@ -442,6 +500,7 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.PUT("/billing/subscriptions/:tenant", r.HandleAdminAssignPlan) // 手动开通（线下收款）
 				adminGroup.GET("/billing/orders", r.HandleAdminListOrders)
 				adminGroup.GET("/billing/revenue", r.HandleAdminRevenueReport) // 收入概览
+				adminGroup.GET("/billing/cost-analysis", r.HandleAdminCostAnalysis) // 成本分析（X-01：收入 vs 成本双报表）
 				adminGroup.GET("/billing/payment-config", r.HandleGetPaymentConfig) // 支付网关配置
 				adminGroup.PUT("/billing/payment-config", r.HandleSetPaymentConfig) // 保存支付配置
 			}

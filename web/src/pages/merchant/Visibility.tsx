@@ -1,11 +1,11 @@
-import { Typography, Card, Row, Col, Table, Tag, Space, Empty, Spin, Tooltip } from 'antd'
-import { RadarChartOutlined, TrophyOutlined, RiseOutlined, FallOutlined } from '@ant-design/icons'
+import { Typography, Card, Row, Col, Table, Tag, Space, Empty, Spin, Tooltip, List } from 'antd'
+import { RadarChartOutlined, TrophyOutlined, RiseOutlined, FallOutlined, BulbOutlined, LinkOutlined } from '@ant-design/icons'
 import { Line } from '@ant-design/charts'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { deltaView } from '../../utils/geo'
-import type { Brand, MonitoringResult } from '../../types/api'
+import type { Brand, MonitoringResult, Advice } from '../../types/api'
 
 const { Title, Text } = Typography
 
@@ -21,6 +21,17 @@ function rateLabel(rate: number): string {
   if (rate >= 0.5) return '稳定'
   if (rate >= 0.2) return '偶尔'
   return '缺席'
+}
+
+// P5-04 趋势降噪：对提及率时间序列做移动平均（窗口 3），
+// 平滑 AI 采样的随机波动，让老板看到"趋势"而非"噪声"。
+function movingAverage(points: { date: string; rate: number }[], window = 3) {
+  return points.map((p, i) => {
+    const start = Math.max(0, i - window + 1)
+    const slice = points.slice(start, i + 1)
+    const avg = slice.reduce((s, x) => s + x.rate, 0) / slice.length
+    return { ...p, rate: avg }
+  })
 }
 
 // AI 可见度总览（商户端一级入口）：
@@ -76,19 +87,38 @@ export default function Visibility() {
     trend: (o.trend || []) as MonitoringResult[],
   })).sort((a, b) => b.rate - a.rate)
 
-  // 趋势对比图数据（所有品牌的提及率时间序列）
+  // 行动建议（P5-05）：针对排名最末（最需要帮助的）品牌生成"下一步做什么"
+  const adviceBrandId = ranking.length > 0 ? ranking[ranking.length - 1].brand.id : undefined
+  const { data: adviceRes } = useQuery({
+    queryKey: ['geo-advice', adviceBrandId],
+    queryFn: () => businessApi.getAdvice(adviceBrandId!).catch(() => ({ advices: [] as Advice[] })),
+    enabled: !!adviceBrandId,
+  })
+  const advices: Advice[] = adviceRes?.advices || []
+
+  // P5-04 趋势降噪：按品牌分组做移动平均（平滑 AI 采样随机波动）
   const trendData: any[] = []
   ranking.forEach(({ brand, trend }) => {
-    trend.forEach((t: MonitoringResult) => {
-      if (t.mention_rate !== undefined && t.probed_at) {
-        trendData.push({
-          date: new Date(t.probed_at).toLocaleDateString(),
-          rate: Math.round((t.mention_rate || 0) * 1000) / 10,
-          brand: brand.name,
-        })
-      }
-    })
+    const points = trend
+      .filter((t) => t.mention_rate !== undefined && t.probed_at)
+      .map((t) => ({
+        date: new Date(t.probed_at).toLocaleDateString(),
+        rate: Math.round((t.mention_rate || 0) * 1000) / 10,
+      }))
+      .sort((a, b) => (a.date < b.date ? -1 : 1))
+    movingAverage(points, 3).forEach((p) => trendData.push({ ...p, brand: brand.name }))
   })
+
+  // P5-01 归因统计：AI 回答引用的来源（去重）+ 自营内容被引用总次数
+  const sourceSet = new Set<string>()
+  let selfCiteCount = 0
+  let lowConfidenceSamples = 0
+  allResults.forEach((r: MonitoringResult) => {
+    r.sources?.forEach((s) => sourceSet.add(s))
+    selfCiteCount += r.self_source_count || 0
+    if (r.sample_count > 0 && r.sample_count < 3) lowConfidenceSamples++
+  })
+  const allSources = Array.from(sourceSet).slice(0, 8)
 
   // 竞品威胁聚合：所有监测结果里出现的竞品及其平均提及率
   const competitorMap = new Map<string, { total: number; count: number }>()
@@ -122,6 +152,62 @@ export default function Visibility() {
           </Tooltip>
         </p>
       </div>
+
+      {/* P5-05 行动建议：给老板"下一步做什么"（针对最需要帮助的品牌） */}
+      {advices.length > 0 && (
+        <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
+          <Space style={{ marginBottom: 8 }}>
+            <BulbOutlined style={{ color: 'var(--wr-warning)' }} />
+            <Text strong style={{ fontSize: 14 }}>行动建议 · 下一步做什么</Text>
+            {adviceBrandId && (
+              <Text type="secondary" style={{ fontSize: 12 }}>基于「{ranking[ranking.length - 1]?.brand?.name}」的现状</Text>
+            )}
+          </Space>
+          <List
+            size="small"
+            dataSource={advices}
+            renderItem={(a: Advice) => (
+              <List.Item
+                actions={a.page ? [<a key="go" onClick={() => navigate(a.page)}>去做 →</a>] : undefined}
+              >
+                <Space>
+                  <Tag color={a.level === 'high' ? 'error' : a.level === 'medium' ? 'warning' : 'default'} style={{ margin: 0, fontSize: 11 }}>
+                    {a.level === 'high' ? '优先' : a.level === 'medium' ? '建议' : '保持'}
+                  </Tag>
+                  <Text style={{ fontSize: 13 }}>{a.message}</Text>
+                </Space>
+              </List.Item>
+            )}
+          />
+        </Card>
+      )}
+
+      {/* P5-01 归因卡片：AI 提到你 ≠ 引用你的内容 */}
+      <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
+        <Space wrap>
+          <LinkOutlined style={{ color: 'var(--wr-accent)' }} />
+          <Text strong style={{ fontSize: 14 }}>引用归因</Text>
+          <Tag color={selfCiteCount > 0 ? 'success' : 'default'} style={{ margin: 0 }}>
+            你的内容被 AI 引用 {selfCiteCount} 次
+          </Tag>
+          {lowConfidenceSamples > 0 && (
+            <Text type="secondary" style={{ fontSize: 12 }}>（{lowConfidenceSamples} 条结果采样不足，置信度低）</Text>
+          )}
+          <Tooltip title="AI 提到品牌 ≠ 引用了你的内容。此数字 = AI 回答中列出的来源里包含你公开站域名的次数——内容 GEO 的直接效果证据。">
+            <span className="wr-help-tip">?</span>
+          </Tooltip>
+        </Space>
+        {allSources.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>AI 回答中出现的来源：</Text>
+            <div style={{ marginTop: 6 }}>
+              <Space wrap size={[6, 6]}>
+                {allSources.map((s) => <Tag key={s} style={{ fontSize: 11 }}>{s}</Tag>)}
+              </Space>
+            </div>
+          </div>
+        )}
+      </Card>
 
       {/* 提及率趋势对比（全品牌）*/}
       <Card className="wr-glass-card" styles={{ body: { padding: 20 } }} style={{ marginBottom: 16 }}>

@@ -43,7 +43,7 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 	}
 
 	// 多样化问法（避免 AI 因缓存返回相同答案，提高统计有效性）
-	questions := generateProbeQuestions(in.Keyword, sampleSize)
+	questions := generateProbeQuestions(in.Keyword, sampleSize, in.LocalContext)
 
 	// 所有品牌名（主品牌 + 别名）
 	allBrandNames := append([]string{in.BrandName}, in.Aliases...)
@@ -52,6 +52,7 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 	positionSum := 0
 	sentimentPos, sentimentNeg := 0, 0
 	competitorMentions := make(map[string]int)
+	sourceSet := make(map[string]bool) // P5-01：跨采样合并来源（去重）
 	var allAnswers []string
 	totalSamples := 0
 
@@ -91,6 +92,10 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		for comp, cnt := range analysis.CompetitorMentions {
 			competitorMentions[comp] += cnt
 		}
+		// P5-01：合并来源（去重）
+		for _, s := range analysis.Sources {
+			sourceSet[s] = true
+		}
 	}
 
 	// 聚合统计（与 AgentProbe 同口径）
@@ -113,6 +118,11 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		rawSample = strings.Join(allAnswers, "\n\n---\n\n")
 		rawSample = truncateForGeo(rawSample, 2000)
 	}
+	// P5-01：来源列表（去重保序）+ 自营站引用计数（归因）
+	sources := make([]string, 0, len(sourceSet))
+	for s := range sourceSet {
+		sources = append(sources, s)
+	}
 
 	return port.ProbeResult{
 		SampleCount:          totalSamples,
@@ -125,6 +135,8 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		SourceCount:          totalSamples,
 		BrandAppearanceCount: mentionCount,
 		Confidence:           computeProbeConfidence(rawSample, totalSamples),
+		Sources:              sources,
+		SelfSourceCount:      countSelfSources(sources, in.SelfBaseDomain),
 	}, nil
 }
 
@@ -148,13 +160,27 @@ func computeProbeConfidence(rawSample string, sampleCount int) float64 {
 }
 
 // generateProbeQuestions 生成多样化问法（原词 + 同义改写），避免缓存重复答案。
-func generateProbeQuestions(keyword string, count int) []string {
+// localContext 非空时插入位置型问法（本地生活 P0 补全）——
+// "望京附近有什么川菜馆"这类问法测的是真实本地决策场景（餐饮命脉）：
+//   - 位置词放前面（如"望京附近有什么川菜馆"），AI 会优先按本地检索
+//   - 本地问法优先于泛化问法（采样轮换时先命中本地场景）
+// 注意：关键词若已含位置（"北京装修公司哪家好"），本地问法拼接会冗余——
+// 用"关键词含区名则跳过本地问法"的启发式避免（区名来自 localContext 末段）。
+func generateProbeQuestions(keyword string, count int, localContext string) []string {
 	base := []string{
 		keyword,
 		"推荐一些" + keyword,
 		keyword + "哪家好",
 		"有了解过" + keyword + "吗",
 		"关于" + keyword + "，你有什么推荐的",
+	}
+	if localContext != "" {
+		local := []string{
+			localContext + "附近有什么" + keyword,
+			keyword + "，" + localContext + "哪家好",
+			localContext + "有什么值得推荐的" + keyword,
+		}
+		base = append(local, base...)
 	}
 	if count <= len(base) {
 		return base[:count]

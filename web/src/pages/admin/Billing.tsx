@@ -1,14 +1,28 @@
 import { Typography, Table, Tag, Space, Button, message, Popconfirm, Card, Row, Col, Statistic, Modal, Input, InputNumber, Form, Select, Divider, Tabs } from 'antd'
-import { DollarOutlined, CrownOutlined, TeamOutlined, RiseOutlined } from '@ant-design/icons'
+import { DollarOutlined, CrownOutlined, TeamOutlined, RiseOutlined, ThunderboltOutlined, FireOutlined, LineChartOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import type { Plan, Subscription } from '../../types/api'
+import type { Plan, Subscription, SceneCost } from '../../types/api'
 
 const { Text } = Typography
 
 const yuan = (cents: number) => `¥${(cents / 100).toFixed(2)}`
 const statusColor: Record<string, string> = { active: 'success', expired: 'default', cancelled: 'error', pending: 'processing', paid: 'success', failed: 'error', refunded: 'warning' }
+
+// X-01 成本分析：场景显示名 / 标签色 / 说明
+const sceneLabel = (s: string) => ({
+  monitor: '品牌监测', 'content-gen': '内容生成', 'content-opt': '内容优化',
+  chat: 'AI 对话', 'keyword-distill': '关键词蒸馏', diagnose: 'GEO 诊断',
+  nearby: '附近同行搜索', '': '（未标注场景）',
+}[s] || s)
+const sceneTagColor = (s: string) => ({ monitor: 'blue', 'content-gen': 'green', 'content-opt': 'cyan', chat: 'purple', diagnose: 'gold', nearby: 'orange' }[s] || 'default')
+const sceneNote = (r: SceneCost) =>
+  r.scene === 'nearby'
+    ? '地图 API 调用（非 LLM，按次计数）'
+    : r.scene === ''
+      ? '老版本未打场景标的历史数据'
+      : r.total_tokens > 0 ? `${(r.total_tokens / 1000).toFixed(0)}k tokens` : ''
 
 // 计费管理（管理后台）：收入概览 + 套餐管理 + 订阅/订单全局视图。
 export default function AdminBilling() {
@@ -19,6 +33,7 @@ export default function AdminBilling() {
   const [form] = Form.useForm()
 
   const { data: revenue } = useQuery({ queryKey: ['billing-revenue'], queryFn: () => businessApi.adminRevenueReport() })
+  const { data: cost } = useQuery({ queryKey: ['billing-cost'], queryFn: () => businessApi.adminCostAnalysis(30) }) // X-01 成本分析
   const { data: plansRes } = useQuery({ queryKey: ['admin-plans'], queryFn: () => businessApi.adminListPlans() })
   const { data: subsRes } = useQuery({ queryKey: ['admin-subs'], queryFn: () => businessApi.adminListSubscriptions() })
   const { data: ordersRes } = useQuery({ queryKey: ['admin-orders'], queryFn: () => businessApi.adminListOrders() })
@@ -173,6 +188,41 @@ export default function AdminBilling() {
                 <Table.Column title="支付方式" dataIndex="payment_gateway" key="gw" width={90} />
                 <Table.Column title="创建时间" dataIndex="created_at" key="created" width={130} render={(t) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.slice(0, 16).replace('T', ' ')}</Text>} />
               </Table>
+            ),
+          },
+          {
+            key: 'cost',
+            label: '成本分析',
+            children: (
+              <div>
+                <Row gutter={16}>
+                  <Col span={6}><Card><Statistic title="近 30 天 LLM 调用" value={cost?.total_calls || 0} prefix={<ThunderboltOutlined />} /></Card></Col>
+                  <Col span={6}><Card><Statistic title="近 30 天 tokens" value={cost?.total_tokens || 0} prefix={<FireOutlined />} /></Card></Col>
+                  <Col span={6}><Card><Statistic title="估算成本" value={yuan(cost?.total_cost_cents || 0)} prefix={<DollarOutlined />} /></Card></Col>
+                  <Col span={6}><Card>
+                    <Statistic title="当月收入 vs 成本" value={((revenue?.month_revenue_cents || 0) - (cost?.total_cost_cents || 0)) / 100} precision={2} prefix={<LineChartOutlined />} suffix="元" valueStyle={{ color: (revenue?.month_revenue_cents || 0) > (cost?.total_cost_cents || 0) ? 'var(--wr-success)' : 'var(--wr-danger)' }} />
+                  </Card></Col>
+                </Row>
+                <Card
+                  title="按场景成本明细"
+                  style={{ marginTop: 16 }}
+                  extra={<Text type="secondary" style={{ fontSize: 12 }}>参考单价 ¥{((cost?.per_m_token_cents || 0) / 100).toFixed(2)}/百万 tokens（LLM_COST_PER_MToken 配置）</Text>}
+                >
+                  <Table
+                    dataSource={cost?.scenes || []}
+                    rowKey="scene"
+                    size="small"
+                    pagination={false}
+                    locale={{ emptyText: '暂无用量数据（先触发监测/内容生成/对话等 LLM 调用）' }}
+                  >
+                    <Table.Column title="场景" dataIndex="scene" key="scene" render={(s) => <Tag color={sceneTagColor(s)} style={{ fontSize: 11 }}>{sceneLabel(s)}</Tag>} />
+                    <Table.Column title="调用次数" dataIndex="calls" key="calls" render={(c) => <Text strong>{c}</Text>} />
+                    <Table.Column title="Tokens" dataIndex="total_tokens" key="tokens" render={(t) => <Text>{t?.toLocaleString()}</Text>} />
+                    <Table.Column title="估算成本" dataIndex="est_cost_cents" key="cost" render={(c) => <Text strong>{yuan(c)}</Text>} />
+                    <Table.Column title="说明" key="note" render={(_: unknown, r: SceneCost) => <Text type="secondary" style={{ fontSize: 12 }}>{sceneNote(r)}</Text>} />
+                  </Table>
+                </Card>
+              </div>
             ),
           },
           {

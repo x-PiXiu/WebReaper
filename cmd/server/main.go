@@ -19,6 +19,7 @@ import (
 	"webreaper/internal/adapter/bing"
 	"webreaper/internal/adapter/crawler"
 	"webreaper/internal/adapter/crypto"
+	geoadapter "webreaper/internal/adapter/geo"
 	"webreaper/internal/adapter/handler"
 	"webreaper/internal/adapter/lock"
 	zaplogger "webreaper/internal/adapter/logger"
@@ -236,6 +237,10 @@ func main() {
 	var indexingUC *indexing.IndexingUseCase
 	if geoRepos != nil {
 		publicHandler := handler.NewPublicHandler(geoRepos.content, geoRepos.brand, structuredUC, cfg.Server.PublicBaseURL)
+		// 门店档案注入公开站（本地生活 P0：文章页 NAP 信息块 + JSON-LD 门店节点）
+		publicHandler.SetStoreRepo(geoRepos.store)
+		// 门店位置静态图（P2）：302 到高德静态地图，Key 不暴露给浏览器
+		publicHandler.SetStaticMapKey(cfg.AMap.APIKey)
 		router.SetPublic(publicHandler)
 
 		// 收录配置加载器：DB（system_settings）优先，env 兜底（main 装配层职责）
@@ -269,10 +274,14 @@ func main() {
 	var geoMonitorUCRef *geo.MonitorUseCase
 	var geoContentUCRef *geo.ContentUseCase
 	var geoDistillUCRef *geo.KeywordDistillUseCase
+	var geoNearbyUCRef *geo.NearbyUseCase      // X-01：附近同行配额注入用
+	var geoDiagnoseUCRef *geo.DiagnoseUseCase  // X-01：诊断配额注入用
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
 		geoScorer := ai.NewLLMGEOScorer(aiGenerator)
 		geoBrandUC := geo.NewBrandUseCase(geoRepos.brand, geoRepos.keyword)
 		geoBrandUC.SetAIGenerator(aiGenerator) // 关键词生成用
+		// 本地意图关键词（P0 补全）：品牌有门店时生成"望京 川菜馆"类本地搜索词
+		geoBrandUC.SetStoreRepo(geoRepos.store)
 
 		// WebFetcher 供 RAG 监测 + 关键词发现的 RAG 增强共用
 		webFetcher := ai.NewWebFetcher()
@@ -295,6 +304,11 @@ func main() {
 		log.Info("GEO 监测引擎：RoutingProbe（真实引擎直测 + Agent 模拟兜底）")
 
 		geoMonitorUC := geo.NewMonitorUseCase(geoRepos.brand, geoRepos.keyword, geoRepos.result, geoProbe)
+		// 归因生命线（P5-01）：注入自营公开站域名——探测统计"AI 回答引用的来源里
+		// 包含自营站内容的次数"，回答"我们做的内容到底有没有被 AI 引用"。
+		geoMonitorUC.SetSelfBaseDomain(cfg.Server.PublicBaseURL)
+		// 本地监测问法（P0 补全）：有门店时问"望京附近有什么川菜馆"——测本地生意
+		geoMonitorUC.SetStoreRepo(geoRepos.store)
 		geoMonitorUCRef = geoMonitorUC
 		geoRankUC := geo.NewRankUseCase(geoRepos.result)
 		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
@@ -311,13 +325,44 @@ func main() {
 		}
 		geoContentUC.SetPromptTemplateRepo(promptTemplateRepo)
 		router.SetPromptTemplates(promptTemplateRepo) // admin 管理端点（列表/热更新）
+
+		// 本地生活改造（P0/P1/P2）：门店档案 + 高德位置服务 + 附近同行双榜。
+		// 策略模式 + 双实现降级：配置 AMAP_API_KEY 走高德真实 API，
+		// 否则 mock 降级（门店照常创建 geo_status=pending，附近同行只显示 AI 榜）。
+		geoLocator := geoadapter.NewAmapGeoCoder(cfg.AMap.APIKey)
+		geoPOISearcher := geoadapter.NewAmapPOISearcher(cfg.AMap.APIKey, cfg.AMap.APIVersion)
+		geoInputTipper := geoadapter.NewAmapInputTipper(cfg.AMap.APIKey)          // P1 地址联想
+		geoMeasurer := geoadapter.NewAmapDistanceMeasurer(cfg.AMap.APIKey)        // P2 驾车耗时
+		if cfg.AMap.IsConfigured() {
+			log.Info("本地生活位置服务已启用（高德：地理编码 + 周边 POI 搜索 v"+cfg.AMap.APIVersion+" + 地址联想 + 距离测量）")
+		} else {
+			log.Info("本地生活位置服务未配置 AMAP_API_KEY（门店暂不编码，附近同行仅 AI 榜）")
+		}
+		router.SetInputTipper(geoInputTipper)
+		geoStoreUC := geo.NewStoreLocationUseCase(geoRepos.store, geoRepos.brand)
+		geoStoreUC.SetLocator(geoLocator)
+		// 内容生成注入门店 NAP（地址/营业时间/电话——本地信任信号，P0-04）
+		geoContentUC.SetStoreRepo(geoRepos.store)
+		geoNearbyUC := geo.NewNearbyUseCase(geoRepos.brand, geoRepos.store, geoRepos.result)
+		geoNearbyUC.SetPOISearcher(geoPOISearcher)
+		geoNearbyUC.SetDistanceMeasurer(geoMeasurer) // P2 驾车耗时（未配置自动降级）
+		geoNearbyUCRef = geoNearbyUC
+		router.SetGeoLocal(geoStoreUC, geoNearbyUC)
+		// 行动建议（P5-05：规则引擎，给老板"下一步做什么"）
+		router.SetAdvice(geo.NewAdviceUseCase(geoRepos.brand, geoRepos.store, geoRepos.result, geoRepos.content))
+		// 内容引用统计（P5-02：每篇被 AI 引用几次——评分校准数据源）
+		router.SetCitation(geo.NewCitationUseCase(geoRepos.result))
+
 		// 收录通知（IndexNow）：发布为 published 时自动通知搜索引擎
 		if indexNowSubmitter != nil {
 			geoContentUC.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 			geoContentUC.SetURLSubmitter(indexNowSubmitter)
 		}
 		geoDiagnoseUC := geo.NewDiagnoseUseCase(geoRepos.brand, geoRepos.result, aiGenerator)
+		geoDiagnoseUCRef = geoDiagnoseUC
 		router.SetGEO(geoBrandUC, geoMonitorUC, geoRankUC, geoContentUC, geoDiagnoseUC)
+		// 诊断→优化闭环（P5-03）：生成内容时可选择"先诊断再对症下药"
+		geoContentUC.SetDiagnoseUC(geoDiagnoseUC)
 
 		// 关键词蒸馏引擎：五种来源策略（策略模式 + 工厂）
 		brandWebSearcher := ai.NewBrandWebSearcher(webFetcher)
@@ -429,6 +474,9 @@ func main() {
 		// 配额检查门（计数派生型：plan 配额 vs usages 表当月用量）
 		// 注入到烧 token 的 usecase——超限返回 ErrQuotaExceeded → HTTP 402
 		usageRecorder := repository.NewGormUsageRecorder(geoRepos.db)
+		// X-01 商业闭环成本侧：成本分析（admin 报表）——参考单价来自 LLM_COST_PER_MToken
+		billingUC.SetUsageStats(usageRecorder)
+		billingUC.SetReferencePricePerMToken(cfg.LLM.CostPerMTokenCents)
 		quotaGate := quota.NewGate(planRepo, subRepo, usageRecorder)
 		router.SetQuotaGate(quotaGate) // ChatHandler 等无独立 usecase 的端点用
 		if geoContentUCRef != nil {
@@ -440,7 +488,15 @@ func main() {
 		if geoDistillUCRef != nil {
 			geoDistillUCRef.SetQuotaGate(quotaGate)
 		}
-		log.Info("配额检查已启用（content-opt/content-gen/monitor/keyword-distill 超限返回 402）")
+		// X-01 新场景计量：附近同行（nearby）+ 诊断（diagnose）配额
+		if geoNearbyUCRef != nil {
+			geoNearbyUCRef.SetQuotaGate(quotaGate)
+			geoNearbyUCRef.SetUsageRecorder(usageRecorder)
+		}
+		if geoDiagnoseUCRef != nil {
+			geoDiagnoseUCRef.SetQuotaGate(quotaGate)
+		}
+		log.Info("配额检查已启用（content-opt/content-gen/monitor/keyword-distill/nearby/diagnose 超限返回 402）")
 	}
 
 	// 平台系统设置（运行时开关：自动盯盘等）——管理后台可切换，调度器即时生效
@@ -467,11 +523,21 @@ func main() {
 			repository.NewGormVideoTaskRepository(geoRepos.db),
 			repository.NewGormVideoJobRepository(geoRepos.db),
 			videoProvider,
-			nil, // 配音 TTS 未接入（跳过配音阶段，直接生成原视频）
-			nil, // 合成器未接入（跳过合成阶段）
+			nil, // 【暂缓】配音 TTS 未接入（goffmpeg 视频编辑域——本轮不做，见
+			//     Docs/Plans/01-本地生活GEO改造与优化完善计划.md § P3-03/P4；
+			//     后续接入 port.VoiceSynthesizer 实现即可，用例层零改动）
+			nil, // 【暂缓】合成器未接入（同上 goffmpeg 域：地址字幕叠加/封面合并等）
 			log,
 		)
 		router.SetVideo(videoUC)
+		// 【暂缓】Vidu 视频生成域当前状态与完善细节（对接内容本轮不做，仅标记）：
+		//   · 现状：provider.NewViduProvider 已实现真实 API 对接（文生视频/图生视频/延长/
+		//     多帧等任务类型 + 任务轮询 + 回调），视频生成→就绪单段流水线可用；
+		//     未配 key 走 mock（成片 URL 为占位地址）。
+		//   · 缺口：① 地址注入（P3-03：文案/封面叠"📍 地址"）；② 配音/合成（goffmpeg）；
+		//     ③ 发布到抖音带定位（P4，需抖音来客/服务商资质或 RPA 定位——平台层暂缓）。
+		//   · 完善入口：usecase/video/video.go 的 stepGenerate 后各阶段 + adapter/provider/vidu.go
+		//     （提示词模板支持地址文本），前端 web/src/pages/merchant/Video.tsx 发布表单。
 	}
 
 	// 管理端装配（用户管理，仅 admin）
@@ -581,6 +647,7 @@ type geoRepos struct {
 	keyword port.KeywordRepository
 	result  port.MonitoringResultRepository
 	content port.OptimizedContentRepository
+	store   port.StoreLocationRepository // 门店档案（本地生活 GEO 地基）
 }
 
 // seedPromptTemplates 首次启动写入内置默认提示词模板（已存在则跳过，保留运营修改）。
@@ -612,6 +679,7 @@ func initGEORpositories(dbCfg config.DBConfig) *geoRepos {
 		keyword: repository.NewGormKeywordRepository(db),
 		result:  repository.NewGormMonitoringResultRepository(db),
 		content: repository.NewGormOptimizedContentRepository(db),
+		store:   repository.NewGormStoreLocationRepository(db),
 	}
 }
 

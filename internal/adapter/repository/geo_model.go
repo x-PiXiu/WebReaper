@@ -35,6 +35,30 @@ type KeywordPO struct {
 
 func (KeywordPO) TableName() string { return "geo_keywords" }
 
+// StoreLocationPO 门店档案（本地生活 GEO 地基；迁移 028）。
+type StoreLocationPO struct {
+	ID         string    `gorm:"primaryKey;size:64"`
+	TenantID   string    `gorm:"size:64;index"`
+	BrandID    string    `gorm:"size:64;index"`
+	Name       string    `gorm:"size:128"`
+	Address    string    `gorm:"size:256"`
+	City       string    `gorm:"size:64"`
+	District   string    `gorm:"size:64"`
+	Adcode     string    `gorm:"size:16"`
+	Lat        float64   `gorm:"type:decimal(10,6)"`
+	Lng        float64   `gorm:"type:decimal(10,6)"`
+	Phone      string    `gorm:"size:32"`
+	Hours      string    `gorm:"size:64"`
+	PriceLevel string    `gorm:"size:16"`
+	BizType    string    `gorm:"size:32"`
+	BusinessArea string  `gorm:"size:64"` // 所属商圈（P1 逆地理编码回填）
+	GeoStatus  string    `gorm:"size:16"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+func (StoreLocationPO) TableName() string { return "geo_store_locations" }
+
 // MonitoringResultPO 监测结果（核心数据资产）。
 type MonitoringResultPO struct {
 	ID           string         `gorm:"primaryKey;size:64"`
@@ -54,6 +78,8 @@ type MonitoringResultPO struct {
 	Confidence   float64        `gorm:"type:decimal(4,3)"`
 	ProbedAt     time.Time      `gorm:"index"`
 	RawSample    string         `gorm:"type:text"`
+	Sources      datatypes.JSON `gorm:"type:json"` // 引用来源（链接/平台名，去重；P5-01）
+	SelfSourceCount int         `gorm:"default:0"` // 自营公开站被引用次数（P5-01 归因）
 }
 
 func (MonitoringResultPO) TableName() string { return "geo_monitoring_results" }

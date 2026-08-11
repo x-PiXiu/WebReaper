@@ -19,6 +19,7 @@ type jsonldInput struct {
 	BrandName    string    // 品牌/组织名（Organization/Product 用）
 	PublishDate  time.Time // 发布日期（可选）
 	ForceArticle bool      // 固定为 Article（公开文章页——避免"套餐/价格"等词误判 Product）
+	Store        *entity.StoreLocation // 门店（可选；本地生活 P0：输出 @graph 双节点）
 }
 
 // buildJSONLD 按类型构建 JSON-LD 文本（纯函数，可单测；不调 LLM）。
@@ -74,20 +75,17 @@ func buildJSONLD(in jsonldInput) (entity.StructuredData, error) {
 			if desc := extractDescription(in.Content); desc != "" {
 				data["description"] = desc
 			}
-			return entity.StructuredData{
-				Type:   st,
-				JSONLD: marshalIndent(data),
-			}, nil
+		} else {
+			mainEntity := make([]map[string]any, 0, len(pairs))
+			for _, p := range pairs {
+				mainEntity = append(mainEntity, map[string]any{
+					"@type":          "Question",
+					"name":           p.Question,
+					"acceptedAnswer": map[string]any{"@type": "Answer", "text": p.Answer},
+				})
+			}
+			data["mainEntity"] = mainEntity
 		}
-		mainEntity := make([]map[string]any, 0, len(pairs))
-		for _, p := range pairs {
-			mainEntity = append(mainEntity, map[string]any{
-				"@type":          "Question",
-				"name":           p.Question,
-				"acceptedAnswer": map[string]any{"@type": "Answer", "text": p.Answer},
-			})
-		}
-		data["mainEntity"] = mainEntity
 
 	case entity.SchemaProduct:
 		data["name"] = in.Title
@@ -129,10 +127,73 @@ func buildJSONLD(in jsonldInput) (entity.StructuredData, error) {
 		data["url"] = in.URL
 	}
 
+	// 门店 NAP 增强（本地生活 P0）：提供门店时输出 @graph 双节点——
+	// [文章主节点, 门店节点]。门店节点携带地址/电话/营业时间/坐标，
+	// 是 AI 回答"附近/本地"问题时的核心结构化信号。
+	if in.Store != nil {
+		return entity.StructuredData{
+			Type: st,
+			JSONLD: marshalIndent(map[string]any{
+				"@context": "https://schema.org",
+				"@graph":   []any{data, buildStoreJSONLDNode(in)},
+			}),
+		}, nil
+	}
+
 	return entity.StructuredData{
 		Type:   st,
 		JSONLD: marshalIndent(data),
 	}, nil
+}
+
+// buildStoreJSONLDNode 构建门店 JSON-LD 节点（纯函数，可单测）。
+// @type 取门店业态（Restaurant/Cafe/Bar/Store），默认 LocalBusiness（schema.org 通用）。
+func buildStoreJSONLDNode(in jsonldInput) map[string]any {
+	s := in.Store
+	if s == nil {
+		return nil
+	}
+	bizType := s.BizType
+	if bizType == "" {
+		bizType = "LocalBusiness"
+	}
+	name := s.Name
+	if name == "" {
+		name = in.BrandName
+	}
+	if name == "" {
+		name = in.Title
+	}
+	node := map[string]any{
+		"@type": bizType,
+		"name":  name,
+	}
+	if s.Address != "" {
+		addr := map[string]any{"@type": "PostalAddress", "streetAddress": s.Address}
+		if s.District != "" {
+			addr["addressRegion"] = s.District
+		}
+		if s.City != "" {
+			addr["addressLocality"] = s.City
+		}
+		node["address"] = addr
+	}
+	if s.Lat != 0 && s.Lng != 0 {
+		node["geo"] = map[string]any{"@type": "GeoCoordinates", "latitude": s.Lat, "longitude": s.Lng}
+	}
+	if s.Phone != "" {
+		node["telephone"] = s.Phone
+	}
+	if s.Hours != "" {
+		node["openingHours"] = s.Hours
+	}
+	if s.PriceLevel != "" {
+		node["priceRange"] = s.PriceLevel
+	}
+	if in.URL != "" {
+		node["url"] = in.URL // 门店无独立页，指向文章页
+	}
+	return node
 }
 
 // marshalIndent 序列化为带缩进的 JSON（LLM/AI 爬虫易读，也是调试友好）。

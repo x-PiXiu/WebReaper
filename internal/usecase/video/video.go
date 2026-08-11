@@ -130,14 +130,19 @@ func (uc *VideoUseCase) pipeline(ctx context.Context, taskID string) {
 		uc.fail(ctx, task, err)
 		return
 	}
-	// ② 配音（未配置则跳过）
+	// ② 配音（未配置则跳过）——【暂缓】goffmpeg 视频编辑域：
+	//    TTS 音轨合成 + 画面拼接（goffmpeg 集成）本轮不做，仅标记：
+	//    完善细节见 Docs/Plans/01-本地生活GEO改造与优化完善计划.md § P3-03/P4
+	//    后续接入：adapter/voice/*（TTS 厂商）+ adapter/compose/goffmpeg.go
+	//    （ffmpeg 命令行封装：文字叠加地址/字幕/封面合并，经 port.VoiceSynthesizer /
+	//    port.VideoComposer 注入即可，用例层零改动）
 	if task.VoiceText != "" && uc.voice != nil {
 		if err := uc.stepDub(ctx, &task, log); err != nil {
 			uc.fail(ctx, task, err)
 			return
 		}
 	}
-	// ③ 合成（未配置则跳过——直接用原视频）
+	// ③ 合成（未配置则跳过——直接用原视频）——【暂缓】同上 goffmpeg 域
 	if uc.composer != nil && task.VoiceURL != "" {
 		if err := uc.stepCompose(ctx, &task, log); err != nil {
 			uc.fail(ctx, task, err)

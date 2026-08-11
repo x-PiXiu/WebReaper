@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary } from '../types/api'
+import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -80,6 +80,38 @@ export const businessApi = {
   deleteBrand: (id: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/geo/brands/${id}`),
 
+  // ---- GEO 门店档案（本地生活地基）----
+  listStoreLocations: (brandId: string) =>
+    apiClient.get<unknown, StoreLocation[]>(`/api/v1/geo/brands/${brandId}/store-locations`),
+
+  createStoreLocation: (brandId: string, data: { name?: string; address: string; phone?: string; hours?: string; price_level?: string; biz_type?: string }) =>
+    apiClient.post<unknown, StoreLocation>(`/api/v1/geo/brands/${brandId}/store-locations`, data),
+
+  updateStoreLocation: (brandId: string, storeId: string, data: { name?: string; address?: string; phone?: string; hours?: string; price_level?: string; biz_type?: string }) =>
+    apiClient.put<unknown, StoreLocation>(`/api/v1/geo/brands/${brandId}/store-locations/${storeId}`, data),
+
+  deleteStoreLocation: (brandId: string, storeId: string) =>
+    apiClient.delete<unknown, unknown>(`/api/v1/geo/brands/${brandId}/store-locations/${storeId}`),
+
+  reGeocodeStoreLocation: (brandId: string, storeId: string) =>
+    apiClient.post<unknown, StoreLocation>(`/api/v1/geo/brands/${brandId}/store-locations/${storeId}/re-geocode`),
+
+  // ---- GEO 附近同行双榜（现实世界地图榜 + AI 竞品榜）----
+  getNearbyCompetitors: (brandId: string, types?: string) =>
+    apiClient.get<unknown, NearbyRanking>(`/api/v1/geo/brands/${brandId}/nearby-competitors`, { params: { types } }),
+
+  // ---- GEO 行动建议（P5-05：给老板"下一步做什么"）----
+  getAdvice: (brandId: string) =>
+    apiClient.get<unknown, { advices: Advice[] }>(`/api/v1/geo/brands/${brandId}/advice`),
+
+  // ---- GEO 内容引用统计（P5-02：每篇被 AI 引用几次，归因细化到篇）----
+  getContentCitations: (brandId: string) =>
+    apiClient.get<unknown, Record<string, number>>(`/api/v1/geo/brands/${brandId}/citations`),
+
+  // ---- 地址联想（P1 输入提示：门店建档边输入边联想）----
+  suggestLocations: (q: string, city?: string, location?: string) =>
+    apiClient.get<unknown, LocationTip[]>(`/api/v1/geo/location/suggest`, { params: { q, city, location } }),
+
   // ---- GEO 关键词 ----
   listKeywords: (brandId: string) =>
     apiClient.get<unknown, Keyword[]>(`/api/v1/geo/brands/${brandId}/keywords`),
@@ -151,7 +183,7 @@ export const businessApi = {
     apiClient.get<unknown, OptimizedContent[]>(`/api/v1/geo/brands/${brandId}/contents`),
 
   // 从零生成内容（根据品牌信息+关键词，AI原创一篇 GEO 文章；支持单/多关键词组合）
-  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string }) =>
+  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean }) =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/generate`, data),
 
   // 内容状态流转：draft ↔ published（published 后公开站可访问，AI 引擎可爬取）
@@ -311,6 +343,9 @@ export const businessApi = {
     apiClient.get<unknown, { orders: Order[] }>('/api/v1/admin/billing/orders'),
   adminRevenueReport: () =>
     apiClient.get<unknown, RevenueSummary>('/api/v1/admin/billing/revenue'),
+  // X-01 成本分析（收入 vs 成本双报表）
+  adminCostAnalysis: (days = 30) =>
+    apiClient.get<unknown, CostAnalysis>(`/api/v1/admin/billing/cost-analysis?days=${days}`),
   adminGetPaymentConfig: () =>
     apiClient.get<unknown, { config: Record<string, string> }>('/api/v1/admin/billing/payment-config'),
   adminSetPaymentConfig: (cfg: { gateway: string; pid: string; key: string; notify_url: string; return_url: string }) =>

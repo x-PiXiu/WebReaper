@@ -20,6 +20,15 @@ import (
 //   - 实现 port.AutoPublishChannel 可选接口（不修改现有 PublishChannel）
 //   - 浏览器自动化细节全部关在此文件，用例层零感知
 //   - 每个平台一个 struct，共用 cookie 注入和浏览器启动逻辑
+//
+// 【暂缓·P4 平台定位探路】"添加定位"（POI 挂载）未实现：
+//   - 抖音/小红书发布时模拟"添加定位"（发布页点定位 → 搜索地址 → 选中）
+//   - 状态：仅标记，不做。原因：视频+定位是平台风控重点区；抖音 POI 挂载官方
+//     通道需"抖音来客/企业号 + 本地生活服务商资质"（资质问题非技术问题）。
+//   - 完善路径：先人工验证（内测账号手操 10 次记录风控表现）→ 再在 PublishAuto
+//     发布流程末尾追加定位步骤（地址来自 job.StoreAddress，字段已落库）；业务侧
+//     零改动（PublishJob.StoreAddress 已就位，见 usecase/account/account.go）。
+//   - 半自动兜底：前端"分发中心"提供定位操作指引（手动选定位，最稳）。
 
 // allocOpts 反检测浏览器选项（与 qrlogin 模块一致）
 func allocOpts() []chromedp.ExecAllocatorOption {

@@ -348,6 +348,25 @@ export default function Distribution() {
           <p>账号池维护 · 内容一键发布到各社媒平台 · 发布后提及率复测</p>
         </div>
 
+        {/* P4-03 半自动定位指引：平台 POI 挂载（RPA 自动定位暂缓） */}
+        <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
+          <Space align="start" style={{ width: '100%' }}>
+            <LinkOutlined style={{ color: 'var(--wr-warning)', marginTop: 3 }} />
+            <div style={{ flex: 1 }}>
+              <Text strong style={{ fontSize: 14 }}>📍 发布带定位 = 附近搜索曝光（半自动指引）</Text>
+              <Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 8px' }}>
+                平台"添加定位"（POI 挂载）自动化为暂缓项（RPA 定位风控高、抖音官方通道需服务商资质）——先用最稳的半自动方式：
+              </Paragraph>
+              <Space direction="vertical" size={2} style={{ fontSize: 12, color: 'var(--wr-text-secondary)' }}>
+                <div>① 门店档案维护好真实地址（品牌管理 → 附近同行 → 门店档案）</div>
+                <div>② 发布内容已自动附带"📍 门店地址"行（发布时 store_address 非空）</div>
+                <div>③ 平台发布页手动选择"添加定位 → 搜索门店地址 → 选中"后发布</div>
+                <div>④ 带定位的内容更容易被附近的人搜到，也增强 AI 本地回答的引用概率</div>
+              </Space>
+            </div>
+          </Space>
+        </Card>
+
         {/* ===== ① 账号池 ===== */}
         <Row gutter={[16, 16]} className="wr-stagger" style={{ marginBottom: 16 }}>
           {PLATFORMS.map((pf) => {

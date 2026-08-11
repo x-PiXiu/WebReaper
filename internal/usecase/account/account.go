@@ -215,6 +215,9 @@ type PublishInput struct {
 	Mode      string // semi-auto / auto
 	// ScheduledAt 排期发布时间（零值 = 立即发布；将来时间 = 定时发送）。
 	ScheduledAt time.Time
+	// StoreAddress 门店地址（本地生活 P3：内容层本地曝光信号）。
+	// 非空时正文尾部附加"📍 地址"，并留档供平台定位（P4 暂缓）。
+	StoreAddress string
 }
 
 // appendPublicLink 在发布内容尾部追加公开站链接（纯函数，可单测）。
@@ -258,6 +261,11 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 	publishContent := pkg.MarkdownToPlainText(pkg.StripThinkTags(in.Content))
 	// 公开站链接兜尾（平台差异：知乎加外链加速爬虫发现；小红书加外链易触发限流，不加）
 	publishContent = appendPublicLink(publishContent, in.Platform, uc.publicBaseURL, in.ContentID)
+	// 门店地址注入（本地生活 P3：内容层本地曝光信号——正文尾部附"📍 地址"。
+	// 全平台安全（纯文本内容，不触平台规则）；平台"添加定位"能力见 P4，暂缓）。
+	if in.StoreAddress != "" {
+		publishContent = strings.TrimRight(publishContent, "\n") + "\n\n📍 门店地址：" + in.StoreAddress
+	}
 	// 标题：优先用调用方传入（内容工作台已带标题），空或过短则从正文提取
 	publishTitle := pkg.StripThinkTags(in.Title)
 	if publishTitle == "" || len(publishTitle) < 4 {
@@ -277,6 +285,7 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		Mode:      mode,
 		Status:    entity.PublishStatusPending,
 		CreatedAt: now,
+		StoreAddress: in.StoreAddress,
 	}
 
 	// 定时发送：ScheduledAt 在未来 → 仅落库 pending，到期由调度任务执行发布

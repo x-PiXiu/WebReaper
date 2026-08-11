@@ -26,6 +26,9 @@ type StructuredDataInput struct {
 	BrandName   string    // 品牌/组织名（可选；Organization/Product 用）
 	PublishDate time.Time // 发布日期（可选）
 	ForceArticle bool     // 固定为 Article 类型（公开文章页用——避免"套餐/价格"等词误判 Product）
+	Store       *entity.StoreLocation // 门店信息（可选；本地生活 P0：提供时输出 @graph 双节点
+	                                  // [Article/FAQPage, LocalBusiness]——地址/电话/营业时间/坐标
+	                                  // 是本地搜索的核心结构化信号）
 }
 
 // StructuredDataUseCase 是结构化数据生成用例。
@@ -53,6 +56,7 @@ func (uc *StructuredDataUseCase) GenerateJSONLD(ctx context.Context, in Structur
 		BrandName:    strings.TrimSpace(in.BrandName),
 		PublishDate:  in.PublishDate,
 		ForceArticle: in.ForceArticle,
+		Store:        in.Store,
 	})
 }
 

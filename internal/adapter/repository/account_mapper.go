@@ -33,7 +33,7 @@ func publishJobToPO(e entity.PublishJob) PublishJobPO {
 		Mode: e.Mode, Status: e.Status, ExternalURL: e.ExternalURL,
 		ErrorMsg: e.ErrorMsg, CreatedAt: e.CreatedAt, PublishedAt: e.PublishedAt,
 		PreMentionRate: e.PreMentionRate, PostMentionRate: e.PostMentionRate,
-		ScheduledAt: e.ScheduledAt,
+		ScheduledAt: e.ScheduledAt, StoreAddress: e.StoreAddress,
 	}
 }
 
@@ -52,6 +52,6 @@ func publishJobFromPO(p PublishJobPO) entity.PublishJob {
 		Mode: mode, Status: status, ExternalURL: p.ExternalURL,
 		ErrorMsg: p.ErrorMsg, CreatedAt: p.CreatedAt, PublishedAt: p.PublishedAt,
 		PreMentionRate: p.PreMentionRate, PostMentionRate: p.PostMentionRate,
-		ScheduledAt: p.ScheduledAt,
+		ScheduledAt: p.ScheduledAt, StoreAddress: p.StoreAddress,
 	}
 }

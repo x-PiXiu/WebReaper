@@ -29,6 +29,7 @@ type BrandUseCase struct {
 	keywordRepo port.KeywordRepository
 	aiGen       port.AIGenerator // 可选：关键词生成用
 	webSearch   port.WebSearcher // 可选：全网搜索（RAG 增强关键词发现）
+	storeRepo   port.StoreLocationRepository // 可选：门店档案（本地意图关键词生成用）
 }
 
 // WebSearcher 全网搜索抽象（用例层声明，适配器实现）。
@@ -50,6 +51,15 @@ func (uc *BrandUseCase) SetAIGenerator(ai port.AIGenerator) {
 // SetWebSearcher 注入全网搜索器（RAG 增强关键词发现；未注入则纯 LLM 推断）。
 func (uc *BrandUseCase) SetWebSearcher(ws port.WebSearcher) {
 	uc.webSearch = ws
+}
+
+// SetStoreRepo 注入门店档案仓储（可选；本地生活 P0 补全）。
+// 注入后关键词生成自动附加门店位置（城市/区），产出"望京 川菜馆"类本地意图词——
+// 实体餐饮的核心搜索入口。
+func (uc *BrandUseCase) SetStoreRepo(r port.StoreLocationRepository) {
+	if r != nil {
+		uc.storeRepo = r
+	}
 }
 
 // BrandInput 创建/更新品牌的输入。
@@ -195,6 +205,17 @@ func (uc *BrandUseCase) GenerateKeywords(ctx context.Context, tenantID, brandID 
 竞品：%s
 `, brand.Name, brand.Positioning, sellingPoints, competitors)
 
+	// 本地意图关键词（本地生活 P0 补全）：品牌有门店时注入位置，
+	// 要求生成含"城市/区+品类"的本地搜索词（如"望京 川菜馆""朝阳区 聚餐餐厅"）——
+	// 实体业态的命脉搜索入口，纯 LLM 凭卖点生成不出来。
+	if localCtx := uc.buildLocalKeywordContext(ctx, brandID); localCtx != "" {
+		userPrompt += fmt.Sprintf(`
+门店位置：%s
+
+请额外生成包含门店位置（城市/区/商圈）的本地搜索词——如"望京 川菜馆"、"朝阳区 适合聚餐的餐厅"这类用户搜附近门店时会用的词。
+`, localCtx)
+	}
+
 	if webContext != "" {
 		userPrompt += fmt.Sprintf(`
 全网相关内容摘要（真实用户/作者在关注的话题）：
@@ -250,6 +271,36 @@ func (uc *BrandUseCase) GenerateKeywords(ctx context.Context, tenantID, brandID 
 	// 过滤 <think> 块后再解析关键词
 	resp = pkg.StripThinkTags(resp)
 	return parseKeywordLines(resp), nil
+}
+
+// buildLocalKeywordContext 取品牌主门店并格式化为本地关键词上下文（纯文本，零失败风险）。
+// 未注入仓储/品牌无门店时返回空串（行为与改造前一致——不强制本地化）。
+// 位置优先级：商圈 > 区 > 城市（P1 商圈补全后，"望京"比"朝阳区"更贴近真实搜索意图）。
+func (uc *BrandUseCase) buildLocalKeywordContext(ctx context.Context, brandID string) string {
+	if uc.storeRepo == nil || brandID == "" {
+		return ""
+	}
+	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)
+	if err != nil {
+		return ""
+	}
+	// 地理编码回填的商圈/区/城市；编码失败（pending）时用地址前半段兜底
+	if ctx := localContextFromStore(store); ctx != "" {
+		return ctx + "（" + store.Address + "）"
+	}
+	return store.Address
+}
+
+// localContextFromStore 从门店提取本地位置上下文（P1 商圈补全，关键词生成/监测问法共用）：
+// 商圈 > 区 > 城市——商圈级（如"望京"）最贴近"附近"搜索意图，无商圈数据逐级回退。
+func localContextFromStore(s entity.StoreLocation) string {
+	if s.BusinessArea != "" {
+		return s.BusinessArea
+	}
+	if s.District != "" {
+		return s.District
+	}
+	return s.City
 }
 
 // parseKeywordLines 从 LLM 响应解析关键词列表（去编号/markdown/说明性文字）。

@@ -172,6 +172,66 @@ func (r *GormKeywordRepository) Count(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// ============ StoreLocationRepository ============
+
+type GormStoreLocationRepository struct{ db *gorm.DB }
+
+var _ port.StoreLocationRepository = (*GormStoreLocationRepository)(nil)
+
+func NewGormStoreLocationRepository(db *gorm.DB) *GormStoreLocationRepository {
+	return &GormStoreLocationRepository{db: db}
+}
+
+func (r *GormStoreLocationRepository) Save(ctx context.Context, s entity.StoreLocation) error {
+	po := storeLocationToPO(s)
+	return r.db.WithContext(ctx).Save(&po).Error
+}
+
+func (r *GormStoreLocationRepository) FindByID(ctx context.Context, tenantID, id string) (entity.StoreLocation, error) {
+	var po StoreLocationPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	err := q.Where("id = ?", id).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.StoreLocation{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.StoreLocation{}, err
+	}
+	return storeLocationFromPO(po), nil
+}
+
+func (r *GormStoreLocationRepository) ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.StoreLocation, error) {
+	var pos []StoreLocationPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	if err := q.Where("brand_id = ?", brandID).Order("created_at ASC").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.StoreLocation, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, storeLocationFromPO(p))
+	}
+	return out, nil
+}
+
+// FindPrimaryByBrand 公开查询：取品牌主门店（最早创建的；不限租户——
+// 公开内容站 NAP 注入/周边搜索中心点用，不暴露其他租户数据）。
+func (r *GormStoreLocationRepository) FindPrimaryByBrand(ctx context.Context, brandID string) (entity.StoreLocation, error) {
+	var po StoreLocationPO
+	err := r.db.WithContext(ctx).Where("brand_id = ?", brandID).Order("created_at ASC").First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.StoreLocation{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.StoreLocation{}, err
+	}
+	return storeLocationFromPO(po), nil
+}
+
+func (r *GormStoreLocationRepository) Delete(ctx context.Context, tenantID, id string) error {
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	return q.Where("id = ?", id).Delete(&StoreLocationPO{}).Error
+}
+
 // ============ MonitoringResultRepository ============
 
 type GormMonitoringResultRepository struct{ db *gorm.DB }

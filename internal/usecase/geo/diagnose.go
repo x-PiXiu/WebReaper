@@ -20,10 +20,20 @@ type DiagnoseUseCase struct {
 	brandRepo  port.BrandRepository
 	resultRepo port.MonitoringResultRepository
 	aiGen      port.AIGenerator // 生成自然语言改进建议
+	quotaGate  port.QuotaStore  // 配额检查门（可选；X-01：diagnose 场景按次限额）
 }
 
 func NewDiagnoseUseCase(br port.BrandRepository, rr port.MonitoringResultRepository, ai port.AIGenerator) *DiagnoseUseCase {
 	return &DiagnoseUseCase{brandRepo: br, resultRepo: rr, aiGen: ai}
+}
+
+// SetQuotaGate 注入配额检查门（可选；X-01 经济系统收口——诊断烧 token（RAG+LLM 建议），
+// 超限返回 ErrQuotaExceeded → HTTP 402）。注意：内容生成的"按诊断建议生成"走
+// content-gen 配额，独立诊断端点（/geo/brands/:id/diagnose）走 diagnose 配额。
+func (uc *DiagnoseUseCase) SetQuotaGate(g port.QuotaStore) {
+	if g != nil {
+		uc.quotaGate = g
+	}
 }
 
 // DiagnoseInput 诊断输入。
@@ -35,6 +45,16 @@ type DiagnoseInput struct {
 
 // Diagnose 执行诊断：聚合监测结果 → 分析问题 → 生成改进建议。
 func (uc *DiagnoseUseCase) Diagnose(ctx context.Context, in DiagnoseInput) (entity.DiagnoseReport, error) {
+	// 配额检查（X-01：diagnose 场景；超限 402）
+	if uc.quotaGate != nil {
+		if err := uc.quotaGate.Check(ctx, in.TenantID, "diagnose"); err != nil {
+			return entity.DiagnoseReport{}, err
+		}
+	}
+	// 用量计量上下文（X-01）：诊断内部的 LLM 调用（llmSuggestions）落 usages 表，
+	// 场景=diagnose——配额计数与成本统计同源。
+	ctx = port.WithUsageContext(ctx, in.TenantID, "diagnose")
+
 	brand, err := uc.brandRepo.FindByID(ctx, in.TenantID, in.BrandID)
 	if err != nil {
 		return entity.DiagnoseReport{}, fmt.Errorf("品牌不存在: %w", err)
