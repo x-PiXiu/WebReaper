@@ -94,7 +94,7 @@ func (h *GenerationHandler) HandleList(c *gin.Context) {
 	success(c, gin.H{"tasks": out})
 }
 
-// HandleTypes GET /api/v1/generation/types —— 端点类型 + 模型列表（前端表单驱动）。
+// HandleTypes GET /api/v1/generation/types —— 端点类型 + 模型能力向量（前端表单驱动）。
 func (h *GenerationHandler) HandleTypes(c *gin.Context) {
 	if h.uc == nil {
 		fail(c, fmt.Errorf("生成服务未配置"))
@@ -103,7 +103,14 @@ func (h *GenerationHandler) HandleTypes(c *gin.Context) {
 	types := h.uc.Types()
 	out := make([]gin.H, 0, len(types))
 	for _, t := range types {
-		models, _ := h.uc.Models(c.Request.Context(), t)
+		caps, err := h.uc.Capabilities(c.Request.Context(), t)
+		if err != nil {
+			continue
+		}
+		models := make([]gin.H, 0, len(caps))
+		for _, cap := range caps {
+			models = append(models, gin.H{"model": cap.Model, "capability": cap})
+		}
 		out = append(out, gin.H{"sub_type": t, "models": models})
 	}
 	success(c, gin.H{"types": out})

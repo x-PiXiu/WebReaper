@@ -38,7 +38,7 @@ const baseMenu: NavItem[] = [
     key: 'creation', label: '创作',
     children: [
       { key: '/m/content', label: '内容工作台', icon: <EditOutlined /> },
-      { key: '/m/video', label: '视频工作台', icon: <VideoCameraOutlined /> },
+      { key: '/m/creation', label: '创作工作台', icon: <VideoCameraOutlined /> },
     ],
   },
   {

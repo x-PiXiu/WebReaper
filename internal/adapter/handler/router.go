@@ -25,8 +25,7 @@ import (
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/structured"
-	taskuc "webreaper/internal/usecase/task"
-	"webreaper/internal/usecase/video")
+	taskuc "webreaper/internal/usecase/task")
 
 // Router 组装所有 HTTP 路由。
 //
@@ -75,8 +74,6 @@ type Router struct {
 	settingsUC *systemsettings.SystemSettingsUseCase
 	// 站内通知（主动唤醒）——通过 SetNotifications 注入，可选
 	notifyUC *notification.NotifyUseCase
-	// 视频生成工作台——通过 SetVideo 注入，可选
-	videoUC *video.VideoUseCase
 	// 统一生成（Vidu 全量接入：视频/图片/音频/数字人）
 	generationUC      *generation.GenerationUseCase
 	generationProvider port.GenerationProvider
@@ -175,11 +172,6 @@ func (r *Router) SetNotifications(uc *notification.NotifyUseCase) {
 func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCase) {
 	r.accountUC = au
 	r.publishSemiUC = pu
-}
-
-// SetVideo 注入视频生成工作台用例（可选；未注入则视频端点不注册）。
-func (r *Router) SetVideo(uc *video.VideoUseCase) {
-	r.videoUC = uc
 }
 
 // SetGeneration 注入统一生成用例（可选；Vidu 全量接入——未注入则生成端点不注册）。
@@ -480,16 +472,6 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/geo/publish-jobs/:id/re-monitor", accountHandler.HandleReMonitor) // 发布效果复测（收录周期后验证提及率爬升）
 		}
 
-		// 视频生成工作台（未配置 DB 时降级：不注册视频端点）
-		if r.videoUC != nil {
-			vh := NewVideoHandler(r.videoUC)
-			api.POST("/video/tasks", vh.HandleSubmit)
-			api.GET("/video/tasks/:id", vh.HandleGet)
-			api.GET("/video/tasks", vh.HandleList)
-			api.POST("/video/tasks/publish", vh.HandlePublish)
-			api.GET("/video/jobs", vh.HandleListJobs)
-		}
-
 		// 统一生成任务（Vidu 全量接入：视频/图片/音频/数字人）
 		if r.generationUC != nil {
 			gh := NewGenerationHandler(r.generationUC)
@@ -503,10 +485,12 @@ func (r *Router) Engine() *gin.Engine {
 				gh.HandleCallback(c, r.generationProvider)
 			})
 		}
-		// 素材上传托管（用户图片/音频 → 本地 → URL 供 Vidu 引用）
+		// 素材库（上传 + 列表 + 删除——用户图片/音频 → 本地 → URL 供 Vidu 引用）
 		if r.mediaStore != nil {
 			mh := NewMediaHandler(r.mediaStore)
 			api.POST("/media/assets", mh.HandleUpload)
+			api.GET("/media/assets", mh.HandleList)
+			api.DELETE("/media/assets/:id", mh.HandleDelete)
 		}
 
 			// 管理端路由（仅 admin 角色可访问）

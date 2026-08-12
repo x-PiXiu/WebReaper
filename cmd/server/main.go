@@ -55,7 +55,6 @@ import (
 	"webreaper/internal/usecase/systemsettings"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/generation"
-	"webreaper/internal/usecase/video"
 )
 
 func main() {
@@ -527,37 +526,6 @@ func main() {
 	// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）
 	notifyUC := notification.NewNotifyUseCase(repository.NewGormNotificationRepository(geoRepos.db))
 	router.SetNotifications(notifyUC)
-
-	// 视频生成工作台（Vidu 模型策略：配置 VIDU_API_KEY 走真实 API，否则 mock 模拟进度）
-	// 策略选择与降级：真实积分珍贵，未配置 key 时 mock 保证前端可完整演示流程。
-	if geoRepos != nil {
-		var videoProvider port.VideoProvider = provider.NewMockVideoProvider()
-		if cfg.Server.ViduAPIKey != "" {
-			videoProvider = provider.NewViduProvider(cfg.Server.ViduAPIKey, cfg.Server.ViduModel)
-			log.Info("视频生成已接入 Vidu（真实 API）")
-		} else {
-			log.Info("视频生成运行在 mock 模式（未配置 VIDU_API_KEY，提交即模拟进度）")
-		}
-		videoUC := video.NewVideoUseCase(
-			repository.NewGormVideoTaskRepository(geoRepos.db),
-			repository.NewGormVideoJobRepository(geoRepos.db),
-			videoProvider,
-			nil, // 【暂缓】配音 TTS 未接入（goffmpeg 视频编辑域——本轮不做，见
-			//     Docs/Plans/01-本地生活GEO改造与优化完善计划.md § P3-03/P4；
-			//     后续接入 port.VoiceSynthesizer 实现即可，用例层零改动）
-			nil, // 【暂缓】合成器未接入（同上 goffmpeg 域：地址字幕叠加/封面合并等）
-			log,
-		)
-		router.SetVideo(videoUC)
-		// 【暂缓】Vidu 视频生成域当前状态与完善细节（对接内容本轮不做，仅标记）：
-		//   · 现状：provider.NewViduProvider 已实现真实 API 对接（文生视频/图生视频/延长/
-		//     多帧等任务类型 + 任务轮询 + 回调），视频生成→就绪单段流水线可用；
-		//     未配 key 走 mock（成片 URL 为占位地址）。
-		//   · 缺口：① 地址注入（P3-03：文案/封面叠"📍 地址"）；② 配音/合成（goffmpeg）；
-		//     ③ 发布到抖音带定位（P4，需抖音来客/服务商资质或 RPA 定位——平台层暂缓）。
-		//   · 完善入口：usecase/video/video.go 的 stepGenerate 后各阶段 + adapter/provider/vidu.go
-		//     （提示词模板支持地址文本），前端 web/src/pages/merchant/Video.tsx 发布表单。
-	}
 
 	// 管理端装配（用户管理，仅 admin）
 	router.SetAdmin(userRepo)

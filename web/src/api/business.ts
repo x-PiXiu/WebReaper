@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, VideoTask, VideoJob, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
+import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, MediaAsset, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -321,21 +321,40 @@ export const businessApi = {
   updateTavilyKey: (data: { enabled: boolean; api_key?: string }) =>
     apiClient.put<unknown, { name: string; enabled: boolean; note: string }>('/api/v1/admin/tavily-key', data),
 
-  // ---- 视频生成工作台（Vidu 流水线）----
-  submitVideoTask: (data: { mode: string; prompt?: string; material_url?: string; brand_id?: string; voice_text?: string }) =>
-    apiClient.post<unknown, VideoTask>('/api/v1/video/tasks', data),
+  // ---- 统一生成（Vidu 全量接入：视频/图片/音频/数字人）----
 
-  getVideoTask: (id: string) =>
-    apiClient.get<unknown, VideoTask>(`/api/v1/video/tasks/${id}`),
+  // 端点类型 + 模型 + 能力向量（表单驱动）
+  listGenerationTypes: () =>
+    apiClient.get<unknown, { types: GenerationType[] }>('/api/v1/generation/types'),
 
-  listVideoTasks: () =>
-    apiClient.get<unknown, VideoTask[]>('/api/v1/video/tasks'),
+  submitGenerationTask: (data: {
+    brand_id?: string
+    sub_type: string
+    model: string
+    params: Record<string, unknown>
+    off_peak?: boolean
+    watermark?: boolean
+  }) => apiClient.post<unknown, GenerationTask>('/api/v1/generation/tasks', data),
 
-  publishVideoTask: (data: { task_id: string; platform: string; account_id?: string }) =>
-    apiClient.post<unknown, VideoJob>('/api/v1/video/tasks/publish', data),
+  getGenerationTask: (id: string) =>
+    apiClient.get<unknown, GenerationTask>(`/api/v1/generation/tasks/${id}`),
 
-  listVideoJobs: () =>
-    apiClient.get<unknown, VideoJob[]>('/api/v1/video/jobs'),
+  listGenerationTasks: () =>
+    apiClient.get<unknown, { tasks: GenerationTask[] }>('/api/v1/generation/tasks'),
+
+  cancelGenerationTask: (id: string) =>
+    apiClient.post<unknown, { cancelled: string }>(`/api/v1/generation/tasks/${id}/cancel`),
+
+  // 素材库（上传/列表/删除——本地托管，P2 换 OSS 前端零改动）
+  uploadAsset: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post<unknown, { asset: MediaAsset }>('/api/v1/media/assets', form)
+  },
+  listAssets: () =>
+    apiClient.get<unknown, { assets: MediaAsset[] }>('/api/v1/media/assets'),
+  deleteAsset: (id: string) =>
+    apiClient.delete<unknown, { deleted: string }>(`/api/v1/media/assets/${id}`),
 
   // ---- 经济系统（套餐/订阅/订单/用量）----
 

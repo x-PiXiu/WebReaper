@@ -124,9 +124,6 @@ func allModels() []any {
 		&UsagePO{},
 		// 租户级设置（多租户个性化配置）
 		&TenantSettingPO{},
-		// 视频生成工作台（生成任务 + 发布任务）
-		&VideoTaskPO{},
-		&VideoJobPO{},
 		// 提示词模板仓库（内容生成/优化提示词可管理）
 		&PromptTemplatePO{},
 		// 经济系统（套餐 / 订阅 / 订单）

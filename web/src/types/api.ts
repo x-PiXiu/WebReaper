@@ -342,34 +342,73 @@ export interface IndexingSubmitLog {
   submitted_at: string
 }
 
-// ---- 视频生成工作台 ----
-export interface VideoTask {
-  id: string
-  tenant_id: string
-  brand_id?: string
-  mode: string            // text / material
-  prompt: string
-  material_url: string
-  status: string          // pending / generating / dubbing / composing / ready / failed
-  video_url: string
-  voice_text: string
-  voice_url: string
-  final_url: string
-  duration_sec: number
-  error: string
-  created_at: string
-  updated_at: string
+// ---- 统一生成（Vidu 全量接入：视频/图片/音频/数字人）----
+
+// 模型能力向量（端点×模型矩阵——DB 驱动，管理后台可热改）
+export interface ModelCapability {
+  model: string
+  family: string
+  endpoint?: string
+  durations: [number, number]     // 时长范围 [min,max]（0 表示不支持自定义）
+  resolutions?: string[]
+  aspect_ratios?: string[]
+  audio_default?: boolean
+  audio_types?: string[]
+  image_slots?: number            // 图片槽位：0=不需要 1=单图 2=双图 -1=动态(1-7)
+  video_slots?: number
+  supports_bgm?: boolean
+  supports_subjects?: boolean
+  supports_movement?: boolean
+  max_prompt_len?: number
 }
 
-export interface VideoJob {
+export interface GenerationType {
+  sub_type: string               // 端点类型（text2video/img2video/…）
+  models: Array<{
+    model: string
+    capability: ModelCapability
+  }>
+}
+
+export interface GenerationCreation {
+  id: string
+  url: string
+  cover_url?: string
+  watermarked_url?: string
+  stored_url?: string            // 转存后的永久 URL（无 = 未转存）
+}
+
+export interface GenerationTask {
   id: string
   tenant_id: string
-  task_id: string
-  account_id: string
-  platform: string
-  status: string          // pending / publishing / published / failed
-  external_url: string
-  error: string
+  brand_id: string
+  type: string                   // video / image / audio / digital_human / other
+  sub_type: string
+  model: string
+  provider: string
+  provider_task_id: string
+  state: string                  // created / queueing / processing / success / failed / cancelled
+  err_code: string
+  err_msg: string
+  params: Record<string, unknown>
+  creations: GenerationCreation[]
+  credits: number
+  off_peak: boolean
+  watermark: boolean
+  retry_count: number
+  created_at: string
+  finished_at: string | null
+}
+
+// 媒体资产（素材上传 + 产物转存）
+export interface MediaAsset {
+  id: string
+  tenant_id: string
+  brand_id: string
+  owner_type: string             // material / creation
+  url: string                    // 可访问 URL（素材列表/上传响应契约）
+  mime: string
+  size_bytes: number
   created_at: string
 }
 

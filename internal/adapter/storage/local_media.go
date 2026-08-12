@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,6 +52,7 @@ func (s *LocalMediaStore) relPath(filename string) string {
 }
 
 // SaveFile 保存素材文件（handler 上传后调用；返回可访问 URL 与资产信息）。
+// 资产 ID = 文件名（List/Delete 由文件名驱动，无需额外索引；换 OSS 时 ID 即对象 key）。
 func (s *LocalMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerType string, data []byte, mime, ext string) (entity.MediaAsset, error) {
 	name := fmt.Sprintf("%s-%d%s", tenantID, time.Now().UnixNano(), ext)
 	path := filepath.Join(s.dir, name)
@@ -58,7 +60,7 @@ func (s *LocalMediaStore) SaveFile(ctx context.Context, tenantID, brandID, owner
 		return entity.MediaAsset{}, fmt.Errorf("素材保存失败: %w", err)
 	}
 	asset := entity.MediaAsset{
-		ID:        fmt.Sprintf("ma-%d", time.Now().UnixNano()),
+		ID:        name,
 		TenantID:  tenantID,
 		BrandID:   brandID,
 		OwnerType: ownerType,
@@ -69,6 +71,95 @@ func (s *LocalMediaStore) SaveFile(ctx context.Context, tenantID, brandID, owner
 		CreatedAt: time.Now(),
 	}
 	return asset, nil
+}
+
+// fileOwnerType 文件名 → 资产类型（material=上传素材 / creation=转存产物）。
+func fileOwnerType(name string) string {
+	if strings.HasPrefix(name, "c-") {
+		return entity.AssetTypeCreation
+	}
+	return entity.AssetTypeMaterial
+}
+
+// List 列出某租户资产（ownerType=material/creation；空=全部），创建时间倒序。
+// 素材库是纯文件实现（media_assets 表预留做元数据索引——P2 换 OSS 或大数据量时启用）。
+func (s *LocalMediaStore) List(ctx context.Context, tenantID, ownerType string) ([]entity.MediaAsset, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.MediaAsset, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// 租户归属校验：material 文件名前缀 {tenant}-；creation 前缀 c-{tenant}-
+		if !strings.HasPrefix(name, tenantID+"-") {
+			continue
+		}
+		if ownerType != "" && fileOwnerType(name) != ownerType {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, entity.MediaAsset{
+			ID:        name,
+			TenantID:  tenantID,
+			OwnerType: fileOwnerType(name),
+			SourceURL: s.publicURL(name),
+			StoredURL: s.publicURL(name),
+			Mime:      mimeFromExt(filepath.Ext(name)),
+			SizeBytes: info.Size(),
+			CreatedAt: info.ModTime(),
+		})
+	}
+	// 倒序（新 → 旧）
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+// Delete 删除资产（文件名即 ID；租户前缀校验防越权删除他人文件）。
+func (s *LocalMediaStore) Delete(ctx context.Context, tenantID, assetID string) error {
+	if assetID == "" || strings.Contains(assetID, "/") || strings.Contains(assetID, "\\") {
+		return fmt.Errorf("非法资产 ID")
+	}
+	if !strings.HasPrefix(assetID, tenantID+"-") {
+		return fmt.Errorf("无权删除该资产")
+	}
+	if err := os.Remove(filepath.Join(s.dir, assetID)); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("资产不存在")
+		}
+		return fmt.Errorf("删除失败: %w", err)
+	}
+	return nil
+}
+
+// mimeFromExt 扩展名 → MIME（列表展示用；上传时用真实 Content-Type）。
+func mimeFromExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a":
+		return "audio/mp4"
+	case ".wav":
+		return "audio/wav"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 // DownloadAndStore 下载外部 URL 到本地（转存：Vidu 产物 24h 过期 → 永久化）。

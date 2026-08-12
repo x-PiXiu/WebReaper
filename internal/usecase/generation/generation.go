@@ -236,6 +236,23 @@ func (uc *GenerationUseCase) Models(ctx context.Context, subType string) ([]stri
 	return uc.registry.Models(ctx, subType)
 }
 
+// Capabilities 某端点全部模型的能力向量（前端表单渲染：时长/分辨率/图片槽位/主体…）。
+func (uc *GenerationUseCase) Capabilities(ctx context.Context, subType string) ([]entity.ModelCapability, error) {
+	models, err := uc.registry.Models(ctx, subType)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.ModelCapability, 0, len(models))
+	for _, m := range models {
+		cap, err := uc.registry.Capability(ctx, subType, m)
+		if err != nil {
+			continue // 单个模型能力缺失不阻断整体（极端情况，DB 脏数据容错）
+		}
+		out = append(out, cap)
+	}
+	return out, nil
+}
+
 // CheckCallbackNonce 回调 nonce 防重放（handler 调用；5 分钟 TTL 去重）。
 func (uc *GenerationUseCase) CheckCallbackNonce(nonce string) bool {
 	now := time.Now()

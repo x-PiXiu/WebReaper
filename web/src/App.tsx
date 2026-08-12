@@ -11,7 +11,7 @@ import Brands from './pages/merchant/Brands'
 import Content from './pages/merchant/Content'
 import Keywords from './pages/merchant/Keywords'
 import Distribution from './pages/merchant/Distribution'
-import VideoWorkbench from './pages/merchant/Video'
+import CreationWorkbench from './pages/merchant/Creation'
 import MyPlan from './pages/merchant/MyPlan'
 import Visibility from './pages/merchant/Visibility'
 import Nearby from './pages/merchant/Nearby'
@@ -44,7 +44,7 @@ export default function App() {
           <Route path="/m/visibility" element={<Visibility />} />
           <Route path="/m/nearby" element={<Nearby />} />
           <Route path="/m/content" element={<Content />} />
-          <Route path="/m/video" element={<VideoWorkbench />} />
+          <Route path="/m/creation" element={<CreationWorkbench />} />
           <Route path="/m/distribution" element={<Distribution />} />
           <Route path="/m/my-plan" element={<MyPlan />} />
           <Route path="/m/chat" element={<Chat />} />

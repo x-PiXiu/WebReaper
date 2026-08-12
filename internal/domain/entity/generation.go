@@ -112,6 +112,11 @@ type GenerationSpec struct {
 //
 // 两类：material（用户上传的图片/音频素材——供 Vidu 引用，避开 20MB body 限制）
 //       creation（生成物转存——24h URL 下载到本地/OSS 永久化）。
+const (
+	AssetTypeMaterial = "material" // 用户上传素材
+	AssetTypeCreation = "creation" // 生成物转存
+)
+
 type MediaAsset struct {
 	ID        string
 	TenantID  string
