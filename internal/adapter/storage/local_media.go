@@ -52,20 +52,26 @@ func (s *LocalMediaStore) relPath(filename string) string {
 }
 
 // SaveFile 保存素材文件（handler 上传后调用；返回可访问 URL 与资产信息）。
-// 资产 ID = 文件名（List/Delete 由文件名驱动，无需额外索引；换 OSS 时 ID 即对象 key）。
+// 资产 ID = {tenantID}/{shortID}.ext（租户子目录隔离 + 短 ID 文件名）
 func (s *LocalMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerType string, data []byte, mime, ext string) (entity.MediaAsset, error) {
-	name := fmt.Sprintf("%s-%d%s", tenantID, time.Now().UnixNano(), ext)
-	path := filepath.Join(s.dir, name)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	name := shortID() + ext
+	relPath := filepath.Join(tenantID, name)
+	fullPath := filepath.Join(s.dir, relPath)
+	// 确保租户子目录存在
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return entity.MediaAsset{}, fmt.Errorf("创建租户目录失败: %w", err)
+	}
+	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
 		return entity.MediaAsset{}, fmt.Errorf("素材保存失败: %w", err)
 	}
+	id := filepath.ToSlash(relPath) // ID 用 / 分隔（跨平台 URL 友好）
 	asset := entity.MediaAsset{
-		ID:        name,
+		ID:        id,
 		TenantID:  tenantID,
 		BrandID:   brandID,
 		OwnerType: ownerType,
-		SourceURL: s.publicURL(name),
-		StoredURL: s.publicURL(name),
+		SourceURL: s.publicURL(id),
+		StoredURL: s.publicURL(id),
 		Mime:      mime,
 		SizeBytes: int64(len(data)),
 		CreatedAt: time.Now(),
@@ -81,11 +87,14 @@ func fileOwnerType(name string) string {
 	return entity.AssetTypeMaterial
 }
 
-// List 列出某租户资产（ownerType=material/creation；空=全部），创建时间倒序。
-// 素材库是纯文件实现（media_assets 表预留做元数据索引——P2 换 OSS 或大数据量时启用）。
+// List 列出某租户资产（子目录：{dir}/{tenantID}/{shortID}.ext）
 func (s *LocalMediaStore) List(ctx context.Context, tenantID, ownerType string) ([]entity.MediaAsset, error) {
-	entries, err := os.ReadDir(s.dir)
+	tenantDir := filepath.Join(s.dir, tenantID)
+	entries, err := os.ReadDir(tenantDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []entity.MediaAsset{}, nil
+		}
 		return nil, err
 	}
 	out := make([]entity.MediaAsset, 0, len(entries))
@@ -94,42 +103,39 @@ func (s *LocalMediaStore) List(ctx context.Context, tenantID, ownerType string) 
 			continue
 		}
 		name := e.Name()
-		// 租户归属校验：material 文件名前缀 {tenant}-；creation 前缀 c-{tenant}-
-		if !strings.HasPrefix(name, tenantID+"-") {
+		isCreation := strings.HasPrefix(name, "c-")
+		if ownerType == entity.AssetTypeMaterial && isCreation {
 			continue
 		}
-		if ownerType != "" && fileOwnerType(name) != ownerType {
+		if ownerType == entity.AssetTypeCreation && !isCreation {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
+		id := filepath.ToSlash(filepath.Join(tenantID, name))
 		out = append(out, entity.MediaAsset{
-			ID:        name,
-			TenantID:  tenantID,
-			OwnerType: fileOwnerType(name),
-			SourceURL: s.publicURL(name),
-			StoredURL: s.publicURL(name),
-			Mime:      mimeFromExt(filepath.Ext(name)),
-			SizeBytes: info.Size(),
+			ID: id, TenantID: tenantID, OwnerType: fileOwnerType(name),
+			SourceURL: s.publicURL(id), StoredURL: s.publicURL(id),
+			Mime: mimeFromExt(filepath.Ext(name)), SizeBytes: info.Size(),
 			CreatedAt: info.ModTime(),
 		})
 	}
-	// 倒序（新 → 旧）
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
 
-// Delete 删除资产（文件名即 ID；租户前缀校验防越权删除他人文件）。
+// Delete 删除资产（assetID={tenantID}/{shortID}.ext；校验目录归属防越权）
 func (s *LocalMediaStore) Delete(ctx context.Context, tenantID, assetID string) error {
-	if assetID == "" || strings.Contains(assetID, "/") || strings.Contains(assetID, "\\") {
+	if assetID == "" || strings.Contains(assetID, "..") {
 		return fmt.Errorf("非法资产 ID")
 	}
-	if !strings.HasPrefix(assetID, tenantID+"-") {
+	relPath := filepath.FromSlash(assetID)
+	if !strings.HasPrefix(relPath, tenantID+string(filepath.Separator)) {
 		return fmt.Errorf("无权删除该资产")
 	}
-	if err := os.Remove(filepath.Join(s.dir, assetID)); err != nil {
+	if err := os.Remove(filepath.Join(s.dir, relPath)); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("资产不存在")
 		}
@@ -204,11 +210,15 @@ func (s *LocalMediaStore) DownloadAndStore(ctx context.Context, tenantID, source
 			ext = ".webp"
 		}
 	}
-	name := fmt.Sprintf("c-%s-%d%s", tenantID, time.Now().UnixNano(), ext)
-	if err := os.WriteFile(filepath.Join(s.dir, name), data, 0o644); err != nil {
+	name := "c-" + shortID() + ext
+	relPath := filepath.Join(tenantID, name)
+	if err := os.MkdirAll(filepath.Join(s.dir, tenantID), 0o755); err != nil {
+		return "", fmt.Errorf("创建租户目录失败: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.dir, relPath), data, 0o644); err != nil {
 		return "", fmt.Errorf("转存写入失败: %w", err)
 	}
-	return s.publicURL(name), nil
+	return s.publicURL(filepath.ToSlash(relPath)), nil
 }
 
 // CleanupBefore 清理过期文件（定时任务；简化：删除 data 目录下早于 before 的文件）。

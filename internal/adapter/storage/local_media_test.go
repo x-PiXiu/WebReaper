@@ -27,15 +27,15 @@ func TestDownloadAndStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadAndStore: %v", err)
 	}
-	if !strings.HasPrefix(stored, "http://localhost:8082/media/c-t1-") || !strings.HasSuffix(stored, ".mp4") {
+	if !strings.Contains(stored, "/media/t1/c-") || !strings.HasSuffix(stored, ".mp4") {
 		t.Errorf("stored URL 格式不对: %s", stored)
 	}
-	// 文件真实落盘
-	entries, _ := os.ReadDir(dir)
+	// 文件真实落盘（子目录结构：{dir}/{tenantID}/{shortID}.ext）
+	entries, _ := os.ReadDir(filepath.Join(dir, "t1"))
 	if len(entries) != 1 {
 		t.Fatalf("应保存 1 个文件，实际 %d", len(entries))
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	data, _ := os.ReadFile(filepath.Join(dir, "t1", entries[0].Name()))
 	if string(data) != "fake-mp4-content" {
 		t.Errorf("文件内容不对: %q", string(data))
 	}
@@ -61,7 +61,7 @@ func TestSaveFileAndPublicURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveFile: %v", err)
 	}
-	if !strings.Contains(asset.SourceURL, "/media/t1-") || !strings.HasSuffix(asset.SourceURL, ".png") {
+	if !strings.Contains(asset.SourceURL, "/media/t1/") || !strings.HasSuffix(asset.SourceURL, ".png") {
 		t.Errorf("URL 格式不对: %s", asset.SourceURL)
 	}
 }

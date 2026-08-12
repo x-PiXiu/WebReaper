@@ -64,8 +64,9 @@ func (s *OSSMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerTy
 	if ownerType == entity.AssetTypeCreation {
 		prefix = "creation"
 	}
-	// key 格式：webreaper/media/{tenant}-{ts}.ext（项目前缀隔离 + 类型分组）
-	key := fmt.Sprintf("%s/%s/%s-%d%s", ossProjectPrefix, prefix, tenantID, time.Now().UnixNano(), ext)
+	// key 格式：webreaper/{media|creation}/{tenantID}/{shortID}.ext
+	// 文件名用 12 位随机 hex（如 32afa9cca14b.png），租户按目录隔离
+	key := fmt.Sprintf("%s/%s/%s/%s%s", ossProjectPrefix, prefix, tenantID, shortID(), ext)
 	if err := s.bucket.PutObject(key, bytes.NewReader(data)); err != nil {
 		return entity.MediaAsset{}, fmt.Errorf("OSS 上传失败: %w", err)
 	}
@@ -79,12 +80,12 @@ func (s *OSSMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerTy
 
 // List 列出某租户的资产（按 OSS 前缀 + ownerType 过滤）。
 func (s *OSSMediaStore) List(ctx context.Context, tenantID, ownerType string) ([]entity.MediaAsset, error) {
-	// 前缀：material → webreaper/media/{tenant}- ；creation → webreaper/creation/c-{tenant}-
+	// 前缀按租户目录隔离：webreaper/media/{tenantID}/ 或 webreaper/creation/{tenantID}/
 	p := ossProjectPrefix + "/"
 	if ownerType == entity.AssetTypeMaterial {
-		p += "media/" + tenantID + "-"
+		p += "media/" + tenantID + "/"
 	} else if ownerType == entity.AssetTypeCreation {
-		p += "creation/c-" + tenantID + "-"
+		p += "creation/" + tenantID + "/"
 	} else {
 		p += tenantID
 	}
@@ -112,7 +113,8 @@ func (s *OSSMediaStore) List(ctx context.Context, tenantID, ownerType string) ([
 
 // Delete 删除 OSS 对象（校验 key 含 tenantID 防越权）。
 func (s *OSSMediaStore) Delete(ctx context.Context, tenantID, assetID string) error {
-	if assetID == "" || !strings.Contains(assetID, tenantID) {
+	// Delete 校验 key 含 tenantID（目录路径隔离防越权）
+	if assetID == "" || !strings.Contains(assetID, tenantID+"/") {
 		return fmt.Errorf("无权删除该资产")
 	}
 	if err := s.bucket.DeleteObject(assetID); err != nil {
@@ -146,7 +148,7 @@ func (s *OSSMediaStore) DownloadAndStore(ctx context.Context, tenantID, sourceUR
 	} else if ct := resp.Header.Get("Content-Type"); ct != "" {
 		ext = extFromContentType(ct)
 	}
-	key := fmt.Sprintf("%s/creation/c-%s-%d%s", ossProjectPrefix, tenantID, time.Now().UnixNano(), ext)
+	key := fmt.Sprintf("%s/creation/%s/%s%s", ossProjectPrefix, tenantID, shortID(), ext)
 	if err := s.bucket.PutObject(key, bytes.NewReader(data)); err != nil {
 		return "", fmt.Errorf("OSS 上传失败: %w", err)
 	}
