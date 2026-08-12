@@ -360,9 +360,15 @@ func (c *XiaohongshuAutoChannel) publishImage(sessionCtx context.Context, job en
 	}
 
 	// ④ 填标题（简单 input，CDP SendKeys trusted）
-	if job.Title != "" {
+	// 小红书图文标题上限 20 字（硬约束——超长点击发布会被前端校验拦截，URL 不跳转）
+	title := job.Title
+	if r := []rune(title); len(r) > 20 {
+		title = string(r[:20])
+		log.Printf("[PublishAuto:xiaohongshu] 标题超 20 字，已截断: %q → %q", job.Title, title)
+	}
+	if title != "" {
 		if err := chromedp.Run(sessionCtx,
-			chromedp.SendKeys(`input.d-text[placeholder*="填写标题"], input[placeholder*="填写标题"]`, job.Title, chromedp.ByQuery),
+			chromedp.SendKeys(`input.d-text[placeholder*="填写标题"], input[placeholder*="填写标题"]`, title, chromedp.ByQuery),
 			chromedp.Sleep(800*time.Millisecond),
 		); err != nil {
 			return "", fmt.Errorf("填充标题失败: %w", err)
@@ -395,17 +401,28 @@ func (c *XiaohongshuAutoChannel) publishImage(sessionCtx context.Context, job en
 		log.Printf("[PublishAuto:xiaohongshu] 正文已填充（%d 字符）", len([]rune(contentText)))
 	}
 
-	// ⑥ 点发布：小红书用 xhs-publish-btn 自定义元素 + submit-disabled 属性
-	// submit-disabled="false" = 可点击；需找内部实际 button
+	// ⑥ 点发布：小红书用 xhs-publish-btn 自定义元素（Web Component）。
+	// 关键：内部 button 可能在 Shadow DOM——querySelectorAll 穿不透 shadow boundary。
+	// 多策略：① 直接点 xhs-publish-btn 本身（submit-disabled="false" 时）
+	//        ② shadowRoot 内找 button  ③ 全局兜底找"发布"button
 	err = chromedp.Run(sessionCtx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			jsClick := `(() => {
-				// xhs-publish-btn 内部渲染 button；也兜底直接找"发布"按钮
+				// ① 直接点击 xhs-publish-btn 自定义元素（Vue 组件绑定了 click）
 				const wrapper = document.querySelector('xhs-publish-btn');
-				const btns = wrapper ? wrapper.querySelectorAll('button') : document.querySelectorAll('button');
-				for (const btn of btns) {
+				if (wrapper && wrapper.getAttribute('submit-disabled') === 'false') {
+					wrapper.click();
+					return true;
+				}
+				// ② Shadow DOM 内找 button
+				if (wrapper && wrapper.shadowRoot) {
+					const sb = wrapper.shadowRoot.querySelector('button:not([disabled])');
+					if (sb) { sb.click(); return true; }
+				}
+				// ③ 全局兜底：找文本含"发布"的可点击 button
+				for (const btn of document.querySelectorAll('button')) {
 					const text = btn.textContent.trim();
-					if ((text === '发布' || text === '发布笔记') && !btn.disabled && btn.offsetParent !== null) {
+					if (text.includes('发布') && !btn.disabled && btn.offsetParent !== null) {
 						btn.click();
 						return true;
 					}
@@ -433,13 +450,33 @@ func (c *XiaohongshuAutoChannel) publishImage(sessionCtx context.Context, job en
 	}
 	log.Printf("[PublishAuto:xiaohongshu] 发布按钮已点击")
 
-	// ⑦ 等待发布完成
+	// ⑦ 等待发布完成 + 校验是否真的发布成功（URL 跳转 ≠ 还在发布页）
+	// 小红书发布成功会跳转离开 publish/publish；若 URL 仍是发布页 = 校验拦截/风控，
+	// 点击虽触发但未真正发布——必须报错让前端展示，不能误报成功。
 	var resultURL string
 	if err := chromedp.Run(sessionCtx,
 		chromedp.Sleep(6*time.Second),
 		chromedp.Location(&resultURL),
 	); err != nil {
 		return "", fmt.Errorf("获取发布结果失败: %w", err)
+	}
+	// 校验：URL 还在发布页 = 发布未成功（标题超长/缺图/内容违规/风控验证码）
+	if strings.Contains(resultURL, "publish/publish") {
+		// 尝试读取页面错误提示（小红书校验失败会在标题/正文区显示红色提示）
+		var errMsg string
+		_ = chromedp.Run(sessionCtx,
+			chromedp.Evaluate(`(() => {
+				const tips = document.querySelectorAll('[class*="error"], [class*="warn"], .toast, .d-toast');
+				const texts = [];
+				tips.forEach(t => { if (t.offsetParent && t.textContent.trim()) texts.push(t.textContent.trim()) });
+				return texts.slice(0, 3).join(' | ');
+			})()`, &errMsg),
+		)
+		detail := errMsg
+		if detail == "" {
+			detail = "URL 未跳转（可能标题超长/内容违规/触发验证码）"
+		}
+		return "", fmt.Errorf("发布未成功（点击已触发但页面校验拦截）: %s", detail)
 	}
 	log.Printf("[PublishAuto:xiaohongshu] 发布完成，URL: %s", resultURL)
 	return resultURL, nil
