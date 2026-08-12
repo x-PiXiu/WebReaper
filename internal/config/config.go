@@ -33,6 +33,7 @@ type Config struct {
 	Tavily    TavilyConfig
 	Baidu     BaiduConfig
 	AMap      AMapConfig // 高德地图（本地生活 GEO：地理编码 + 周边 POI 搜索）
+	Storage   StorageConfig
 }
 
 // TelemetryConfig 链路追踪配置（OpenTelemetry）。
@@ -192,6 +193,19 @@ type RedisConfig struct {
 	DB       int
 }
 
+// StorageConfig 文件存储配置（双模式：local 本地 / oss 阿里云 OSS）。
+// STORAGE_TYPE=local（默认，本地开发）→ LocalMediaStore（./data/media）
+// STORAGE_TYPE=oss（云端部署）→ OSSMediaStore（阿里云 OSS）
+type StorageConfig struct {
+	Type             string // local / oss
+	Endpoint         string // OSS 公网 endpoint（oss-cn-guangzhou.aliyuncs.com）
+	InternalEndpoint string // OSS 内网 endpoint（云服务器内网传输，oss-cn-guangzhou-internal.aliyuncs.com）
+	Bucket           string // OSS bucket 名
+	AccessKey        string // OSS AccessKey ID
+	SecretKey        string // OSS AccessKey Secret
+	PublicDomain     string // OSS 公开访问域名（可选；空=用 https://{bucket}.{endpoint}）
+}
+
 // TavilyConfig Tavily 搜索 API 配置（GEO 监测的高质量搜索源）。
 // Tavily 是专为 AI 设计的搜索 API，返回结构化的干净内容（不需自己抓正文）。
 // 不配置则降级到 Bing（WebFetcher）。
@@ -303,6 +317,15 @@ func Load() Config {
 			Enabled:      getenvBool("TELEMETRY_ENABLED", true),
 			Exporter:     getenvDefault("TELEMETRY_EXPORTER", "stdout"),
 			OTLPEndpoint: getenvDefault("TELEMETRY_OTLP_ENDPOINT", ""),
+		},
+		Storage: StorageConfig{
+			Type:             getenvDefault("STORAGE_TYPE", "local"),
+			Endpoint:         getenvDefault("OSS_ENDPOINT", ""),
+			InternalEndpoint: getenvDefault("OSS_INTERNAL_ENDPOINT", ""),
+			Bucket:           getenvDefault("OSS_BUCKET", ""),
+			AccessKey:        os.Getenv("OSS_ACCESS_KEY"),
+			SecretKey:        os.Getenv("OSS_SECRET_KEY"),
+			PublicDomain:     getenvDefault("OSS_PUBLIC_DOMAIN", ""),
 		},
 	}
 }

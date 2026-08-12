@@ -607,14 +607,38 @@ func main() {
 			log.Warn("seed 生成规格默认值失败", port.Err(seedErr))
 		}
 		genUC := generation.NewGenerationUseCase(genProvider, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
-		// 媒体资产存储（素材托管 + 产物转存——Vidu 生成物 24h URL 永久化）
-		mediaStore, mErr := storage.NewLocalMediaStore("./data/media", cfg.Server.PublicBaseURL)
-		if mErr == nil {
+		// 媒体资产存储——双模式切换（STORAGE_TYPE 环境变量控制）
+		// local（默认/本地开发）：LocalMediaStore（./data/media + /media 静态托管）
+		// oss（云端部署）：OSSMediaStore（阿里云 OSS，素材+产物持久化到云端）
+		var mediaStore port.MediaAssetStore
+		var mediaDir string
+		switch cfg.Storage.Type {
+		case "oss":
+			// 云服务器用内网 endpoint（免流量费），本地开发用公网
+			ep := cfg.Storage.Endpoint
+			if cfg.Storage.InternalEndpoint != "" {
+				ep = cfg.Storage.InternalEndpoint
+			}
+			ms, ossErr := storage.NewOSSMediaStore(ep, cfg.Storage.Bucket, cfg.Storage.AccessKey, cfg.Storage.SecretKey, cfg.Storage.PublicDomain)
+			if ossErr != nil {
+				log.Warn("OSS 初始化失败，降级本地存储", port.Err(ossErr))
+			} else {
+				mediaStore = ms
+				log.Info("媒体存储已启用（阿里云 OSS）")
+			}
+		default:
+			ms, lErr := storage.NewLocalMediaStore("./data/media", cfg.Server.PublicBaseURL)
+			if lErr == nil {
+				mediaStore = ms
+				mediaDir = "./data/media"
+				log.Info("媒体存储已启用（本地目录 ./data/media）")
+			} else {
+				log.Warn("媒体存储初始化失败", port.Err(lErr))
+			}
+		}
+		if mediaStore != nil {
 			genUC.SetAssetStore(mediaStore)
-			router.SetMedia(mediaStore, "./data/media")
-			log.Info("媒体存储已启用（本地目录 ./data/media，/media 静态托管）")
-		} else {
-			log.Warn("媒体存储初始化失败（产物转存禁用）", port.Err(mErr))
+			router.SetMedia(mediaStore, mediaDir)
 		}
 		router.SetGeneration(genUC, genProvider, genRegistry, genSpecRepo)
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429

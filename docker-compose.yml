@@ -49,6 +49,14 @@ services:
       # 其他
       AUTO_MONITOR_ENABLED: ${AUTO_MONITOR_ENABLED:-true}
       TELEMETRY_ENABLED: "false"
+      # 文件存储（oss=阿里云 OSS 云端持久化；local=本地磁盘）
+      STORAGE_TYPE: ${STORAGE_TYPE:-oss}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-oss-cn-guangzhou.aliyuncs.com}
+      OSS_INTERNAL_ENDPOINT: ${OSS_INTERNAL_ENDPOINT:-oss-cn-guangzhou-internal.aliyuncs.com}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ACCESS_KEY: ${OSS_ACCESS_KEY:-}
+      OSS_SECRET_KEY: ${OSS_SECRET_KEY:-}
+      OSS_PUBLIC_DOMAIN: ${OSS_PUBLIC_DOMAIN:-}
     volumes:
       # 媒体素材持久化（用户上传 + Vidu 产物转存）
       - ./data:/app/data
