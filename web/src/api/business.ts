@@ -235,7 +235,7 @@ export const businessApi = {
     apiClient.delete<unknown, unknown>(`/api/v1/geo/accounts/${id}`),
 
   // ---- GEO 内容发布（半自动）----
-  publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string; scheduled_at?: string }) =>
+  publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string; scheduled_at?: string; content_type?: string; media_urls?: string[]; cover_url?: string }) =>
     apiClient.post<unknown, PublishJob>('/api/v1/geo/publish', data),
 
   listPublishJobs: () =>

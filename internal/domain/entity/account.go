@@ -67,6 +67,14 @@ func (a Account) IsHealthy() bool {
 //
 // 半自动模式下，Status 为 pending 时 ExternalURL 是预填好的发布页链接，
 // 用户点击跳转到平台确认发布后，前端可标记为 published。
+// 内容形态常量（Platform × ContentType 双维度——同一平台支持多种形态）
+const (
+	ContentTypeImage   = "image"   // 图文笔记（小红书主流）
+	ContentTypeVideo   = "video"   // 视频笔记
+	ContentTypeArticle = "article" // 长文章
+	ContentTypeAudio   = "audio"   // 音频
+)
+
 type PublishJob struct {
 	ID          string    // 任务 ID
 	TenantID    string    // 租户隔离
@@ -85,11 +93,20 @@ type PublishJob struct {
 	PreMentionRate  float64 // 发布前品牌提及率（发布效果追踪用）
 	PostMentionRate float64 // 发布后品牌提及率（发布效果追踪用）
 	// ScheduledAt 排期发布时间（零值 = 立即发布）。
-	// 将来时间 = 定时发送：任务落库 pending，调度任务到期后自动执行发布。
 	ScheduledAt time.Time
 	// StoreAddress 门店地址（本地生活 P3：内容层本地曝光信号）。
-	// 发布时非空则正文尾部附加"📍 地址"，并留档供平台定位（P4 暂缓）。
 	StoreAddress string
+
+	// ContentType 内容形态（Platform × ContentType 双维度）。
+	// 同一平台支持多种形态：小红书 image/video/article/audio；知乎默认 article。
+	// 空 = 向后兼容（知乎走 article；小红书走 image 默认）。
+	ContentType string
+	// MediaURLs 媒体文件 URL 列表（图文=图片[]、视频=[mp4]、音频=[mp3]）。
+	// RPA 发布时下载到本地临时文件再上传到平台。空=纯文本发布（知乎）。
+	// 持久化为 JSON 文本（mapper 层处理序列化）。
+	MediaURLs []string
+	// CoverURL 封面图 URL（视频/长文/音频需要；图文取首图）。
+	CoverURL string
 }
 
 // IsValid 领域规则。

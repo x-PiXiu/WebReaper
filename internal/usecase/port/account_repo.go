@@ -106,8 +106,12 @@ type PublishChannel interface {
 	PublishSemiAuto(ctx context.Context, job entity.PublishJob, account entity.Account) (externalURL string, err error)
 	// Platform 返回平台标识（zhihu / xiaohongshu / ...）。
 	Platform() string
-	// SupportedMediaType 返回支持的内容类型（text / image / video）。
+	// SupportedMediaType 返回支持的内容类型（text / image / video）——向后兼容。
 	SupportedMediaType() []string
+	// SupportedContentTypes 返回支持的内容形态（image/video/article/audio）。
+	// Platform × ContentType 双维度：同一平台支持多种形态（小红书 4 种，知乎 article）。
+	// 默认实现可返回 nil（用 SupportedMediaType 兜底）。
+	SupportedContentTypes() []string
 }
 
 // AutoPublishChannel 全自动发布通道（可选接口）。

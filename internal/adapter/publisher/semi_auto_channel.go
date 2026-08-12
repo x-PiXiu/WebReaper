@@ -29,6 +29,7 @@ func NewZhihuChannel() *ZhihuChannel { return &ZhihuChannel{} }
 
 func (c *ZhihuChannel) Platform() string           { return "zhihu" }
 func (c *ZhihuChannel) SupportedMediaType() []string { return []string{"text"} }
+func (c *ZhihuChannel) SupportedContentTypes() []string { return []string{entity.ContentTypeArticle} }
 
 // PublishSemiAuto 生成知乎写文章页 URL（知乎暂不支持 URL 预填正文，引导用户到发布页）。
 func (c *ZhihuChannel) PublishSemiAuto(_ context.Context, job entity.PublishJob, _ entity.Account) (string, error) {
@@ -51,6 +52,7 @@ func NewXiaohongshuChannel() *XiaohongshuChannel { return &XiaohongshuChannel{} 
 
 func (c *XiaohongshuChannel) Platform() string           { return "xiaohongshu" }
 func (c *XiaohongshuChannel) SupportedMediaType() []string { return []string{"text", "image"} }
+func (c *XiaohongshuChannel) SupportedContentTypes() []string { return []string{entity.ContentTypeImage, entity.ContentTypeVideo, entity.ContentTypeArticle, entity.ContentTypeAudio} }
 
 // PublishSemiAuto 生成小红书发布页 URL。
 func (c *XiaohongshuChannel) PublishSemiAuto(_ context.Context, _ entity.PublishJob, _ entity.Account) (string, error) {

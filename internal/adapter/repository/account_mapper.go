@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"encoding/json"
+
 	"webreaper/internal/domain/entity"
 )
 
@@ -34,6 +36,7 @@ func publishJobToPO(e entity.PublishJob) PublishJobPO {
 		ErrorMsg: e.ErrorMsg, CreatedAt: e.CreatedAt, PublishedAt: e.PublishedAt,
 		PreMentionRate: e.PreMentionRate, PostMentionRate: e.PostMentionRate,
 		ScheduledAt: e.ScheduledAt, StoreAddress: e.StoreAddress,
+		ContentType: e.ContentType, MediaURLsJSON: mediaURLsToJSON(e.MediaURLs), CoverURL: e.CoverURL,
 	}
 }
 
@@ -53,5 +56,33 @@ func publishJobFromPO(p PublishJobPO) entity.PublishJob {
 		ErrorMsg: p.ErrorMsg, CreatedAt: p.CreatedAt, PublishedAt: p.PublishedAt,
 		PreMentionRate: p.PreMentionRate, PostMentionRate: p.PostMentionRate,
 		ScheduledAt: p.ScheduledAt, StoreAddress: p.StoreAddress,
+		ContentType: p.ContentType, MediaURLs: mediaURLsFromJSON(p.MediaURLsJSON), CoverURL: p.CoverURL,
 	}
+}
+
+// mediaURLsToJSON MediaURLs → JSON 文本（空数组存 "[]"）。
+func mediaURLsToJSON(urls []string) string {
+	if len(urls) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(urls)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+// mediaURLsFromJSON JSON 文本 → MediaURLs（容错：空/格式错返回 nil）。
+func mediaURLsFromJSON(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var urls []string
+	if err := json.Unmarshal([]byte(s), &urls); err != nil {
+		return nil
+	}
+	if len(urls) == 0 {
+		return nil
+	}
+	return urls
 }

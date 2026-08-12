@@ -42,6 +42,9 @@ type PublishJobPO struct {
 	PostMentionRate float64   `gorm:"type:decimal(5,2)"`
 	ScheduledAt     time.Time `gorm:"index"` // 排期发布时间（零值=立即）
 	StoreAddress    string    `gorm:"size:256"` // 门店地址（本地生活 P3：内容层本地曝光信号）
+	ContentType     string    `gorm:"size:16"`  // 内容形态：image/video/article/audio
+	MediaURLsJSON   string    `gorm:"type:text"` // 媒体文件 URL 列表（JSON 数组）
+	CoverURL        string    `gorm:"type:text"` // 封面图 URL
 }
 
 func (PublishJobPO) TableName() string { return "geo_publish_jobs" }

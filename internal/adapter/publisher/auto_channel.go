@@ -3,7 +3,10 @@ package publisher
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -77,6 +80,7 @@ func NewZhihuAutoChannel() *ZhihuAutoChannel { return &ZhihuAutoChannel{} }
 
 func (c *ZhihuAutoChannel) Platform() string           { return "zhihu" }
 func (c *ZhihuAutoChannel) SupportedMediaType() []string { return []string{"text"} }
+func (c *ZhihuAutoChannel) SupportedContentTypes() []string { return []string{entity.ContentTypeArticle} }
 
 // PublishSemiAuto 半自动模式：返回知乎写文章页 URL
 func (c *ZhihuAutoChannel) PublishSemiAuto(_ context.Context, job entity.PublishJob, _ entity.Account) (string, error) {
@@ -251,131 +255,257 @@ func NewXiaohongshuAutoChannel() *XiaohongshuAutoChannel { return &XiaohongshuAu
 
 func (c *XiaohongshuAutoChannel) Platform() string           { return "xiaohongshu" }
 func (c *XiaohongshuAutoChannel) SupportedMediaType() []string { return []string{"text", "image"} }
-
-// PublishSemiAuto 半自动模式：返回小红书发布页 URL
-func (c *XiaohongshuAutoChannel) PublishSemiAuto(_ context.Context, _ entity.PublishJob, _ entity.Account) (string, error) {
-	return "https://creator.xiaohongshu.com/publish/publish", nil
+func (c *XiaohongshuAutoChannel) SupportedContentTypes() []string {
+	return []string{entity.ContentTypeImage, entity.ContentTypeVideo, entity.ContentTypeArticle, entity.ContentTypeAudio}
 }
 
-// PublishAuto 全自动发布到小红书。
+// PublishSemiAuto 半自动模式：按 ContentType 拼 target 参数直达正确发布页
+func (c *XiaohongshuAutoChannel) PublishSemiAuto(_ context.Context, job entity.PublishJob, _ entity.Account) (string, error) {
+	ct := job.ContentType
+	if ct == "" {
+		ct = entity.ContentTypeImage // 默认图文
+	}
+	return "https://creator.xiaohongshu.com/publish/publish?from=menu&target=" + ct, nil
+}
+
+// PublishAuto 全自动发布到小红书（按 ContentType 分发）。
+// 4 种形态：image（图文）/ video（视频）/ article（长文）/ audio（音频）。
+// 账号通用（同一 cookie），形态决定具体上传/填写流程。
 func (c *XiaohongshuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJob, cookieStr string) (string, error) {
-	log.Printf("[PublishAuto:xiaohongshu] 开始全自动发布，标题=%q", job.Title)
+	ct := job.ContentType
+	if ct == "" {
+		ct = entity.ContentTypeImage
+	}
+	log.Printf("[PublishAuto:xiaohongshu] 开始全自动发布，类型=%s 标题=%q", ct, job.Title)
 
 	cookies := parseCookies(cookieStr, ".xiaohongshu.com")
+	base := "https://creator.xiaohongshu.com/publish/publish?from=menu&target=" + ct
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), allocOpts()...)
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
-	sessionCtx, sessionCancel := context.WithTimeout(browserCtx, 3*time.Minute)
+	sessionCtx, sessionCancel := context.WithTimeout(browserCtx, 4*time.Minute)
 	defer func() {
 		sessionCancel()
 		browserCancel()
 		allocCancel()
 	}()
 
-	// 首次 Run：cookie 注入 + 导航（同一 context，避免 Tab 被关闭）
+	// cookie 注入 + 导航（带 target 参数直达正确发布页，免切 tab）
 	var currentURL string
-	err := chromedp.Run(sessionCtx,
+	if err := chromedp.Run(sessionCtx,
 		network.Enable(),
 		network.SetCookies(cookies),
-		chromedp.Navigate("https://creator.xiaohongshu.com/publish/publish"),
+		chromedp.Navigate(base),
 		chromedp.Sleep(5*time.Second),
 		chromedp.Location(&currentURL),
-	)
-	if err != nil {
+	); err != nil {
 		return "", fmt.Errorf("导航到发布页失败: %w", err)
 	}
 	log.Printf("[PublishAuto:xiaohongshu] cookie已注入，已导航到: %s", currentURL)
-
 	if strings.Contains(currentURL, "login") {
 		return "", fmt.Errorf("cookie已过期，请重新绑定账号")
 	}
 
-	// 选择"上传图文"tab
-	clickTabJS := `(() => {
-		const els = document.querySelectorAll('div, span, li, button');
-		for (const el of els) {
-			if (el.textContent.includes('上传图文') && el.offsetParent !== null) {
-				el.click();
-				return true;
-			}
-		}
-		return false;
-	})()`
-	var tabClicked bool
-	_ = chromedp.Run(sessionCtx,
-		chromedp.Sleep(1*time.Second),
-		chromedp.Evaluate(clickTabJS, &tabClicked),
-		chromedp.Sleep(2*time.Second),
-	)
-	log.Printf("[PublishAuto:xiaohongshu] 选择上传图文: %v", tabClicked)
+	switch ct {
+	case entity.ContentTypeImage:
+		return c.publishImage(sessionCtx, job)
+	case entity.ContentTypeVideo, entity.ContentTypeArticle, entity.ContentTypeAudio:
+		// video/article/audio 后续实现（image 跑通后复用 trusted 方案 + 大文件上传）
+		return "", fmt.Errorf("内容类型 %s 暂未实现，当前仅支持 image（图文）", ct)
+	default:
+		return "", fmt.Errorf("不支持的内容类型: %s", ct)
+	}
+}
 
-	// 填充标题
+// publishImage 小红书图文笔记发布（两阶段：上传页 → 自动跳编辑页）。
+//
+// 流程：上传图片 → 自动跳转编辑页 → 填标题 → 填正文（ProseMirror）→ 发布。
+// 关键点：
+//   - 图片必须 ≥1 张（小红书图文硬约束）
+//   - 正文是 TipTap/ProseMirror 富文本（校验 isTrusted）→ 用 CDP Input.insertText
+//   - 上传第一张后页面自动跳转到编辑页（标题/正文/发布按钮在此页）
+func (c *XiaohongshuAutoChannel) publishImage(sessionCtx context.Context, job entity.PublishJob) (string, error) {
+	// ① 下载图片到本地临时文件（chromedp 上传需要本地路径）
+	if len(job.MediaURLs) == 0 {
+		return "", fmt.Errorf("图文笔记至少需要 1 张图片（MediaURLs 为空）")
+	}
+	localPaths, cleanup, err := downloadMediaToTemp(job.MediaURLs)
+	if err != nil {
+		return "", fmt.Errorf("下载图片失败: %w", err)
+	}
+	defer cleanup()
+
+	// ② 上传图片：chromedp.SetUploadFiles 找 input[type=file] 并设置
+	log.Printf("[PublishAuto:xiaohongshu] 上传 %d 张图片", len(localPaths))
+	if err := chromedp.Run(sessionCtx,
+		// 等上传区可见（"上传图片"按钮）
+		chromedp.WaitVisible(`.upload-button, button.upload-button, [class*="upload-button"]`, chromedp.ByQuery),
+		// SetUploadFiles 自动找 input[type=file] 设置文件（chromedp 内部处理）
+		chromedp.SetUploadFiles(`input[type="file"]`, localPaths, chromedp.ByQuery),
+		chromedp.Sleep(5*time.Second), // 等上传 + 自动跳编辑页
+	); err != nil {
+		// input[type=file] 可能找不到（纯动态创建）——兜底：点上传按钮触发 FileChooser
+		log.Printf("[PublishAuto:xiaohongshu] SetUploadFiles 失败，尝试点击上传按钮: %v", err)
+		if err2 := c.uploadByClick(sessionCtx, localPaths); err2 != nil {
+			return "", fmt.Errorf("图片上传失败（SetUploadFiles + 点击兜底均失败）: %w / %v", err, err2)
+		}
+	}
+	log.Printf("[PublishAuto:xiaohongshu] 图片已上传")
+
+	// ③ 等待编辑页就绪（标题输入框出现 = 已跳转到编辑页）
+	if err := chromedp.Run(sessionCtx,
+		chromedp.WaitVisible(`input.d-text[placeholder*="填写标题"], input[placeholder*="填写标题"]`, chromedp.ByQuery),
+	); err != nil {
+		return "", fmt.Errorf("等待编辑页就绪失败（图片可能上传未完成）: %w", err)
+	}
+
+	// ④ 填标题（简单 input，CDP SendKeys trusted）
+	if job.Title != "" {
+		if err := chromedp.Run(sessionCtx,
+			chromedp.SendKeys(`input.d-text[placeholder*="填写标题"], input[placeholder*="填写标题"]`, job.Title, chromedp.ByQuery),
+			chromedp.Sleep(800*time.Millisecond),
+		); err != nil {
+			return "", fmt.Errorf("填充标题失败: %w", err)
+		}
+		log.Printf("[PublishAuto:xiaohongshu] 标题已填充")
+	}
+
+	// ⑤ 填正文——ProseMirror（TipTap），同知乎方案：CDP Input.insertText（trusted）
+	// ProseMirror 校验 isTrusted，合成事件被拒 → 必须用内核 Input 事件
+	if job.Content != "" {
+		const editorSel = `.tiptap.ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"]`
+		if err := chromedp.Run(sessionCtx,
+			chromedp.Click(editorSel, chromedp.ByQuery),
+			chromedp.Sleep(500*time.Millisecond),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				return input.InsertText(job.Content).Do(ctx)
+			}),
+			chromedp.Sleep(1500*time.Millisecond),
+		); err != nil {
+			return "", fmt.Errorf("填充正文失败: %w", err)
+		}
+		// 校验正文非空
+		var contentText string
+		_ = chromedp.Run(sessionCtx,
+			chromedp.Evaluate(`document.querySelector('.tiptap.ProseMirror, .ProseMirror')?.textContent || ''`, &contentText),
+		)
+		if len([]rune(strings.TrimSpace(contentText))) == 0 {
+			return "", fmt.Errorf("正文填充校验失败：编辑器内容为空（ProseMirror 可能拒绝输入）")
+		}
+		log.Printf("[PublishAuto:xiaohongshu] 正文已填充（%d 字符）", len([]rune(contentText)))
+	}
+
+	// ⑥ 点发布：小红书用 xhs-publish-btn 自定义元素 + submit-disabled 属性
+	// submit-disabled="false" = 可点击；需找内部实际 button
 	err = chromedp.Run(sessionCtx,
-		chromedp.WaitVisible(`input[placeholder*="标题"], #title, [class*="title"] input`, chromedp.ByQuery),
-		chromedp.SendKeys(`input[placeholder*="标题"], #title, [class*="title"] input`, job.Title, chromedp.ByQuery),
-		chromedp.Sleep(1*time.Second),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			jsClick := `(() => {
+				// xhs-publish-btn 内部渲染 button；也兜底直接找"发布"按钮
+				const wrapper = document.querySelector('xhs-publish-btn');
+				const btns = wrapper ? wrapper.querySelectorAll('button') : document.querySelectorAll('button');
+				for (const btn of btns) {
+					const text = btn.textContent.trim();
+					if ((text === '发布' || text === '发布笔记') && !btn.disabled && btn.offsetParent !== null) {
+						btn.click();
+						return true;
+					}
+				}
+				return false;
+			})()`
+			deadline := time.Now().Add(15 * time.Second)
+			for time.Now().Before(deadline) {
+				var clicked bool
+				if e := chromedp.Evaluate(jsClick, &clicked).Do(ctx); e != nil {
+					return e
+				}
+				if clicked {
+					return nil
+				}
+				if e := chromedp.Sleep(600 * time.Millisecond).Do(ctx); e != nil {
+					return e
+				}
+			}
+			return fmt.Errorf("发布按钮 15 秒内未变为可点击（可能缺图或正文校验未通过）")
+		}),
 	)
 	if err != nil {
-		return "", fmt.Errorf("填充标题失败: %w", err)
-	}
-	log.Printf("[PublishAuto:xiaohongshu] 标题已填充")
-
-	// 填充正文
-	fillContentJS := fmt.Sprintf(`(() => {
-		const editors = document.querySelectorAll('[contenteditable="true"], textarea[placeholder*="正文"], [class*="content"] textarea, [class*="desc"] textarea');
-		for (const editor of editors) {
-			if (editor.offsetParent !== null) {
-				editor.focus();
-				editor.value = %q;
-				editor.dispatchEvent(new Event('input', {bubbles: true}));
-				return true;
-			}
-		}
-		return false;
-	})()`, job.Content)
-	var filled bool
-	err = chromedp.Run(sessionCtx,
-		chromedp.Evaluate(fillContentJS, &filled),
-		chromedp.Sleep(2*time.Second),
-	)
-	if err != nil || !filled {
-		log.Printf("[PublishAuto:xiaohongshu] 正文填充可能失败: %v (filled=%v)", err, filled)
-	} else {
-		log.Printf("[PublishAuto:xiaohongshu] 正文已填充")
-	}
-
-	// 点击发布按钮
-	clickPublishJS := `(() => {
-		const btns = document.querySelectorAll('button');
-		for (const btn of btns) {
-			const text = btn.textContent.trim();
-			if ((text === '发布' || text === '发布笔记') && btn.offsetParent !== null && !btn.disabled) {
-				btn.click();
-				return true;
-			}
-		}
-		return false;
-	})()`
-	var clicked bool
-	err = chromedp.Run(sessionCtx,
-		chromedp.Sleep(2*time.Second),
-		chromedp.Evaluate(clickPublishJS, &clicked),
-	)
-	if err != nil || !clicked {
-		return "", fmt.Errorf("点击发布按钮失败: %w (clicked=%v)", err, clicked)
+		return "", fmt.Errorf("点击发布按钮失败: %w", err)
 	}
 	log.Printf("[PublishAuto:xiaohongshu] 发布按钮已点击")
 
-	// 等待发布完成
-	var articleURL string
-	err = chromedp.Run(sessionCtx,
-		chromedp.Sleep(5*time.Second),
-		chromedp.Location(&articleURL),
-	)
-	if err != nil {
+	// ⑦ 等待发布完成
+	var resultURL string
+	if err := chromedp.Run(sessionCtx,
+		chromedp.Sleep(6*time.Second),
+		chromedp.Location(&resultURL),
+	); err != nil {
 		return "", fmt.Errorf("获取发布结果失败: %w", err)
 	}
+	log.Printf("[PublishAuto:xiaohongshu] 发布完成，URL: %s", resultURL)
+	return resultURL, nil
+}
 
-	log.Printf("[PublishAuto:xiaohongshu] 发布完成，URL: %s", articleURL)
-	return articleURL, nil
+// uploadByClick 兜底上传：点击"上传图片"按钮触发文件选择，用 input 兜底。
+// （小红书若用纯动态 input，SetUploadFiles 找不到时用此兜底）
+func (c *XiaohongshuAutoChannel) uploadByClick(sessionCtx context.Context, localPaths []string) error {
+	// 点击上传按钮（触发 file chooser）
+	if err := chromedp.Run(sessionCtx,
+		chromedp.Click(`.upload-button, button.upload-button`, chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second),
+	); err != nil {
+		return err
+	}
+	// file chooser 弹出后，再尝试设置 input（动态创建的 input 此时应在 DOM）
+	return chromedp.Run(sessionCtx,
+		chromedp.SetUploadFiles(`input[type="file"]`, localPaths, chromedp.ByQuery),
+		chromedp.Sleep(5*time.Second),
+	)
+}
+
+// downloadMediaToTemp 下载 URL 列表到本地临时文件，返回路径 + cleanup。
+// chromedp 上传需要本地文件路径；调用方 defer cleanup() 清理。
+func downloadMediaToTemp(urls []string) (paths []string, cleanup func(), err error) {
+	client := &http.Client{Timeout: 60 * time.Second}
+	var tmpFiles []*os.File
+	cleanup = func() {
+		for _, f := range tmpFiles {
+			_ = os.Remove(f.Name())
+		}
+	}
+	for i, u := range urls {
+		// 扩展名：从 URL 推断，默认 .png
+		ext := ".png"
+		if strings.HasSuffix(strings.ToLower(u), ".jpg") || strings.HasSuffix(strings.ToLower(u), ".jpeg") {
+			ext = ".jpg"
+		} else if strings.HasSuffix(strings.ToLower(u), ".webp") {
+			ext = ".webp"
+		}
+		req, e := http.NewRequest(http.MethodGet, u, nil)
+		if e != nil {
+			cleanup()
+			return nil, cleanup, e
+		}
+		resp, e := client.Do(req)
+		if e != nil {
+			cleanup()
+			return nil, cleanup, fmt.Errorf("下载 %s: %w", u, e)
+		}
+		tmp, e := os.CreateTemp("", fmt.Sprintf("xhs-upload-%d-*%s", i, ext))
+		if e != nil {
+			resp.Body.Close()
+			cleanup()
+			return nil, cleanup, e
+		}
+		tmpFiles = append(tmpFiles, tmp)
+		if _, e := io.Copy(tmp, resp.Body); e != nil {
+			resp.Body.Close()
+			tmp.Close()
+			cleanup()
+			return nil, cleanup, fmt.Errorf("写入 %s: %w", u, e)
+		}
+		resp.Body.Close()
+		tmp.Close()
+		paths = append(paths, tmp.Name())
+	}
+	return paths, cleanup, nil
 }

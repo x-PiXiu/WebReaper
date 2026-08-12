@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, Spin, DatePicker } from 'antd'
-import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, LinkOutlined } from '@ant-design/icons'
+import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, LinkOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
 import { businessApi } from '../../api/business'
@@ -66,6 +66,16 @@ export default function Distribution() {
   const [scheduleTime, setScheduleTime] = useState<Date | null>(null) // 定时发送（null=立即）
   const [publishLinks, setPublishLinks] = useState<PublishJob[]>([])
   const [autoJobIds, setAutoJobIds] = useState<string[]>([])
+  // 小红书图文配图（MediaType：小红书 image 必填，URL 来自素材库）
+  const [mediaUrls, setMediaUrls] = useState<string[]>([])
+  const [showAssetPicker, setShowAssetPicker] = useState(false)
+
+  const { data: pickerAssets = [] } = useQuery({
+    queryKey: ['media-assets'],
+    queryFn: () => businessApi.listAssets().then(r => r.assets),
+    enabled: showAssetPicker,
+  })
+  const pickerImages = pickerAssets.filter(a => a.mime.startsWith('image'))
 
   // ---- 数据 ----
   const { data: accounts = [], isLoading: accountsLoading } = useQuery({
@@ -194,6 +204,8 @@ export default function Distribution() {
             account_id: '', platform, content_id: selectedContent.id, brand_id: selectedBrand,
             title: selectedContent.title || '', content: selectedContent.optimized_text, mode: publishMode,
             scheduled_at: scheduledAt,
+            content_type: platform === 'xiaohongshu' ? 'image' : 'article',
+            media_urls: platform === 'xiaohongshu' ? mediaUrls : undefined,
           }))
         }
       } else {
@@ -204,6 +216,8 @@ export default function Distribution() {
             account_id: accId, platform: acc.platform, content_id: selectedContent.id, brand_id: selectedBrand,
             title: selectedContent.title || '', content: selectedContent.optimized_text, mode: publishMode,
             scheduled_at: scheduledAt,
+            content_type: acc.platform === 'xiaohongshu' ? 'image' : 'article',
+            media_urls: acc.platform === 'xiaohongshu' ? mediaUrls : undefined,
           }))
         }
       }
@@ -508,6 +522,32 @@ export default function Distribution() {
                       </>
                     )}
 
+                    {/* 小红书图文配图（小红书账号存在时显示；image 类型必填 ≥1 张） */}
+                    {healthyAccounts.some(a => a.platform === 'xiaohongshu') && (
+                      <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <Text strong style={{ fontSize: 13 }}>小红书配图（图文必填 ≥1 张）</Text>
+                          <Button size="small" icon={<PictureOutlined />} onClick={() => setShowAssetPicker(true)}>
+                            从素材库选图
+                          </Button>
+                        </div>
+                        {mediaUrls.length === 0 ? (
+                          <Text type="secondary" style={{ fontSize: 12 }}>未选图——发小红书会失败（图文笔记硬约束）</Text>
+                        ) : (
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {mediaUrls.map((u, i) => (
+                              <div key={i} style={{ position: 'relative' }}>
+                                <img src={u} alt="" style={{ width: 52, height: 52, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />
+                                <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                                  onClick={() => setMediaUrls(mediaUrls.filter((_, j) => j !== i))}
+                                  style={{ position: 'absolute', top: -8, right: -8, padding: 0, background: '#fff', borderRadius: '50%' }} />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {publishing && publishMode === 'auto' && autoStatus && (
                       <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
                         {autoStatus.map(s => (
@@ -654,6 +694,42 @@ export default function Distribution() {
             </div>
           ))}
         </Space>
+      </Modal>
+
+      {/* 素材库选图 Modal（小红书图文配图） */}
+      <Modal
+        title="从素材库选择图片"
+        open={showAssetPicker}
+        onCancel={() => setShowAssetPicker(false)}
+        onOk={() => setShowAssetPicker(false)}
+        okText="完成"
+        width={640}
+      >
+        {pickerImages.length === 0 ? (
+          <Empty description="暂无图片素材，请先在创作工作台上传" />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, maxHeight: 380, overflow: 'auto' }}>
+            {pickerImages.map(a => {
+              const active = mediaUrls.includes(a.url)
+              return (
+                <div
+                  key={a.id}
+                  onClick={() => setMediaUrls(prev => active ? prev.filter(u => u !== a.url) : [...prev, a.url])}
+                  style={{
+                    border: active ? '2px solid var(--wr-primary)' : '1px solid #e5e7eb',
+                    borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+                  }}
+                >
+                  <img src={a.url} alt="" style={{ width: '100%', height: 88, objectFit: 'cover' }} />
+                  <div style={{ padding: 4, fontSize: 11, color: '#999', textAlign: 'center' }}>
+                    {Math.round(a.size_bytes / 1024)}KB
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>已选 {mediaUrls.length} 张（点击图片切换选中）</div>
       </Modal>
     </div>
   )

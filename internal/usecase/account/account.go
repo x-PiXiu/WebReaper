@@ -216,8 +216,13 @@ type PublishInput struct {
 	// ScheduledAt 排期发布时间（零值 = 立即发布；将来时间 = 定时发送）。
 	ScheduledAt time.Time
 	// StoreAddress 门店地址（本地生活 P3：内容层本地曝光信号）。
-	// 非空时正文尾部附加"📍 地址"，并留档供平台定位（P4 暂缓）。
 	StoreAddress string
+	// ContentType 内容形态（image/video/article/audio）；空=平台默认
+	ContentType string
+	// MediaURLs 媒体文件 URL 列表（图文=图片、视频=mp4、音频=mp3）
+	MediaURLs []string
+	// CoverURL 封面图 URL
+	CoverURL string
 }
 
 // appendPublicLink 在发布内容尾部追加公开站链接（纯函数，可单测）。
@@ -286,6 +291,9 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		Status:    entity.PublishStatusPending,
 		CreatedAt: now,
 		StoreAddress: in.StoreAddress,
+		ContentType:  in.ContentType,
+		MediaURLs:    in.MediaURLs,
+		CoverURL:     in.CoverURL,
 	}
 
 	// 定时发送：ScheduledAt 在未来 → 仅落库 pending，到期由调度任务执行发布

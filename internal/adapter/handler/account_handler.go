@@ -60,6 +60,9 @@ func publishJobToView(j entity.PublishJob) gin.H {
 		"published_at":      j.PublishedAt,
 		"pre_mention_rate":  j.PreMentionRate,
 		"post_mention_rate": j.PostMentionRate,
+		"content_type":      j.ContentType,
+		"media_urls":        j.MediaURLs,
+		"cover_url":         j.CoverURL,
 	}
 }
 
@@ -154,27 +157,33 @@ func (h *AccountHandler) HandleDeleteAccount(c *gin.Context) {
 func (h *AccountHandler) HandlePublish(c *gin.Context) {
 	tenantID := middleware.CurrentTenantID(c)
 	var req struct {
-		AccountID string `json:"account_id"`
-		Platform  string `json:"platform" binding:"required"`
-		ContentID string `json:"content_id"`
-		BrandID   string `json:"brand_id"`
-		Title     string `json:"title"`
-		Content   string `json:"content"`
-		Mode      string `json:"mode"`
+		AccountID   string   `json:"account_id"`
+		Platform    string   `json:"platform" binding:"required"`
+		ContentID   string   `json:"content_id"`
+		BrandID     string   `json:"brand_id"`
+		Title       string   `json:"title"`
+		Content     string   `json:"content"`
+		Mode        string   `json:"mode"`
+		ContentType string   `json:"content_type"` // image/video/article/audio
+		MediaURLs   []string `json:"media_urls"`   // 媒体文件 URL（图文=图片）
+		CoverURL    string   `json:"cover_url"`    // 封面图
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
 	job, err := h.publishUC.Publish(c.Request.Context(), account.PublishInput{
-		TenantID:  tenantID,
-		BrandID:   req.BrandID,
-		AccountID: req.AccountID,
-		Platform:  req.Platform,
-		ContentID: req.ContentID,
-		Title:     req.Title,
-		Content:   req.Content,
-		Mode:      req.Mode,
+		TenantID:    tenantID,
+		BrandID:     req.BrandID,
+		AccountID:   req.AccountID,
+		Platform:    req.Platform,
+		ContentID:   req.ContentID,
+		Title:       req.Title,
+		Content:     req.Content,
+		Mode:        req.Mode,
+		ContentType: req.ContentType,
+		MediaURLs:   req.MediaURLs,
+		CoverURL:    req.CoverURL,
 	})
 	if err != nil {
 		fail(c, err)
