@@ -127,6 +127,10 @@ type MonitoringResult struct {
 	// 用户需要坐标系"我 45% vs 竞品 80%"才知道自己好不好。
 	// 与 Competitors 同源（探测时统计），落库时按采样数归一化。
 	CompetitorRates map[string]float64
+	// CandidateCompetitors AI 回答中自然出现的其他品牌（非品牌自身、非已配置竞品，去重）。
+	// 竞品沉淀（P1-4）数据源：监测时 LLM 客观列出回答中所有品牌，只有已配置竞品会被计入
+	// CompetitorRates（排除自身）；其余名字沉淀到这里——「从监测结果推荐」据此蒸馏新竞品候选。
+	CandidateCompetitors []string
 	Confidence   float64 // 置信度（采样次数少则低）
 	ProbedAt     time.Time
 	RawSample    string  // 原始回答摘录（留证，便于复核；不存全量以省空间）

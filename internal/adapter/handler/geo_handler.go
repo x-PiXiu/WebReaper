@@ -126,6 +126,8 @@ func monitoringResultToView(r entity.MonitoringResult) gin.H {
 		"sentiment":        r.Sentiment,
 		"competitors":      r.Competitors,
 		"competitor_rates": r.CompetitorRates, // 竞品提及率（对比坐标系）
+		// 竞品沉淀候选（AI 回答中自然出现的其他品牌）——「从监测结果推荐」数据源
+		"candidate_competitors": r.CandidateCompetitors,
 		"confidence":       r.Confidence,
 		"probed_at":        r.ProbedAt,
 		"raw_sample":       r.RawSample,

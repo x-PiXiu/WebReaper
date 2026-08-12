@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -246,9 +247,10 @@ func dedupeMapRanking(entries []MapRankEntry) []MapRankEntry {
 
 // SuggestCompetitorsFromMonitoring 从监测结果蒸馏竞品候选（P0-4 竞品自动沉淀）。
 //
-// 策略：查品牌最近监测结果 → 聚合 CompetitorRates（取每竞品最大提及率）→
-// 排除品牌自身 + 已有竞品 → 按提及率降序取 top N。
+// 策略：查品牌最近监测结果 → 聚合 AI 回答中自然出现的其他品牌（CandidateCompetitors，
+// 已排除品牌自身与已配置竞品；跨结果去重）→ 按出现次数降序取 top N。
 // 对 local/online 都适用——online 品牌的核心竞品来源（AI 回答中提到的对手自动沉淀）。
+// 注意：不能从 CompetitorRates 蒸馏——它只统计"已配置竞品"，会被"排除已有竞品"过滤恒空。
 func (uc *NearbyUseCase) SuggestCompetitorsFromMonitoring(ctx context.Context, tenantID, brandID string, limit int) ([]CompetitorSuggestion, error) {
 	if limit <= 0 {
 		limit = 5
@@ -261,32 +263,30 @@ func (uc *NearbyUseCase) SuggestCompetitorsFromMonitoring(ctx context.Context, t
 	if err != nil || len(results) == 0 {
 		return nil, errors.New("还没有监测数据——发起监测后，AI 回答中提到的对手会自动推荐为竞品候选")
 	}
-	// 聚合竞品提及率（跨关键词/引擎取最大值）
-	rates := make(map[string]float64)
-	for _, r := range results {
-		for name, rate := range r.CompetitorRates {
-			if rate > rates[name] {
-				rates[name] = rate
-			}
-		}
-	}
-	// 排除品牌自身 + 已有竞品
+	// 聚合候选竞品（跨关键词/引擎/结果统计出现次数；去重保序）
 	excluded := map[string]bool{brand.Name: true}
 	for _, c := range brand.Competitors {
 		excluded[c] = true
 	}
 	type candidate struct {
 		name string
-		rate float64
+		cnt  int
 	}
-	var pool []candidate
-	for name, rate := range rates {
-		if excluded[name] || name == "" || len(name) < 2 {
-			continue
+	poolMap := make(map[string]int)
+	for _, r := range results {
+		for _, name := range r.CandidateCompetitors {
+			name = strings.TrimSpace(name)
+			if name == "" || len(name) < 2 || excluded[name] {
+				continue
+			}
+			poolMap[name]++
 		}
-		pool = append(pool, candidate{name, rate})
 	}
-	sort.SliceStable(pool, func(i, j int) bool { return pool[i].rate > pool[j].rate })
+	pool := make([]candidate, 0, len(poolMap))
+	for name, cnt := range poolMap {
+		pool = append(pool, candidate{name, cnt})
+	}
+	sort.SliceStable(pool, func(i, j int) bool { return pool[i].cnt > pool[j].cnt })
 	if len(pool) > limit {
 		pool = pool[:limit]
 	}
@@ -294,9 +294,9 @@ func (uc *NearbyUseCase) SuggestCompetitorsFromMonitoring(ctx context.Context, t
 	for _, c := range pool {
 		out = append(out, CompetitorSuggestion{
 			Name:     c.name,
-			Rating:   c.rate, // 提及率（0-1）——前端显示为百分比
+			Rating:   float64(c.cnt) / float64(len(results)), // 出现结果占比（0-1）
 			Category: "监测识别",
-			Address:  fmt.Sprintf("AI 回答中提及率 %.0f%%", c.rate*100),
+			Address:  fmt.Sprintf("在 %d 次监测结果中出现", c.cnt),
 		})
 	}
 	return out, nil

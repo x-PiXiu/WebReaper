@@ -86,6 +86,10 @@ type ProbeResult struct {
 	AvgPosition  int     // 平均排名
 	Sentiment    string  // positive/neutral/negative
 	Competitors  map[string]int // 竞品名 → 被提及次数
+	// OtherBrands AI 回答中自然出现的其他品牌（非品牌自身、非已配置竞品，去重）。
+	// 竞品沉淀数据源：LLM 客观列出回答中所有品牌，已配置竞品计入 Competitors，
+	// 其余名字进这里——用例层据此沉淀"新竞品候选"（「从监测结果推荐」）。
+	OtherBrands []string
 	RawSample    string  // 原始回答摘录
 	SourceCount  int     // 搜索源文章数
 	BrandAppearanceCount int // 品牌在检索源里出现的文章数

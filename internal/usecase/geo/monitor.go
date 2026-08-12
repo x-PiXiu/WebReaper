@@ -190,6 +190,8 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 			Sentiment:       probeResult.Sentiment,
 			Competitors:     mentionedCompetitors,
 			CompetitorRates: competitorRates,
+			// 竞品沉淀：回答中自然出现的其他品牌 → 候选（「从监测结果推荐」数据源）
+			CandidateCompetitors: probeResult.OtherBrands,
 			Confidence:      probeResult.Confidence,
 			ProbedAt:        time.Now(),
 			RawSample:       probeResult.RawSample,
@@ -299,6 +301,8 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 		Sentiment:       probeResult.Sentiment,
 		Competitors:     mentionedCompetitors,
 		CompetitorRates: competitorRates,
+		// 竞品沉淀：回答中自然出现的其他品牌 → 候选（「从监测结果推荐」数据源）
+		CandidateCompetitors: probeResult.OtherBrands,
 		Confidence:      probeResult.Confidence,
 		ProbedAt:        time.Now(),
 		RawSample:       probeResult.RawSample,
@@ -379,6 +383,8 @@ func (uc *MonitorUseCase) MonitorMultiEngine(ctx context.Context, tenantID, keyw
 			Sentiment:       probeResult.Sentiment,
 			Competitors:     mentionedCompetitors,
 			CompetitorRates: competitorRates,
+			// 竞品沉淀：回答中自然出现的其他品牌 → 候选（「从监测结果推荐」数据源）
+			CandidateCompetitors: probeResult.OtherBrands,
 			Confidence:      probeResult.Confidence,
 			ProbedAt:        time.Now(),
 			RawSample:       probeResult.RawSample,

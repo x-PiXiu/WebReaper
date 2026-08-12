@@ -77,6 +77,9 @@ type MonitoringResultPO struct {
 	// CompetitorRates 竞品提及率 JSON（{name: rate}）——探测时统计、落库时归一化，
 	// 前端对比条"我 X% vs 竞品 Y%"的数据源
 	CompetitorRates datatypes.JSON `gorm:"type:json"`
+	// CandidateCompetitors 竞品沉淀候选 JSON（[]string）——AI 回答中自然出现的
+	// 其他品牌（非自身、非已配置竞品），「从监测结果推荐」的蒸馏数据源（迁移 036）
+	CandidateCompetitors datatypes.JSON `gorm:"type:json"`
 	Confidence   float64        `gorm:"type:decimal(4,3)"`
 	ProbedAt     time.Time      `gorm:"index"`
 	RawSample    string         `gorm:"type:text"`

@@ -57,6 +57,7 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 	positionSum := 0
 	sentimentPos, sentimentNeg := 0, 0
 	competitorMentions := make(map[string]int)
+	var allOtherBrands []string // 竞品沉淀：跨采样收集"回答中出现的其他品牌"
 	sourceSet := make(map[string]bool) // P5-01：跨采样合并来源（去重）
 	var allAnswers []string
 	totalSamples := 0
@@ -97,6 +98,8 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		for comp, cnt := range analysis.CompetitorMentions {
 			competitorMentions[comp] += cnt
 		}
+		// 竞品沉淀：收集回答中自然出现的其他品牌（跨采样去重见 dedupeOtherBrands）
+		allOtherBrands = append(allOtherBrands, analysis.OtherBrands...)
 		// P5-01：合并来源（去重）
 		for _, s := range analysis.Sources {
 			sourceSet[s] = true
@@ -136,6 +139,7 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		AvgPosition:          avgPos,
 		Sentiment:            sentiment,
 		Competitors:          competitorMentions,
+		OtherBrands:          dedupeOtherBrands(allOtherBrands),
 		RawSample:            rawSample,
 		SourceCount:          totalSamples,
 		BrandAppearanceCount: mentionCount,

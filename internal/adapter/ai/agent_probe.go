@@ -49,6 +49,7 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 	positionSum := 0
 	sentimentPos, sentimentNeg := 0, 0
 	competitorMentions := make(map[string]int)
+	var allOtherBrands []string // 竞品沉淀：跨采样收集"回答中出现的其他品牌"
 	sourceSet := make(map[string]bool) // P5-01：跨采样合并来源（去重）
 	var allAnswers []string
 	totalSamples := 0 // 实际成功采样数（用于置信度）
@@ -126,6 +127,8 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		for comp, cnt := range analysis.CompetitorMentions {
 			competitorMentions[comp] += cnt
 		}
+		// 竞品沉淀：收集回答中自然出现的其他品牌（跨采样去重见 dedupeOtherBrands）
+		allOtherBrands = append(allOtherBrands, analysis.OtherBrands...)
 		// P5-01：合并来源（去重）
 		for _, s := range analysis.Sources {
 			sourceSet[s] = true
@@ -168,6 +171,7 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		AvgPosition:          avgPos,
 		Sentiment:            sentiment,
 		Competitors:          competitorMentions,
+		OtherBrands:          dedupeOtherBrands(allOtherBrands),
 		RawSample:            rawSample,
 		SourceCount:          totalSamples,
 		BrandAppearanceCount: mentionCount,
@@ -289,6 +293,7 @@ func matchBrandFromList(resp, brandName string, aliases, competitors []string) m
 	allTargetNames := append([]string{brandName}, aliases...)
 	for _, entry := range parsed.Brands {
 		entryName := strings.ToLower(strings.TrimSpace(entry.Name))
+		matched := false
 		// 检查是否是目标品牌
 		for _, target := range allTargetNames {
 			if target == "" {
@@ -298,6 +303,7 @@ func matchBrandFromList(resp, brandName string, aliases, competitors []string) m
 			// 双向包含匹配（品牌名可能不完全一致）
 			if strings.Contains(entryName, targetLower) || strings.Contains(targetLower, entryName) {
 				ma.Mentioned = true
+				matched = true
 				if entry.Position > 0 {
 					ma.Position = entry.Position
 				}
@@ -307,6 +313,9 @@ func matchBrandFromList(resp, brandName string, aliases, competitors []string) m
 				break
 			}
 		}
+		if matched {
+			continue
+		}
 		// 检查是否是竞品
 		for _, comp := range competitors {
 			if comp == "" {
@@ -315,7 +324,12 @@ func matchBrandFromList(resp, brandName string, aliases, competitors []string) m
 			compLower := strings.ToLower(comp)
 			if strings.Contains(entryName, compLower) || strings.Contains(compLower, entryName) {
 				ma.CompetitorMentions[comp]++
+				matched = true
 			}
+		}
+		// 竞品沉淀（P1-4）：既非品牌自身也非已配置竞品的名字 → 新竞品候选
+		if !matched && strings.TrimSpace(entry.Name) != "" {
+			ma.OtherBrands = append(ma.OtherBrands, strings.TrimSpace(entry.Name))
 		}
 	}
 
@@ -351,6 +365,7 @@ type mentionAnalysis struct {
 	Position              int
 	Sentiment             string
 	CompetitorMentions    map[string]int
+	OtherBrands           []string // 回答中出现的其他品牌（非自身、非已配置竞品）——竞品沉淀
 	SourceAppearanceCount int // 品牌在检索源里出现的文章数
 	Sources               []string // P5-01：回答中提到的来源（链接/网站名，去重）
 }
@@ -368,6 +383,21 @@ func extractURLs(s string) []string {
 		}
 		seen[u] = true
 		out = append(out, u)
+	}
+	return out
+}
+
+// dedupeOtherBrands 竞品沉淀候选去重（保序，忽略空白；trim 后比较）。
+func dedupeOtherBrands(names []string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
 	}
 	return out
 }
