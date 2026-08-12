@@ -43,6 +43,10 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 	if len(questions) == 0 {
 		questions = p.questioner.Questions(in.Keyword, sampleSize, in.LocalContext)
 	}
+	// 真实性红线（采样层兜底）：问法池若仍含品牌/竞品名（上游校验遗漏路径），
+	// 用模板中性问法替换——点名问法会诱导 AI 复述名字（回声提及），监测失真
+	forbidden := append([]string{in.BrandName}, in.Competitors...)
+	questions = replaceForbiddenQuestions(questions, forbidden, in.Keyword, sampleSize, in.LocalContext, p.questioner)
 
 	allBrandNames := append([]string{in.BrandName}, in.Aliases...)
 	mentionCount := 0

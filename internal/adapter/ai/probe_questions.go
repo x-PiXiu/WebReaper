@@ -55,6 +55,36 @@ func (q *ProbeQuestioner) Questions(keyword string, count int, localContext stri
 	return out
 }
 
+// replaceForbiddenQuestions 采样层兜底（真实性红线第③道防线）：
+// 把含品牌/竞品名的问法逐条替换为模板中性问法（模板只含关键词+位置，天然不点名）。
+// 任何上游校验遗漏的点名问法都会诱导 AI 复述名字（回声提及），必须替换。
+func replaceForbiddenQuestions(questions, forbidden []string, keyword string, count int, localCtx string, q *ProbeQuestioner) []string {
+	if q == nil || len(questions) == 0 {
+		return questions
+	}
+	out := make([]string, 0, len(questions))
+	for _, qs := range questions {
+		if len(sanitizeQuestions([]string{qs}, forbidden)) == 0 {
+			// 点名问法 → 从模板池取第一个中性问法替换
+			pool := q.Questions(keyword, count, localCtx)
+			replaced := false
+			for _, alt := range pool {
+				if len(sanitizeQuestions([]string{alt}, forbidden)) > 0 {
+					out = append(out, alt)
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				out = append(out, qs) // 极端兜底：模板也被污染则保留（正常不会发生）
+			}
+		} else {
+			out = append(out, qs)
+		}
+	}
+	return out
+}
+
 // generateProbeQuestions 兼容薄包装（历史测试保留）——委托共享实现。
 func generateProbeQuestions(keyword string, count int, localContext string) []string {
 	return NewProbeQuestioner().Questions(keyword, count, localContext)
