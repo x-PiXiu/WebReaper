@@ -54,13 +54,18 @@ func (s *OSSMediaStore) publicURL(key string) string {
 	return s.publicBase + "/" + key
 }
 
+// ossProjectPrefix OSS key 统一项目前缀（和另一个项目共 bucket 时按前缀隔离）。
+// 如 zhichen 项目用 "zhichen/"，WebReaper 用 "webreaper/"。
+const ossProjectPrefix = "webreaper"
+
 // SaveFile 上传素材文件到 OSS。
 func (s *OSSMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerType string, data []byte, mime, ext string) (entity.MediaAsset, error) {
 	prefix := "media"
 	if ownerType == entity.AssetTypeCreation {
 		prefix = "creation"
 	}
-	key := fmt.Sprintf("%s/%s-%d%s", prefix, tenantID, time.Now().UnixNano(), ext)
+	// key 格式：webreaper/media/{tenant}-{ts}.ext（项目前缀隔离 + 类型分组）
+	key := fmt.Sprintf("%s/%s/%s-%d%s", ossProjectPrefix, prefix, tenantID, time.Now().UnixNano(), ext)
 	if err := s.bucket.PutObject(key, bytes.NewReader(data)); err != nil {
 		return entity.MediaAsset{}, fmt.Errorf("OSS 上传失败: %w", err)
 	}
@@ -74,13 +79,16 @@ func (s *OSSMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerTy
 
 // List 列出某租户的资产（按 OSS 前缀 + ownerType 过滤）。
 func (s *OSSMediaStore) List(ctx context.Context, tenantID, ownerType string) ([]entity.MediaAsset, error) {
-	// 前缀：material → media/{tenant}- ；creation → creation/c-{tenant}- ；空 → {tenant}
-	prefix := tenantID
+	// 前缀：material → webreaper/media/{tenant}- ；creation → webreaper/creation/c-{tenant}-
+	p := ossProjectPrefix + "/"
 	if ownerType == entity.AssetTypeMaterial {
-		prefix = "media/" + tenantID + "-"
+		p += "media/" + tenantID + "-"
 	} else if ownerType == entity.AssetTypeCreation {
-		prefix = "creation/c-" + tenantID + "-"
+		p += "creation/c-" + tenantID + "-"
+	} else {
+		p += tenantID
 	}
+	prefix := p
 	result, err := s.bucket.ListObjects(oss.Prefix(prefix), oss.MaxKeys(200))
 	if err != nil {
 		return nil, fmt.Errorf("OSS 列出失败: %w", err)
@@ -90,7 +98,7 @@ func (s *OSSMediaStore) List(ctx context.Context, tenantID, ownerType string) ([
 	for i := len(result.Objects) - 1; i >= 0; i-- {
 		obj := result.Objects[i]
 		owner := entity.AssetTypeCreation
-		if strings.HasPrefix(obj.Key, "media/") {
+		if strings.Contains(obj.Key, "/media/") {
 			owner = entity.AssetTypeMaterial
 		}
 		out = append(out, entity.MediaAsset{
@@ -138,7 +146,7 @@ func (s *OSSMediaStore) DownloadAndStore(ctx context.Context, tenantID, sourceUR
 	} else if ct := resp.Header.Get("Content-Type"); ct != "" {
 		ext = extFromContentType(ct)
 	}
-	key := fmt.Sprintf("creation/c-%s-%d%s", tenantID, time.Now().UnixNano(), ext)
+	key := fmt.Sprintf("%s/creation/c-%s-%d%s", ossProjectPrefix, tenantID, time.Now().UnixNano(), ext)
 	if err := s.bucket.PutObject(key, bytes.NewReader(data)); err != nil {
 		return "", fmt.Errorf("OSS 上传失败: %w", err)
 	}
@@ -148,7 +156,7 @@ func (s *OSSMediaStore) DownloadAndStore(ctx context.Context, tenantID, sourceUR
 // CleanupBefore 清理早于 before 的资产（按 LastModified 过滤 + 批量删除）。
 func (s *OSSMediaStore) CleanupBefore(ctx context.Context, before time.Time) (int, error) {
 	// 列出 creation 目录所有对象
-	result, err := s.bucket.ListObjects(oss.Prefix("creation/"), oss.MaxKeys(1000))
+	result, err := s.bucket.ListObjects(oss.Prefix(ossProjectPrefix+"/creation/"), oss.MaxKeys(1000))
 	if err != nil {
 		return 0, err
 	}
