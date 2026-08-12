@@ -941,6 +941,7 @@ func nearbyRankingToView(v geo.NearbyRanking) gin.H {
 		aiRanking = append(aiRanking, gin.H{
 			"name": e.Name, "rate": e.Rate, "sample_cnt": e.SampleCnt,
 			"mentioned": e.Mentioned, "mention_cnt": e.MentionCnt,
+			"is_own": e.IsOwn,
 		})
 	}
 	return gin.H{

@@ -197,6 +197,7 @@ export interface AIRankEntry {
   sample_cnt: number
   mentioned?: boolean       // 是否被 AI 提及（false=未上榜——全量补位）
   mention_cnt?: number      // 提及次数（探查口径）
+  is_own?: boolean          // 是否自己的品牌（金色高亮 + 我的品牌标签）
 }
 
 export interface NearbyRanking {

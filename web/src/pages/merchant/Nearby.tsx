@@ -365,17 +365,30 @@ export default function Nearby() {
                       ) : (
                         <Space direction="vertical" size={8} style={{ width: '100%' }}>
                           {ranking.ai_ranking.map((c, i) => (
-                            <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div
+                              key={c.name + (c.is_own ? '-own' : '')}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 12,
+                                background: c.is_own ? 'rgba(250, 173, 20, 0.10)' : undefined,
+                                border: c.is_own ? '1px solid rgba(250, 173, 20, 0.35)' : undefined,
+                                borderRadius: 8, padding: c.is_own ? '4px 8px' : undefined,
+                              }}
+                            >
                               <Text style={{ color: i < 3 && c.mentioned ? 'var(--wr-danger)' : 'var(--wr-text-muted)', fontWeight: 600, width: 20 }}>
                                 {c.mentioned ? i + 1 : '—'}
                               </Text>
-                              <Text ellipsis style={{ flex: 1, fontSize: 13, color: c.mentioned ? undefined : 'var(--wr-text-muted)' }}>{c.name}</Text>
+                              <Text ellipsis style={{ flex: 1, fontSize: 13, color: c.mentioned ? undefined : 'var(--wr-text-muted)', fontWeight: c.is_own ? 700 : undefined }}>
+                                {c.is_own ? '⭐ ' : ''}{c.name}
+                              </Text>
+                              {c.is_own && (
+                                <Tag color="gold" style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}>我的品牌</Tag>
+                              )}
                               {c.mentioned ? (
                                 <>
                                   <Progress
                                     percent={Math.round(c.rate * 100)}
                                     size="small"
-                                    strokeColor={c.rate >= 0.5 ? 'var(--wr-danger)' : 'var(--wr-warning)'}
+                                    strokeColor={c.is_own ? '#faad14' : (c.rate >= 0.5 ? 'var(--wr-danger)' : 'var(--wr-warning)')}
                                     style={{ width: 110, margin: 0 }}
                                   />
                                   <Text strong style={{ color: 'var(--wr-text-secondary)', width: 40, textAlign: 'right', fontSize: 13 }}>{(c.rate * 100).toFixed(0)}%</Text>

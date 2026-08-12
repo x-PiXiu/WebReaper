@@ -109,14 +109,17 @@ func TestNearbyUseCase_GetRanking(t *testing.T) {
 		if view.OwnRate != 0.5 {
 			t.Errorf("own_rate = %f, want 0.5", view.OwnRate)
 		}
-		if len(view.AIRanking) != 2 {
-			t.Fatalf("AI 榜应 2 条，got %d", len(view.AIRanking))
+		if len(view.AIRanking) != 3 {
+			t.Fatalf("AI 榜应 3 条（2 竞品 + 自己进榜），got %d", len(view.AIRanking))
 		}
 		if view.AIRanking[0].Name != "辣婆婆" || view.AIRanking[0].Rate != 0.8 {
 			t.Errorf("AI 榜首位应为辣婆婆 0.8: %+v", view.AIRanking)
 		}
-		if view.AIRanking[1].Name != "麻椒鱼" {
-			t.Errorf("AI 榜次位应为麻椒鱼: %+v", view.AIRanking)
+		if !view.AIRanking[1].IsOwn || view.AIRanking[1].Name != "望京川菜馆" {
+			t.Errorf("AI 榜次位应为自己的品牌（0.5）：%+v", view.AIRanking)
+		}
+		if view.AIRanking[2].Name != "麻椒鱼" {
+			t.Errorf("AI 榜第三位应为麻椒鱼: %+v", view.AIRanking)
 		}
 	})
 

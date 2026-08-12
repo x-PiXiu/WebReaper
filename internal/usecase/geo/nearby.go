@@ -117,6 +117,7 @@ type AIRankEntry struct {
 	SampleCnt  int     // 统计的采样次数（数据量）
 	Mentioned  bool    // 是否被 AI 提及（false=未上榜——全量补位展示）
 	MentionCnt int     // 提及次数（探查口径）
+	IsOwn      bool    // 是否自己的品牌（v3：自己进入榜单参与排名，前端高亮）
 }
 
 // GetRanking 生成品牌附近同行双榜。
@@ -264,6 +265,26 @@ func (uc *NearbyUseCase) GetRanking(ctx context.Context, tenantID, brandID, type
 		if rateCnt > 0 {
 			view.OwnRate = rateSum / float64(rateCnt)
 		}
+	}
+	// 自己的品牌进入 AI 榜（v3）：作为高亮条目参与完整排序——老板要看到自己
+	// 在榜单里的真实排名（"我在第几"），而不只是一行提及率文字。
+	// 口径：Mentioned = OwnRate > 0（有提及即上榜，与同行同规则）。
+	if view.OwnRate >= 0 {
+		view.AIRanking = append(view.AIRanking, AIRankEntry{
+			Name: brand.Name, Rate: view.OwnRate, SampleCnt: view.AIRankSample,
+			Mentioned: view.OwnRate > 0, IsOwn: true,
+		})
+	}
+	// 统一排序：被提及的（rate>0）按提及率降序在前；未提及的保持原序在后。
+	// 自己的条目与同行同规则参与——排名全局一致（第 1/2/3…）。
+	sort.SliceStable(view.AIRanking, func(i, j int) bool {
+		if view.AIRanking[i].Mentioned != view.AIRanking[j].Mentioned {
+			return view.AIRanking[i].Mentioned
+		}
+		return view.AIRanking[i].Rate > view.AIRanking[j].Rate
+	})
+	if view.AIRankTotal <= 0 {
+		view.AIRankTotal = len(view.AIRanking)
 	}
 	return view, nil
 }
