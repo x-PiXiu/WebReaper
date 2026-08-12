@@ -32,6 +32,7 @@ import (
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
+	"webreaper/internal/adapter/storage"
 	"webreaper/internal/adapter/telemetry"
 	"webreaper/internal/adapter/urlsubmit"
 	"webreaper/internal/config"
@@ -629,6 +630,15 @@ func main() {
 			log.Warn("seed 生成规格默认值失败", port.Err(seedErr))
 		}
 		genUC := generation.NewGenerationUseCase(genProvider, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
+		// 媒体资产存储（素材托管 + 产物转存——Vidu 生成物 24h URL 永久化）
+		mediaStore, mErr := storage.NewLocalMediaStore("./data/media", cfg.Server.PublicBaseURL)
+		if mErr == nil {
+			genUC.SetAssetStore(mediaStore)
+			router.SetMedia(mediaStore, "./data/media")
+			log.Info("媒体存储已启用（本地目录 ./data/media，/media 静态托管）")
+		} else {
+			log.Warn("媒体存储初始化失败（产物转存禁用）", port.Err(mErr))
+		}
 		router.SetGeneration(genUC, genProvider, genRegistry, genSpecRepo)
 		// 轮询驱动：20s 周期扫描未终态任务（回调到达后幂等跳过；双通道合并）
 		_ = taskScheduler.Register(scheduledtask.NewGenerationPollTask(genUC, log))

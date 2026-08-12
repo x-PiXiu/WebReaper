@@ -44,6 +44,12 @@ func NewRegistry() *Registry {
 	r.register(multiframeAdapter{})
 	r.register(digitalHumanAdapter{})
 	r.register(subjectAdapter{})
+	// 媒体端点（P1：图片+音频全端点）
+	r.register(text2imageAdapter{})
+	r.register(text2audioAdapter{})
+	r.register(soundEffectAdapter{})
+	r.register(ttsAdapter{})
+	r.register(voiceCloneAdapter{})
 	// 出厂默认能力表（seed 源——数据源：Vidu端点完整参数限制.md + 各端点文档）
 	r.defaultCaps["text2video"] = text2videoCaps
 	r.defaultCaps["img2video"] = img2videoCaps
@@ -51,6 +57,11 @@ func NewRegistry() *Registry {
 	r.defaultCaps["reference2video"] = reference2videoCaps
 	r.defaultCaps["multiframe"] = multiframeCaps
 	r.defaultCaps["digital_human"] = digitalHumanCaps
+	r.defaultCaps["text2image"] = text2imageCaps
+	r.defaultCaps["text2audio"] = text2audioCaps
+	r.defaultCaps["sound_effect"] = soundEffectCaps
+	r.defaultCaps["tts"] = ttsCaps
+	r.defaultCaps["voice_clone"] = voiceCloneCaps
 	return r
 }
 
@@ -244,4 +255,9 @@ var registryAdapterPaths = map[string]string{
 	"multiframe":      "/ent/v2/multiframe",
 	"digital_human":   "/ent/v2/digital-human",
 	"subject":         "/ent/v2/subjects",
+	"text2image":      "/ent/v2/reference2image",
+	"text2audio":      "/ent/v2/text2audio",
+	"sound_effect":    "/ent/v2/timing2audio",
+	"tts":             "/ent/v2/audio-tts",
+	"voice_clone":     "/ent/v2/audio-clone",
 }

@@ -97,11 +97,9 @@ type GenerationSpecRepository interface {
 
 // MediaAssetStore 媒体资产存储（素材托管 + 产物转存适配器）。
 type MediaAssetStore interface {
-	Save(ctx context.Context, a entity.MediaAsset) error
-	FindByID(ctx context.Context, tenantID, id string) (entity.MediaAsset, error)
-	// StoredURL 取产物永久 URL（任务列表展示用）。
-	StoredURL(ctx context.Context, tenantID, id string) (string, error)
-	// DownloadAndStore 下载外部 URL 到本地存储并返回永久 URL（转存用）。
+	// SaveFile 保存素材文件（上传）——返回资产（含可访问 URL）。
+	SaveFile(ctx context.Context, tenantID, brandID, ownerType string, data []byte, mime, ext string) (entity.MediaAsset, error)
+	// DownloadAndStore 下载外部 URL 到本地存储并返回永久 URL（转存用——Vidu 24h 产物永久化）。
 	DownloadAndStore(ctx context.Context, tenantID, sourceURL string, meta map[string]string) (string, error)
 	// CleanupBefore 清理过期资产（定时任务）。
 	CleanupBefore(ctx context.Context, before time.Time) (int, error)

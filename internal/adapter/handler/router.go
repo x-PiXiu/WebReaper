@@ -82,6 +82,8 @@ type Router struct {
 	generationProvider port.GenerationProvider
 	generationRegistry port.EndpointRegistry   // 规格管理（管理后台矩阵）
 	generationSpecRepo port.GenerationSpecRepository
+	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
+	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
@@ -188,6 +190,12 @@ func (r *Router) SetGeneration(uc *generation.GenerationUseCase, provider port.G
 	r.generationSpecRepo = specRepo
 }
 
+// SetMedia 注入媒体资产存储（可选；素材上传/转存——未注入则上传端点不注册）。
+func (r *Router) SetMedia(store port.MediaAssetStore, dir string) {
+	r.mediaStore = store
+	r.mediaDir = dir
+}
+
 // SetPromptTemplates 注入提示词模板仓库（可选；admin 管理内容生成/优化提示词）。
 func (r *Router) SetPromptTemplates(repo port.PromptTemplateRepository) {
 	r.promptTemplateRepo = repo
@@ -260,6 +268,11 @@ func (r *Router) Engine() *gin.Engine {
 	e.Use(gin.Recovery(), gin.Logger(), corsMiddleware())
 
 	e.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+
+	// 媒体静态托管（素材/转存产物——LocalMediaStore 的数据目录对外只读）
+	if r.mediaDir != "" {
+		e.Static("/media", r.mediaDir)
+	}
 
 	// 认证（公开）——核心依赖，未注入则认证端点不注册
 	if r.authRegister != nil && r.authLogin != nil {
@@ -489,6 +502,11 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/generation/callback", func(c *gin.Context) {
 				gh.HandleCallback(c, r.generationProvider)
 			})
+		}
+		// 素材上传托管（用户图片/音频 → 本地 → URL 供 Vidu 引用）
+		if r.mediaStore != nil {
+			mh := NewMediaHandler(r.mediaStore)
+			api.POST("/media/assets", mh.HandleUpload)
 		}
 
 			// 管理端路由（仅 admin 角色可访问）
