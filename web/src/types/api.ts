@@ -195,6 +195,8 @@ export interface AIRankEntry {
   name: string
   rate: number              // 竞品平均提及率（0~1）
   sample_cnt: number
+  mentioned?: boolean       // 是否被 AI 提及（false=未上榜——全量补位）
+  mention_cnt?: number      // 提及次数（探查口径）
 }
 
 export interface NearbyRanking {
@@ -204,6 +206,12 @@ export interface NearbyRanking {
   own_rate: number          // 自己的 AI 提及率（-1=无数据）
   map_available: boolean
   search_keyword: string
+  // AI 榜来源与覆盖（v2：AI 榜单探查——全量补位 + 上榜率）
+  ai_rank_from_probe?: boolean  // true=来自探查；false/缺省=旧逻辑（监测竞品提及率）
+  ai_rank_probed_at?: string    // 探查时间
+  ai_rank_total?: number        // 附近同行总数
+  ai_rank_mentioned?: number    // 被 AI 提及数（上榜率 = mentioned/total）
+  ai_rank_sample?: number       // 探查采样次数
 }
 
 // ---- GEO：关键词 ----

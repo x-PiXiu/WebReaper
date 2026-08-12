@@ -86,6 +86,16 @@ export default function Nearby() {
     retry: false,
   })
 
+  // AI 榜单探查（v2：让 AI 真实搜索附近同行——刷新按钮触发，约 1-2 分钟）
+  const airProbeMut = useMutation({
+    mutationFn: (t: string) => businessApi.runAIRankProbe(brandId!, t),
+    onSuccess: (view: any) => {
+      queryClient.setQueryData(['geo-nearby', brandId, types], view)
+      message.success('AI 榜已更新：AI 真实搜索了附近同行')
+    },
+    onError: (e: Error) => message.error('AI 榜探查失败：' + e.message),
+  })
+
   const createMut = useMutation({
     mutationFn: (v: any) => businessApi.createStoreLocation(brandId!, v),
     onSuccess: () => {
@@ -261,7 +271,15 @@ export default function Nearby() {
                     style={{ width: 240 }}
                     allowClear
                   />
-                  <Button onClick={() => refetchRanking()} icon={<ReloadOutlined />}>刷新</Button>
+                  <Tooltip title="重新搜索地图同行 + 让 AI 真实搜索一次附近同行（约 1-2 分钟，结果缓存 24 小时）">
+                    <Button
+                      onClick={() => airProbeMut.mutate(types || '')}
+                      icon={<ReloadOutlined />}
+                      loading={airProbeMut.isPending}
+                    >
+                      {airProbeMut.isPending ? 'AI 搜索中…' : '刷新'}
+                    </Button>
+                  </Tooltip>
                 </Space>
               }
             >
@@ -320,28 +338,51 @@ export default function Nearby() {
                     <Col xs={24} lg={10}>
                       <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>
                         <TrophyOutlined style={{ color: 'var(--wr-accent)', marginRight: 6 }} />
-                        AI 榜 · 竞品提及率
+                        AI 榜 · 谁被 AI 提及
                         {ranking.own_rate >= 0 && (
                           <Text style={{ fontSize: 12, marginLeft: 8 }}>
                             我的提及率 <b style={{ color: 'var(--wr-accent)' }}>{(ranking.own_rate * 100).toFixed(0)}%</b>
                           </Text>
                         )}
                       </div>
+                      {ranking.ai_rank_from_probe && (
+                        <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--wr-text-muted)' }}>
+                          {(ranking.ai_rank_mentioned ?? 0) > 0 ? (
+                            <Text type="warning">
+                              上榜率 <b>{ranking.ai_rank_mentioned}/{ranking.ai_rank_total}</b>——附近同行里只有 {ranking.ai_rank_mentioned} 家被 AI 提及
+                              {(ranking.ai_rank_mentioned ?? 0) > 0 && (ranking.ai_rank_mentioned ?? 0) < (ranking.ai_rank_total || 1) ? '，你还没上榜' : ''}
+                            </Text>
+                          ) : (
+                            <Text type="secondary">
+                              上榜率 0/{ranking.ai_rank_total}——本地 AI 竞争度低，正是抢先发布内容让 AI 认识你的机会
+                            </Text>
+                          )}
+                          <div>更新于 {ranking.ai_rank_probed_at} · {ranking.ai_rank_sample} 次问法探查</div>
+                        </div>
+                      )}
                       {ranking.ai_ranking.length === 0 ? (
-                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 AI 竞品数据（监测时自动识别）" />
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 AI 榜数据——点击上方「刷新」让 AI 真实搜索附近同行" />
                       ) : (
                         <Space direction="vertical" size={8} style={{ width: '100%' }}>
                           {ranking.ai_ranking.map((c, i) => (
                             <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                              <Text style={{ color: i < 3 ? 'var(--wr-danger)' : 'var(--wr-text-muted)', fontWeight: 600, width: 20 }}>{i + 1}</Text>
-                              <Text ellipsis style={{ flex: 1, fontSize: 13 }}>{c.name}</Text>
-                              <Progress
-                                percent={Math.round(c.rate * 100)}
-                                size="small"
-                                strokeColor={c.rate >= 0.5 ? 'var(--wr-danger)' : 'var(--wr-warning)'}
-                                style={{ width: 110, margin: 0 }}
-                              />
-                              <Text strong style={{ color: 'var(--wr-text-secondary)', width: 40, textAlign: 'right', fontSize: 13 }}>{(c.rate * 100).toFixed(0)}%</Text>
+                              <Text style={{ color: i < 3 && c.mentioned ? 'var(--wr-danger)' : 'var(--wr-text-muted)', fontWeight: 600, width: 20 }}>
+                                {c.mentioned ? i + 1 : '—'}
+                              </Text>
+                              <Text ellipsis style={{ flex: 1, fontSize: 13, color: c.mentioned ? undefined : 'var(--wr-text-muted)' }}>{c.name}</Text>
+                              {c.mentioned ? (
+                                <>
+                                  <Progress
+                                    percent={Math.round(c.rate * 100)}
+                                    size="small"
+                                    strokeColor={c.rate >= 0.5 ? 'var(--wr-danger)' : 'var(--wr-warning)'}
+                                    style={{ width: 110, margin: 0 }}
+                                  />
+                                  <Text strong style={{ color: 'var(--wr-text-secondary)', width: 40, textAlign: 'right', fontSize: 13 }}>{(c.rate * 100).toFixed(0)}%</Text>
+                                </>
+                              ) : (
+                                <Text type="secondary" style={{ fontSize: 12 }}>未上榜</Text>
+                              )}
                             </div>
                           ))}
                         </Space>

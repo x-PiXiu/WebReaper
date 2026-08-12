@@ -112,6 +112,10 @@ export const businessApi = {
   getNearbyCompetitors: (brandId: string, types?: string) =>
     apiClient.get<unknown, NearbyRanking>(`/api/v1/geo/brands/${brandId}/nearby-competitors`, { params: { types } }),
 
+  // AI 榜单探查（v2：AI 真实搜索附近同行并归因上榜，缓存 24h；返回新双榜视图）
+  runAIRankProbe: (brandId: string, types?: string) =>
+    apiClient.post<unknown, NearbyRanking>(`/api/v1/geo/brands/${brandId}/ai-rank-probe`, { types }),
+
   // ---- GEO 行动建议（P5-05：给老板"下一步做什么"）----
   getAdvice: (brandId: string) =>
     apiClient.get<unknown, { advices: Advice[] }>(`/api/v1/geo/brands/${brandId}/advice`),

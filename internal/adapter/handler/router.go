@@ -56,6 +56,7 @@ type Router struct {
 	geoDistillUC *geo.KeywordDistillUseCase // 关键词蒸馏用例（可选）
 	geoStoreUC   *geo.StoreLocationUseCase  // 门店档案用例（本地生活地基，可选）
 	geoNearbyUC  *geo.NearbyUseCase         // 附近同行双榜用例（可选）
+	geoAirProbeUC *geo.AIRankProbeUseCase   // AI 榜单探查用例（可选，v2：AI 榜数据源）
 	geoAdviceUC  *geo.AdviceUseCase         // 行动建议用例（可选，P5-05）
 	geoCitationUC *geo.CitationUseCase      // 内容引用统计用例（可选，P5-02）
 	inputTipper   port.InputTipper          // 地址联想（可选，P1；未注入→空列表降级）
@@ -94,6 +95,11 @@ func (r *Router) SetKeywordDistill(uc *geo.KeywordDistillUseCase) {
 func (r *Router) SetGeoLocal(storeUC *geo.StoreLocationUseCase, nearbyUC *geo.NearbyUseCase) {
 	r.geoStoreUC = storeUC
 	r.geoNearbyUC = nearbyUC
+}
+
+// SetAIRankProbe 注入 AI 榜单探查用例（可选；未注入则探查端点不注册）。
+func (r *Router) SetAIRankProbe(uc *geo.AIRankProbeUseCase) {
+	r.geoAirProbeUC = uc
 }
 
 // SetAdvice 注入行动建议用例（可选；未注入则建议端点不注册）。
@@ -357,6 +363,9 @@ func (r *Router) Engine() *gin.Engine {
 			if r.geoNearbyUC != nil {
 				geoHandler.SetNearbyUC(r.geoNearbyUC)
 			}
+			if r.geoAirProbeUC != nil {
+				geoHandler.SetAIRankProbeUC(r.geoAirProbeUC)
+			}
 			if r.geoAdviceUC != nil {
 				geoHandler.SetAdviceUC(r.geoAdviceUC)
 			}
@@ -412,6 +421,8 @@ func (r *Router) Engine() *gin.Engine {
 			// 附近同行双榜（现实世界地图榜 + AI 竞品榜）
 			api.GET("/geo/brands/:id/nearby-competitors", geoHandler.HandleNearbyCompetitors)
 			api.GET("/geo/brands/:id/competitor-suggestions", geoHandler.HandleSuggestCompetitors) // 竞品自动推荐（附近同行 top N）
+			// AI 榜单探查（v2：AI 榜真实数据源——手动刷新时强制重跑并缓存 24h）
+			api.POST("/geo/brands/:id/ai-rank-probe", geoHandler.HandleAIRankProbe)
 			// 行动建议（P5-05：给老板"下一步做什么"）
 			api.GET("/geo/brands/:id/advice", geoHandler.HandleAdvice)
 			// 内容引用统计（P5-02：每篇被 AI 引用几次）

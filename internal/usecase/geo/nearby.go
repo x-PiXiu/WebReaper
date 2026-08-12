@@ -15,12 +15,13 @@ import (
 
 // NearbyUseCase 编排"附近同行对比排名"：
 //   地图榜（现实世界）：以门店位置为中心，POI 周边搜索同行业门店（距离/评分）
-//   AI 榜（虚拟世界）：监测结果里竞品的提及率（谁在 AI 引擎里更响）
+//   AI 榜（虚拟世界）：AI 榜单探查结果——附近同行被 AI 提及的情况（谁在 AI 引擎里更响）
 // 双榜对照让老板同时看到"物理距离上的对手"和"AI 声量上的对手"。
 type NearbyUseCase struct {
 	brandRepo   port.BrandRepository
 	storeRepo   port.StoreLocationRepository
 	resultRepo  port.MonitoringResultRepository
+	probeRepo   port.AIRankProbeRepository // 可选；AI 榜单探查结果（v2：AI 榜真实数据源）
 	searcher    port.POISearcher // 可选；nil/未配置时降级只显示 AI 榜
 	measurer    port.DistanceMeasurer // 可选；P2 驾车耗时（未配置时只显示直线距离）
 	quotaGate   port.QuotaStore  // 配额检查门（可选；X-01：nearby 场景，地图 API 有成本）
@@ -29,6 +30,14 @@ type NearbyUseCase struct {
 
 func NewNearbyUseCase(brandRepo port.BrandRepository, storeRepo port.StoreLocationRepository, resultRepo port.MonitoringResultRepository) *NearbyUseCase {
 	return &NearbyUseCase{brandRepo: brandRepo, storeRepo: storeRepo, resultRepo: resultRepo}
+}
+
+// SetAIRankProbeRepo 注入 AI 榜单探查结果仓储（可选；v2：AI 榜数据源升级——注入后
+// GetRanking 的 AI 榜优先用探查结果（全量补位），未注入/无数据回落监测竞品提及率）。
+func (uc *NearbyUseCase) SetAIRankProbeRepo(r port.AIRankProbeRepository) {
+	if r != nil {
+		uc.probeRepo = r
+	}
 }
 
 // SetPOISearcher 注入周边搜索器（可选；未注入/未配置时降级只显示 AI 榜）。
@@ -65,10 +74,16 @@ func (uc *NearbyUseCase) SetUsageRecorder(r port.UsageRecorder) {
 type NearbyRanking struct {
 	Store       entity.StoreLocation // 主门店（无门店时 IsValid()==false，前端提示先建门店）
 	MapRanking  []MapRankEntry       // 地图榜：按距离升序
-	AIRanking   []AIRankEntry        // AI 榜：按提及率降序
+	AIRanking   []AIRankEntry        // AI 榜：按提及率降序（含未上榜门店——全量补位）
 	OwnRate     float64              // 自己的 AI 提及率（最近监测均值；无数据为 -1）
 	MapAvailable bool                // 地图服务是否可用（false=未配置/搜索失败，降级提示）
 	SearchKeyword string             // 实际使用的搜索词（调试/展示用）
+	// ---- AI 榜来源与覆盖（v2：AI 榜单探查）----
+	AIRankFromProbe bool   // true=AI 榜来自"AI 榜单探查"（真实搜索+名单归因）；false=旧逻辑（监测竞品提及率）
+	AIRankProbedAt  string // 探查时间（展示"更新于 xx"）
+	AIRankTotal     int    // 附近同行总数（地图榜同源）
+	AIRankMentioned int    // 被 AI 提及的门店数（上榜率 = mentioned/total）
+	AIRankSample    int    // 探查采样次数（问法数）
 }
 
 // MapRankEntry 地图榜条目。
@@ -97,9 +112,11 @@ type MapRankEntry struct {
 
 // AIRankEntry AI 榜条目。
 type AIRankEntry struct {
-	Name      string  // 竞品名
-	Rate      float64 // 平均提及率（0-1）
-	SampleCnt int     // 统计的采样次数（数据量）
+	Name       string  // 门店名
+	Rate       float64 // 提及率（0-1）
+	SampleCnt  int     // 统计的采样次数（数据量）
+	Mentioned  bool    // 是否被 AI 提及（false=未上榜——全量补位展示）
+	MentionCnt int     // 提及次数（探查口径）
 }
 
 // GetRanking 生成品牌附近同行双榜。
@@ -181,39 +198,71 @@ func (uc *NearbyUseCase) GetRanking(ctx context.Context, tenantID, brandID, type
 		view.MapAvailable = false
 	}
 
-	// ---- AI 榜（虚拟世界：监测结果竞品提及率）----
+	// ---- AI 榜（虚拟世界）----
+	// v2 数据源升级：优先用"AI 榜单探查"结果（真实搜索 + 附近名单归因匹配，全量补位——
+	// 被提及的上榜、未被提及的显示"未上榜"，对比压力可见）；无探查数据回落旧逻辑
+	// （监测结果竞品提及率——数据稀疏但兼容旧版本行为）。
+	if uc.probeRepo != nil {
+		if cached, pErr := uc.probeRepo.Latest(ctx, tenantID, brandID); pErr == nil && len(cached.Results) > 0 {
+			view.AIRankFromProbe = true
+			view.AIRankProbedAt = cached.ProbedAt.Format("01-02 15:04")
+			view.AIRankSample = cached.SampleCount
+			view.AIRankTotal = len(cached.Results)
+			view.AIRanking = make([]AIRankEntry, 0, len(cached.Results))
+			for _, it := range cached.Results {
+				if it.Mentioned {
+					view.AIRankMentioned++
+				}
+				view.AIRanking = append(view.AIRanking, AIRankEntry{
+					Name: it.Name, Rate: it.Rate, SampleCnt: cached.SampleCount,
+					Mentioned: it.Mentioned, MentionCnt: it.MentionCnt,
+				})
+			}
+		}
+	}
+	if len(view.AIRanking) == 0 {
+		// 回落：监测结果竞品提及率（旧逻辑——只有被 AI 提到的已配置竞品）
+		latest, rErr := uc.resultRepo.LatestByBrand(ctx, tenantID, brandID)
+		if rErr == nil && len(latest) > 0 {
+			compMap := make(map[string]struct {
+				rateSum float64
+				cnt     int
+			})
+			for _, r := range latest {
+				for name, rate := range r.CompetitorRates {
+					c := compMap[name]
+					c.rateSum += rate
+					c.cnt++
+					compMap[name] = c
+				}
+			}
+			view.AIRanking = make([]AIRankEntry, 0, len(compMap))
+			for name, c := range compMap {
+				view.AIRanking = append(view.AIRanking, AIRankEntry{
+					Name: name, Rate: c.rateSum / float64(c.cnt),
+					SampleCnt: c.cnt, Mentioned: true,
+				})
+			}
+			sort.SliceStable(view.AIRanking, func(i, j int) bool {
+				return view.AIRanking[i].Rate > view.AIRanking[j].Rate
+			})
+			if len(view.AIRanking) > 10 {
+				view.AIRanking = view.AIRanking[:10]
+			}
+		}
+	}
+	// 自己的 AI 提及率（最近监测均值；独立于 AI 榜数据源——监测口径不变）
 	latest, rErr := uc.resultRepo.LatestByBrand(ctx, tenantID, brandID)
 	if rErr == nil && len(latest) > 0 {
-		rateSum, rateCnt, sampleSum := 0.0, 0, 0
-		compMap := make(map[string]struct {
-			rateSum float64
-			cnt     int
-		})
+		rateSum, rateCnt := 0.0, 0
 		for _, r := range latest {
 			if r.MentionRate > 0 {
 				rateSum += r.MentionRate
 				rateCnt++
-				sampleSum += r.SampleCount
-			}
-			for name, rate := range r.CompetitorRates {
-				c := compMap[name]
-				c.rateSum += rate
-				c.cnt++
-				compMap[name] = c
 			}
 		}
 		if rateCnt > 0 {
 			view.OwnRate = rateSum / float64(rateCnt)
-		}
-		view.AIRanking = make([]AIRankEntry, 0, len(compMap))
-		for name, c := range compMap {
-			view.AIRanking = append(view.AIRanking, AIRankEntry{Name: name, Rate: c.rateSum / float64(c.cnt), SampleCnt: c.cnt})
-		}
-		sort.SliceStable(view.AIRanking, func(i, j int) bool {
-			return view.AIRanking[i].Rate > view.AIRanking[j].Rate
-		})
-		if len(view.AIRanking) > 10 {
-			view.AIRanking = view.AIRanking[:10]
 		}
 	}
 	return view, nil

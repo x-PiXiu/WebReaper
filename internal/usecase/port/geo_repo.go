@@ -62,6 +62,13 @@ type MonitoringResultRepository interface {
 	Count(ctx context.Context) (int, error)
 }
 
+// AIRankProbeRepository AI 榜单探查结果仓储（附近同行 AI 榜数据源）。
+type AIRankProbeRepository interface {
+	Save(ctx context.Context, r entity.AIRankProbeResult) error
+	// Latest 取该品牌最近一次探查结果（含过期标记——调用方按 ExpireAt 判断是否重跑）。
+	Latest(ctx context.Context, tenantID, brandID string) (entity.AIRankProbeResult, error)
+}
+
 // OptimizedContentRepository 优化内容仓储。
 type OptimizedContentRepository interface {
 	Save(ctx context.Context, c entity.OptimizedContent) error

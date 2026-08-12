@@ -142,6 +142,34 @@ type MonitoringResult struct {
 	SelfSourceCount int
 }
 
+// AIRankProbeResult AI 榜单探查结果（附近同行"AI 榜"数据源）。
+//
+// 设计（解决"AI 榜稀疏"问题——本地小店在监测回答中很少出现）：
+//   - 探查问法：本地化中性问法（商圈+品类+卖点，不点名——符合真实性红线）
+//   - AI 真实搜索回答（AgentProbe，模拟引擎）
+//   - 附近 POI 名单归因匹配：名单不喂给 LLM（无诱导），只在解析阶段做文本匹配
+//   - 被 AI 提到的门店上榜（提及率），未被提到的保持"未上榜"——全量补位让对比压力可见
+type AIRankProbeResult struct {
+	TenantID    string
+	BrandID     string
+	Results     []AIRankProbeItem // 附近同行名单（含未上榜）——与地图榜同源
+	SampleCount int               // 采样次数（问法数）
+	ProbedAt    time.Time
+	ExpireAt    time.Time // 缓存过期时间（= ProbedAt + 24h）
+}
+
+// AIRankProbeItem 附近同行单门店的 AI 提及情况（"AI 榜"条目）。
+type AIRankProbeItem struct {
+	Name       string  // 门店名（POI 名单同源）
+	Mentioned  bool    // 是否被 AI 提到
+	MentionCnt int     // 提及次数（跨采样累计）
+	Rate       float64 // 提及率 = 被提到的采样数 / 总采样数
+	AvgPos     int     // 平均出现位次（1=回答中最先出现；0=未提及）
+}
+
+// AIRankProbeTTL AI 榜单探查缓存时长（探查消耗 LLM/地图配额——24h 缓存 + 手动刷新）。
+const AIRankProbeTTL = 24 * time.Hour
+
 // MentionRateLabel 领域规则：把提及率映射为可读等级（纯函数，零依赖）。
 func (m MonitoringResult) MentionRateLabel() string {
 	switch {

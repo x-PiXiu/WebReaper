@@ -352,7 +352,15 @@ func main() {
 		geoNearbyUC.SetPOISearcher(geoPOISearcher)
 		geoNearbyUC.SetDistanceMeasurer(geoMeasurer) // P2 驾车耗时（未配置自动降级）
 		geoNearbyUCRef = geoNearbyUC
+		// AI 榜单探查（v2：AI 榜真实数据源——中性问法真实搜索 + 附近名单归因匹配，缓存 24h）
+		geoAirProbeUC := geo.NewAIRankProbeUseCase(
+			ai.NewRoutingProbe(ai.NewAgentProbe(aiGenerator), ai.NewDirectProbe(aiGenerator), llmConfigRepo),
+			geoRepos.brand, geoRepos.store, geoRepos.keyword,
+			repository.NewGormAIRankProbeRepository(geoRepos.db), geoPOISearcher,
+		)
+		geoNearbyUC.SetAIRankProbeRepo(repository.NewGormAIRankProbeRepository(geoRepos.db))
 		router.SetGeoLocal(geoStoreUC, geoNearbyUC)
+		router.SetAIRankProbe(geoAirProbeUC)
 		// 行动建议（P5-05：规则引擎，给老板"下一步做什么"）
 		router.SetAdvice(geo.NewAdviceUseCase(geoRepos.brand, geoRepos.store, geoRepos.result, geoRepos.content))
 		// 内容引用统计（P5-02：每篇被 AI 引用几次——评分校准数据源）

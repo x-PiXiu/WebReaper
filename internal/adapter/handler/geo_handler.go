@@ -28,6 +28,7 @@ type GEOHandler struct {
 	distillUC  *geo.KeywordDistillUseCase
 	storeUC    *geo.StoreLocationUseCase // 门店档案（可选注入）
 	nearbyUC   *geo.NearbyUseCase        // 附近同行双榜（可选注入）
+	airProbeUC *geo.AIRankProbeUseCase   // AI 榜单探查（可选注入，v2：AI 榜数据源）
 	adviceUC   *geo.AdviceUseCase        // 行动建议（可选注入，P5-05）
 	citationUC *geo.CitationUseCase      // 内容引用统计（可选注入，P5-02）
 	inputTipper port.InputTipper         // 地址联想（可选注入，P1；未注入→空列表降级）
@@ -50,6 +51,11 @@ func (h *GEOHandler) SetStoreUC(uc *geo.StoreLocationUseCase) {
 // SetNearbyUC 注入附近同行用例（可选；未注入则双榜端点不注册）。
 func (h *GEOHandler) SetNearbyUC(uc *geo.NearbyUseCase) {
 	h.nearbyUC = uc
+}
+
+// SetAIRankProbeUC 注入 AI 榜单探查用例（可选；未注入则探查端点不注册）。
+func (h *GEOHandler) SetAIRankProbeUC(uc *geo.AIRankProbeUseCase) {
+	h.airProbeUC = uc
 }
 
 // SetAdviceUC 注入行动建议用例（可选；未注入则建议端点不注册）。
@@ -932,7 +938,10 @@ func nearbyRankingToView(v geo.NearbyRanking) gin.H {
 	}
 	aiRanking := make([]gin.H, 0, len(v.AIRanking))
 	for _, e := range v.AIRanking {
-		aiRanking = append(aiRanking, gin.H{"name": e.Name, "rate": e.Rate, "sample_cnt": e.SampleCnt})
+		aiRanking = append(aiRanking, gin.H{
+			"name": e.Name, "rate": e.Rate, "sample_cnt": e.SampleCnt,
+			"mentioned": e.Mentioned, "mention_cnt": e.MentionCnt,
+		})
 	}
 	return gin.H{
 		"store":          storeLocationToView(v.Store),
@@ -941,6 +950,12 @@ func nearbyRankingToView(v geo.NearbyRanking) gin.H {
 		"own_rate":       v.OwnRate,
 		"map_available":  v.MapAvailable,
 		"search_keyword": v.SearchKeyword,
+		// AI 榜来源与覆盖（v2：AI 榜单探查——全量补位 + 上榜率）
+		"ai_rank_from_probe": v.AIRankFromProbe,
+		"ai_rank_probed_at":  v.AIRankProbedAt,
+		"ai_rank_total":      v.AIRankTotal,
+		"ai_rank_mentioned":  v.AIRankMentioned,
+		"ai_rank_sample":     v.AIRankSample,
 	}
 }
 
@@ -956,6 +971,35 @@ func (h *GEOHandler) HandleNearbyCompetitors(c *gin.Context) {
 		fail(c, err)
 		return
 	}
+	success(c, nearbyRankingToView(view))
+}
+
+// HandleAIRankProbe POST /api/v1/geo/brands/:id/ai-rank-probe
+// 手动触发"AI 榜单探查"（force 重跑并缓存 24h；返回最新 AI 榜视图）。
+// 请求体可选：types（POI 分类编码，如 050000 餐饮）。
+func (h *GEOHandler) HandleAIRankProbe(c *gin.Context) {
+	if h.airProbeUC == nil {
+		fail(c, fmt.Errorf("AI 榜单探查用例未注入"))
+		return
+	}
+	var req struct {
+		Types string `json:"types"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	result, err := h.airProbeUC.Run(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), req.Types, true)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	// 探查后返回完整双榜视图（含新 AI 榜）——前端刷新一次即完成
+	view, vErr := h.nearbyUC.GetRanking(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), req.Types)
+	if vErr != nil {
+		success(c, gin.H{"ai_rank_probed": true, "sample_count": result.SampleCount})
+		return
+	}
+	view.AIRankFromProbe = true
+	view.AIRankProbedAt = result.ProbedAt.Format("01-02 15:04")
+	view.AIRankSample = result.SampleCount
 	success(c, nearbyRankingToView(view))
 }
 
