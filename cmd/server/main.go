@@ -25,6 +25,8 @@ import (
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/provider"
+	"webreaper/internal/adapter/provider/vidu"
+	"webreaper/internal/adapter/provider/viduendpoint"
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/payment"
 	"webreaper/internal/adapter/qrlogin"
@@ -51,6 +53,7 @@ import (
 	"webreaper/internal/usecase/structured"
 	"webreaper/internal/usecase/systemsettings"
 	taskuc "webreaper/internal/usecase/task"
+	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/video"
 )
 
@@ -603,6 +606,25 @@ func main() {
 			indexChecker = bing.NewChecker(cfg.Server.BingAPIKey, cfg.Server.BingSiteURL)
 		}
 		_ = taskScheduler.Register(scheduledtask.NewIndexCheckTask(geoRepos.content, indexChecker, cfg.Server.PublicBaseURL, log))
+	}
+
+	// ③ 统一生成任务（Vidu 全量接入：视频 5+图片/音频/数字人——Docs/Plans/03 计划文档）
+	// 协议层 + 端点策略（viduendpoint：能力向量校验/请求体组装）+ 回调验签；
+	// 未配 key 走 MockGenerationProvider（模拟进度，前端全流程可演示）。
+	// 配额（generation 场景）在 P1 随计费场景扩展注入；当前 mock 模式无真实成本。
+	if geoRepos != nil {
+		genRegistry := viduendpoint.NewRegistry()
+		var genProvider port.GenerationProvider = provider.NewMockGenerationProvider()
+		if cfg.Server.ViduAPIKey != "" {
+			genProvider = vidu.NewViduProvider(cfg.Server.ViduAPIKey)
+			log.Info("统一生成已接入 Vidu（真实 API）")
+		} else {
+			log.Info("统一生成运行在 mock 模式（未配置 VIDU_API_KEY）")
+		}
+		genUC := generation.NewGenerationUseCase(genProvider, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
+		router.SetGeneration(genUC, genProvider)
+		// 轮询驱动：20s 周期扫描未终态任务（回调到达后幂等跳过；双通道合并）
+		_ = taskScheduler.Register(scheduledtask.NewGenerationPollTask(genUC, log))
 	}
 	taskScheduler.Start(schedulerCtx)
 

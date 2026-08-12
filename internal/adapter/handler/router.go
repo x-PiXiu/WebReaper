@@ -16,6 +16,7 @@ import (
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/crawlconfig"
+	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
@@ -25,8 +26,7 @@ import (
 	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/structured"
 	taskuc "webreaper/internal/usecase/task"
-	"webreaper/internal/usecase/video"
-)
+	"webreaper/internal/usecase/video")
 
 // Router 组装所有 HTTP 路由。
 //
@@ -77,6 +77,9 @@ type Router struct {
 	notifyUC *notification.NotifyUseCase
 	// 视频生成工作台——通过 SetVideo 注入，可选
 	videoUC *video.VideoUseCase
+	// 统一生成（Vidu 全量接入：视频/图片/音频/数字人）
+	generationUC      *generation.GenerationUseCase
+	generationProvider port.GenerationProvider
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
@@ -173,6 +176,12 @@ func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCa
 // SetVideo 注入视频生成工作台用例（可选；未注入则视频端点不注册）。
 func (r *Router) SetVideo(uc *video.VideoUseCase) {
 	r.videoUC = uc
+}
+
+// SetGeneration 注入统一生成用例（可选；Vidu 全量接入——未注入则生成端点不注册）。
+func (r *Router) SetGeneration(uc *generation.GenerationUseCase, provider port.GenerationProvider) {
+	r.generationUC = uc
+	r.generationProvider = provider
 }
 
 // SetPromptTemplates 注入提示词模板仓库（可选；admin 管理内容生成/优化提示词）。
@@ -462,6 +471,20 @@ func (r *Router) Engine() *gin.Engine {
 			api.GET("/video/tasks", vh.HandleList)
 			api.POST("/video/tasks/publish", vh.HandlePublish)
 			api.GET("/video/jobs", vh.HandleListJobs)
+		}
+
+		// 统一生成任务（Vidu 全量接入：视频/图片/音频/数字人）
+		if r.generationUC != nil {
+			gh := NewGenerationHandler(r.generationUC)
+			api.POST("/generation/tasks", gh.HandleSubmit)
+			api.GET("/generation/tasks/:id", gh.HandleGet)
+			api.GET("/generation/tasks", gh.HandleList)
+			api.GET("/generation/types", gh.HandleTypes)
+			api.POST("/generation/tasks/:id/cancel", gh.HandleCancel)
+			// Vidu 回调入口（无需商户 token——验签保护；provider 闭包注入）
+			api.POST("/generation/callback", func(c *gin.Context) {
+				gh.HandleCallback(c, r.generationProvider)
+			})
 		}
 
 			// 管理端路由（仅 admin 角色可访问）
