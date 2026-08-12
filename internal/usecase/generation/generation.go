@@ -87,11 +87,12 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if err != nil {
 		return entity.GenerationTask{}, err
 	}
+	// 能力唯一来源：Registry（DB 驱动，管理后台可热改）——策略不持有能力表
 	cap, err := uc.registry.Capability(ctx, in.SubType, in.Model)
 	if err != nil {
 		return entity.GenerationTask{}, err
 	}
-	if err := adapter.Validate(ctx, in.Model, in.Params); err != nil {
+	if err := adapter.Validate(ctx, cap, in.Params); err != nil {
 		return entity.GenerationTask{}, err
 	}
 	// 提示词长度上限（能力向量）

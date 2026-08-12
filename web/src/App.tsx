@@ -23,6 +23,7 @@ import AdminBrands from './pages/admin/Brands'
 import AdminContents from './pages/admin/Contents'
 import AdminSettings from './pages/admin/Settings'
 import AdminBilling from './pages/admin/Billing'
+import GenerationSpecs from './pages/admin/GenerationSpecs'
 // 布局与守卫
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="/admin/agent-configs" element={<AgentConfigs />} />
           <Route path="/admin/tools" element={<Tools />} />
           <Route path="/admin/indexing" element={<Indexing />} />
+          <Route path="/admin/generation-specs" element={<GenerationSpecs />} />
           <Route path="/admin/billing" element={<AdminBilling />} />
           <Route path="/admin/chat" element={<Chat />} />
         </Route>

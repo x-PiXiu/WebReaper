@@ -621,8 +621,15 @@ func main() {
 		} else {
 			log.Info("统一生成运行在 mock 模式（未配置 VIDU_API_KEY）")
 		}
+		// 生成规格 DB 驱动（全局掌控）：首次启动 seed 出厂默认 → 管理后台全量可编辑，
+		// 30s TTL 热生效（不重启）；删除行 = 恢复出厂默认
+		genSpecRepo := repository.NewGormGenerationSpecRepository(geoRepos.db)
+		genRegistry.SetSpecRepo(genSpecRepo)
+		if seedErr := genRegistry.SeedDefaults(context.Background()); seedErr != nil {
+			log.Warn("seed 生成规格默认值失败", port.Err(seedErr))
+		}
 		genUC := generation.NewGenerationUseCase(genProvider, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
-		router.SetGeneration(genUC, genProvider)
+		router.SetGeneration(genUC, genProvider, genRegistry, genSpecRepo)
 		// 轮询驱动：20s 周期扫描未终态任务（回调到达后幂等跳过；双通道合并）
 		_ = taskScheduler.Register(scheduledtask.NewGenerationPollTask(genUC, log))
 	}

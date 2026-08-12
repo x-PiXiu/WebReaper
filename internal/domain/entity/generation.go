@@ -76,34 +76,36 @@ type CreationItem struct {
 // ModelCapability 模型能力向量（类型化约束——替代裸 JSON schema）。
 //
 // 设计（对 Vidu 文档 parameter_schema_json 方案的改进）：参数约束按"模型能力"
-// 组织而非"参数平铺"——校验是直查（duration ∈ [Durations]）而非解释执行配置；
-// 新增模型 = 加一行 struct（编译期安全）；结构化输入（图片槽位/主体/视频参考）
-// 有类型归属。管理后台可对单模型做 JSON 覆盖（generation_specs.capabilities_json）。
+// 组织而非"参数平铺"——校验是直查（duration ∈ [Durations]）而非解释执行配置。
+// **数据库驱动**：generation_specs 表为唯一事实源（首次启动 seed 代码默认值，
+// 管理后台全量可编辑；删除行 = 恢复出厂默认）。JSON tags 用于表存储与管理后台编辑。
 type ModelCapability struct {
-	Model            string   // 模型名（viduq3-pro/audio1.0…）
-	Family           string   // 系列（q3/q2/q1/vidu2.0/audio1.0）
-	Endpoint         string   // 适用端点（同模型多端点时分别注册）
-	Durations        [2]int   // 时长范围 [min,max]（0 表示不支持自定义）
-	Resolutions      []string // 分辨率枚举（空=不支持自定义）
-	AspectRatios     []string // 比例枚举
-	AudioDefault     bool     // audio 默认值（q3=true 其他=false）
-	AudioTypes       []string // audio_type 枚举（all/speech_only/sound_effect_only）
-	ImageSlots       int      // 图片槽位：0=不需要 1=单图 2=双图 -1=动态(1-7)
-	VideoSlots       int      // 视频参考槽位（仅 q2-pro 参考生视频）
-	SupportsBGM      bool
-	SupportsSubjects bool     // 参考生视频主体模式
-	SupportsMovement bool     // movement_amplitude（q1/2.0 生效）
-	MaxPromptLen     int      // prompt 上限（默认 5000）
+	Model            string   `json:"model"`             // 模型名（viduq3-pro/audio1.0…）
+	Family           string   `json:"family"`            // 系列（q3/q2/q1/vidu2.0/audio1.0）
+	Endpoint         string   `json:"endpoint,omitempty"` // 适用端点（同模型多端点时分别注册）
+	Durations        [2]int   `json:"durations"`          // 时长范围 [min,max]（0 表示不支持自定义）
+	Resolutions      []string `json:"resolutions,omitempty"` // 分辨率枚举
+	AspectRatios     []string `json:"aspect_ratios,omitempty"` // 比例枚举
+	AudioDefault     bool     `json:"audio_default"`      // audio 默认值
+	AudioTypes       []string `json:"audio_types,omitempty"` // audio_type 枚举
+	ImageSlots       int      `json:"image_slots"`        // 图片槽位：0=不需要 1=单图 2=双图 -1=动态(1-7)
+	VideoSlots       int      `json:"video_slots"`        // 视频参考槽位（仅 q2-pro 参考生视频）
+	SupportsBGM      bool     `json:"supports_bgm"`
+	SupportsSubjects bool     `json:"supports_subjects"`  // 参考生视频主体模式
+	SupportsMovement bool     `json:"supports_movement"`  // movement_amplitude（q1/2.0 生效）
+	MaxPromptLen     int      `json:"max_prompt_len"`     // prompt 上限（默认 5000）
 }
 
-// GenerationSpec 端点/模型注册表条目（管理后台可维护；代码内能力向量为默认值）。
+// GenerationSpec 端点/模型注册表条目（generation_specs 表——唯一事实源）。
+// 管理后台全量可编辑：能力 JSON（capabilities_json）覆盖 + 启用开关 + 端点路径。
+// Enabled=false 时该模型在端点下拉隐藏、提交被拒（全局掌控：停用/限流单模型）。
 type GenerationSpec struct {
-	SubType          string
-	Model            string
-	Endpoint         string
-	Enabled          bool
-	CapabilitiesJSON string // 管理后台覆盖源（空=用代码默认）
-	UpdatedAt        time.Time
+	SubType          string `json:"sub_type"`           // 端点类型（text2video/…）
+	Model            string `json:"model"`              // 模型名
+	Endpoint         string `json:"endpoint"`           // 服务商端点路径
+	Enabled          bool   `json:"enabled"`            // 启用开关（false=停用）
+	CapabilitiesJSON string `json:"capabilities_json"`  // 能力向量 JSON（管理后台可编辑）
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // MediaAsset 媒体资产（素材上传 + 产物转存）。

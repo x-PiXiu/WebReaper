@@ -22,6 +22,7 @@ const adminMenu: NavItem[] = [
       { key: '/admin/chat', label: 'AI 对话' },
       { key: '/admin/tools', label: '工具面板' },
       { key: '/admin/indexing', label: '收录管理' },
+      { key: '/admin/generation-specs', label: '生成规格' },
     ],
   },
 ]

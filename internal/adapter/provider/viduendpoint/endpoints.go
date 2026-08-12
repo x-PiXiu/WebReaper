@@ -7,20 +7,15 @@ import (
 )
 
 // ---- 文生视频 /ent/v2/text2video ----
-// 参数：model/prompt/duration/resolution/seed/audio/audio_type/bgm/callback_url/style/aspect_ratio/movement_amplitude/watermark/off_peak/payload/meta_data
+// 参数：model/prompt/duration/resolution/seed/audio/audio_type/bgm/style/aspect_ratio/movement_amplitude/watermark/off_peak/payload
 
 type text2videoAdapter struct{}
 
 func (text2videoAdapter) Type() string     { return "text2video" }
+func (text2videoAdapter) Category() string { return entity.GenerationTypeVideo }
 func (text2videoAdapter) Endpoint() string { return "/ent/v2/text2video" }
 
-func (text2videoAdapter) Category() string { return entity.GenerationTypeVideo }
-
-func (text2videoAdapter) Validate(ctx context.Context, model string, p entity.GenerationParams) error {
-	cap, err := capabilityFor(text2videoCaps, model)
-	if err != nil {
-		return err
-	}
+func (text2videoAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if len(getString(p, "prompt")) == 0 {
 		return errPromptRequired
 	}
@@ -61,15 +56,10 @@ func (text2videoAdapter) BuildRequest(ctx context.Context, model string, p entit
 type img2videoAdapter struct{}
 
 func (img2videoAdapter) Type() string     { return "img2video" }
+func (img2videoAdapter) Category() string { return entity.GenerationTypeVideo }
 func (img2videoAdapter) Endpoint() string { return "/ent/v2/img2video" }
 
-func (img2videoAdapter) Category() string { return entity.GenerationTypeVideo }
-
-func (img2videoAdapter) Validate(ctx context.Context, model string, p entity.GenerationParams) error {
-	cap, err := capabilityFor(img2videoCaps, model)
-	if err != nil {
-		return err
-	}
+func (img2videoAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if err := validateImageSlots(getStrings(p, "images"), cap, "图片 images"); err != nil {
 		return err
 	}
@@ -100,15 +90,10 @@ func (img2videoAdapter) BuildRequest(ctx context.Context, model string, p entity
 type startEnd2videoAdapter struct{}
 
 func (startEnd2videoAdapter) Type() string     { return "start_end2video" }
+func (startEnd2videoAdapter) Category() string { return entity.GenerationTypeVideo }
 func (startEnd2videoAdapter) Endpoint() string { return "/ent/v2/start-end2video" }
 
-func (startEnd2videoAdapter) Category() string { return entity.GenerationTypeVideo }
-
-func (startEnd2videoAdapter) Validate(ctx context.Context, model string, p entity.GenerationParams) error {
-	cap, err := capabilityFor(startEnd2videoCaps, model)
-	if err != nil {
-		return err
-	}
+func (startEnd2videoAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if err := validateImageSlots(getStrings(p, "images"), cap, "图片 images"); err != nil {
 		return err
 	}
@@ -140,15 +125,10 @@ func (startEnd2videoAdapter) BuildRequest(ctx context.Context, model string, p e
 type reference2videoAdapter struct{}
 
 func (reference2videoAdapter) Type() string     { return "reference2video" }
+func (reference2videoAdapter) Category() string { return entity.GenerationTypeVideo }
 func (reference2videoAdapter) Endpoint() string { return "/ent/v2/reference2video" }
 
-func (reference2videoAdapter) Category() string { return entity.GenerationTypeVideo }
-
-func (reference2videoAdapter) Validate(ctx context.Context, model string, p entity.GenerationParams) error {
-	cap, err := capabilityFor(reference2videoCaps, model)
-	if err != nil {
-		return err
-	}
+func (reference2videoAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if subs := getSubjects(p); len(subs) > 0 {
 		// 主体模式
 		if !cap.SupportsSubjects {
@@ -193,15 +173,10 @@ func (reference2videoAdapter) BuildRequest(ctx context.Context, model string, p 
 type multiframeAdapter struct{}
 
 func (multiframeAdapter) Type() string     { return "multiframe" }
+func (multiframeAdapter) Category() string { return entity.GenerationTypeVideo }
 func (multiframeAdapter) Endpoint() string { return "/ent/v2/multiframe" }
 
-func (multiframeAdapter) Category() string { return entity.GenerationTypeVideo }
-
-func (multiframeAdapter) Validate(ctx context.Context, model string, p entity.GenerationParams) error {
-	cap, err := capabilityFor(multiframeCaps, model)
-	if err != nil {
-		return err
-	}
+func (multiframeAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if getString(p, "start_image") == "" {
 		return errStartImageRequired
 	}
@@ -233,15 +208,10 @@ func (multiframeAdapter) BuildRequest(ctx context.Context, model string, p entit
 type digitalHumanAdapter struct{}
 
 func (digitalHumanAdapter) Type() string     { return "digital_human" }
+func (digitalHumanAdapter) Category() string { return entity.GenerationTypeDigitalHuman }
 func (digitalHumanAdapter) Endpoint() string { return "/ent/v2/digital-human" }
 
-func (digitalHumanAdapter) Category() string { return entity.GenerationTypeDigitalHuman }
-
-func (digitalHumanAdapter) Validate(ctx context.Context, model string, p entity.GenerationParams) error {
-	cap, err := capabilityFor(digitalHumanCaps, model)
-	if err != nil {
-		return err
-	}
+func (digitalHumanAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if len(getStrings(p, "images")) != 1 && getString(p, "image") == "" {
 		return errDigitalHumanImageRequired
 	}
@@ -284,11 +254,10 @@ func (digitalHumanAdapter) BuildRequest(ctx context.Context, model string, p ent
 type subjectAdapter struct{}
 
 func (subjectAdapter) Type() string     { return "subject" }
+func (subjectAdapter) Category() string { return entity.GenerationTypeOther }
 func (subjectAdapter) Endpoint() string { return "/ent/v2/subjects" }
 
-func (subjectAdapter) Category() string { return entity.GenerationTypeOther }
-
-func (subjectAdapter) Validate(ctx context.Context, model string, p entity.GenerationParams) error {
+func (subjectAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if getString(p, "name") == "" {
 		return errSubjectNameRequired
 	}

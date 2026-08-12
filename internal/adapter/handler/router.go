@@ -80,6 +80,8 @@ type Router struct {
 	// 统一生成（Vidu 全量接入：视频/图片/音频/数字人）
 	generationUC      *generation.GenerationUseCase
 	generationProvider port.GenerationProvider
+	generationRegistry port.EndpointRegistry   // 规格管理（管理后台矩阵）
+	generationSpecRepo port.GenerationSpecRepository
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
@@ -179,9 +181,11 @@ func (r *Router) SetVideo(uc *video.VideoUseCase) {
 }
 
 // SetGeneration 注入统一生成用例（可选；Vidu 全量接入——未注入则生成端点不注册）。
-func (r *Router) SetGeneration(uc *generation.GenerationUseCase, provider port.GenerationProvider) {
+func (r *Router) SetGeneration(uc *generation.GenerationUseCase, provider port.GenerationProvider, registry port.EndpointRegistry, specRepo port.GenerationSpecRepository) {
 	r.generationUC = uc
 	r.generationProvider = provider
+	r.generationRegistry = registry
+	r.generationSpecRepo = specRepo
 }
 
 // SetPromptTemplates 注入提示词模板仓库（可选；admin 管理内容生成/优化提示词）。
@@ -518,6 +522,13 @@ func (r *Router) Engine() *gin.Engine {
 			if r.promptTemplateRepo != nil {
 				adminGroup.GET("/prompt-templates", r.HandleListPromptTemplates)
 				adminGroup.PUT("/prompt-templates/:key", r.HandleUpdatePromptTemplate)
+			}
+			// 生成规格管理（Vidu 端点×模型矩阵——DB 驱动全局掌控，30s 热生效）
+			if r.generationRegistry != nil && r.generationSpecRepo != nil {
+				gh := NewGenerationAdminHandler(r.generationRegistry, r.generationSpecRepo)
+				adminGroup.GET("/generation/specs", gh.HandleListSpecs)
+				adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
+				adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
 			}
 			// 收录管理（运行时配置/提交日志/手动补提交）
 			if r.indexingUC != nil {

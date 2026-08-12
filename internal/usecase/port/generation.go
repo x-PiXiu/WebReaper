@@ -49,8 +49,9 @@ type EndpointAdapter interface {
 	Category() string
 	// Endpoint 服务商端点路径（如 /ent/v2/text2video——路径归属端点策略）。
 	Endpoint() string
-	// Validate 参数校验——内部直查能力向量 + 端点结构规则（首尾帧恰 2 张等）。
-	Validate(ctx context.Context, model string, params entity.GenerationParams) error
+	// Validate 参数校验——cap 由 Registry 提供（DB 驱动唯一入口，策略不持有能力表）；
+	// 策略只做端点结构规则（首尾帧恰 2 张、主体模式支持等）。
+	Validate(ctx context.Context, cap entity.ModelCapability, params entity.GenerationParams) error
 	// BuildRequest 组装请求体——参数映射/图片引用/payload 透传。
 	BuildRequest(ctx context.Context, model string, params entity.GenerationParams, payload string) (map[string]any, error)
 }
@@ -61,10 +62,12 @@ type EndpointRegistry interface {
 	Get(ctx context.Context, subType string) (EndpointAdapter, error)
 	// Types 全部已注册端点（前端/管理后台枚举）。
 	Types() []string
-	// Capability 取模型能力（校验用；spec 表覆盖优先，代码默认兜底）。
+	// Capability 取模型能力（校验用；DB 覆盖优先，代码默认兜底）。
 	Capability(ctx context.Context, subType, model string) (entity.ModelCapability, error)
-	// Models 某端点可用模型列表。
+	// Models 某端点可用模型列表（DB 全量 enabled + 代码默认合并）。
 	Models(ctx context.Context, subType string) ([]string, error)
+	// AllSpecs 全量规格视图（管理后台矩阵：DB 覆盖行 + 未覆盖的出厂默认值）。
+	AllSpecs(ctx context.Context) []entity.GenerationSpec
 }
 
 // GenerationTaskRepository 生成任务仓储。
@@ -78,6 +81,18 @@ type GenerationTaskRepository interface {
 	List(ctx context.Context, tenantID string, limit int) ([]entity.GenerationTask, error)
 	// ListActive 轮询用：全部租户未终态任务（阶段 1 单机扫描）。
 	ListActive(ctx context.Context, limit int) ([]entity.GenerationTask, error)
+}
+
+// GenerationSpecRepository 端点/模型规格仓储（DB 为唯一事实源——全局掌控）。
+type GenerationSpecRepository interface {
+	// ListAll 全量条目（sub_type+model → 能力 JSON + enabled + endpoint）。
+	ListAll(ctx context.Context) ([]entity.GenerationSpec, error)
+	// Find 单条（管理后台编辑回显；未找到返回错误）。
+	Find(ctx context.Context, subType, model string) (entity.GenerationSpec, error)
+	// Upsert 保存（新增模型 = 直接插入；修改 = 覆盖能力 JSON/开关）。
+	Upsert(ctx context.Context, spec entity.GenerationSpec) error
+	// Delete 删除行（= 恢复出厂默认——查询回退代码默认值）。
+	Delete(ctx context.Context, subType, model string) error
 }
 
 // MediaAssetStore 媒体资产存储（素材托管 + 产物转存适配器）。

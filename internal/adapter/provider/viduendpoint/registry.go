@@ -2,8 +2,11 @@ package viduendpoint
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"sync"
+	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -11,19 +14,29 @@ import (
 
 // Registry 是 port.EndpointRegistry 的 Vidu 端点注册表实现。
 //
-// 设计：端点策略在 init 时自注册（注册表模式）——新增端点 = 新增策略文件 +
-// 注册一行，开闭原则。能力向量默认内置于代码（类型安全），generation_specs
-// 表的 JSON 覆盖优先（管理后台热更新运营策略）。
+// 设计（数据库驱动·全局掌控——用户要求所有模型/端点/参数管理后台动态控制）：
+//   - **端点策略**（Validate/BuildRequest 行为）在代码注册——端点是行为，不可配置化
+//   - **模型与能力**（generation_specs 表）为唯一事实源：
+//       ① 首次启动 seed：代码默认能力表写入 DB（出厂默认值）
+//       ② 查询 = DB 优先（30s TTL 缓存——管理后台改完 30s 生效，不重启）
+//       ③ DB 删除行 = 恢复代码默认（出厂值回退）
+//       ④ 新增模型 = 管理后台直接插入一行（端点组装逻辑与模型名无关）
+//       ⑤ Enabled=false = 模型停用（下拉隐藏 + 提交拒绝）
 type Registry struct {
 	adapters map[string]port.EndpointAdapter
-	caps     map[string][]entity.ModelCapability // key: subType
-	// specOverrides 管理后台覆盖（subType|model → 覆盖后的能力；注入可为 nil）
-	specOverrides func(ctx context.Context, subType, model string) (*entity.ModelCapability, error)
+	// 代码默认能力表（seed 源 + DB 删除行后的回退）
+	defaultCaps map[string][]entity.ModelCapability // key: subType
+	// specRepo DB 事实源（nil=纯代码模式，测试用）
+	specRepo port.GenerationSpecRepository
+	// 30s TTL 缓存
+	mu        sync.Mutex
+	cachedAt  time.Time
+	cacheList []entity.GenerationSpec
 }
 
-// NewRegistry 创建注册表并注册内置端点策略与能力向量表。
+// NewRegistry 创建注册表并注册内置端点策略与默认能力表。
 func NewRegistry() *Registry {
-	r := &Registry{adapters: map[string]port.EndpointAdapter{}, caps: map[string][]entity.ModelCapability{}}
+	r := &Registry{adapters: map[string]port.EndpointAdapter{}, defaultCaps: map[string][]entity.ModelCapability{}}
 	r.register(text2videoAdapter{})
 	r.register(img2videoAdapter{})
 	r.register(startEnd2videoAdapter{})
@@ -31,28 +44,84 @@ func NewRegistry() *Registry {
 	r.register(multiframeAdapter{})
 	r.register(digitalHumanAdapter{})
 	r.register(subjectAdapter{})
-	// 能力向量表（数据源：Vidu端点完整参数限制.md + 各端点文档，交叉核对模型参数对照表）
-	r.registerCapabilities("text2video", text2videoCaps)
-	r.registerCapabilities("img2video", img2videoCaps)
-	r.registerCapabilities("start_end2video", startEnd2videoCaps)
-	r.registerCapabilities("reference2video", reference2videoCaps)
-	r.registerCapabilities("multiframe", multiframeCaps)
-	r.registerCapabilities("digital_human", digitalHumanCaps)
+	// 出厂默认能力表（seed 源——数据源：Vidu端点完整参数限制.md + 各端点文档）
+	r.defaultCaps["text2video"] = text2videoCaps
+	r.defaultCaps["img2video"] = img2videoCaps
+	r.defaultCaps["start_end2video"] = startEnd2videoCaps
+	r.defaultCaps["reference2video"] = reference2videoCaps
+	r.defaultCaps["multiframe"] = multiframeCaps
+	r.defaultCaps["digital_human"] = digitalHumanCaps
 	return r
 }
 
-// SetSpecOverrides 注入管理后台覆盖源（可选；nil=只用代码默认能力）。
-func (r *Registry) SetSpecOverrides(fn func(ctx context.Context, subType, model string) (*entity.ModelCapability, error)) {
-	r.specOverrides = fn
+// SetSpecRepo 注入规格仓储（数据库驱动开关；nil=纯代码模式）。
+func (r *Registry) SetSpecRepo(repo port.GenerationSpecRepository) {
+	r.specRepo = repo
+	r.mu.Lock()
+	r.cacheList = nil // 清缓存
+	r.mu.Unlock()
+}
+
+// SeedDefaults 首次启动 seed：DB 为空时写入代码默认能力（保留运营已有修改）。
+func (r *Registry) SeedDefaults(ctx context.Context) error {
+	if r.specRepo == nil {
+		return nil
+	}
+	existing, err := r.specRepo.ListAll(ctx)
+	if err != nil {
+		return fmt.Errorf("读取 generation_specs 失败: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil // 已有数据（运营改过）——不覆盖
+	}
+	// 写入代码默认（含 subject 端点——无能力约束，仅端点路径）
+	var specs []entity.GenerationSpec
+	for subType, caps := range r.defaultCaps {
+		for _, c := range caps {
+			capsJSON, _ := json.Marshal(c)
+			specs = append(specs, entity.GenerationSpec{
+				SubType: subType, Model: c.Model, Endpoint: endpointOf(subType),
+				Enabled: true, CapabilitiesJSON: string(capsJSON),
+			})
+		}
+	}
+	for _, s := range specs {
+		if err := r.specRepo.Upsert(ctx, s); err != nil {
+			return fmt.Errorf("seed generation_specs %s/%s: %w", s.SubType, s.Model, err)
+		}
+	}
+	return nil
+}
+
+// specs 取全量规格（DB 优先 + 30s TTL 缓存 + 代码默认回退合并）。
+func (r *Registry) specs(ctx context.Context) []entity.GenerationSpec {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.specRepo != nil {
+		if r.cacheList == nil || time.Since(r.cachedAt) > 30*time.Second {
+			if list, err := r.specRepo.ListAll(ctx); err == nil {
+				r.cacheList = list
+				r.cachedAt = time.Now()
+			}
+		}
+		if r.cacheList != nil {
+			return r.cacheList
+		}
+	}
+	// 纯代码模式：把默认表转成 spec 列表（只读）
+	var out []entity.GenerationSpec
+	for subType, caps := range r.defaultCaps {
+		for _, c := range caps {
+			out = append(out, entity.GenerationSpec{
+				SubType: subType, Model: c.Model, Endpoint: endpointOf(subType), Enabled: true,
+			})
+		}
+	}
+	return out
 }
 
 func (r *Registry) register(a port.EndpointAdapter) {
 	r.adapters[a.Type()] = a
-}
-
-// registerCapabilities 注册某端点的能力向量表（策略文件内调用）。
-func (r *Registry) registerCapabilities(subType string, caps []entity.ModelCapability) {
-	r.caps[subType] = caps
 }
 
 func (r *Registry) Get(ctx context.Context, subType string) (port.EndpointAdapter, error) {
@@ -72,32 +141,107 @@ func (r *Registry) Types() []string {
 	return out
 }
 
-// Capability 取模型能力：spec 表覆盖优先，代码默认兜底。
+// Capability 取模型能力：DB 覆盖行优先；DB 无该行 → 代码默认回退（出厂值）。
 func (r *Registry) Capability(ctx context.Context, subType, model string) (entity.ModelCapability, error) {
-	if r.specOverrides != nil {
-		if ov, err := r.specOverrides(ctx, subType, model); err == nil && ov != nil {
-			return *ov, nil
+	for _, s := range r.specs(ctx) {
+		if s.SubType == subType && s.Model == model {
+			if !s.Enabled {
+				return entity.ModelCapability{}, fmt.Errorf("模型 %q 已停用（管理后台可重新启用）", model)
+			}
+			if s.CapabilitiesJSON != "" {
+				var c entity.ModelCapability
+				if json.Unmarshal([]byte(s.CapabilitiesJSON), &c) == nil && c.Model != "" {
+					return c, nil
+				}
+			}
+			// 无能力 JSON（如 subject 端点）：返回最小能力（仅模型名）
+			return entity.ModelCapability{Model: model}, nil
 		}
 	}
-	caps := r.caps[subType]
-	return capabilityFor(caps, model)
+	// 回退代码默认（DB 删除行 = 恢复出厂）
+	for _, c := range r.defaultCaps[subType] {
+		if c.Model == model {
+			return c, nil
+		}
+	}
+	return entity.ModelCapability{}, fmt.Errorf("模型 %q 未在该端点注册（可在管理后台新增）", model)
 }
 
-// Models 某端点可用模型列表（spec 覆盖后以覆盖为准；简化：取代码默认表）。
+// Models 某端点可用模型（DB 全量 enabled + 代码默认合并去重；subject 端点无模型约束）。
 func (r *Registry) Models(ctx context.Context, subType string) ([]string, error) {
-	caps := r.caps[subType]
-	if len(caps) == 0 {
-		return nil, fmt.Errorf("端点 %q 无能力注册", subType)
+	if _, ok := r.adapters[subType]; !ok {
+		return nil, fmt.Errorf("端点 %q 未注册", subType)
 	}
-	out := make([]string, 0, len(caps))
-	for _, c := range caps {
-		out = append(out, c.Model)
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range r.specs(ctx) {
+		if s.SubType == subType && s.Enabled && !seen[s.Model] {
+			seen[s.Model] = true
+			out = append(out, s.Model)
+		}
 	}
+	for _, c := range r.defaultCaps[subType] {
+		if !seen[c.Model] {
+			seen[c.Model] = true
+			out = append(out, c.Model)
+		}
+	}
+	sort.Strings(out)
 	return out, nil
 }
 
-// HasModel 判断模型是否在该端点注册（防重复提交校验用）。
-func (r *Registry) HasModel(ctx context.Context, subType, model string) bool {
-	_, err := r.Capability(ctx, subType, model)
-	return err == nil
+// AllSpecs 全量规格视图（管理后台：含代码默认回退条目——DB 行 + 未覆盖的出厂值）。
+// 返回的 Enabled 为实际生效值；HasOverride 标记该行是否 DB 覆盖。
+func (r *Registry) AllSpecs(ctx context.Context) []entity.GenerationSpec {
+	dbList := r.specs(ctx)
+	dbMap := map[string]entity.GenerationSpec{}
+	for _, s := range dbList {
+		dbMap[s.SubType+"|"+s.Model] = s
+	}
+	var out []entity.GenerationSpec
+	for subType, caps := range r.defaultCaps {
+		for _, c := range caps {
+			key := subType + "|" + c.Model
+			if db, ok := dbMap[key]; ok {
+				out = append(out, db)
+				delete(dbMap, key)
+			} else {
+				capsJSON, _ := json.Marshal(c)
+				out = append(out, entity.GenerationSpec{
+					SubType: subType, Model: c.Model, Endpoint: endpointOf(subType),
+					Enabled: true, CapabilitiesJSON: string(capsJSON),
+				})
+			}
+		}
+	}
+	// DB 新增的模型（代码默认表之外的）
+	for _, s := range dbMap {
+		out = append(out, s)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SubType != out[j].SubType {
+			return out[i].SubType < out[j].SubType
+		}
+		return out[i].Model < out[j].Model
+	})
+	return out
+}
+
+// endpointOf 端点路径（与策略的 Endpoint() 一致）。
+func endpointOf(subType string) string {
+	if a, ok := registryAdapterPaths[subType]; ok {
+		return a
+	}
+	return ""
+}
+
+// registryAdapterPaths 端点路径表（seed 用；与各策略 Endpoint() 方法保持一致）。
+var registryAdapterPaths = map[string]string{
+	"text2video":      "/ent/v2/text2video",
+	"img2video":       "/ent/v2/img2video",
+	"start_end2video": "/ent/v2/start-end2video",
+	"reference2video": "/ent/v2/reference2video",
+	"multiframe":      "/ent/v2/multiframe",
+	"digital_human":   "/ent/v2/digital-human",
+	"subject":         "/ent/v2/subjects",
 }
