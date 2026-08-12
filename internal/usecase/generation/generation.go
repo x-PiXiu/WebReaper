@@ -28,6 +28,9 @@ type GenerationUseCase struct {
 	asset    port.MediaAssetStore // 可选；nil=不转存（产物仅保留 24h URL）
 	quotaGate port.QuotaStore     // 可选；generation 场景配额
 	usageRec  port.UsageRecorder  // 可选；generation 场景计量
+	// submitSem 并发节流（P3）：限制同时提交到上游的请求数，防瞬时高峰触发
+	// Vidu QuotaExceeded/429。nil=不节流（向后兼容）。容量由 SetConcurrency 配置。
+	submitSem chan struct{}
 	// callbackNonces 防重放 nonce 去重表（单机内存 TTL；多实例换 Redis——port 预留）
 	callbackNonces map[string]time.Time
 }
@@ -58,6 +61,14 @@ func (uc *GenerationUseCase) SetQuotaGate(g port.QuotaStore) {
 func (uc *GenerationUseCase) SetUsageRecorder(r port.UsageRecorder) {
 	if r != nil {
 		uc.usageRec = r
+	}
+}
+
+// SetConcurrency 设置提交并发上限（P3 节流——防 Vidu QuotaExceeded/429）。
+// n<=0 表示不节流。建议设为 Vidu 套餐允许的并发数（如 5）。
+func (uc *GenerationUseCase) SetConcurrency(n int) {
+	if n > 0 {
+		uc.submitSem = make(chan struct{}, n)
 	}
 }
 
@@ -143,6 +154,15 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		task.FinishedAt = nowPtr(time.Now())
 		_ = uc.repo.Save(ctx, task)
 		return task, bErr
+	}
+	// 并发节流：信号量限流提交到上游（防瞬时高峰触发 Vidu QuotaExceeded/429）
+	if uc.submitSem != nil {
+		select {
+		case uc.submitSem <- struct{}{}:
+			defer func() { <-uc.submitSem }()
+		case <-ctx.Done():
+			return task, ctx.Err()
+		}
 	}
 	taskID, credits, err := uc.provider.Submit(ctx, adapter.Endpoint(), body)
 	if err != nil {
@@ -275,6 +295,27 @@ func (uc *GenerationUseCase) CheckCallbackNonce(nonce string) bool {
 		}
 	}
 	return true
+}
+
+// CleanupOldTasks 清理早于 retainDays 天的终态任务 + 过期素材文件（P3 任务清理策略）。
+// 由定时任务（generation-cleanup，24h）调用；活跃任务不动。
+func (uc *GenerationUseCase) CleanupOldTasks(ctx context.Context, retainDays int) (tasks int64, files int, err error) {
+	if uc.repo == nil {
+		return 0, 0, nil
+	}
+	if retainDays <= 0 {
+		retainDays = 30
+	}
+	before := time.Now().AddDate(0, 0, -retainDays)
+	tasks, err = uc.repo.DeleteTerminalOlderThan(ctx, before)
+	if err != nil {
+		return 0, 0, err
+	}
+	// 素材文件清理（同阈值；LocalMediaStore 按文件 mtime 判断）
+	if uc.asset != nil {
+		files, _ = uc.asset.CleanupBefore(ctx, before)
+	}
+	return tasks, files, nil
 }
 
 // applyStatus 状态机推进（幂等核心）：success/failed 终态；queueing/processing 中间态。

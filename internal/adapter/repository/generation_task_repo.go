@@ -144,3 +144,12 @@ func (r *GormGenerationTaskRepository) ListActive(ctx context.Context, limit int
 	}
 	return out, nil
 }
+
+// DeleteTerminalOlderThan 清理早于 before 的终态任务（P3 任务清理策略——避免 generation_tasks 无限增长）。
+// 仅删终态（success/failed/cancelled），活跃任务不动。
+func (r *GormGenerationTaskRepository) DeleteTerminalOlderThan(ctx context.Context, before time.Time) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Where("state IN ? AND created_at < ?", []string{entity.TaskStateSuccess, entity.TaskStateFailed, entity.TaskStateCancelled}, before).
+		Delete(&GenerationTaskPO{})
+	return res.RowsAffected, res.Error
+}

@@ -81,6 +81,8 @@ type GenerationTaskRepository interface {
 	List(ctx context.Context, tenantID string, limit int) ([]entity.GenerationTask, error)
 	// ListActive 轮询用：全部租户未终态任务（阶段 1 单机扫描）。
 	ListActive(ctx context.Context, limit int) ([]entity.GenerationTask, error)
+	// DeleteTerminalOlderThan 清理早于 before 的终态任务（P3 任务清理）。
+	DeleteTerminalOlderThan(ctx context.Context, before time.Time) (int64, error)
 }
 
 // GenerationSpecRepository 端点/模型规格仓储（DB 为唯一事实源——全局掌控）。

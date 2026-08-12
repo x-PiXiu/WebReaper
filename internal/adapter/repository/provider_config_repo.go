@@ -43,8 +43,10 @@ func (r *GormProviderConfigRepository) List(ctx context.Context) ([]entity.Provi
 }
 
 func (r *GormProviderConfigRepository) Get(ctx context.Context, provider string) (entity.ProviderConfig, error) {
+	// 用 Find 而非 First：找不到返回零值 + nil（避免 GORM record-not-found 噪音日志——
+	// 装配时厂商未配置是正常态，调用方按 APIKey == "" 判断）
 	var po ProviderConfigPO
-	if err := r.db.WithContext(ctx).Where("provider = ?", provider).First(&po).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("provider = ?", provider).Limit(1).Find(&po).Error; err != nil {
 		return entity.ProviderConfig{}, err
 	}
 	return providerConfigFromPO(po), nil

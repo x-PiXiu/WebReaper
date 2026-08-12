@@ -381,6 +381,7 @@ export default function CreationWorkbench() {
   const selectModel = (m: string) => {
     setModel(m)
     setParams({})
+    setCanvasIdx(0)
     const entry = modelEntries.find(e => e.model === m)
     setSubType(entry?.endpoints[0]?.sub_type || '')
   }
@@ -507,13 +508,25 @@ export default function CreationWorkbench() {
     })
   }
 
-  // ---- 画布：当前模式最近成功产物 ----
-  const canvasResult = useMemo(() => {
-    if (!subType) return null
-    return tasks
-      .filter(t => t.sub_type === subType && t.state === 'success' && (t.creations || []).length > 0)
-      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0] || null
+  // ---- 画布：当前模式所有成功产物（多结果缩略条——即梦式）----
+  interface CanvasItem { taskId: string; url: string; cover?: string; type: string; createdAt: string }
+  const canvasItems = useMemo<CanvasItem[]>(() => {
+    if (!subType) return []
+    const list: CanvasItem[] = []
+    for (const t of tasks) {
+      if (t.sub_type !== subType || t.state !== 'success') continue
+      for (const c of (t.creations || [])) {
+        const url = c.stored_url || c.url
+        if (!url) continue
+        list.push({ taskId: t.id, url, cover: c.cover_url, type: t.type, createdAt: t.created_at || '' })
+      }
+    }
+    return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }, [tasks, subType])
+  const [canvasIdx, setCanvasIdx] = useState(0)
+  // 切换模式时重置选中索引（避免越界）
+  const safeIdx = canvasItems.length === 0 ? 0 : Math.min(canvasIdx, canvasItems.length - 1)
+  const canvasCurrent = canvasItems[safeIdx] || null
 
   // ---- 能力字段（折叠进高级参数）----
   const renderField = (kind: string): ReactNode | null => {
@@ -928,26 +941,54 @@ export default function CreationWorkbench() {
             </div>
           </div>
         </Empty>
-      ) : canvasResult ? (
-        (() => {
-          const c = canvasResult.creations[0]
-          const url = c.stored_url || c.url
-          const type = canvasResult.type
-          return (
-            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-              {type === 'image' ? (
-                <img src={url} alt="生成结果" style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.12)' }} />
-              ) : type === 'video' || type === 'digital_human' ? (
-                <video src={url} poster={c.cover_url} controls style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.12)' }} />
-              ) : (
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 56, color: 'var(--wr-primary)', marginBottom: 12 }}><SoundOutlined /></div>
-                  <audio src={url} controls style={{ width: 320 }} />
-                </div>
-              )}
+      ) : canvasCurrent ? (
+        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* 主预览区 */}
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, minHeight: 0 }}>
+            {canvasCurrent.type === 'image' ? (
+              <img src={canvasCurrent.url} alt="生成结果" style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.12)' }} />
+            ) : canvasCurrent.type === 'video' || canvasCurrent.type === 'digital_human' ? (
+              <video key={canvasCurrent.url} src={canvasCurrent.url} poster={canvasCurrent.cover} controls autoPlay style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.12)' }} />
+            ) : (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 56, color: 'var(--wr-primary)', marginBottom: 12 }}><SoundOutlined /></div>
+                <audio src={canvasCurrent.url} controls style={{ width: 320 }} />
+              </div>
+            )}
+          </div>
+          {/* 多结果缩略条（即梦式横向） */}
+          {canvasItems.length > 1 && (
+            <div style={{ flexShrink: 0, padding: '8px 16px 14px', display: 'flex', gap: 8, overflowX: 'auto', borderTop: '1px solid rgba(0,0,0,0.04)' }}>
+              {canvasItems.map((it, i) => {
+                const active = i === safeIdx
+                return (
+                  <div
+                    key={it.taskId + '-' + i}
+                    onClick={() => setCanvasIdx(i)}
+                    style={{
+                      width: 72, height: 72, borderRadius: 8, flexShrink: 0, cursor: 'pointer',
+                      overflow: 'hidden', position: 'relative',
+                      border: active ? '2px solid var(--wr-primary)' : '2px solid transparent',
+                      boxShadow: active ? '0 4px 12px rgba(99,102,241,0.3)' : 'none',
+                      transition: 'all .2s',
+                    }}
+                  >
+                    {it.type === 'image' || it.type === 'video' || it.type === 'digital_human' ? (
+                      <img src={it.cover || it.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f0f5' }}>
+                        <SoundOutlined style={{ fontSize: 22, color: '#8c8c8c' }} />
+                      </div>
+                    )}
+                    {(it.type === 'video' || it.type === 'digital_human') && (
+                      <PlayCircleOutlined style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: '#fff', fontSize: 20, textShadow: '0 1px 4px rgba(0,0,0,0.5)' }} />
+                    )}
+                  </div>
+                )
+              })}
             </div>
-          )
-        })()
+          )}
+        </div>
       ) : (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}

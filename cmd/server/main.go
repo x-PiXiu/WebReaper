@@ -617,8 +617,12 @@ func main() {
 			log.Warn("媒体存储初始化失败（产物转存禁用）", port.Err(mErr))
 		}
 		router.SetGeneration(genUC, genProvider, genRegistry, genSpecRepo)
+		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429
+		genUC.SetConcurrency(5)
 		// 轮询驱动：20s 周期扫描未终态任务（回调到达后幂等跳过；双通道合并）
 		_ = taskScheduler.Register(scheduledtask.NewGenerationPollTask(genUC, log))
+		// 任务清理（P3）：每日清理 30 天前终态任务 + 过期素材文件
+		_ = taskScheduler.Register(scheduledtask.NewGenerationCleanupTask(genUC, log))
 	}
 	taskScheduler.Start(schedulerCtx)
 

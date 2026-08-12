@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -45,6 +46,11 @@ func (h *GenerationHandler) HandleSubmit(c *gin.Context) {
 	}
 	if req.Params == nil {
 		req.Params = map[string]any{}
+	}
+	// 引用素材租户归属校验：本站 /media/ 路径必须属于当前租户（防 A 引用 B 的素材）
+	if err := validateRefsOwnership(middleware.CurrentTenantID(c), req.Refs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 40000, "msg": err.Error()})
+		return
 	}
 	task, err := h.uc.Submit(c.Request.Context(), generation.SubmitInput{
 		TenantID: middleware.CurrentTenantID(c),
@@ -206,4 +212,23 @@ func generationTaskToView(t entity.GenerationTask) gin.H {
 		"retry_count": t.RetryCount,
 		"created_at": t.CreatedAt, "finished_at": t.FinishedAt,
 	}
+}
+
+// validateRefsOwnership 引用素材租户归属校验。
+// 本站托管路径（/media/）的素材文件名以 {tenantID}- 为前缀（LocalMediaStore 命名规则）——
+// 校验防止 A 租户引用 B 租户的素材（越权）。外部 URL（用户自己的图床等）放行。
+func validateRefsOwnership(tenantID string, refs []entity.PromptRef) error {
+	for _, r := range refs {
+		// 仅校验本站 /media/ 托管路径；外部 URL（图床/OSS）不校验
+		idx := strings.Index(r.URL, "/media/")
+		if idx < 0 {
+			continue
+		}
+		fileName := r.URL[idx+len("/media/"):]
+		// 文件名必须以 {tenantID}- 开头（material 命名：{tenant}-{ts}{ext}；creation：c-{tenant}-{ts}{ext}）
+		if !strings.HasPrefix(fileName, tenantID+"-") && !strings.HasPrefix(fileName, "c-"+tenantID+"-") {
+			return fmt.Errorf("引用素材 %s 不属于当前租户", fileName)
+		}
+	}
+	return nil
 }
