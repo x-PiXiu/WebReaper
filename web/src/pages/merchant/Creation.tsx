@@ -3,15 +3,16 @@ import type { ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, message,
-  Table, Modal, Upload, Empty, Popconfirm, Tooltip, Alert, Divider, Badge,
+  Table, Modal, Upload, Empty, Popconfirm, Tooltip, Alert, Divider, Badge, Segmented,
 } from 'antd'
 import {
   VideoCameraOutlined, PictureOutlined, AudioOutlined, RobotOutlined, AppstoreOutlined,
   UploadOutlined, DeleteOutlined, ReloadOutlined, PlayCircleOutlined, SoundOutlined,
   PlusOutlined, MinusCircleOutlined, FileImageOutlined, CloseCircleOutlined,
+  ThunderboltOutlined, ApartmentOutlined, ClockCircleOutlined, MonitorOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
-import type { GenerationTask } from '../../types/api'
+import type { GenerationTask, GenerationType, ModelCapability } from '../../types/api'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -83,12 +84,39 @@ const EMOTION_OPTIONS = [
   { value: 'calm', label: '平静' },
 ]
 
-// 资产类型 → 可接受文件类型（上传白名单）
 const ASSET_ACCEPT: Record<string, string> = {
   image: 'image/png,image/jpeg,image/webp',
   audio: 'audio/mpeg,audio/mp4,audio/wav',
   any: 'image/png,image/jpeg,image/webp,audio/mpeg,audio/mp4,audio/wav',
 }
+
+// ---- 模型库聚合：模型 → 支持的端点（模式）----
+interface ModelEntry {
+  model: string
+  family: string
+  endpoints: Array<{ sub_type: string; capability: ModelCapability }>
+}
+
+function buildModelMap(types: GenerationType[]): ModelEntry[] {
+  const map = new Map<string, ModelEntry>()
+  for (const t of types) {
+    for (const m of t.models) {
+      let entry = map.get(m.model)
+      if (!entry) {
+        entry = { model: m.model, family: m.capability.family || '', endpoints: [] }
+        map.set(m.model, entry)
+      }
+      entry.endpoints.push({ sub_type: t.sub_type, capability: m.capability })
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.family !== b.family) return a.family.localeCompare(b.family)
+    return a.model.localeCompare(b.model)
+  })
+}
+
+// 端点支持哪些分类（聚合展示用）
+const endpointCategory = (st: string) => SUBTYPE_META[st]?.category || 'other'
 
 // ---- 素材库选择器 ----
 function AssetPicker(props: {
@@ -286,13 +314,15 @@ function parseTaskParams(r: GenerationTask): Record<string, any> {
 // ---- 创作工作台 ----
 export default function CreationWorkbench() {
   const queryClient = useQueryClient()
-  const [category, setCategory] = useState('video')
-  const [subType, setSubType] = useState<string>('')
+  const [activeTab, setActiveTab] = useState('create')
+  const [category, setCategory] = useState<string | null>(null) // 模型库分类过滤（null=全部）
   const [model, setModel] = useState<string>('')
+  const [subType, setSubType] = useState<string>('')
   const [params, setParams] = useState<Record<string, any>>({})
   const [offPeak, setOffPeak] = useState(false)
   const [watermark, setWatermark] = useState(false)
   const [brandId, setBrandId] = useState<string>('')
+  const [taskFilter, setTaskFilter] = useState<string>('all')
   const [picker, setPicker] = useState<{ mode: 'single' | 'multi'; accept: 'image' | 'audio' | 'any'; key: string; title: string; max?: number; subjectIndex?: number } | null>(null)
 
   // 品牌（任务归属）
@@ -334,27 +364,30 @@ export default function CreationWorkbench() {
     },
   })
 
-  // 当前分类可用的端点
-  const catTypes = useMemo(
-    () => types.filter(t => (SUBTYPE_META[t.sub_type]?.category || 'other') === category),
-    [types, category],
+  // ---- 模型库（跨端点聚合）----
+  const modelEntries = useMemo(() => buildModelMap(types), [types])
+
+  const filteredModels = useMemo(() => {
+    if (!category) return modelEntries
+    return modelEntries.filter(e => e.endpoints.some(ep => endpointCategory(ep.sub_type) === category))
+  }, [modelEntries, category])
+
+  // 当前模型 → 可用模式（端点）
+  const currentModel = useMemo(() => modelEntries.find(e => e.model === model), [modelEntries, model])
+  const modes = currentModel?.endpoints || []
+
+  // 当前模式能力
+  const cap = useMemo(
+    () => modes.find(m => m.sub_type === subType)?.capability,
+    [modes, subType],
   )
 
-  // 当前模型能力
-  const cap = useMemo(() => {
-    const t = types.find(t => t.sub_type === subType)
-    return t?.models.find(m => m.model === model)?.capability
-  }, [types, subType, model])
-
-  // 切换端点：重置模型与参数
-  const onSubTypeChange = (v: string) => {
-    setSubType(v)
-    setModel('')
+  // 选择模型：默认进入第一个模式
+  const selectModel = (m: string) => {
+    setModel(m)
     setParams({})
-  }
-  const onModelChange = (v: string) => {
-    setModel(v)
-    setParams({})
+    const entry = modelEntries.find(e => e.model === m)
+    setSubType(entry?.endpoints[0]?.sub_type || '')
   }
 
   // 素材选择回调 → 回填参数键
@@ -376,28 +409,31 @@ export default function CreationWorkbench() {
         }
         return { ...prev, subjects }
       }
-      if (picker.key === 'timing_prompts') return prev // 事件不适用
+      if (picker.key === 'refs') {
+        // @引用素材：chips 展示，提交时并入 images
+        return { ...prev, refs: urls }
+      }
       return { ...prev, [picker.key]: urls[0] }
     })
   }
 
   // 任务 params → 表单回填（重新生成）
   const regenerate = (task: GenerationTask) => {
-    const meta = SUBTYPE_META[task.sub_type]
-    setCategory(meta?.category || 'other')
-    setSubType(task.sub_type)
+    setActiveTab('create')
+    setCategory(endpointCategory(task.sub_type) === 'other' ? null : endpointCategory(task.sub_type))
     setModel(task.model)
+    setSubType(task.sub_type)
     setParams(parseTaskParams(task))
     setOffPeak(task.off_peak)
     setWatermark(task.watermark)
     message.info('已回填参数，可调整后重新提交')
   }
 
-  const canSubmit = subType && model && cap
+  const canSubmit = model && subType && cap
 
   const submit = () => {
     if (!canSubmit) {
-      message.warning('请选择端点与模型')
+      message.warning('请选择模型与生成模式')
       return
     }
     // 清理空值
@@ -406,6 +442,13 @@ export default function CreationWorkbench() {
       if (v === undefined || v === null || v === '') continue
       if (Array.isArray(v) && v.length === 0) continue
       clean[k] = v
+    }
+    // @引用素材 → 并入 images（端点支持图片时）
+    const refs = (clean.refs as string[]) || []
+    delete clean.refs
+    if (refs.length > 0) {
+      const images = (clean.images as string[]) || []
+      clean.images = Array.from(new Set([...images, ...refs]))
     }
     // 必填校验（服务端兜底，前端提前提示）
     if (subType === 'tts' && !clean.text) { message.warning('请输入合成文本'); return }
@@ -416,7 +459,6 @@ export default function CreationWorkbench() {
     if (subType === 'multiframe' && !clean.start_image) { message.warning('请选择首帧图'); return }
     if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { message.warning('请至少添加一个音效事件'); return }
     if (!clean.prompt && !clean.text && subType !== 'subject') {
-      // 除 subject 外的端点都需 prompt/text
       if (subType !== 'tts' && subType !== 'voice_clone' && subType !== 'sound_effect') {
         message.warning('请输入提示词/文本'); return
       }
@@ -438,7 +480,9 @@ export default function CreationWorkbench() {
     const get = (key: string) => params[key]
 
     switch (kind) {
-      case 'prompt':
+      case 'prompt': {
+        const refs = (get('refs') as string[]) || []
+        const supportRefs = (cap.image_slots ?? 0) !== 0 || cap.image_slots === -1
         return (
           <div key="prompt" style={{ marginBottom: 16 }}>
             <div style={{ marginBottom: 6 }}>
@@ -446,6 +490,14 @@ export default function CreationWorkbench() {
               <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
                 描述画面/内容（{cap.max_prompt_len || 5000} 字上限）
               </Text>
+              {supportRefs && (
+                <Button
+                  size="small" type="link" icon={<PictureOutlined />} style={{ float: 'right' }}
+                  onClick={() => setPicker({ mode: 'multi', accept: 'image', key: 'refs', title: '从素材库引用图片（@ 引用）', max: 7 })}
+                >
+                  @ 引用素材
+                </Button>
+              )}
             </div>
             <TextArea
               rows={3}
@@ -453,10 +505,30 @@ export default function CreationWorkbench() {
               onChange={e => set('prompt', e.target.value)}
               showCount
               maxLength={cap.max_prompt_len || 5000}
-              placeholder="描述你想要生成的内容，越具体效果越好…"
+              placeholder="描述你想要生成的内容，越具体效果越好…（可 @ 引用下方素材）"
             />
+            {refs.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Space size={4} wrap>
+                  <Text type="secondary" style={{ fontSize: 12 }}>已引用：</Text>
+                  {refs.map(u => {
+                    const name = decodeURIComponent(u.split('/').pop() || '')
+                    return (
+                      <Tag
+                        key={u} icon={<PictureOutlined />} closable
+                        onClose={() => set('refs', refs.filter(x => x !== u))}
+                        style={{ fontSize: 12 }}
+                      >
+                        @{name.slice(0, 20)}
+                      </Tag>
+                    )
+                  })}
+                </Space>
+              </div>
+            )}
           </div>
         )
+      }
       case 'text':
         return (
           <div key="text" style={{ marginBottom: 16 }}>
@@ -626,7 +698,7 @@ export default function CreationWorkbench() {
                 {f.key_image ? (
                   <img src={f.key_image} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />
                 ) : (
-                  <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'multi', accept: 'image', key: 'image_settings', title: `选择关键帧 #${i + 1}`, max: 1 })}>选图</Button>
+                  <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'single', accept: 'image', key: 'image_settings', title: `选择关键帧 #${i + 1}` })}>选图</Button>
                 )}
                 <Input size="small" style={{ width: 180 }} placeholder={`关键帧 ${i + 1} 提示词`} value={f.prompt} onChange={e => setFrames(frames.map((x, j) => j === i ? { ...x, prompt: e.target.value } : x))} />
                 <InputNumber size="small" min={2} max={7} placeholder="秒" value={f.duration} onChange={v => setFrames(frames.map((x, j) => j === i ? { ...x, duration: v } : x))} />
@@ -767,69 +839,162 @@ export default function CreationWorkbench() {
     }
   }
 
-  // 提交表单区
-  const formArea = (
-    <div>
-      <Space style={{ marginBottom: 16 }} wrap>
-        <div>
-          <Text strong style={{ fontSize: 13 }}>端点</Text>
-          <Select
-            style={{ width: 220, marginLeft: 8 }} value={subType || undefined} placeholder="选择生成方式"
-            onChange={onSubTypeChange}
-            options={catTypes.map(t => ({ value: t.sub_type, label: `${SUBTYPE_META[t.sub_type]?.label || t.sub_type}（${t.models.length} 模型）` }))}
-          />
+  // ---- 模型库卡片 ----
+  const renderModelCard = (e: ModelEntry) => {
+    const active = e.model === model
+    const resSummary = e.endpoints[0]?.capability.resolutions?.join('/') || ''
+    const dur = e.endpoints[0]?.capability.durations || [0, 0]
+    const durText = dur[1] > 0 ? (dur[0] === dur[1] ? `${dur[0]}s` : `${dur[0]}-${dur[1]}s`) : ''
+    return (
+      <div
+        key={e.model}
+        onClick={() => selectModel(e.model)}
+        style={{
+          padding: '10px 12px', borderRadius: 10, cursor: 'pointer', marginBottom: 8,
+          border: active ? '1.5px solid var(--wr-primary)' : '1px solid var(--wr-border, #e5e7eb)',
+          background: active ? 'rgba(99,102,241,0.06)' : '#fff',
+          transition: 'all .2s',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text strong style={{ fontSize: 13 }}>{e.model}</Text>
+          <Tag color="blue" style={{ fontSize: 10, marginInlineEnd: 0 }}>{e.family}</Tag>
         </div>
-        <div>
-          <Text strong style={{ fontSize: 13 }}>模型</Text>
-          <Select
-            style={{ width: 220, marginLeft: 8 }} value={model || undefined} placeholder={subType ? '选择模型' : '先选端点'}
-            disabled={!subType} onChange={onModelChange}
-            options={catTypes.find(t => t.sub_type === subType)?.models.map(m => ({ value: m.model, label: m.model })) || []}
-          />
+        <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            <ApartmentOutlined /> {e.endpoints.length} 种模式
+          </Text>
+          {resSummary && <Text type="secondary" style={{ fontSize: 11 }}><MonitorOutlined /> {resSummary}</Text>}
+          {durText && <Text type="secondary" style={{ fontSize: 11 }}><ClockCircleOutlined /> {durText}</Text>}
         </div>
-        {brands.length > 0 && (
-          <div>
-            <Text strong style={{ fontSize: 13 }}>品牌</Text>
-            <Select style={{ width: 180, marginLeft: 8 }} value={brandId || undefined} placeholder="选择归属品牌" onChange={setBrandId}
-              options={brands.map((b: any) => ({ value: b.id, label: b.name }))} allowClear />
-          </div>
+      </div>
+    )
+  }
+
+  // ---- 创作视图（模型库 + 模式 + 表单）----
+  const createView = (
+    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+      {/* 左：模型库 */}
+      <div className="wr-glass-card" style={{ width: 300, flexShrink: 0, padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <Text strong style={{ fontSize: 14 }}>模型库</Text>
+          <Badge count={filteredModels.length} style={{ backgroundColor: 'var(--wr-primary)' }} />
+        </div>
+        <Segmented
+          block size="small" value={category ?? 'all'}
+          onChange={(v) => { setCategory(v === 'all' ? null : (v as string)); setModel(''); setSubType(''); setParams({}) }}
+          options={[
+            { value: 'all', label: '全部' },
+            ...CATEGORIES.map(c => ({ value: c.key, label: c.label })),
+          ]}
+          style={{ marginBottom: 12 }}
+        />
+        <div style={{ maxHeight: 560, overflow: 'auto' }}>
+          {filteredModels.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该分类暂无模型" />
+          ) : (
+            filteredModels.map(renderModelCard)
+          )}
+        </div>
+      </div>
+
+      {/* 右：模式 + 表单 */}
+      <div className="wr-glass-card" style={{ flex: 1, padding: '16px 24px 24px', minWidth: 0 }}>
+        {!model ? (
+          <Empty style={{ padding: '60px 0' }} description={
+            <span>从左侧选择一个模型开始创作<br /><Text type="secondary" style={{ fontSize: 12 }}>模型决定能力——同一模型可切换多种生成模式</Text></span>
+          } />
+        ) : (
+          <>
+            {/* 模型头部 + 模式切换 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <Space size={10}>
+                <Text strong style={{ fontSize: 16 }}>{model}</Text>
+                <Tag color="blue">{currentModel?.family}</Tag>
+                <Text type="secondary" style={{ fontSize: 12 }}>选择生成模式</Text>
+              </Space>
+              {brands.length > 0 && (
+                <Space>
+                  <Text strong style={{ fontSize: 13 }}>品牌</Text>
+                  <Select style={{ width: 180 }} value={brandId || undefined} placeholder="选择归属品牌" onChange={setBrandId}
+                    options={brands.map((b: any) => ({ value: b.id, label: b.name }))} allowClear />
+                </Space>
+              )}
+            </div>
+
+            {/* 模式 pills */}
+            <Space size={8} wrap style={{ marginTop: 12 }}>
+              {modes.map(m => {
+                const meta = SUBTYPE_META[m.sub_type]
+                const isActive = m.sub_type === subType
+                return (
+                  <Tooltip key={m.sub_type} title={meta?.desc}>
+                    <Tag.CheckableTag
+                      checked={isActive}
+                      onChange={() => { setSubType(m.sub_type); setParams({}) }}
+                      style={{
+                        fontSize: 13, padding: '4px 14px', borderRadius: 20,
+                        border: isActive ? '1px solid var(--wr-primary)' : '1px solid #e5e7eb',
+                        background: isActive ? 'var(--wr-primary)' : '#fff',
+                        color: isActive ? '#fff' : 'inherit',
+                        transition: 'all .2s',
+                      }}
+                    >
+                      {meta?.label || m.sub_type}
+                    </Tag.CheckableTag>
+                  </Tooltip>
+                )
+              })}
+            </Space>
+
+            {cap && (
+              <>
+                <Alert
+                  type="info" showIcon style={{ marginTop: 16, marginBottom: 16 }}
+                  message={SUBTYPE_META[subType]?.label}
+                  description={SUBTYPE_META[subType]?.desc}
+                />
+                {fieldsFor(subType).map(kind => renderField(kind))}
+
+                <Divider style={{ margin: '16px 0' }} />
+                <Space wrap>
+                  <Space size={4}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>错峰</Text>
+                    <Tooltip title="错峰模式积分更低，48 小时内完成，可手动取消">
+                      <Switch size="small" checked={offPeak} onChange={setOffPeak} />
+                    </Tooltip>
+                  </Space>
+                  <Space size={4}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>水印</Text>
+                    <Switch size="small" checked={watermark} onChange={setWatermark} />
+                  </Space>
+                  <Button type="primary" icon={<ThunderboltOutlined />} loading={submitMutation.isPending} onClick={submit} style={{ marginLeft: 16 }}>
+                    提交生成
+                  </Button>
+                </Space>
+              </>
+            )}
+            {!cap && <Alert type="warning" showIcon style={{ marginTop: 16 }} message="该模式暂无能力配置（可能已停用），请选择其他模式" />}
+          </>
         )}
-      </Space>
-
-      {subType && cap && (
-        <>
-          <Divider style={{ margin: '8px 0 16px' }} />
-          <Alert
-            type="info" showIcon style={{ marginBottom: 16 }}
-            message={`${SUBTYPE_META[subType]?.label} · ${model}`}
-            description={SUBTYPE_META[subType]?.desc}
-          />
-          {fieldsFor(subType).map(kind => renderField(kind))}
-
-          <Space style={{ marginTop: 4 }} wrap>
-            <Space size={4}>
-              <Text type="secondary" style={{ fontSize: 12 }}>错峰</Text>
-              <Tooltip title="错峰模式积分更低，48 小时内完成，可手动取消">
-                <Switch size="small" checked={offPeak} onChange={setOffPeak} />
-              </Tooltip>
-            </Space>
-            <Space size={4}>
-              <Text type="secondary" style={{ fontSize: 12 }}>水印</Text>
-              <Switch size="small" checked={watermark} onChange={setWatermark} />
-            </Space>
-            <Button type="primary" icon={<VideoCameraOutlined />} loading={submitMutation.isPending} onClick={submit} style={{ marginLeft: 16 }}>
-              提交生成
-            </Button>
-          </Space>
-        </>
-      )}
-      {subType && !cap && (
-        <Alert type="warning" showIcon style={{ marginTop: 16 }} message="该模型暂无能力配置（可能已停用），请选择其他模型" />
-      )}
+      </div>
     </div>
   )
 
-  // 任务列表
+  // ---- 生成任务视图 ----
+  const taskTypeFilter = useMemo(() => {
+    const set = new Set<string>()
+    tasks.forEach(t => set.add(t.sub_type))
+    return Array.from(set)
+  }, [tasks])
+
+  const filteredTasks = useMemo(() => {
+    if (taskFilter === 'all') return tasks
+    return tasks.filter(t => t.sub_type === taskFilter)
+  }, [tasks, taskFilter])
+
+  const activeCount = tasks.filter(t => ACTIVE_STATES.includes(t.state)).length
+
   const taskColumns = [
     {
       title: '时间', dataIndex: 'created_at', key: 'created_at', width: 150,
@@ -889,40 +1054,58 @@ export default function CreationWorkbench() {
     },
   ]
 
-  const activeCount = tasks.filter(t => ACTIVE_STATES.includes(t.state)).length
+  const tasksView = (
+    <div className="wr-glass-card" style={{ padding: '16px 24px 24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <Space size={12}>
+          <h3 style={{ margin: 0 }}>生成任务</h3>
+          <Select
+            size="small" style={{ width: 160 }} value={taskFilter} onChange={setTaskFilter}
+            options={[{ value: 'all', label: '全部类型' }, ...taskTypeFilter.map(st => ({ value: st, label: SUBTYPE_META[st]?.label || st }))]}
+          />
+        </Space>
+        <Space>
+          {activeCount > 0 && <Badge count={activeCount} color="processing" />}
+          <Button size="small" onClick={() => queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })}>刷新</Button>
+        </Space>
+      </div>
+      <Table
+        rowKey="id" size="small" dataSource={filteredTasks} columns={taskColumns} pagination={{ pageSize: 10, showSizeChanger: false }}
+      />
+    </div>
+  )
 
   return (
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div className="wr-page-header">
           <h1>创作工作台</h1>
-          <p>视频 · 图片 · 音频 · 数字人——统一生成，能力向量驱动（端点/模型可在管理后台动态配置）</p>
+          <p>先选模型 · 再选模式 · 素材 @ 引用——能力向量驱动，端点/模型可在管理后台动态配置</p>
         </div>
 
-        <div className="wr-glass-card" style={{ padding: '16px 24px 24px' }}>
-          <Tabs
-            activeKey={category}
-            onChange={setCategory}
-            items={CATEGORIES.map(c => ({
-              key: c.key,
-              label: <span><Space size={6}>{c.icon}{c.label}</Space></span>,
-            }))}
-          />
-          {formArea}
-        </div>
-
-        <div className="wr-glass-card" style={{ padding: '16px 24px 24px', marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0 }}>生成任务</h3>
-            <Space>
-              {activeCount > 0 && <Badge count={activeCount} color="processing" />}
-              <Button size="small" onClick={() => queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })}>刷新</Button>
-            </Space>
-          </div>
-          <Table
-            rowKey="id" size="small" dataSource={tasks} columns={taskColumns} pagination={{ pageSize: 8, showSizeChanger: false }}
-          />
-        </div>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'create',
+              label: <span><Space size={6}><ThunderboltOutlined />创作</Space></span>,
+              children: createView,
+            },
+            {
+              key: 'tasks',
+              label: (
+                <span>
+                  <Space size={6}>
+                    <ApartmentOutlined />生成任务
+                    {activeCount > 0 && <Badge count={activeCount} color="processing" />}
+                  </Space>
+                </span>
+              ),
+              children: tasksView,
+            },
+          ]}
+        />
       </div>
 
       <AssetPicker
