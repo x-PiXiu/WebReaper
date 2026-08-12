@@ -27,15 +27,22 @@ func TestDownloadAndStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadAndStore: %v", err)
 	}
-	if !strings.Contains(stored, "/media/t1/c-") || !strings.HasSuffix(stored, ".mp4") {
+	if !strings.Contains(stored, "/media/t1/") || !strings.Contains(stored, "/c-") || !strings.HasSuffix(stored, ".mp4") {
 		t.Errorf("stored URL 格式不对: %s", stored)
 	}
-	// 文件真实落盘（子目录结构：{dir}/{tenantID}/{shortID}.ext）
-	entries, _ := os.ReadDir(filepath.Join(dir, "t1"))
-	if len(entries) != 1 {
-		t.Fatalf("应保存 1 个文件，实际 %d", len(entries))
+	// 文件真实落盘（子目录结构：{dir}/{tenantID}/{date}/{shortID}.ext）
+	// 用 filepath.Walk 递归查找文件
+	var found string
+	filepath.Walk(filepath.Join(dir, "t1"), func(p string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && strings.HasSuffix(info.Name(), ".mp4") {
+			found = p
+		}
+		return nil
+	})
+	if found == "" {
+		t.Fatalf("未找到落盘的 mp4 文件")
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, "t1", entries[0].Name()))
+	data, _ := os.ReadFile(found)
 	if string(data) != "fake-mp4-content" {
 		t.Errorf("文件内容不对: %q", string(data))
 	}

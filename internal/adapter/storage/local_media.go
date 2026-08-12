@@ -55,7 +55,7 @@ func (s *LocalMediaStore) relPath(filename string) string {
 // 资产 ID = {tenantID}/{shortID}.ext（租户子目录隔离 + 短 ID 文件名）
 func (s *LocalMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerType string, data []byte, mime, ext string) (entity.MediaAsset, error) {
 	name := shortID() + ext
-	relPath := filepath.Join(tenantID, name)
+	relPath := filepath.Join(tenantID, datePath(), name)
 	fullPath := filepath.Join(s.dir, relPath)
 	// 确保租户子目录存在
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
@@ -87,41 +87,32 @@ func fileOwnerType(name string) string {
 	return entity.AssetTypeMaterial
 }
 
-// List 列出某租户资产（子目录：{dir}/{tenantID}/{shortID}.ext）
+// List 列出某租户资产（递归扫描日期子目录：{dir}/{tenantID}/{date}/{shortID}.ext）
 func (s *LocalMediaStore) List(ctx context.Context, tenantID, ownerType string) ([]entity.MediaAsset, error) {
 	tenantDir := filepath.Join(s.dir, tenantID)
-	entries, err := os.ReadDir(tenantDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []entity.MediaAsset{}, nil
+	var out []entity.MediaAsset
+	_ = filepath.Walk(tenantDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
 		}
-		return nil, err
-	}
-	out := make([]entity.MediaAsset, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
+		name := info.Name()
 		isCreation := strings.HasPrefix(name, "c-")
 		if ownerType == entity.AssetTypeMaterial && isCreation {
-			continue
+			return nil
 		}
 		if ownerType == entity.AssetTypeCreation && !isCreation {
-			continue
+			return nil
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		id := filepath.ToSlash(filepath.Join(tenantID, name))
+		rel, _ := filepath.Rel(s.dir, path) // {tenantID}/{date}/{name}
+		id := filepath.ToSlash(rel)
 		out = append(out, entity.MediaAsset{
 			ID: id, TenantID: tenantID, OwnerType: fileOwnerType(name),
 			SourceURL: s.publicURL(id), StoredURL: s.publicURL(id),
 			Mime: mimeFromExt(filepath.Ext(name)), SizeBytes: info.Size(),
 			CreatedAt: info.ModTime(),
 		})
-	}
+		return nil
+	})
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
@@ -211,9 +202,9 @@ func (s *LocalMediaStore) DownloadAndStore(ctx context.Context, tenantID, source
 		}
 	}
 	name := "c-" + shortID() + ext
-	relPath := filepath.Join(tenantID, name)
-	if err := os.MkdirAll(filepath.Join(s.dir, tenantID), 0o755); err != nil {
-		return "", fmt.Errorf("创建租户目录失败: %w", err)
+	relPath := filepath.Join(tenantID, datePath(), name)
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(s.dir, relPath)), 0o755); err != nil {
+		return "", fmt.Errorf("创建目录失败: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(s.dir, relPath), data, 0o644); err != nil {
 		return "", fmt.Errorf("转存写入失败: %w", err)

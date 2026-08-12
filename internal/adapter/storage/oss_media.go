@@ -64,9 +64,8 @@ func (s *OSSMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerTy
 	if ownerType == entity.AssetTypeCreation {
 		prefix = "creation"
 	}
-	// key 格式：webreaper/{media|creation}/{tenantID}/{shortID}.ext
-	// 文件名用 12 位随机 hex（如 32afa9cca14b.png），租户按目录隔离
-	key := fmt.Sprintf("%s/%s/%s/%s%s", ossProjectPrefix, prefix, tenantID, shortID(), ext)
+	// key 格式：webreaper/{media|creation}/{tenantID}/{date}/{shortID}.ext
+	key := fmt.Sprintf("%s/%s/%s/%s/%s%s", ossProjectPrefix, prefix, tenantID, datePath(), shortID(), ext)
 	if err := s.bucket.PutObject(key, bytes.NewReader(data)); err != nil {
 		return entity.MediaAsset{}, fmt.Errorf("OSS 上传失败: %w", err)
 	}
@@ -148,7 +147,7 @@ func (s *OSSMediaStore) DownloadAndStore(ctx context.Context, tenantID, sourceUR
 	} else if ct := resp.Header.Get("Content-Type"); ct != "" {
 		ext = extFromContentType(ct)
 	}
-	key := fmt.Sprintf("%s/creation/%s/%s%s", ossProjectPrefix, tenantID, shortID(), ext)
+	key := fmt.Sprintf("%s/creation/%s/%s/%s%s", ossProjectPrefix, tenantID, datePath(), shortID(), ext)
 	if err := s.bucket.PutObject(key, bytes.NewReader(data)); err != nil {
 		return "", fmt.Errorf("OSS 上传失败: %w", err)
 	}

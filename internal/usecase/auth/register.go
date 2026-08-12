@@ -79,10 +79,10 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in RegisterInput) (Regis
 	//     只能看到自己的数据；管理后台的全平台管理走显式 admin 旁路端点）
 	// 未指定 TenantID 时统一按 userID 派生，杜绝"空租户 = 看全局"的越权路径。
 	now := time.Now()
-	userID := fmt.Sprintf("user-%d", now.UnixNano())
+	userID := pkg.UserID()
 	tenantID := in.TenantID
 	if tenantID == "" {
-		tenantID = "tenant-" + userID // 一人一租户（admin 亦同）
+		tenantID = pkg.TenantID() // 一人一租户（admin 亦同）
 	}
 	user := entity.User{
 		ID:           userID,

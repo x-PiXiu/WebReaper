@@ -57,7 +57,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 	// 2.5 租户兜底（隔离铁律）：存量账号（租户隔离改造前注册）可能无 tenant_id。
 	// 任何账号登录后必须归属一个租户——否则在用户界面会因"空租户=看全局"越权。
 	if user.TenantID == "" {
-		user.TenantID = "tenant-" + user.ID
+		user.TenantID = pkg.TenantID()
 		if err := uc.repo.Save(ctx, user); err != nil {
 			return LoginOutput{}, fmt.Errorf("assign tenant: %w", err)
 		}
