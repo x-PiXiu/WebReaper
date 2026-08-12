@@ -63,6 +63,21 @@ export default function Visibility() {
     enabled: brands.length > 0,
   })
 
+  // 行动建议（P5-05）：针对排名最末（最需要帮助的）品牌生成"下一步做什么"
+  // 注意：必须在条件 return 之前声明（React Hooks 规则——与 Home.tsx 同款修复）
+  const { data: adviceRes } = useQuery({
+    queryKey: ['geo-advice-last', overviews.data?.map((o: any) => o.brand_id).join(',')],
+    queryFn: () => {
+      const ov = (overviews.data || []) as any[]
+      if (ov.length === 0) return { advices: [] as Advice[] }
+      const worst = [...ov].sort((a, b) => (a.avg_mention_rate || 0) - (b.avg_mention_rate || 0))[0]
+      if (!worst?.brand_id) return { advices: [] as Advice[] }
+      return businessApi.getAdvice(worst.brand_id).catch(() => ({ advices: [] as Advice[] }))
+    },
+    enabled: (overviews.data?.length || 0) > 0,
+  })
+  const advices: Advice[] = adviceRes?.advices || []
+
   if (isLoading) {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: 120 }}><Spin size="large" /></div>
   }
@@ -86,15 +101,6 @@ export default function Visibility() {
     rate: o.avg_mention_rate || 0,
     trend: (o.trend || []) as MonitoringResult[],
   })).sort((a, b) => b.rate - a.rate)
-
-  // 行动建议（P5-05）：针对排名最末（最需要帮助的）品牌生成"下一步做什么"
-  const adviceBrandId = ranking.length > 0 ? ranking[ranking.length - 1].brand.id : undefined
-  const { data: adviceRes } = useQuery({
-    queryKey: ['geo-advice', adviceBrandId],
-    queryFn: () => businessApi.getAdvice(adviceBrandId!).catch(() => ({ advices: [] as Advice[] })),
-    enabled: !!adviceBrandId,
-  })
-  const advices: Advice[] = adviceRes?.advices || []
 
   // P5-04 趋势降噪：按品牌分组做移动平均（平滑 AI 采样随机波动）
   const trendData: any[] = []
@@ -159,7 +165,7 @@ export default function Visibility() {
           <Space style={{ marginBottom: 8 }}>
             <BulbOutlined style={{ color: 'var(--wr-warning)' }} />
             <Text strong style={{ fontSize: 14 }}>行动建议 · 下一步做什么</Text>
-            {adviceBrandId && (
+            {ranking.length > 0 && (
               <Text type="secondary" style={{ fontSize: 12 }}>基于「{ranking[ranking.length - 1]?.brand?.name}」的现状</Text>
             )}
           </Space>
@@ -260,7 +266,7 @@ export default function Visibility() {
                   render: (name: string, r: any) => (
                     <Space direction="vertical" size={0}>
                       <Text strong>{name}</Text>
-                      <Text type="secondary" style={{ fontSize: 11 }}>{r.keywordCount} 个关键词</Text>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{r.overview?.keyword_count ?? 0} 个关键词</Text>
                     </Space>
                   ),
                 },

@@ -99,6 +99,11 @@ func (s *Submitter) SubmitURLs(ctx context.Context, urls []string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
+		// 429 = IndexNow 服务限流（常见：同一 key 提交过频，或 keyLocation 公网不可验证）。
+		// 商户端提示要可读——裸 "HTTP 429" 用户无法理解。
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return fmt.Errorf("收录服务繁忙（限流），请稍后再试或检查收录配置")
+		}
 		return fmt.Errorf("indexnow submit HTTP %d", resp.StatusCode)
 	}
 	return nil

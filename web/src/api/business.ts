@@ -373,8 +373,9 @@ export const businessApi = {
     apiClient.put<unknown, { saved: boolean }>('/api/v1/admin/billing/payment-config', cfg),
 
   // admin 提示词模板管理（格式指令/生成/优化 prompt 热更新）
+  // 后端返回 data: { templates: [...] }（对象包裹）——前端解包为数组
   adminListPromptTemplates: () =>
-    apiClient.get<unknown, { key: string; version: number; content: string; updated_at: string }[]>('/api/v1/admin/prompt-templates'),
+    apiClient.get<unknown, { templates: { key: string; version: number; content: string; updated_at: string }[] }>('/api/v1/admin/prompt-templates').then((r) => r.templates),
   adminUpdatePromptTemplate: (key: string, content: string) =>
     apiClient.put<unknown, { key: string }>(`/api/v1/admin/prompt-templates/${key}`, { content }),
 }

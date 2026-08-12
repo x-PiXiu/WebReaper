@@ -18,7 +18,10 @@ import (
 // 优化版设计：
 //   - 默认 sampleSize=5（对齐 Monitor 默认；每次采样用不同问法——采样矩阵的"问法维度"）
 //   - 问法由 ProbeQuestioner 生成并随机打乱（修复"5 次搜索词全一样"的同质化问题）
-//   - 解析提及用 default 引擎（固定），搜索用用户选的引擎（分离，避免自判）
+//   - 解析提及用 default 引擎（固定）；搜索同样用 default 引擎——本实现只在
+//     "引擎未接入真实 LLMConfig"时被 RoutingProbe 选中（模拟估算路径），
+//     in.EngineName 仅作模拟标签与问法分片种子，不能当真实配置传给 LLM 层
+//     （否则 resolveLLM 找不到配置，采样全部静默失败，结果恒为 0）
 type AgentProbe struct {
 	aiGen      port.AIGenerator
 	questioner *ProbeQuestioner
@@ -64,7 +67,8 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		var answerBuilder strings.Builder
 		var agentErr error
 		searchTools := []string{"search_crawler", "tavily_search"} // GetByNames 自动过滤未启用的
-		err := p.aiGen.RunWithTools(ctx, "", in.EngineName, task, systemPrompt,
+		// 模拟路径固定用 default LLM（""）：引擎未接入真实配置时，传 in.EngineName 会让 resolveLLM 失败
+		err := p.aiGen.RunWithTools(ctx, "", "", task, systemPrompt,
 			searchTools,
 			func(evt port.ToolEvent) {
 				if evt.Type == "text-delta" && evt.Text != "" {
@@ -79,7 +83,7 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 			// 搜索工具失败率高（网络/工具抖动）——同采样重试 1 次，稳定实际采样数
 			answerBuilder.Reset()
 			agentErr = nil
-			retryErr := p.aiGen.RunWithTools(ctx, "", in.EngineName, task, systemPrompt,
+			retryErr := p.aiGen.RunWithTools(ctx, "", "", task, systemPrompt,
 				searchTools,
 				func(evt port.ToolEvent) {
 					if evt.Type == "text-delta" && evt.Text != "" {
