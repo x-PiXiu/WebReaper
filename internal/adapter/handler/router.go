@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -83,6 +84,7 @@ type Router struct {
 	providerConfigUC   *providerconfig.UseCase // 厂商配置（管理后台）
 	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
 	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
+	apiPrefix          string                  // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
@@ -195,6 +197,12 @@ func (r *Router) SetMedia(store port.MediaAssetStore, dir string) {
 	r.mediaDir = dir
 }
 
+// SetAPIPrefix 设置路由统一前缀（nginx 分流用，如 /webreaper）。
+// 必须在 Engine() 调用前设置；空=无前缀（本地开发默认）。
+func (r *Router) SetAPIPrefix(prefix string) {
+	r.apiPrefix = strings.TrimSuffix(prefix, "/")
+}
+
 // SetPromptTemplates 注入提示词模板仓库（可选；admin 管理内容生成/优化提示词）。
 func (r *Router) SetPromptTemplates(repo port.PromptTemplateRepository) {
 	r.promptTemplateRepo = repo
@@ -266,17 +274,20 @@ func (r *Router) Engine() *gin.Engine {
 	e := gin.New()
 	e.Use(gin.Recovery(), gin.Logger(), corsMiddleware())
 
-	e.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	// 统一前缀（nginx 分流用；空前缀时 root 等同 e，本地开发零影响）
+	root := e.Group(r.apiPrefix)
+
+	root.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	// 媒体静态托管（素材/转存产物——LocalMediaStore 的数据目录对外只读）
 	if r.mediaDir != "" {
-		e.Static("/media", r.mediaDir)
+		root.Static("/media", r.mediaDir)
 	}
 
 	// 认证（公开）——核心依赖，未注入则认证端点不注册
 	if r.authRegister != nil && r.authLogin != nil {
 		authHandler := NewAuthHandler(r.authRegister, r.authLogin)
-		authGroup := e.Group("/api/v1/auth")
+		authGroup := root.Group("/api/v1/auth")
 		{
 			authGroup.POST("/register", authHandler.HandleRegister)
 			authGroup.POST("/login", authHandler.HandleLogin)
@@ -285,29 +296,28 @@ func (r *Router) Engine() *gin.Engine {
 
 	// 采集政策（公开，无需认证，让外部可查询合规承诺）
 	if r.crawlCfgUC != nil {
-		e.GET("/api/v1/crawl-policy", NewCrawlConfigHandler(r.crawlCfgUC).HandlePolicy)
+		root.GET("/api/v1/crawl-policy", NewCrawlConfigHandler(r.crawlCfgUC).HandlePolicy)
 	}
 
 	// 公开内容站（无认证——让 AI 引擎/搜索引擎可爬取已发布内容）
-	// 通过 SetPublic 注入；未注入则公开端点不注册。
 	if r.publicHandler != nil {
-		e.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
-		e.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
-		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
-		e.GET("/public/store-map/:brandId", r.publicHandler.GetStoreMap) // 品牌主门店位置静态图（302 到高德）
-		e.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
-		// IndexNow 协议要求的根目录密钥文件：https://<domain>/{key}.txt（文件名=密钥）
+		root.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
+		root.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
+		root.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
+		root.GET("/public/store-map/:brandId", r.publicHandler.GetStoreMap)
+		root.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
+		// IndexNow 协议要求密钥文件在域名根目录（不加前缀）
 		e.GET("/:key.txt", r.publicHandler.GetIndexNowKeyFile)
 	}
 
 	// 支付网关异步回调（公开——支付平台回调无 JWT，靠签名验证安全）
 	if r.billingUC != nil {
-		e.GET("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
-		e.POST("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
+		root.GET("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
+		root.POST("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
 	}
 
 	// 业务路由（受 JWT 中间件保护）
-	api := e.Group("/api/v1")
+	api := root.Group("/api/v1")
 	api.Use(middleware.JWTAuth(r.tokenParser))
 	{
 		// AI 对话（SSE 流式）——配额检查在 SSE 头设置前，超限返回 JSON 402

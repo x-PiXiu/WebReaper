@@ -20,6 +20,8 @@ services:
     environment:
       APP_ENV: production
       SERVER_PORT: "8082"
+      # 路由统一前缀（nginx 分流用——前端 VITE_API_PREFIX 必须与此一致）
+      API_PREFIX: /webreaper
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8082}
       # MySQL（共享已有 zhichen-mysql，端口 13306）
       DB_HOST: localhost

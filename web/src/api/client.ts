@@ -11,8 +11,12 @@ import type { ApiEnvelope } from '../types/api'
 //   - 响应拦截：解包信封 {code,msg,data}；code!==0 抛错+提示；401 清 token 跳登录
 //   - 40201 配额超限：弹"去升级"引导（友好化——不把服务端原始错误直接甩给用户）
 
+// 统一 API 前缀（生产部署在 nginx 后面分流用，如 /webreaper）
+// VITE_API_PREFIX 由 vite 构建时注入（.env.production 或构建命令）；开发时为空
+const API_PREFIX = import.meta.env.VITE_API_PREFIX || ''
+
 export const apiClient = axios.create({
-  baseURL: '/', // 走 Vite proxy，/api/* 被转发到后端
+  baseURL: API_PREFIX || '/', // 走 Vite proxy，/api/* 被转发到后端
   timeout: 120000, // GEO 的 RAG 操作（爬全网+LLM）耗时较长，给 2 分钟
 })
 

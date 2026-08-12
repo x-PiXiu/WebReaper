@@ -92,6 +92,9 @@ type PublishConfig struct {
 type ServerConfig struct {
 	Port string // 监听端口，默认 8082
 	Env  string // 运行环境：development / production
+	// APIPrefix 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）。
+	// 生产部署在宿主机 nginx 后面，通过前缀区分不同项目的请求。
+	APIPrefix string
 	// PublicBaseURL 公开内容站的根地址（生成 sitemap/llms.txt/JSON-LD 的绝对 URL）。
 	// 生产环境必须是公网可达的地址（如 https://content.example.com）。
 	PublicBaseURL string
@@ -248,6 +251,7 @@ func Load() Config {
 		Server: ServerConfig{
 			Port:          getenvDefault("SERVER_PORT", "8082"),
 			Env:           getenvDefault("APP_ENV", "development"),
+			APIPrefix:     getenvDefault("API_PREFIX", ""),
 			PublicBaseURL: getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
 			IndexNowKey:   os.Getenv("INDEXNOW_KEY"),
 			BingAPIKey:    os.Getenv("BING_API_KEY"),

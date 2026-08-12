@@ -626,6 +626,9 @@ func main() {
 	}
 	taskScheduler.Start(schedulerCtx)
 
+	// 路由统一前缀（生产部署在 nginx 后面分流用，如 /webreaper；空=无前缀）
+	router.SetAPIPrefix(cfg.Server.APIPrefix)
+
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
 
 	quit := make(chan os.Signal, 1)
