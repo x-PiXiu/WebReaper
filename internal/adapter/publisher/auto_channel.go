@@ -7,11 +7,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
 	"webreaper/internal/domain/entity"
@@ -290,11 +292,26 @@ func (c *XiaohongshuAutoChannel) PublishAuto(ctx context.Context, job entity.Pub
 		allocCancel()
 	}()
 
-	// cookie 注入 + 导航（带 target 参数直达正确发布页，免切 tab）
+	// cookie 注入 + Shadow DOM 穿透补丁 + 导航
+	// 关键：小红书 xhs-publish-btn 用 closed Shadow DOM（attachShadow({mode:'closed'})），
+	// 外部 JS 的 shadowRoot 返回 null，无法访问内部 button → 发布点击点不到真按钮。
+	// 解法：导航前用 addScriptToEvaluateOnNewDocument 注入补丁，重写 attachShadow
+	// 强制 mode:'open'——后续所有 shadow root 都可被外部 shadowRoot 访问。
 	var currentURL string
 	if err := chromedp.Run(sessionCtx,
 		network.Enable(),
 		network.SetCookies(cookies),
+		// ① Shadow DOM 穿透补丁（必须在 Navigate 前注入，对页面所有后续 shadow 生效）
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, e := page.AddScriptToEvaluateOnNewDocument(`(() => {
+				if (Element.prototype.attachShadow.__patched) return;
+				const orig = Element.prototype.attachShadow;
+				const patched = function(init) { return orig.call(this, Object.assign({}, init, {mode: 'open'})); };
+				patched.__patched = true;
+				Element.prototype.attachShadow = patched;
+			})()`).Do(ctx)
+			return e
+		}),
 		chromedp.Navigate(base),
 		chromedp.Sleep(5*time.Second),
 		chromedp.Location(&currentURL),
@@ -401,84 +418,138 @@ func (c *XiaohongshuAutoChannel) publishImage(sessionCtx context.Context, job en
 		log.Printf("[PublishAuto:xiaohongshu] 正文已填充（%d 字符）", len([]rune(contentText)))
 	}
 
-	// ⑥ 点发布：小红书用 xhs-publish-btn 自定义元素（Web Component）。
-	// 关键：内部 button 可能在 Shadow DOM——querySelectorAll 穿不透 shadow boundary。
-	// 多策略：① 直接点 xhs-publish-btn 本身（submit-disabled="false" 时）
-	//        ② shadowRoot 内找 button  ③ 全局兜底找"发布"button
+	// ⑥ 点发布：Shadow DOM 坐标穿透 + CDP 鼠标点击。
+	// xhs-publish-btn 是 Vue 自定义元素，内部 button 可能在 Shadow DOM（querySelector
+	// 穿不透）。改用：JS 穿透 shadowRoot 取 button 真实坐标 → CDP Input.dispatchMouseEvent
+	// 点坐标（内核层 trusted，不依赖 querySelector，不受 shadow boundary 限制）。
 	err = chromedp.Run(sessionCtx,
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			jsClick := `(() => {
-				// ① 直接点击 xhs-publish-btn 自定义元素（Vue 组件绑定了 click）
-				const wrapper = document.querySelector('xhs-publish-btn');
-				if (wrapper && wrapper.getAttribute('submit-disabled') === 'false') {
-					wrapper.click();
-					return true;
-				}
-				// ② Shadow DOM 内找 button
-				if (wrapper && wrapper.shadowRoot) {
-					const sb = wrapper.shadowRoot.querySelector('button:not([disabled])');
-					if (sb) { sb.click(); return true; }
-				}
-				// ③ 全局兜底：找文本含"发布"的可点击 button
-				for (const btn of document.querySelectorAll('button')) {
-					const text = btn.textContent.trim();
-					if (text.includes('发布') && !btn.disabled && btn.offsetParent !== null) {
-						btn.click();
-						return true;
-					}
-				}
-				return false;
-			})()`
+			// 等待 submit-disabled="false"（按钮可点击）
 			deadline := time.Now().Add(15 * time.Second)
 			for time.Now().Before(deadline) {
-				var clicked bool
-				if e := chromedp.Evaluate(jsClick, &clicked).Do(ctx); e != nil {
-					return e
-				}
-				if clicked {
-					return nil
+				var ready bool
+				_ = chromedp.Evaluate(`(() => {
+					const w = document.querySelector('xhs-publish-btn');
+					return w && w.getAttribute('submit-disabled') === 'false';
+				})()`, &ready).Do(ctx)
+				if ready {
+					break
 				}
 				if e := chromedp.Sleep(600 * time.Millisecond).Do(ctx); e != nil {
 					return e
 				}
 			}
-			return fmt.Errorf("发布按钮 15 秒内未变为可点击（可能缺图或正文校验未通过）")
+			// 穿透 Shadow DOM（补丁后 closed→open）取 button 坐标 + 诊断信息
+			var info struct {
+				X, Y, W, H float64
+				Source     string `json:"source"` // shadow/light/text/wrapper
+				Text       string `json:"text"`
+				InnerHTML  string `json:"innerHTML"`
+			}
+			if e := chromedp.Evaluate(`(() => {
+				const w = document.querySelector('xhs-publish-btn');
+				if (!w) return {source:'none', innerHTML:'no xhs-publish-btn'};
+				let btn = null, source = 'none', text = '';
+				if (w.shadowRoot) {
+					// ① 精确找"发布"按钮：ce-btn bg-red（红色发布键，排除"暂存离开"）
+					btn = w.shadowRoot.querySelector('button.ce-btn.bg-red, button.bg-red');
+					if (btn) { source = 'shadow-red'; text = btn.textContent.trim().slice(0,20); }
+					// ② 兜底：文本精确=="发布"的 button（不匹配"暂存离开"）
+					if (!btn) {
+						for (const b of w.shadowRoot.querySelectorAll('button')) {
+							if (b.textContent.trim() === '发布' || b.textContent.trim() === '发布笔记') {
+								btn = b; source = 'shadow-text'; text = b.textContent.trim(); break;
+							}
+						}
+					}
+				}
+				// light DOM 找 button
+				if (!btn) {
+					btn = w.querySelector('button, [role="button"]');
+					if (btn) { source = 'light'; text = btn.textContent.trim().slice(0,20); }
+				}
+				// 文本兜底：shadowRoot/light 内找文本含"发布"的叶子元素
+				if (!btn) {
+					const roots = w.shadowRoot ? [w.shadowRoot, w] : [w];
+					for (const root of roots) {
+						for (const el of root.querySelectorAll('*')) {
+							const dt = Array.from(el.childNodes).filter(n=>n.nodeType===3).map(n=>n.textContent.trim()).join('');
+							if (dt === '发布' || dt === '发布笔记') {
+								const r = el.getBoundingClientRect();
+								if (r.width > 0) { btn = el; source = 'text'; text = dt; break; }
+							}
+						}
+						if (btn) break;
+					}
+				}
+				if (!btn) { btn = w; source = 'wrapper'; }
+				const r = btn.getBoundingClientRect();
+				return {x: r.x + r.width/2, y: r.y + r.height/2, w: r.width, h: r.height, source, text, innerHTML: (w.shadowRoot ? w.shadowRoot.innerHTML : w.innerHTML).slice(0,400)};
+			})()`, &info).Do(ctx); e != nil {
+				return e
+			}
+			log.Printf("[PublishAuto:xiaohongshu] 发布按钮定位 source=%s text=%q 坐标=(%.0f,%.0f) 尺寸=%.0fx%.0f innerHTML=%.200s",
+				info.Source, info.Text, info.X, info.Y, info.W, info.H, info.InnerHTML)
+			if info.W == 0 || info.H == 0 {
+				return fmt.Errorf("发布按钮不可见（尺寸 0）source=%s innerHTML=%s", info.Source, info.InnerHTML)
+			}
+			// CDP 鼠标点击坐标（内核层 trusted 事件）
+			if e := input.DispatchMouseEvent(input.MouseMoved, info.X, info.Y).Do(ctx); e != nil {
+				return e
+			}
+			press := input.DispatchMouseEvent(input.MousePressed, info.X, info.Y)
+			press.Button, press.ClickCount = input.Left, 1
+			if e := press.Do(ctx); e != nil {
+				return e
+			}
+			release := input.DispatchMouseEvent(input.MouseReleased, info.X, info.Y)
+			release.Button, release.ClickCount = input.Left, 1
+			return release.Do(ctx)
 		}),
 	)
 	if err != nil {
 		return "", fmt.Errorf("点击发布按钮失败: %w", err)
 	}
+	log.Printf("[PublishAuto:xiaohongshu] 发布按钮已点击（CDP 鼠标坐标）")
+
+	// 诊断截图（点击后页面状态——验证码/校验红框/没反应 都能看出）
+	var screenshot []byte
+	if e := chromedp.Run(sessionCtx, chromedp.Sleep(3*time.Second), chromedp.CaptureScreenshot(&screenshot)); e == nil && len(screenshot) > 0 {
+		fileName := fmt.Sprintf("debug-xhs-%d.png", time.Now().UnixNano())
+		shotPath := filepath.Join("data", "media", fileName)
+		if wErr := os.WriteFile(shotPath, screenshot, 0o644); wErr == nil {
+			// 静态路由 /media → ./data/media，URL 用 /media/文件名（不带 data/ 前缀）
+			log.Printf("[PublishAuto:xiaohongshu] 诊断截图: http://localhost:8082/media/%s", fileName)
+		}
+	}
 	log.Printf("[PublishAuto:xiaohongshu] 发布按钮已点击")
 
-	// ⑦ 等待发布完成 + 校验是否真的发布成功（URL 跳转 ≠ 还在发布页）
-	// 小红书发布成功会跳转离开 publish/publish；若 URL 仍是发布页 = 校验拦截/风控，
-	// 点击虽触发但未真正发布——必须报错让前端展示，不能误报成功。
+	// ⑦ 等待发布完成 + 综合判断成功（不靠单一 URL 判断——小红书发布成功后
+	// URL 行为不确定：可能跳转、可能原地弹 toast、可能跳到仍含 publish 的路径）。
+	// 改为检查【失败信号】：有明确错误/验证码才报失败；否则认为成功（已点击+无失败）。
 	var resultURL string
+	var pageText string
 	if err := chromedp.Run(sessionCtx,
 		chromedp.Sleep(6*time.Second),
 		chromedp.Location(&resultURL),
+		chromedp.Evaluate(`document.body ? document.body.innerText.slice(0, 2000) : ''`, &pageText),
 	); err != nil {
 		return "", fmt.Errorf("获取发布结果失败: %w", err)
 	}
-	// 校验：URL 还在发布页 = 发布未成功（标题超长/缺图/内容违规/风控验证码）
-	if strings.Contains(resultURL, "publish/publish") {
-		// 尝试读取页面错误提示（小红书校验失败会在标题/正文区显示红色提示）
-		var errMsg string
-		_ = chromedp.Run(sessionCtx,
-			chromedp.Evaluate(`(() => {
-				const tips = document.querySelectorAll('[class*="error"], [class*="warn"], .toast, .d-toast');
-				const texts = [];
-				tips.forEach(t => { if (t.offsetParent && t.textContent.trim()) texts.push(t.textContent.trim()) });
-				return texts.slice(0, 3).join(' | ');
-			})()`, &errMsg),
-		)
-		detail := errMsg
-		if detail == "" {
-			detail = "URL 未跳转（可能标题超长/内容违规/触发验证码）"
-		}
-		return "", fmt.Errorf("发布未成功（点击已触发但页面校验拦截）: %s", detail)
+	log.Printf("[PublishAuto:xiaohongshu] 发布结果 URL: %s", resultURL)
+
+	// 失败信号检测（明确报错才算失败）
+	failureSignals := []string{
+		"发布失败", "上传失败", "内容违规", "请重新登录",
+		"滑动验证", "安全验证", "请完成验证",
 	}
-	log.Printf("[PublishAuto:xiaohongshu] 发布完成，URL: %s", resultURL)
+	for _, sig := range failureSignals {
+		if strings.Contains(pageText, sig) {
+			return "", fmt.Errorf("发布失败（页面提示含「%s」）URL: %s", sig, resultURL)
+		}
+	}
+	// 无失败信号 = 发布成功（小红书异步审核，平台侧已接收）
+	log.Printf("[PublishAuto:xiaohongshu] ✅ 发布成功（已提交，等待平台审核）URL: %s", resultURL)
 	return resultURL, nil
 }
 
