@@ -1,0 +1,63 @@
+# WebReaper 容器编排
+#
+# 设计：与已有 zhichen 项目一致——network_mode: host，通过 localhost 连已有 MySQL。
+# MySQL 共享 zhichen-mysql（:13306），在已有实例里建 webreaper database 即可。
+# Redis 暂不接入（当前 NoopLock，阶段 2 多实例才需要）。
+# 前端独立部署到宿主机 nginx（不进容器），nginx 反代 /api/* 和 /media/* 到容器。
+
+services:
+  webreaper:
+    build: .
+    container_name: webreaper
+    restart: unless-stopped
+    # host 网络：容器直接用宿主机网络栈，localhost:13306 连已有 MySQL
+    network_mode: host
+    dns:
+      - 8.8.8.8
+      - 223.5.5.5
+    mem_limit: 1g
+    mem_reservation: 512m
+    environment:
+      APP_ENV: production
+      SERVER_PORT: "8082"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8082}
+      # MySQL（共享已有 zhichen-mysql，端口 13306）
+      DB_HOST: localhost
+      DB_PORT: "13306"
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-zhichen2026}
+      DB_NAME: webreaper
+      # LLM（内容生成/AI 监测用）
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-minimax}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.minimaxi.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-MiniMax-M2.5}
+      # Vidu 视频/图片/音频生成
+      VIDU_API_KEY: ${VIDU_API_KEY:-}
+      # 高德地图（本地生活 GEO）
+      AMAP_API_KEY: ${AMAP_API_KEY:-}
+      # Bing 收录
+      BING_API_KEY: ${BING_API_KEY:-}
+      BING_SITE_URL: ${BING_SITE_URL:-}
+      # 安全
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      PUBLISH_COOKIE_SECRET: ${PUBLISH_COOKIE_SECRET:-change-me-in-production}
+      # RPA 浏览器（容器无显示器 → headless）
+      QR_LOGIN_HEADED: "false"
+      # 其他
+      AUTO_MONITOR_ENABLED: ${AUTO_MONITOR_ENABLED:-true}
+      TELEMETRY_ENABLED: "false"
+    volumes:
+      # 媒体素材持久化（用户上传 + Vidu 产物转存）
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

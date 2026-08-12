@@ -37,16 +37,21 @@ import (
 //   - 半自动兜底：前端"分发中心"提供定位操作指引（手动选定位，最稳）。
 
 // allocOpts 反检测浏览器选项（与 qrlogin 模块一致）
+// 容器环境（QR_LOGIN_HEADED != true）自动启用 headless + no-sandbox（容器内 Chromium 需要）
 func allocOpts() []chromedp.ExecAllocatorOption {
-	return []chromedp.ExecAllocatorOption{
+	opts := []chromedp.ExecAllocatorOption{
 		chromedp.NoFirstRun,
 		chromedp.NoDefaultBrowserCheck,
 		chromedp.WindowSize(1280, 800),
 		chromedp.Flag("enable-automation", false),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
-		// 不设 chromedp.Headless = 显示模式（用户可见浏览器窗口）
 	}
+	// headless 模式：QR_LOGIN_HEADED != "true" 时启用（容器/无显示器环境必须 headless）
+	if os.Getenv("QR_LOGIN_HEADED") != "true" {
+		opts = append(opts, chromedp.Headless, chromedp.Flag("no-sandbox", true))
+	}
+	return opts
 }
 
 // parseCookies 将 cookie 字符串解析为 chromedp CookieParam 列表。

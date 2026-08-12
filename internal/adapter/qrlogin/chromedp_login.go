@@ -212,7 +212,7 @@ func (q *ChromedpQRLogin) allocOpts() []chromedp.ExecAllocatorOption {
 	if q.headed {
 		opts = append(opts, chromedp.Flag("headless", false))
 	} else {
-		opts = append(opts, chromedp.Headless)
+		opts = append(opts, chromedp.Headless, chromedp.Flag("no-sandbox", true))
 	}
 	return opts
 }
