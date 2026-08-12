@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, MediaAsset, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
+import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -332,6 +332,7 @@ export const businessApi = {
     sub_type: string
     model: string
     params: Record<string, unknown>
+    refs?: PromptRef[]             // @引用素材（服务端翻译层按端点映射）
     off_peak?: boolean
     watermark?: boolean
   }) => apiClient.post<unknown, GenerationTask>('/api/v1/generation/tasks', data),
@@ -355,6 +356,12 @@ export const businessApi = {
     apiClient.get<unknown, { assets: MediaAsset[] }>('/api/v1/media/assets'),
   deleteAsset: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/media/assets/${id}`),
+
+  // 厂商配置（管理后台：按厂商设置 API Key / 启用开关——保存后热生效）
+  listProviderConfigs: () =>
+    apiClient.get<unknown, { providers: ProviderConfig[] }>('/api/v1/admin/provider-configs'),
+  saveProviderConfig: (provider: string, data: { api_key?: string; base_url?: string; enabled?: boolean }) =>
+    apiClient.put<unknown, { providers: ProviderConfig[] }>(`/api/v1/admin/provider-configs/${provider}`, data),
 
   // ---- 经济系统（套餐/订阅/订单/用量）----
 

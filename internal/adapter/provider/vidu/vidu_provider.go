@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"webreaper/internal/domain/entity"
@@ -23,6 +24,7 @@ const baseURL = "https://api.vidu.cn"
 
 // ViduProvider 是 port.GenerationProvider 的 Vidu 实现。
 type ViduProvider struct {
+	mu     sync.RWMutex // 保护 apiKey（管理后台热更新）
 	apiKey string
 	client *http.Client
 }
@@ -35,7 +37,24 @@ func NewViduProvider(apiKey string) *ViduProvider {
 	}
 }
 
+// UpdateAPIKey 运行时更新 API Key（管理后台保存后热生效，无需重启）。
+// 实现 port.ConfigurableProvider——main 装配后由 admin handler 调用。
+func (p *ViduProvider) UpdateAPIKey(key string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.apiKey = key
+}
+
+// apiKeyNow 并发安全的 Key 读取。
+func (p *ViduProvider) apiKeyNow() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.apiKey
+}
+
 func (p *ViduProvider) Name() string { return "vidu" }
+
+var _ port.ConfigurableProvider = (*ViduProvider)(nil)
 
 // Submit 提交生成任务（endpoint 由端点策略提供，body 为组装后的请求体）。
 func (p *ViduProvider) Submit(ctx context.Context, endpoint string, body map[string]any) (string, int, error) {
@@ -45,7 +64,7 @@ func (p *ViduProvider) Submit(ctx context.Context, endpoint string, body map[str
 		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Token "+p.apiKey)
+	req.Header.Set("Authorization", "Token "+p.apiKeyNow())
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -76,7 +95,7 @@ func (p *ViduProvider) Poll(ctx context.Context, taskID string) (port.Generation
 	if err != nil {
 		return port.GenerationStatus{}, err
 	}
-	req.Header.Set("Authorization", "Token "+p.apiKey)
+	req.Header.Set("Authorization", "Token "+p.apiKeyNow())
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -116,7 +135,7 @@ func (p *ViduProvider) Cancel(ctx context.Context, taskID string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Token "+p.apiKey)
+	req.Header.Set("Authorization", "Token "+p.apiKeyNow())
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("Vidu 取消任务失败: %w", err)
@@ -135,7 +154,7 @@ func (p *ViduProvider) QueryCredits(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Authorization", "Token "+p.apiKey)
+	req.Header.Set("Authorization", "Token "+p.apiKeyNow())
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("Vidu 查询积分失败: %w", err)
@@ -154,7 +173,7 @@ func (p *ViduProvider) QueryCredits(ctx context.Context) (int, error) {
 
 // VerifyCallback 回调验签（HMAC-SHA256 复合签名字符串；验签实现见 callback.go）。
 func (p *ViduProvider) VerifyCallback(ctx context.Context, header http.Header, body []byte) error {
-	return verifyCallbackSignature(p.apiKey, header, body)
+	return verifyCallbackSignature(p.apiKeyNow(), header, body)
 }
 
 // TranslateError 错误码 → 产品级消息（可读 + 语义化）。

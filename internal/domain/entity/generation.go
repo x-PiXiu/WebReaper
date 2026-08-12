@@ -130,3 +130,33 @@ type MediaAsset struct {
 	CreatedAt time.Time
 	ExpiresAt *time.Time
 }
+
+// PromptRef 提示词 @引用（客户端从素材库选择，提交给服务端统一翻译）。
+//
+// 设计：客户端只表达"引用了哪个素材 + 什么类型"，服务端提示词翻译层
+// （translateRefs）按 端点×能力向量 把引用翻译成上游需要的参数格式
+// （images/audio_url/start_image/videos…）——新增端点/类型只改翻译规则，
+// 客户端零改动。
+const (
+	RefKindImage = "image" // 图片引用
+	RefKindAudio = "audio" // 音频引用
+	RefKindVideo = "video" // 视频引用（仅 reference2video q2-pro）
+)
+
+type PromptRef struct {
+	ID   string `json:"id"`   // 素材 ID（文件名，用于校验归属）
+	Name string `json:"name"` // 素材名（prompt 中 @名称 标记）
+	URL  string `json:"url"`  // 素材可访问 URL（最终引用值）
+	Kind string `json:"kind"` // RefKindImage/Audio/Video
+}
+
+// ProviderConfig 厂商配置（管理后台按厂商管理：Vidu API Key 等）。
+// DB 为事实源：装配优先 DB，环境变量兜底；保存后对已装配厂商热生效。
+type ProviderConfig struct {
+	Provider  string
+	APIKey    string // 明文（后台管理场景）；API 层只返回掩码
+	BaseURL   string
+	Enabled   bool
+	ExtraJSON string // 扩展字段（签名密钥等，预留）
+	UpdatedAt time.Time
+}

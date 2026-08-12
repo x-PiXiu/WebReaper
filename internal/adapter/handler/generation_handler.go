@@ -35,6 +35,7 @@ func (h *GenerationHandler) HandleSubmit(c *gin.Context) {
 		SubType   string                 `json:"sub_type" binding:"required"`
 		Model     string                 `json:"model" binding:"required"`
 		Params    map[string]any         `json:"params"`
+		Refs      []entity.PromptRef     `json:"refs"` // @引用素材（服务端翻译层按端点映射）
 		OffPeak   bool                   `json:"off_peak"`
 		Watermark bool                   `json:"watermark"`
 	}
@@ -51,6 +52,7 @@ func (h *GenerationHandler) HandleSubmit(c *gin.Context) {
 		SubType:  req.SubType,
 		Model:    req.Model,
 		Params:   entity.GenerationParams(req.Params),
+		Refs:     req.Refs,
 		OffPeak:  req.OffPeak,
 		Watermark: req.Watermark,
 	})

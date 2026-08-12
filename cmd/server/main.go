@@ -55,6 +55,7 @@ import (
 	"webreaper/internal/usecase/systemsettings"
 	taskuc "webreaper/internal/usecase/task"
 	"webreaper/internal/usecase/generation"
+	"webreaper/internal/usecase/providerconfig"
 )
 
 func main() {
@@ -583,13 +584,21 @@ func main() {
 	// 配额（generation 场景）在 P1 随计费场景扩展注入；当前 mock 模式无真实成本。
 	if geoRepos != nil {
 		genRegistry := viduendpoint.NewRegistry()
+		// 厂商配置 DB 优先（管理后台可设置 Vidu API Key），环境变量兜底
+		providerCfgRepo := repository.NewGormProviderConfigRepository(geoRepos.db)
+		viduAPIKey := cfg.Server.ViduAPIKey
+		if dbCfg, cfgErr := providerCfgRepo.Get(context.Background(), "vidu"); cfgErr == nil && dbCfg.APIKey != "" {
+			viduAPIKey = dbCfg.APIKey
+			log.Info("统一生成使用厂商配置（管理后台 DB 设置 Vidu API Key）")
+		}
 		var genProvider port.GenerationProvider = provider.NewMockGenerationProvider()
-		if cfg.Server.ViduAPIKey != "" {
-			genProvider = vidu.NewViduProvider(cfg.Server.ViduAPIKey)
+		if viduAPIKey != "" {
+			genProvider = vidu.NewViduProvider(viduAPIKey)
 			log.Info("统一生成已接入 Vidu（真实 API）")
 		} else {
 			log.Info("统一生成运行在 mock 模式（未配置 VIDU_API_KEY）")
 		}
+		router.SetProviderConfig(providerconfig.NewUseCase(providerCfgRepo))
 		// 生成规格 DB 驱动（全局掌控）：首次启动 seed 出厂默认 → 管理后台全量可编辑，
 		// 30s TTL 热生效（不重启）；删除行 = 恢复出厂默认
 		genSpecRepo := repository.NewGormGenerationSpecRepository(geoRepos.db)

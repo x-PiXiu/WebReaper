@@ -23,6 +23,7 @@ const adminMenu: NavItem[] = [
       { key: '/admin/tools', label: '工具面板' },
       { key: '/admin/indexing', label: '收录管理' },
       { key: '/admin/generation-specs', label: '生成规格' },
+      { key: '/admin/providers', label: '厂商配置' },
     ],
   },
 ]

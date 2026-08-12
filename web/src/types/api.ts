@@ -412,6 +412,24 @@ export interface MediaAsset {
   created_at: string
 }
 
+// 提示词 @引用（客户端从素材库选择 → 服务端翻译层按端点格式映射）
+export interface PromptRef {
+  id: string
+  name: string                   // 素材名（prompt 中 @名称 标记）
+  url: string
+  kind: 'image' | 'audio' | 'video'
+}
+
+// 厂商配置（管理后台按厂商管理）
+export interface ProviderConfig {
+  provider: string
+  api_key: string                // 掩码（管理后台展示）
+  has_key: boolean
+  base_url: string
+  enabled: boolean
+  updated_at: string
+}
+
 // ---- 经济系统（订阅 / 计费 / 配额）----
 
 export interface Plan {

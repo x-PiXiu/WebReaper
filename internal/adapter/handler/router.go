@@ -22,6 +22,7 @@ import (
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/notification"
 	"webreaper/internal/usecase/port"
+	"webreaper/internal/usecase/providerconfig"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/structured"
@@ -79,6 +80,7 @@ type Router struct {
 	generationProvider port.GenerationProvider
 	generationRegistry port.EndpointRegistry   // 规格管理（管理后台矩阵）
 	generationSpecRepo port.GenerationSpecRepository
+	providerConfigUC   *providerconfig.UseCase // 厂商配置（管理后台）
 	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
 	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
@@ -180,6 +182,11 @@ func (r *Router) SetGeneration(uc *generation.GenerationUseCase, provider port.G
 	r.generationProvider = provider
 	r.generationRegistry = registry
 	r.generationSpecRepo = specRepo
+}
+
+// SetProviderConfig 注入厂商配置用例（可选；管理后台按厂商设置 API Key——未注入则端点不注册）。
+func (r *Router) SetProviderConfig(uc *providerconfig.UseCase) {
+	r.providerConfigUC = uc
 }
 
 // SetMedia 注入媒体资产存储（可选；素材上传/转存——未注入则上传端点不注册）。
@@ -531,6 +538,12 @@ func (r *Router) Engine() *gin.Engine {
 				adminGroup.GET("/generation/specs", gh.HandleListSpecs)
 				adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
 				adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
+			}
+			// 厂商配置管理（按厂商设置 API Key——保存后对已装配厂商热生效）
+			if r.providerConfigUC != nil {
+				pch := NewProviderConfigHandler(r.providerConfigUC, r.generationProvider)
+				adminGroup.GET("/provider-configs", pch.HandleList)
+				adminGroup.PUT("/provider-configs/:provider", pch.HandleSave)
 			}
 			// 收录管理（运行时配置/提交日志/手动补提交）
 			if r.indexingUC != nil {

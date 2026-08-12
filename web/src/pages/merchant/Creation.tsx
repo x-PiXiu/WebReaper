@@ -3,16 +3,16 @@ import type { ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, message,
-  Table, Modal, Upload, Empty, Popconfirm, Tooltip, Alert, Divider, Badge, Segmented,
+  Table, Modal, Upload, Empty, Popconfirm, Tooltip, Alert, Badge, Segmented, Collapse,
 } from 'antd'
 import {
   VideoCameraOutlined, PictureOutlined, AudioOutlined, RobotOutlined, AppstoreOutlined,
   UploadOutlined, DeleteOutlined, ReloadOutlined, PlayCircleOutlined, SoundOutlined,
   PlusOutlined, MinusCircleOutlined, FileImageOutlined, CloseCircleOutlined,
-  ThunderboltOutlined, ApartmentOutlined, ClockCircleOutlined, MonitorOutlined,
+  ThunderboltOutlined, ApartmentOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
-import type { GenerationTask, GenerationType, ModelCapability } from '../../types/api'
+import type { GenerationTask, GenerationType, ModelCapability, MediaAsset, PromptRef } from '../../types/api'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -29,7 +29,7 @@ const SUBTYPE_META: Record<string, { category: string; label: string; desc: stri
   text2audio: { category: 'audio', label: '音乐生成', desc: '提示词生成 2-10 秒音乐' },
   sound_effect: { category: 'audio', label: '音效生成', desc: '时间轴事件驱动生成音效' },
   tts: { category: 'audio', label: '语音合成', desc: '文本合成语音（语速/音量/情绪可控）' },
-  voice_clone: { category: 'audio', label: '声音克隆', desc: '上传音频复刻音色（voice_id 永久复用）' },
+  voice_clone: { category: 'audio', label: '声音克隆', desc: '引用音频复刻音色（voice_id 永久复用）' },
   digital_human: { category: 'digital_human', label: '数字人', desc: '人像图 + 文本/音频生成口播视频' },
   subject: { category: 'other', label: '主体创建', desc: '创建主体素材，供参考生视频复用' },
 }
@@ -115,10 +115,18 @@ function buildModelMap(types: GenerationType[]): ModelEntry[] {
   })
 }
 
-// 端点支持哪些分类（聚合展示用）
 const endpointCategory = (st: string) => SUBTYPE_META[st]?.category || 'other'
 
-// ---- 素材库选择器 ----
+// 文件名（URL 末段）
+const fileNameOf = (url: string) => {
+  try {
+    return decodeURIComponent(url.split('/').pop() || '')
+  } catch {
+    return url.split('/').pop() || ''
+  }
+}
+
+// ---- 素材库选择器（返回完整资产对象——引用需携带 name/kind）----
 function AssetPicker(props: {
   open: boolean
   mode: 'single' | 'multi'
@@ -126,11 +134,11 @@ function AssetPicker(props: {
   title: string
   max?: number
   onClose: () => void
-  onSelect: (urls: string[]) => void
+  onSelect: (assets: MediaAsset[]) => void
 }) {
   const { open, mode, accept, title, max, onClose, onSelect } = props
   const queryClient = useQueryClient()
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected] = useState<MediaAsset[]>([])
   const [uploading, setUploading] = useState(false)
 
   const { data: assets = [] } = useQuery({
@@ -158,25 +166,24 @@ function AssetPicker(props: {
       } finally {
         setUploading(false)
       }
-      return false // 手动控制，不走 antd 自动上传
+      return false
     },
   }
 
-  const toggleSelect = (url: string) => {
+  const toggleSelect = (a: MediaAsset) => {
     if (mode === 'single') {
-      // 单选：点击即选中并回填（footer 无确认按钮）
-      setSelected([url])
-      onSelect([url])
+      setSelected([a])
+      onSelect([a])
       onClose()
       return
     }
     setSelected(prev => {
-      if (prev.includes(url)) return prev.filter(u => u !== url)
+      if (prev.some(x => x.id === a.id)) return prev.filter(x => x.id !== a.id)
       if (max && prev.length >= max) {
         message.warning(`最多选择 ${max} 个`)
         return prev
       }
-      return [...prev, url]
+      return [...prev, a]
     })
   }
 
@@ -215,11 +222,11 @@ function AssetPicker(props: {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, maxHeight: 320, overflow: 'auto' }}>
           {filtered.map(a => {
             const isImage = a.mime.startsWith('image')
-            const active = selected.includes(a.url)
+            const active = selected.some(x => x.id === a.id)
             return (
               <div
                 key={a.id}
-                onClick={() => toggleSelect(a.url)}
+                onClick={() => toggleSelect(a)}
                 style={{
                   border: active ? '2px solid var(--wr-primary)' : '1px solid var(--wr-border, #e5e7eb)',
                   borderRadius: 8, overflow: 'hidden', cursor: 'pointer', position: 'relative',
@@ -250,7 +257,7 @@ function AssetPicker(props: {
   )
 }
 
-// ---- 任务产物预览 ----
+// ---- 任务产物预览（任务表格内）----
 function CreationPreview({ task }: { task: GenerationTask }) {
   const [preview, setPreview] = useState<{ url: string; cover?: string } | null>(null)
   const creations = task.creations || []
@@ -311,11 +318,11 @@ function parseTaskParams(r: GenerationTask): Record<string, any> {
   return {}
 }
 
-// ---- 创作工作台 ----
+// ---- 创作工作台（即梦式布局：左画布 + 右面板）----
 export default function CreationWorkbench() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('create')
-  const [category, setCategory] = useState<string | null>(null) // 模型库分类过滤（null=全部）
+  const [category, setCategory] = useState<string>('video')
   const [model, setModel] = useState<string>('')
   const [subType, setSubType] = useState<string>('')
   const [params, setParams] = useState<Record<string, any>>({})
@@ -323,21 +330,18 @@ export default function CreationWorkbench() {
   const [watermark, setWatermark] = useState(false)
   const [brandId, setBrandId] = useState<string>('')
   const [taskFilter, setTaskFilter] = useState<string>('all')
-  const [picker, setPicker] = useState<{ mode: 'single' | 'multi'; accept: 'image' | 'audio' | 'any'; key: string; title: string; max?: number; subjectIndex?: number } | null>(null)
+  const [picker, setPicker] = useState<{ mode: 'single' | 'multi'; accept: 'image' | 'audio' | 'any'; key: string; title: string; max?: number } | null>(null)
 
-  // 品牌（任务归属）
   const { data: brands = [] } = useQuery({
     queryKey: ['geo-brands'],
     queryFn: () => businessApi.listBrands(),
   })
 
-  // 端点类型 + 能力向量（表单驱动源）
   const { data: types = [] } = useQuery({
     queryKey: ['generation-types'],
     queryFn: () => businessApi.listGenerationTypes().then(r => r.types),
   })
 
-  // 任务列表（活跃任务 5s 轮询）
   const { data: tasks = [] } = useQuery({
     queryKey: ['generation-tasks'],
     queryFn: () => businessApi.listGenerationTasks().then(r => r.tasks),
@@ -364,25 +368,16 @@ export default function CreationWorkbench() {
     },
   })
 
-  // ---- 模型库（跨端点聚合）----
+  // ---- 模型 / 模式 ----
   const modelEntries = useMemo(() => buildModelMap(types), [types])
-
-  const filteredModels = useMemo(() => {
-    if (!category) return modelEntries
-    return modelEntries.filter(e => e.endpoints.some(ep => endpointCategory(ep.sub_type) === category))
-  }, [modelEntries, category])
-
-  // 当前模型 → 可用模式（端点）
+  const catModels = useMemo(
+    () => modelEntries.filter(e => e.endpoints.some(ep => endpointCategory(ep.sub_type) === category)),
+    [modelEntries, category],
+  )
   const currentModel = useMemo(() => modelEntries.find(e => e.model === model), [modelEntries, model])
   const modes = currentModel?.endpoints || []
+  const cap = useMemo(() => modes.find(m => m.sub_type === subType)?.capability, [modes, subType])
 
-  // 当前模式能力
-  const cap = useMemo(
-    () => modes.find(m => m.sub_type === subType)?.capability,
-    [modes, subType],
-  )
-
-  // 选择模型：默认进入第一个模式
   const selectModel = (m: string) => {
     setModel(m)
     setParams({})
@@ -390,37 +385,79 @@ export default function CreationWorkbench() {
     setSubType(entry?.endpoints[0]?.sub_type || '')
   }
 
-  // 素材选择回调 → 回填参数键
-  const onAssetPicked = (urls: string[]) => {
+  // 引用能力（该模式支持 @引用 的类型）
+  const refKinds = useMemo(() => {
+    if (!cap) return [] as string[]
+    const kinds: string[] = []
+    if (cap.image_slots !== 0 || ['digital_human', 'multiframe', 'subject', 'reference2video', 'text2image', 'img2video', 'start_end2video'].includes(subType)) {
+      kinds.push('image')
+    }
+    if (['voice_clone', 'digital_human'].includes(subType)) kinds.push('audio')
+    if (subType === 'reference2video' && (cap.video_slots ?? 0) > 0) kinds.push('video')
+    return kinds
+  }, [cap, subType])
+
+  // refs 视图
+  const refs: PromptRef[] = (params.refs as PromptRef[]) || []
+
+  // 素材选择回调 → 引用统一入 refs（服务端翻译层按端点映射参数）
+  const onAssetPicked = (assets: MediaAsset[]) => {
     if (!picker) return
+    const newRefs = assets.map(a => ({
+      id: a.id,
+      name: fileNameOf(a.url),
+      url: a.url,
+      kind: (a.mime.startsWith('audio') ? 'audio' : a.mime.startsWith('video') ? 'video' : 'image') as PromptRef['kind'],
+    }))
     setParams(prev => {
-      if (picker.key === 'images') return { ...prev, images: urls }
-      if (picker.key === 'image_settings') {
-        // 关键帧：按序回填 key_image
-        const frames = Array.isArray(prev.image_settings) ? (prev.image_settings as any[]) : []
-        const next = frames.map((f, i) => (i < urls.length ? { ...f, key_image: urls[i] } : f))
-        return { ...prev, image_settings: next }
-      }
-      if (picker.key === 'subject_imgs') {
-        // 主体图片：回填到指定主体
-        const subjects = Array.isArray(prev.subjects) ? (prev.subjects as any[]).map(s => ({ ...s })) : []
-        if (picker.subjectIndex !== undefined && subjects[picker.subjectIndex]) {
-          subjects[picker.subjectIndex].images = urls
-        }
-        return { ...prev, subjects }
-      }
+      const next = { ...prev }
       if (picker.key === 'refs') {
-        // @引用素材：chips 展示，提交时并入 images
-        return { ...prev, refs: urls }
+        next.refs = [...(prev.refs || []), ...newRefs]
+        // prompt 末尾追加 @名称（服务端翻译层还原为纯名称）
+        const prompt = (prev.prompt as string) || ''
+        const marks = newRefs.map(r => `@${r.name}`).join(' ')
+        next.prompt = prompt ? `${prompt} ${marks}` : marks
+      } else if (picker.key === 'subjects') {
+        // 主体模式：本次选择作为第一个主体的图
+        const subjects = Array.isArray(prev.subjects) ? (prev.subjects as any[]).map(s => ({ ...s })) : []
+        if (subjects[0]) {
+          subjects[0].images = (subjects[0].images || []).concat(newRefs.map(r => r.url))
+        }
+        next.subjects = subjects
       }
-      return { ...prev, [picker.key]: urls[0] }
+      return next
     })
   }
 
-  // 任务 params → 表单回填（重新生成）
+  const removeRef = (i: number) => {
+    setParams(prev => {
+      const next = { ...prev }
+      const list = [...(prev.refs || [])]
+      const removed = list.splice(i, 1)
+      next.refs = list
+      // 同步移除 prompt 中的 @名称
+      const prompt = (prev.prompt as string) || ''
+      for (const r of removed) {
+        next.prompt = prompt.replace(`@${r.name}`, r.name).replace(/\s+$/, '')
+      }
+      return next
+    })
+  }
+
+  // 打开引用选择器（按模式支持的类型）
+  const openRefPicker = () => {
+    if (refKinds.length === 0) return
+    const accept = refKinds.length > 1 ? 'any' : (refKinds[0] as 'image' | 'audio')
+    setPicker({
+      mode: 'multi', accept, key: 'refs',
+      title: refKinds.length > 1 ? '从素材库引用（图片/音频）' : `从素材库引用（${refKinds[0] === 'image' ? '图片' : refKinds[0] === 'audio' ? '音频' : '视频'}）`,
+      max: 7,
+    })
+  }
+
   const regenerate = (task: GenerationTask) => {
     setActiveTab('create')
-    setCategory(endpointCategory(task.sub_type) === 'other' ? null : endpointCategory(task.sub_type))
+    setCategory(endpointCategory(task.sub_type))
     setModel(task.model)
     setSubType(task.sub_type)
     setParams(parseTaskParams(task))
@@ -436,29 +473,25 @@ export default function CreationWorkbench() {
       message.warning('请选择模型与生成模式')
       return
     }
-    // 清理空值
     const clean: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(params)) {
       if (v === undefined || v === null || v === '') continue
       if (Array.isArray(v) && v.length === 0) continue
       clean[k] = v
     }
-    // @引用素材 → 并入 images（端点支持图片时）
-    const refs = (clean.refs as string[]) || []
+    const submitRefs = (clean.refs as PromptRef[]) || []
     delete clean.refs
-    if (refs.length > 0) {
-      const images = (clean.images as string[]) || []
-      clean.images = Array.from(new Set([...images, ...refs]))
+    if (submitRefs.length > 0 && refKinds.length === 0) {
+      message.warning('该模式不支持素材引用')
+      return
     }
-    // 必填校验（服务端兜底，前端提前提示）
+    // 必填校验（服务端兜底）
     if (subType === 'tts' && !clean.text) { message.warning('请输入合成文本'); return }
     if (subType === 'tts' && !(clean.voice_setting_voice_id as string)) { message.warning('请输入音色 ID'); return }
-    if (subType === 'voice_clone' && !clean.audio_url) { message.warning('请选择原音频素材'); return }
-    if (subType === 'voice_clone' && !clean.voice_id) { message.warning('请输入声音 ID（8-256 位）'); return }
-    if (subType === 'digital_human' && !clean.image && !(clean.images as string[])?.length) { message.warning('请选择数字人人像'); return }
-    if (subType === 'multiframe' && !clean.start_image) { message.warning('请选择首帧图'); return }
+    if (subType === 'voice_clone' && !submitRefs.some(r => r.kind === 'audio') && !clean.audio_url) { message.warning('请引用音频素材（声音克隆的原料）'); return }
+    if (subType === 'digital_human' && !submitRefs.some(r => r.kind === 'image') && !clean.image) { message.warning('请引用人像图片'); return }
     if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { message.warning('请至少添加一个音效事件'); return }
-    if (!clean.prompt && !clean.text && subType !== 'subject') {
+    if (!clean.prompt && !clean.text && subType !== 'subject' && subType !== 'multiframe') {
       if (subType !== 'tts' && subType !== 'voice_clone' && subType !== 'sound_effect') {
         message.warning('请输入提示词/文本'); return
       }
@@ -468,100 +501,45 @@ export default function CreationWorkbench() {
       sub_type: subType,
       model,
       params: clean,
+      refs: submitRefs,
       off_peak: offPeak,
       watermark,
     })
   }
 
-  // ---- 能力向量驱动表单 ----
+  // ---- 画布：当前模式最近成功产物 ----
+  const canvasResult = useMemo(() => {
+    if (!subType) return null
+    return tasks
+      .filter(t => t.sub_type === subType && t.state === 'success' && (t.creations || []).length > 0)
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0] || null
+  }, [tasks, subType])
+
+  // ---- 能力字段（折叠进高级参数）----
   const renderField = (kind: string): ReactNode | null => {
     if (!cap) return null
     const set = (key: string, value: any) => setParams(prev => ({ ...prev, [key]: value }))
     const get = (key: string) => params[key]
 
     switch (kind) {
-      case 'prompt': {
-        const refs = (get('refs') as string[]) || []
-        const supportRefs = (cap.image_slots ?? 0) !== 0 || cap.image_slots === -1
-        return (
-          <div key="prompt" style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 6 }}>
-              <Text strong style={{ fontSize: 13 }}>提示词</Text>
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                描述画面/内容（{cap.max_prompt_len || 5000} 字上限）
-              </Text>
-              {supportRefs && (
-                <Button
-                  size="small" type="link" icon={<PictureOutlined />} style={{ float: 'right' }}
-                  onClick={() => setPicker({ mode: 'multi', accept: 'image', key: 'refs', title: '从素材库引用图片（@ 引用）', max: 7 })}
-                >
-                  @ 引用素材
-                </Button>
-              )}
-            </div>
-            <TextArea
-              rows={3}
-              value={get('prompt')}
-              onChange={e => set('prompt', e.target.value)}
-              showCount
-              maxLength={cap.max_prompt_len || 5000}
-              placeholder="描述你想要生成的内容，越具体效果越好…（可 @ 引用下方素材）"
-            />
-            {refs.length > 0 && (
-              <div style={{ marginTop: 8 }}>
-                <Space size={4} wrap>
-                  <Text type="secondary" style={{ fontSize: 12 }}>已引用：</Text>
-                  {refs.map(u => {
-                    const name = decodeURIComponent(u.split('/').pop() || '')
-                    return (
-                      <Tag
-                        key={u} icon={<PictureOutlined />} closable
-                        onClose={() => set('refs', refs.filter(x => x !== u))}
-                        style={{ fontSize: 12 }}
-                      >
-                        @{name.slice(0, 20)}
-                      </Tag>
-                    )
-                  })}
-                </Space>
-              </div>
-            )}
-          </div>
-        )
-      }
-      case 'text':
-        return (
-          <div key="text" style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 6 }}>
-              <Text strong style={{ fontSize: 13 }}>合成文本</Text>
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>支持 &lt;#x#&gt; 停顿标记（{cap.max_prompt_len || 10000} 字上限）</Text>
-            </div>
-            <TextArea rows={3} value={get('text')} onChange={e => set('text', e.target.value)} showCount maxLength={cap.max_prompt_len || 10000} placeholder="输入要合成语音的文本…" />
-          </div>
-        )
       case 'duration': {
         const [min, max] = cap.durations || [0, 0]
         if (max <= 0) return null
         if (min === max) {
           return (
-            <div key="duration" style={{ marginBottom: 16 }}>
+            <div key="duration" style={{ marginBottom: 12 }}>
               <Text strong style={{ fontSize: 13 }}>时长</Text>
               <Tag style={{ marginLeft: 8 }}>{min} 秒（固定）</Tag>
             </div>
           )
         }
         return (
-          <div key="duration" style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 6 }}>
+          <div key="duration" style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 4 }}>
               <Text strong style={{ fontSize: 13 }}>时长</Text>
               <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>{min}-{max} 秒</Text>
             </div>
-            <Slider
-              min={min} max={max} step={1}
-              value={get('duration') ?? max}
-              onChange={v => set('duration', v)}
-              marks={{ [min]: `${min}s`, [max]: `${max}s` }}
-            />
+            <Slider min={min} max={max} step={1} value={get('duration') ?? max} onChange={v => set('duration', v)} />
           </div>
         )
       }
@@ -569,9 +547,9 @@ export default function CreationWorkbench() {
         const opts = cap.resolutions || []
         if (opts.length === 0) return null
         return (
-          <div key="resolution" style={{ marginBottom: 16 }}>
+          <div key="resolution" style={{ marginBottom: 12 }}>
             <Text strong style={{ fontSize: 13 }}>分辨率</Text>
-            <Select style={{ width: 160, marginLeft: 12 }} value={get('resolution') || opts[0]} onChange={v => set('resolution', v)} options={opts.map(o => ({ value: o, label: o }))} />
+            <Select size="small" style={{ width: 140, marginLeft: 10 }} value={get('resolution') || opts[0]} onChange={v => set('resolution', v)} options={opts.map(o => ({ value: o, label: o }))} />
           </div>
         )
       }
@@ -579,23 +557,23 @@ export default function CreationWorkbench() {
         const opts = cap.aspect_ratios || []
         if (opts.length === 0) return null
         return (
-          <div key="aspect" style={{ marginBottom: 16 }}>
+          <div key="aspect" style={{ marginBottom: 12 }}>
             <Text strong style={{ fontSize: 13 }}>画面比例</Text>
-            <Select style={{ width: 160, marginLeft: 12 }} value={get('aspect_ratio') || '16:9'} onChange={v => set('aspect_ratio', v)} options={opts.map(o => ({ value: o, label: o }))} />
+            <Select size="small" style={{ width: 140, marginLeft: 10 }} value={get('aspect_ratio') || '16:9'} onChange={v => set('aspect_ratio', v)} options={opts.map(o => ({ value: o, label: o }))} />
           </div>
         )
       }
       case 'audio': {
         if (!cap.audio_types && !cap.audio_default) return null
         return (
-          <div key="audio" style={{ marginBottom: 16 }}>
-            <Space size={16} wrap>
-              <Space>
+          <div key="audio" style={{ marginBottom: 12 }}>
+            <Space size={12} wrap>
+              <Space size={6}>
                 <Text strong style={{ fontSize: 13 }}>生成音频</Text>
-                <Switch checked={get('audio') ?? cap.audio_default ?? false} onChange={v => set('audio', v)} />
+                <Switch size="small" checked={get('audio') ?? cap.audio_default ?? false} onChange={v => set('audio', v)} />
               </Space>
               {get('audio') && (
-                <Select style={{ width: 180 }} placeholder="音频类型" value={get('audio_type')} onChange={v => set('audio_type', v)} options={AUDIO_TYPE_OPTIONS} />
+                <Select size="small" style={{ width: 150 }} placeholder="音频类型" value={get('audio_type')} onChange={v => set('audio_type', v)} options={AUDIO_TYPE_OPTIONS} />
               )}
             </Space>
           </div>
@@ -603,106 +581,83 @@ export default function CreationWorkbench() {
       }
       case 'seed':
         return (
-          <div key="seed" style={{ marginBottom: 16 }}>
+          <div key="seed" style={{ marginBottom: 12 }}>
             <Text strong style={{ fontSize: 13 }}>随机种子</Text>
-            <InputNumber style={{ marginLeft: 12, width: 160 }} min={0} max={9999} placeholder="留空=随机" value={get('seed')} onChange={v => set('seed', v)} />
+            <InputNumber size="small" style={{ marginLeft: 10, width: 140 }} min={0} max={9999} placeholder="留空=随机" value={get('seed')} onChange={v => set('seed', v)} />
           </div>
         )
       case 'style':
         return (
-          <div key="style" style={{ marginBottom: 16 }}>
+          <div key="style" style={{ marginBottom: 12 }}>
             <Text strong style={{ fontSize: 13 }}>风格</Text>
-            <Select style={{ width: 160, marginLeft: 12 }} allowClear placeholder="不指定" value={get('style')} onChange={v => set('style', v)} options={STYLE_OPTIONS} />
+            <Select size="small" style={{ width: 140, marginLeft: 10 }} allowClear placeholder="不指定" value={get('style')} onChange={v => set('style', v)} options={STYLE_OPTIONS} />
           </div>
         )
       case 'movement':
         if (!cap.supports_movement) return null
         return (
-          <div key="movement" style={{ marginBottom: 16 }}>
+          <div key="movement" style={{ marginBottom: 12 }}>
             <Text strong style={{ fontSize: 13 }}>运动幅度</Text>
-            <Select style={{ width: 160, marginLeft: 12 }} value={get('movement_amplitude') || 'auto'} onChange={v => set('movement_amplitude', v)} options={MOVEMENT_OPTIONS} />
+            <Select size="small" style={{ width: 140, marginLeft: 10 }} value={get('movement_amplitude') || 'auto'} onChange={v => set('movement_amplitude', v)} options={MOVEMENT_OPTIONS} />
           </div>
         )
-      case 'images': {
-        const slots = cap.image_slots ?? 0
-        if (slots === 0) return null
-        const picked = (get('images') as string[]) || []
-        const need = slots === 2 ? '首帧 + 尾帧（2 张）' : slots === -1 ? `1-7 张（已选 ${picked.length}）` : '1 张'
-        const max = slots === -1 ? 7 : Math.abs(slots)
+      case 'voice_id':
         return (
-          <div key="images" style={{ marginBottom: 16 }}>
-            <Text strong style={{ fontSize: 13 }}>参考图片</Text>
-            <Space style={{ marginLeft: 12 }}>
-              <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: slots === 1 ? 'single' : 'multi', accept: 'image', key: 'images', title: '选择参考图片', max })}>
-                选择素材（{need}）
-              </Button>
-              {picked.length > 0 && (
-                <Space size={2} wrap>
-                  {picked.map((u, i) => (
-                    <img key={i} src={u} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />
-                  ))}
-                  <Button size="small" type="text" danger icon={<CloseCircleOutlined />} onClick={() => set('images', [])} />
-                </Space>
-              )}
-            </Space>
+          <div key="voice_id" style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 13 }}>声音 ID</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>8-256 位，字母开头（复用音色）</Text>
+            <Input size="small" style={{ marginTop: 4, maxWidth: 300 }} value={get('voice_id')} onChange={e => set('voice_id', e.target.value)} placeholder="如 my-voice-001" />
           </div>
         )
-      }
-      case 'image': {
-        const picked = get('image')
+      case 'voice_settings':
         return (
-          <div key="image" style={{ marginBottom: 16 }}>
-            <Text strong style={{ fontSize: 13 }}>人像图片</Text>
-            <Space style={{ marginLeft: 12 }}>
-              <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'single', accept: 'image', key: 'image', title: '选择数字人人像' })}>
-                {picked ? '更换人像' : '选择人像'}
-              </Button>
-              {picked && <img src={picked} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />}
-            </Space>
+          <div key="voice_settings" style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 13 }}>声音设置</Text>
+            <div style={{ display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>语速</Text>
+                <InputNumber size="small" min={0.5} max={2} step={0.1} style={{ width: 80, marginLeft: 4 }} value={get('voice_setting_speed')} onChange={v => set('voice_setting_speed', v)} placeholder="1.0" />
+              </div>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>音量</Text>
+                <InputNumber size="small" min={0} max={10} style={{ width: 80, marginLeft: 4 }} value={get('voice_setting_volume')} onChange={v => set('voice_setting_volume', v)} placeholder="5" />
+              </div>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>语调</Text>
+                <InputNumber size="small" min={-12} max={12} style={{ width: 80, marginLeft: 4 }} value={get('voice_setting_pitch')} onChange={v => set('voice_setting_pitch', v)} placeholder="0" />
+              </div>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>情绪</Text>
+                <Select size="small" style={{ width: 100, marginLeft: 4 }} allowClear placeholder="平静" value={get('voice_setting_emotion')} onChange={v => set('voice_setting_emotion', v)} options={EMOTION_OPTIONS} />
+              </div>
+            </div>
           </div>
         )
-      }
-      case 'start_image': {
-        const picked = get('start_image')
-        return (
-          <div key="start_image" style={{ marginBottom: 16 }}>
-            <Text strong style={{ fontSize: 13 }}>首帧图</Text>
-            <Space style={{ marginLeft: 12 }}>
-              <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'single', accept: 'image', key: 'start_image', title: '选择首帧图' })}>
-                {picked ? '更换首帧' : '选择首帧'}
-              </Button>
-              {picked && <img src={picked} alt="" style={{ width: 44, height: 44, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />}
-            </Space>
-          </div>
-        )
-      }
       case 'keyframes': {
         const frames: any[] = (get('image_settings') as any[]) || []
         const setFrames = (next: any[]) => set('image_settings', next)
         return (
-          <div key="keyframes" style={{ marginBottom: 16 }}>
+          <div key="keyframes" style={{ marginBottom: 12 }}>
             <div style={{ marginBottom: 6 }}>
               <Text strong style={{ fontSize: 13 }}>关键帧（2-9 个）</Text>
-              <Space style={{ marginLeft: 12 }}>
+              <Space style={{ marginLeft: 10 }}>
                 <InputNumber size="small" min={2} max={9} value={frames.length || 2} onChange={v => {
                   const n = v ?? 2
-                  const next = Array.from({ length: n }, (_, i) => frames[i] || { key_image: '', prompt: '', duration: 5 })
-                  setFrames(next)
+                  setFrames(Array.from({ length: n }, (_, i) => frames[i] || { key_image: '', prompt: '', duration: 5 }))
                 }} />
                 <Button size="small" icon={<PlusOutlined />} onClick={() => frames.length < 9 && setFrames([...frames, { key_image: '', prompt: '', duration: 5 }])} />
               </Space>
             </div>
             {frames.map((f, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                <Text type="secondary" style={{ fontSize: 12, width: 28 }}>#{i + 1}</Text>
+              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                <Text type="secondary" style={{ fontSize: 12, width: 26 }}>#{i + 1}</Text>
                 {f.key_image ? (
-                  <img src={f.key_image} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />
+                  <img src={f.key_image} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />
                 ) : (
-                  <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'single', accept: 'image', key: 'image_settings', title: `选择关键帧 #${i + 1}` })}>选图</Button>
+                  <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'single', accept: 'image', key: 'subjects', title: `选择关键帧 #${i + 1}` })}>选图</Button>
                 )}
-                <Input size="small" style={{ width: 180 }} placeholder={`关键帧 ${i + 1} 提示词`} value={f.prompt} onChange={e => setFrames(frames.map((x, j) => j === i ? { ...x, prompt: e.target.value } : x))} />
+                <Input size="small" style={{ width: 140 }} placeholder={`帧 ${i + 1} 提示词`} value={f.prompt} onChange={e => setFrames(frames.map((x, j) => j === i ? { ...x, prompt: e.target.value } : x))} />
                 <InputNumber size="small" min={2} max={7} placeholder="秒" value={f.duration} onChange={v => setFrames(frames.map((x, j) => j === i ? { ...x, duration: v } : x))} />
-                <MinusCircleOutlined style={{ color: '#999' }} onClick={() => frames.length > 2 && setFrames(frames.filter((_, j) => j !== i))} />
               </div>
             ))}
           </div>
@@ -713,94 +668,45 @@ export default function CreationWorkbench() {
         const subjects: any[] = (get('subjects') as any[]) || []
         const setSubjects = (next: any[]) => set('subjects', next)
         return (
-          <div key="subjects" style={{ marginBottom: 16 }}>
+          <div key="subjects" style={{ marginBottom: 12 }}>
             <div style={{ marginBottom: 6 }}>
               <Text strong style={{ fontSize: 13 }}>主体模式</Text>
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>提示词中用 @名称 引用主体（最多 3 个）</Text>
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>提示词中用 @名称 引用</Text>
             </div>
             {subjects.length === 0 ? (
               <Button size="small" icon={<PlusOutlined />} onClick={() => setSubjects([{ name: '', images: [], voice_id: '' }])}>添加主体</Button>
             ) : (
               subjects.map((s, i) => (
-                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                  <Input size="small" style={{ width: 110 }} placeholder="主体名称" value={s.name} onChange={e => setSubjects(subjects.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
-                  <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'multi', accept: 'image', key: 'subject_imgs', title: `选择主体 ${i + 1} 图片（1-3 张）`, max: 3, subjectIndex: i })}>
+                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                  <Input size="small" style={{ width: 100 }} placeholder="主体名称" value={s.name} onChange={e => setSubjects(subjects.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
+                  <Button size="small" icon={<PictureOutlined />} onClick={() => setPicker({ mode: 'multi', accept: 'image', key: 'subjects', title: '选择主体图片', max: 3 })}>
                     {s.images?.length ? `已选 ${s.images.length} 图` : '选图'}
                   </Button>
-                  <Input size="small" style={{ width: 140 }} placeholder="音色 ID（可选）" value={s.voice_id} onChange={e => setSubjects(subjects.map((x, j) => j === i ? { ...x, voice_id: e.target.value } : x))} />
+                  <Input size="small" style={{ width: 110 }} placeholder="音色 ID" value={s.voice_id} onChange={e => setSubjects(subjects.map((x, j) => j === i ? { ...x, voice_id: e.target.value } : x))} />
                   <MinusCircleOutlined style={{ color: '#999' }} onClick={() => setSubjects(subjects.filter((_, j) => j !== i))} />
                 </div>
               ))
             )}
-            {subjects.length > 0 && subjects.length < 3 && (
-              <Button size="small" type="link" icon={<PlusOutlined />} onClick={() => setSubjects([...subjects, { name: '', images: [], voice_id: '' }])}>再加一个主体</Button>
-            )}
           </div>
         )
       }
-      case 'audio_url': {
-        const picked = get('audio_url')
-        return (
-          <div key="audio_url" style={{ marginBottom: 16 }}>
-            <Text strong style={{ fontSize: 13 }}>原音频</Text>
-            <Space style={{ marginLeft: 12 }}>
-              <Button size="small" icon={<AudioOutlined />} onClick={() => setPicker({ mode: 'single', accept: 'audio', key: 'audio_url', title: '选择原音频（10s-5min）' })}>
-                {picked ? '更换音频' : '选择音频'}
-              </Button>
-              {picked && <SoundOutlined style={{ color: 'var(--wr-primary)' }} />}
-            </Space>
-          </div>
-        )
-      }
-      case 'voice_id':
-        return (
-          <div key="voice_id" style={{ marginBottom: 16 }}>
-            <Text strong style={{ fontSize: 13 }}>声音 ID</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>8-256 位，字母开头，可含数字/-/_（后续克隆任务复用）</Text>
-            <Input style={{ marginTop: 6, maxWidth: 420 }} value={get('voice_id')} onChange={e => set('voice_id', e.target.value)} placeholder="如 my-voice-001" />
-          </div>
-        )
-      case 'voice_settings':
-        return (
-          <div key="voice_settings" style={{ marginBottom: 16 }}>
-            <Text strong style={{ fontSize: 13 }}>声音设置</Text>
-            <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
-              <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>语速</Text>
-                <InputNumber size="small" min={0.5} max={2} step={0.1} style={{ width: 90, marginLeft: 6 }} value={get('voice_setting_speed')} onChange={v => set('voice_setting_speed', v)} placeholder="1.0" />
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>音量</Text>
-                <InputNumber size="small" min={0} max={10} style={{ width: 90, marginLeft: 6 }} value={get('voice_setting_volume')} onChange={v => set('voice_setting_volume', v)} placeholder="5" />
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>语调</Text>
-                <InputNumber size="small" min={-12} max={12} style={{ width: 90, marginLeft: 6 }} value={get('voice_setting_pitch')} onChange={v => set('voice_setting_pitch', v)} placeholder="0" />
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>情绪</Text>
-                <Select size="small" style={{ width: 110, marginLeft: 6 }} allowClear placeholder="平静" value={get('voice_setting_emotion')} onChange={v => set('voice_setting_emotion', v)} options={EMOTION_OPTIONS} />
-              </div>
-            </div>
-          </div>
-        )
       case 'timing': {
         const duration = Number(params.duration) || 10
         const events: any[] = (get('timing_prompts') as any[]) || []
         const setEvents = (next: any[]) => set('timing_prompts', next)
         return (
-          <div key="timing" style={{ marginBottom: 16 }}>
+          <div key="timing" style={{ marginBottom: 12 }}>
             <div style={{ marginBottom: 6 }}>
-              <Text strong style={{ fontSize: 13 }}>音效事件（时间轴）</Text>
-              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>总时长 {duration} 秒，事件区间需在 [0,{duration}] 内</Text>
+              <Text strong style={{ fontSize: 13 }}>音效事件</Text>
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>区间需在 [0,{duration}] 内</Text>
             </div>
             {events.map((e, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                <Text type="secondary" style={{ fontSize: 12, width: 28 }}>#{i + 1}</Text>
-                <InputNumber size="small" min={0} max={duration} style={{ width: 80 }} placeholder="开始" value={e.from} onChange={v => setEvents(events.map((x, j) => j === i ? { ...x, from: v } : x))} />
+              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                <Text type="secondary" style={{ fontSize: 12, width: 26 }}>#{i + 1}</Text>
+                <InputNumber size="small" min={0} max={duration} style={{ width: 70 }} placeholder="开始" value={e.from} onChange={v => setEvents(events.map((x, j) => j === i ? { ...x, from: v } : x))} />
                 <Text type="secondary" style={{ fontSize: 12 }}>→</Text>
-                <InputNumber size="small" min={0} max={duration} style={{ width: 80 }} placeholder="结束" value={e.to} onChange={v => setEvents(events.map((x, j) => j === i ? { ...x, to: v } : x))} />
-                <Input size="small" style={{ width: 220 }} placeholder="该时段音效描述" value={e.prompt} onChange={ev => setEvents(events.map((x, j) => j === i ? { ...x, prompt: ev.target.value } : x))} />
+                <InputNumber size="small" min={0} max={duration} style={{ width: 70 }} placeholder="结束" value={e.to} onChange={v => setEvents(events.map((x, j) => j === i ? { ...x, to: v } : x))} />
+                <Input size="small" style={{ width: 150 }} placeholder="音效描述" value={e.prompt} onChange={ev => setEvents(events.map((x, j) => j === i ? { ...x, prompt: ev.target.value } : x))} />
                 <MinusCircleOutlined style={{ color: '#999' }} onClick={() => setEvents(events.filter((_, j) => j !== i))} />
               </div>
             ))}
@@ -810,9 +716,9 @@ export default function CreationWorkbench() {
       }
       case 'subject_name':
         return (
-          <div key="subject_name" style={{ marginBottom: 16 }}>
+          <div key="subject_name" style={{ marginBottom: 12 }}>
             <Text strong style={{ fontSize: 13 }}>主体名称</Text>
-            <Input style={{ marginTop: 6, maxWidth: 420 }} value={get('name')} onChange={e => set('name', e.target.value)} placeholder="如：我的咖啡品牌 IP" />
+            <Input size="small" style={{ marginTop: 4, maxWidth: 300 }} value={get('name')} onChange={e => set('name', e.target.value)} placeholder="如：我的咖啡品牌 IP" />
           </div>
         )
       default:
@@ -820,164 +726,254 @@ export default function CreationWorkbench() {
     }
   }
 
-  // 端点 → 渲染哪些字段
+  // 端点 → 高级参数字段
   const fieldsFor = (st: string): string[] => {
     switch (st) {
-      case 'text2video': return ['prompt', 'duration', 'resolution', 'aspect', 'audio', 'style', 'movement', 'seed']
-      case 'img2video': return ['images', 'prompt', 'duration', 'resolution', 'movement', 'seed']
-      case 'start_end2video': return ['images', 'prompt', 'duration', 'resolution', 'movement', 'seed']
-      case 'reference2video': return ['subjects', 'images', 'prompt', 'duration', 'resolution', 'aspect', 'movement', 'seed']
-      case 'multiframe': return ['start_image', 'keyframes', 'resolution', 'aspect']
-      case 'text2image': return ['prompt', 'images', 'seed']
-      case 'text2audio': return ['prompt', 'duration', 'seed']
+      case 'text2video': return ['duration', 'resolution', 'aspect', 'audio', 'style', 'movement', 'seed']
+      case 'img2video': return ['duration', 'resolution', 'movement', 'seed']
+      case 'start_end2video': return ['duration', 'resolution', 'movement', 'seed']
+      case 'reference2video': return ['subjects', 'duration', 'resolution', 'aspect', 'movement', 'seed']
+      case 'multiframe': return ['keyframes', 'resolution', 'aspect']
+      case 'text2image': return ['seed']
+      case 'text2audio': return ['duration', 'seed']
       case 'sound_effect': return ['timing', 'duration', 'seed']
-      case 'tts': return ['text', 'voice_settings', 'voice_id']
-      case 'voice_clone': return ['audio_url', 'voice_id', 'text']
-      case 'digital_human': return ['image', 'prompt', 'audio_url', 'voice_id', 'resolution']
-      case 'subject': return ['subject_name', 'images', 'voice_id']
-      default: return ['prompt']
+      case 'tts': return ['voice_settings', 'voice_id']
+      case 'voice_clone': return ['voice_id']
+      case 'digital_human': return ['voice_id', 'resolution']
+      case 'subject': return ['subject_name', 'voice_id']
+      default: return []
     }
   }
 
-  // ---- 模型库卡片 ----
-  const renderModelCard = (e: ModelEntry) => {
-    const active = e.model === model
-    const resSummary = e.endpoints[0]?.capability.resolutions?.join('/') || ''
-    const dur = e.endpoints[0]?.capability.durations || [0, 0]
-    const durText = dur[1] > 0 ? (dur[0] === dur[1] ? `${dur[0]}s` : `${dur[0]}-${dur[1]}s`) : ''
-    return (
-      <div
-        key={e.model}
-        onClick={() => selectModel(e.model)}
-        style={{
-          padding: '10px 12px', borderRadius: 10, cursor: 'pointer', marginBottom: 8,
-          border: active ? '1.5px solid var(--wr-primary)' : '1px solid var(--wr-border, #e5e7eb)',
-          background: active ? 'rgba(99,102,241,0.06)' : '#fff',
-          transition: 'all .2s',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text strong style={{ fontSize: 13 }}>{e.model}</Text>
-          <Tag color="blue" style={{ fontSize: 10, marginInlineEnd: 0 }}>{e.family}</Tag>
-        </div>
-        <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            <ApartmentOutlined /> {e.endpoints.length} 种模式
-          </Text>
-          {resSummary && <Text type="secondary" style={{ fontSize: 11 }}><MonitorOutlined /> {resSummary}</Text>}
-          {durText && <Text type="secondary" style={{ fontSize: 11 }}><ClockCircleOutlined /> {durText}</Text>}
-        </div>
-      </div>
-    )
-  }
+  // 该模式主输入类型（画布/提示词引导）
+  const mainInputKind = useMemo(() => {
+    if (subType === 'tts' || subType === 'voice_clone') return 'text' as const
+    if (subType === 'sound_effect') return 'events' as const
+    return 'prompt' as const
+  }, [subType])
 
-  // ---- 创作视图（模型库 + 模式 + 表单）----
-  const createView = (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-      {/* 左：模型库 */}
-      <div className="wr-glass-card" style={{ width: 300, flexShrink: 0, padding: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <Text strong style={{ fontSize: 14 }}>模型库</Text>
-          <Badge count={filteredModels.length} style={{ backgroundColor: 'var(--wr-primary)' }} />
-        </div>
-        <Segmented
-          block size="small" value={category ?? 'all'}
-          onChange={(v) => { setCategory(v === 'all' ? null : (v as string)); setModel(''); setSubType(''); setParams({}) }}
-          options={[
-            { value: 'all', label: '全部' },
-            ...CATEGORIES.map(c => ({ value: c.key, label: c.label })),
-          ]}
-          style={{ marginBottom: 12 }}
+  // ---- 右面板：模型/模式/提示词/引用/高级参数 ----
+  const rightPanel = (
+    <div className="wr-glass-card" style={{ width: 460, flexShrink: 0, padding: '20px 24px' }}>
+      {/* 模型选择 */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+        <Select
+          style={{ flex: 1 }} size="large" value={model || undefined} placeholder="选择模型"
+          onChange={selectModel}
+          options={catModels.map(e => ({ value: e.model, label: `${e.model}（${e.endpoints.length} 模式）` }))}
+          popupMatchSelectWidth={false}
         />
-        <div style={{ maxHeight: 560, overflow: 'auto' }}>
-          {filteredModels.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该分类暂无模型" />
+        {currentModel && <Tag color="blue" style={{ marginInlineEnd: 0 }}>{currentModel.family}</Tag>}
+      </div>
+
+      {/* 模式 pills */}
+      {modes.length > 0 && (
+        <Space size={6} wrap style={{ marginBottom: 14 }}>
+          {modes.map(m => {
+            const isActive = m.sub_type === subType
+            return (
+              <Tooltip key={m.sub_type} title={SUBTYPE_META[m.sub_type]?.desc}>
+                <Tag.CheckableTag
+                  checked={isActive}
+                  onChange={() => { setSubType(m.sub_type); setParams({}) }}
+                  style={{
+                    fontSize: 12, padding: '3px 12px', borderRadius: 16,
+                    border: isActive ? '1px solid var(--wr-primary)' : '1px solid #e5e7eb',
+                    background: isActive ? 'var(--wr-primary)' : '#fff',
+                    color: isActive ? '#fff' : 'inherit',
+                  }}
+                >
+                  {SUBTYPE_META[m.sub_type]?.label || m.sub_type}
+                </Tag.CheckableTag>
+              </Tooltip>
+            )
+          })}
+        </Space>
+      )}
+
+      {/* 主输入 */}
+      {cap && mainInputKind === 'prompt' && (
+        <div style={{ marginBottom: 14 }}>
+          <TextArea
+            rows={4} value={(params.prompt as string) || ''}
+            onChange={e => setParams(prev => ({ ...prev, prompt: e.target.value }))}
+            showCount maxLength={cap.max_prompt_len || 5000}
+            placeholder="描述你想要生成的内容…在下方引用素材可 @ 自动带入"
+            style={{ fontSize: 14, borderRadius: 10 }}
+          />
+        </div>
+      )}
+      {cap && mainInputKind === 'text' && (
+        <div style={{ marginBottom: 14 }}>
+          <TextArea
+            rows={4} value={(params.text as string) || ''}
+            onChange={e => setParams(prev => ({ ...prev, text: e.target.value }))}
+            showCount maxLength={cap.max_prompt_len || 10000}
+            placeholder="输入要合成/复刻的文本…"
+            style={{ fontSize: 14, borderRadius: 10 }}
+          />
+        </div>
+      )}
+
+      {/* 参考素材（引用）——即梦式横排 */}
+      {cap && refKinds.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text strong style={{ fontSize: 13 }}>参考素材</Text>
+            <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={openRefPicker}>@ 引用</Button>
+          </div>
+          {refs.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>从素材库引用图片/音频，提交时自动翻译为参数</Text>
           ) : (
-            filteredModels.map(renderModelCard)
+            <Space size={6} wrap>
+              {refs.map((r, i) => (
+                <div key={i} style={{ position: 'relative' }}>
+                  {r.kind === 'image' ? (
+                    <img src={r.url} alt={r.name} style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', border: '1px solid #eee' }} />
+                  ) : (
+                    <div style={{ width: 56, height: 56, borderRadius: 8, border: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f7f7f8' }}>
+                      <SoundOutlined style={{ fontSize: 20, color: '#8c8c8c' }} />
+                    </div>
+                  )}
+                  <Tooltip title={`@${r.name}`}>
+                    <CloseCircleOutlined
+                      onClick={() => removeRef(i)}
+                      style={{ position: 'absolute', top: -6, right: -6, color: '#ff4d4f', background: '#fff', borderRadius: '50%', fontSize: 14 }}
+                    />
+                  </Tooltip>
+                </div>
+              ))}
+            </Space>
           )}
         </div>
-      </div>
+      )}
 
-      {/* 右：模式 + 表单 */}
-      <div className="wr-glass-card" style={{ flex: 1, padding: '16px 24px 24px', minWidth: 0 }}>
-        {!model ? (
-          <Empty style={{ padding: '60px 0' }} description={
-            <span>从左侧选择一个模型开始创作<br /><Text type="secondary" style={{ fontSize: 12 }}>模型决定能力——同一模型可切换多种生成模式</Text></span>
-          } />
-        ) : (
-          <>
-            {/* 模型头部 + 模式切换 */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <Space size={10}>
-                <Text strong style={{ fontSize: 16 }}>{model}</Text>
-                <Tag color="blue">{currentModel?.family}</Tag>
-                <Text type="secondary" style={{ fontSize: 12 }}>选择生成模式</Text>
+      {/* 高级参数 */}
+      {cap && fieldsFor(subType).some(k => renderField(k) !== null) && (
+        <Collapse
+          size="small" ghost
+          items={[{
+            key: 'adv',
+            label: <span><SettingOutlined style={{ marginRight: 6 }} />高级参数</span>,
+            children: <div>{fieldsFor(subType).map(k => renderField(k))}</div>,
+          }]}
+          style={{ marginBottom: 14 }}
+        />
+      )}
+      {cap && fieldsFor(subType).length === 0 && subType === 'tts' && (
+        <Alert type="info" showIcon style={{ marginBottom: 14 }} message="语音合成：音色 ID 为必填（后续从声音克隆任务复用）" />
+      )}
+
+      {/* 提交区 */}
+      {cap && (
+        <div>
+          <Space style={{ marginBottom: 10 }} size={14}>
+            {brands.length > 0 && (
+              <Space size={4}>
+                <Text type="secondary" style={{ fontSize: 12 }}>品牌</Text>
+                <Select size="small" style={{ width: 130 }} value={brandId || undefined} placeholder="选择" onChange={setBrandId}
+                  options={brands.map((b: any) => ({ value: b.id, label: b.name }))} allowClear />
               </Space>
-              {brands.length > 0 && (
-                <Space>
-                  <Text strong style={{ fontSize: 13 }}>品牌</Text>
-                  <Select style={{ width: 180 }} value={brandId || undefined} placeholder="选择归属品牌" onChange={setBrandId}
-                    options={brands.map((b: any) => ({ value: b.id, label: b.name }))} allowClear />
-                </Space>
+            )}
+            <Space size={4}>
+              <Text type="secondary" style={{ fontSize: 12 }}>错峰</Text>
+              <Tooltip title="错峰模式积分更低，48 小时内完成">
+                <Switch size="small" checked={offPeak} onChange={setOffPeak} />
+              </Tooltip>
+            </Space>
+            <Space size={4}>
+              <Text type="secondary" style={{ fontSize: 12 }}>水印</Text>
+              <Switch size="small" checked={watermark} onChange={setWatermark} />
+            </Space>
+          </Space>
+          <Button
+            type="primary" size="large" block icon={<ThunderboltOutlined />}
+            loading={submitMutation.isPending} onClick={submit}
+            style={{ height: 44, borderRadius: 10, fontSize: 15 }}
+          >
+            立即生成
+          </Button>
+        </div>
+      )}
+      {!cap && model && <Alert type="warning" showIcon message="该模式暂无能力配置（可能已停用），请切换模式" />}
+    </div>
+  )
+
+  // ---- 画布（结果区）----
+  const canvasView = (
+    <div
+      className="wr-glass-card"
+      style={{
+        flex: 1, minWidth: 0, minHeight: 620,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'linear-gradient(145deg, #f8f9ff 0%, #eef0fb 100%)',
+        borderRadius: 16, overflow: 'hidden', position: 'relative',
+      }}
+    >
+      {!model ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={null}
+          style={{ margin: 0 }}
+        >
+          <div style={{ textAlign: 'center', maxWidth: 320 }}>
+            <div style={{ fontSize: 40, marginBottom: 12, color: 'var(--wr-primary)' }}>
+              {category === 'video' ? <VideoCameraOutlined /> : category === 'image' ? <PictureOutlined /> : category === 'audio' ? <AudioOutlined /> : category === 'digital_human' ? <RobotOutlined /> : <AppstoreOutlined />}
+            </div>
+            <Text strong style={{ fontSize: 15 }}>选择模型，开始创作</Text>
+            <div style={{ marginTop: 6 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                在右侧选择模型与生成模式，描述你的创意后一键生成
+              </Text>
+            </div>
+          </div>
+        </Empty>
+      ) : canvasResult ? (
+        (() => {
+          const c = canvasResult.creations[0]
+          const url = c.stored_url || c.url
+          const type = canvasResult.type
+          return (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+              {type === 'image' ? (
+                <img src={url} alt="生成结果" style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.12)' }} />
+              ) : type === 'video' || type === 'digital_human' ? (
+                <video src={url} poster={c.cover_url} controls style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.12)' }} />
+              ) : (
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 56, color: 'var(--wr-primary)', marginBottom: 12 }}><SoundOutlined /></div>
+                  <audio src={url} controls style={{ width: 320 }} />
+                </div>
               )}
             </div>
-
-            {/* 模式 pills */}
-            <Space size={8} wrap style={{ marginTop: 12 }}>
-              {modes.map(m => {
-                const meta = SUBTYPE_META[m.sub_type]
-                const isActive = m.sub_type === subType
-                return (
-                  <Tooltip key={m.sub_type} title={meta?.desc}>
-                    <Tag.CheckableTag
-                      checked={isActive}
-                      onChange={() => { setSubType(m.sub_type); setParams({}) }}
-                      style={{
-                        fontSize: 13, padding: '4px 14px', borderRadius: 20,
-                        border: isActive ? '1px solid var(--wr-primary)' : '1px solid #e5e7eb',
-                        background: isActive ? 'var(--wr-primary)' : '#fff',
-                        color: isActive ? '#fff' : 'inherit',
-                        transition: 'all .2s',
-                      }}
-                    >
-                      {meta?.label || m.sub_type}
-                    </Tag.CheckableTag>
-                  </Tooltip>
-                )
-              })}
-            </Space>
-
-            {cap && (
-              <>
-                <Alert
-                  type="info" showIcon style={{ marginTop: 16, marginBottom: 16 }}
-                  message={SUBTYPE_META[subType]?.label}
-                  description={SUBTYPE_META[subType]?.desc}
-                />
-                {fieldsFor(subType).map(kind => renderField(kind))}
-
-                <Divider style={{ margin: '16px 0' }} />
-                <Space wrap>
-                  <Space size={4}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>错峰</Text>
-                    <Tooltip title="错峰模式积分更低，48 小时内完成，可手动取消">
-                      <Switch size="small" checked={offPeak} onChange={setOffPeak} />
-                    </Tooltip>
-                  </Space>
-                  <Space size={4}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>水印</Text>
-                    <Switch size="small" checked={watermark} onChange={setWatermark} />
-                  </Space>
-                  <Button type="primary" icon={<ThunderboltOutlined />} loading={submitMutation.isPending} onClick={submit} style={{ marginLeft: 16 }}>
-                    提交生成
-                  </Button>
-                </Space>
-              </>
-            )}
-            {!cap && <Alert type="warning" showIcon style={{ marginTop: 16 }} message="该模式暂无能力配置（可能已停用），请选择其他模式" />}
-          </>
-        )}
-      </div>
+          )
+        })()
+      ) : (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={null}
+          style={{ margin: 0 }}
+        >
+          <div style={{ textAlign: 'center', maxWidth: 340 }}>
+            <Text strong style={{ fontSize: 15 }}>{SUBTYPE_META[subType]?.label || subType} · {model}</Text>
+            <div style={{ marginTop: 6 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {SUBTYPE_META[subType]?.desc || ''}
+                {'　'}右侧填写参数后点击「立即生成」，结果将展示在这里
+              </Text>
+            </div>
+          </div>
+        </Empty>
+      )}
+      {/* 画布角标：当前模式 */}
+      {model && (
+        <div style={{ position: 'absolute', top: 14, left: 16 }}>
+          <Space size={6}>
+            <Tag color="blue" style={{ fontSize: 11, borderRadius: 12 }}>{model}</Tag>
+            <Tag style={{ fontSize: 11, borderRadius: 12 }}>{SUBTYPE_META[subType]?.label || subType}</Tag>
+          </Space>
+        </div>
+      )}
     </div>
   )
 
@@ -1080,7 +1076,7 @@ export default function CreationWorkbench() {
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div className="wr-page-header">
           <h1>创作工作台</h1>
-          <p>先选模型 · 再选模式 · 素材 @ 引用——能力向量驱动，端点/模型可在管理后台动态配置</p>
+          <p>选模型 · 选模式 · 引用素材 @ 自动翻译——结果即画即得</p>
         </div>
 
         <Tabs
@@ -1090,7 +1086,20 @@ export default function CreationWorkbench() {
             {
               key: 'create',
               label: <span><Space size={6}><ThunderboltOutlined />创作</Space></span>,
-              children: createView,
+              children: (
+                <>
+                  {/* 分类 Tab（模型库过滤） */}
+                  <Segmented
+                    block value={category} onChange={(v) => { setCategory(v as string); setModel(''); setSubType(''); setParams({}) }}
+                    options={CATEGORIES.map(c => ({ value: c.key, label: <span><Space size={5}>{c.icon}{c.label}</Space></span> }))}
+                    style={{ marginBottom: 16 }}
+                  />
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                    {canvasView}
+                    {rightPanel}
+                  </div>
+                </>
+              ),
             },
             {
               key: 'tasks',

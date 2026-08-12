@@ -24,6 +24,7 @@ import AdminContents from './pages/admin/Contents'
 import AdminSettings from './pages/admin/Settings'
 import AdminBilling from './pages/admin/Billing'
 import GenerationSpecs from './pages/admin/GenerationSpecs'
+import Providers from './pages/admin/Providers'
 // 布局与守卫
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/admin/tools" element={<Tools />} />
           <Route path="/admin/indexing" element={<Indexing />} />
           <Route path="/admin/generation-specs" element={<GenerationSpecs />} />
+          <Route path="/admin/providers" element={<Providers />} />
           <Route path="/admin/billing" element={<AdminBilling />} />
           <Route path="/admin/chat" element={<Chat />} />
         </Route>

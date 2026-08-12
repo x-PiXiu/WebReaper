@@ -68,6 +68,7 @@ type SubmitInput struct {
 	SubType  string
 	Model    string
 	Params   entity.GenerationParams
+	Refs     []entity.PromptRef // @引用素材（服务端翻译层按端点格式映射）
 	OffPeak  bool
 	Watermark bool
 }
@@ -92,16 +93,21 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if err != nil {
 		return entity.GenerationTask{}, err
 	}
-	if err := adapter.Validate(ctx, cap, in.Params); err != nil {
+	// 提示词翻译层：@引用（图片/音频/视频）→ 该端点需要的参数格式
+	params, err := translateRefs(in.SubType, cap, in.Params, in.Refs)
+	if err != nil {
+		return entity.GenerationTask{}, err
+	}
+	if err := adapter.Validate(ctx, cap, params); err != nil {
 		return entity.GenerationTask{}, err
 	}
 	// 提示词长度上限（能力向量）
-	if prompt := getPrompt(in.Params); len([]rune(prompt)) > cap.MaxPromptLen {
+	if prompt := getPrompt(params); len([]rune(prompt)) > cap.MaxPromptLen {
 		return entity.GenerationTask{}, fmt.Errorf("提示词超过 %d 字符上限", cap.MaxPromptLen)
 	}
 
 	// 防重复提交：同租户同参数哈希的未终态任务直接复用
-	hash := paramsHash(in.SubType, in.Model, in.Params)
+	hash := paramsHash(in.SubType, in.Model, params)
 	if pending, pErr := uc.repo.FindPendingByHash(ctx, in.TenantID, hash); pErr == nil && len(pending) > 0 {
 		return pending[0], nil
 	}
@@ -122,7 +128,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	paramsJSON, _ := json.Marshal(in.Params)
+	paramsJSON, _ := json.Marshal(params)
 	task.ParamsJSON = string(paramsJSON)
 	task.Payload = task.ID // 透传本地任务 ID——回调免查表
 
@@ -130,7 +136,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if err := uc.repo.Save(ctx, task); err != nil {
 		return entity.GenerationTask{}, fmt.Errorf("任务保存失败: %w", err)
 	}
-	body, bErr := adapter.BuildRequest(ctx, in.Model, in.Params, task.Payload)
+	body, bErr := adapter.BuildRequest(ctx, in.Model, params, task.Payload)
 	if bErr != nil {
 		task.State = entity.TaskStateFailed
 		task.ErrMsg = "参数组装失败: " + bErr.Error()

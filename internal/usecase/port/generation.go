@@ -108,3 +108,19 @@ type MediaAssetStore interface {
 	// CleanupBefore 清理过期资产（定时任务）。
 	CleanupBefore(ctx context.Context, before time.Time) (int, error)
 }
+
+// ProviderConfigRepository 厂商配置仓储（管理后台按厂商管理）。
+type ProviderConfigRepository interface {
+	// List 全部厂商配置。
+	List(ctx context.Context) ([]entity.ProviderConfig, error)
+	// Get 取某厂商配置（不存在返回 entity.ErrNotFound 语义错误）。
+	Get(ctx context.Context, provider string) (entity.ProviderConfig, error)
+	// Upsert 保存（不存在插入，存在覆盖非空字段）。
+	Upsert(ctx context.Context, cfg entity.ProviderConfig) error
+}
+
+// ConfigurableProvider 支持运行时更新配置的厂商（管理后台保存后热生效，无需重启）。
+type ConfigurableProvider interface {
+	// UpdateAPIKey 更新 API Key（原子生效，后续请求使用新 Key）。
+	UpdateAPIKey(key string)
+}
