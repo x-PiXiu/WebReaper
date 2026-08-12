@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
@@ -121,10 +122,10 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		return "", fmt.Errorf("cookie已过期，请重新绑定账号")
 	}
 
-	// 3. 填充标题
+	// 3. 填充标题（精确选择器：.WriteIndex-titleInput 为知乎稳定类；placeholder 兜底）
 	err = chromedp.Run(sessionCtx,
-		chromedp.WaitVisible(`textarea[placeholder*="标题"], input[placeholder*="标题"], .PostEditor-titleInput`, chromedp.ByQuery),
-		chromedp.SendKeys(`textarea[placeholder*="标题"], input[placeholder*="标题"], .PostEditor-titleInput`, job.Title, chromedp.ByQuery),
+		chromedp.WaitVisible(`.WriteIndex-titleInput textarea, textarea[placeholder*="标题"]`, chromedp.ByQuery),
+		chromedp.SendKeys(`.WriteIndex-titleInput textarea, textarea[placeholder*="标题"]`, job.Title, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
 	)
 	if err != nil {
@@ -132,58 +133,93 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 	}
 	log.Printf("[PublishAuto:zhihu] 标题已填充")
 
-	// 4. 填充正文（知乎用 contenteditable div / DraftJS 编辑器）
-	// execCommand('insertText') 对长文本不可靠（有长度限制 + DraftJS 拦截）
-	// 改用：先 focus + selectAll 清空，再用 execCommand 逐段插入（每段 500 字符）
-	fillContentJS := fmt.Sprintf(`(() => {
-		const editors = document.querySelectorAll('[contenteditable="true"], .public-DraftEditor-content, .ProseMirror');
-		for (const editor of editors) {
-			if (editor.offsetParent !== null) {
-				editor.focus();
-				// 清空编辑器
-				document.execCommand('selectAll', false, null);
-				document.execCommand('delete', false, null);
-
-				// 分段插入正文（每段 500 字符，避免 insertText 长度限制）
-				const content = %q;
-				const chunkSize = 500;
-				for (let i = 0; i < content.length; i += chunkSize) {
-					const chunk = content.slice(i, i + chunkSize);
-					document.execCommand('insertText', false, chunk);
-				}
-				return true;
-			}
-		}
-		return false;
-	})()`, job.Content)
-	var filled bool
+	// 4. 填充正文——【关键修复】改用 CDP Input 内核事件，不再用 execCommand。
+	// 原因：知乎专栏是 DraftJS（React 富文本），DraftJS 校验 event.isTrusted，
+	// execCommand('insertText') 产生合成事件 isTrusted=false 被 DraftJS 丢弃 →
+	// 内容不进 EditorState → 发布按钮一直 disabled → 失败存草稿。
+	//
+	// 修复方案（trusted 链）：
+	//   ① chromedp.Click 聚焦编辑器（CDP Input 事件，trusted）
+	//   ② selectAll + Backspace 清空草稿残留（selectAll 只改选区不触发内容校验；
+	//      Backspace 是 CDP 内核事件 trusted，DraftJS 接受删除）
+	//   ③ input.InsertText 批量插入正文（CDP Input.insertText，内核层 trusted，
+	//      原生支持中文/长文本/换行，DraftJS 无法区分真人键盘 → 接受）
+	//   ④ 校验：读编辑器 textContent 非空才继续
+	const editorSel = `.public-DraftEditor-content[contenteditable="true"]`
 	err = chromedp.Run(sessionCtx,
-		chromedp.Evaluate(fillContentJS, &filled),
-		chromedp.Sleep(2*time.Second),
+		// ① 聚焦编辑器（.public-DraftEditor-content 是 DraftJS 框架标准类，极稳定）
+		chromedp.Click(editorSel, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+		// ② 清空草稿残留：selectAll（选区操作安全）+ Backspace（trusted 删除）
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var dummy bool
+			_ = chromedp.Evaluate(`document.execCommand('selectAll')`, &dummy).Do(ctx)
+			down := input.DispatchKeyEvent(input.KeyRawDown)
+			down.Key, down.Code = "Backspace", "Backspace"
+			if err := down.Do(ctx); err != nil {
+				return err
+			}
+			up := input.DispatchKeyEvent(input.KeyUp)
+			up.Key, up.Code = "Backspace", "Backspace"
+			return up.Do(ctx)
+		}),
+		chromedp.Sleep(300*time.Millisecond),
+		// ③ 插入正文（CDP 内核层，支持中文/长文本）
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return input.InsertText(job.Content).Do(ctx)
+		}),
+		chromedp.Sleep(1500*time.Millisecond), // 等 DraftJS 状态更新 + 字数计数器刷新
 	)
-	if err != nil || !filled {
-		return "", fmt.Errorf("填充正文失败: %w (filled=%v)", err, filled)
+	if err != nil {
+		return "", fmt.Errorf("填充正文失败: %w", err)
 	}
-	log.Printf("[PublishAuto:zhihu] 正文已填充")
 
-	// 5. 点击发布按钮
-	clickPublishJS := `(() => {
-		const btns = document.querySelectorAll('button');
-		for (const btn of btns) {
-			if (btn.textContent.trim() === '发布' && btn.offsetParent !== null) {
-				btn.click();
-				return true;
-			}
+	// ④ 校验：编辑器 textContent 非空（防 DraftJS 静默拒绝导致按钮仍 disabled）
+	var contentText string
+	if cerr := chromedp.Run(sessionCtx,
+		chromedp.Evaluate(`document.querySelector('.public-DraftEditor-content')?.textContent || ''`, &contentText),
+	); cerr == nil {
+		trimmed := strings.TrimSpace(contentText)
+		if len([]rune(trimmed)) == 0 {
+			return "", fmt.Errorf("正文填充校验失败：编辑器内容为空（DraftJS 可能拒绝了输入）")
 		}
-		return false;
-	})()`
-	var clicked bool
+		log.Printf("[PublishAuto:zhihu] 正文已填充（%d 字符）", len([]rune(trimmed)))
+	}
+
+	// 5. 等待发布按钮可点击 + 点击。
+	// 【修复】原代码点击 disabled 按钮静默无效还误判成功。新逻辑：轮询等待
+	// 按钮 enabled（正文填入后 DraftJS 校验通过自动激活），最多等 12 秒。
 	err = chromedp.Run(sessionCtx,
-		chromedp.Sleep(2*time.Second),
-		chromedp.Evaluate(clickPublishJS, &clicked),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			jsClick := `(() => {
+				// 稳定标识：Button--primary + Button--blue + 文本"发布"（hash 类名会变，不用）
+				const candidates = document.querySelectorAll('button.Button--primary, button[class*="Button--blue"]');
+				for (const btn of candidates) {
+					if (btn.textContent.trim() === '发布' && !btn.disabled && btn.offsetParent !== null) {
+						btn.click();
+						return true;
+					}
+				}
+				return false;
+			})()`
+			deadline := time.Now().Add(12 * time.Second)
+			for time.Now().Before(deadline) {
+				var clicked bool
+				if e := chromedp.Evaluate(jsClick, &clicked).Do(ctx); e != nil {
+					return e
+				}
+				if clicked {
+					return nil
+				}
+				if e := chromedp.Sleep(500 * time.Millisecond).Do(ctx); e != nil {
+					return e
+				}
+			}
+			return fmt.Errorf("发布按钮 12 秒内未变为可点击（正文校验可能未通过）")
+		}),
 	)
-	if err != nil || !clicked {
-		return "", fmt.Errorf("点击发布按钮失败: %w (clicked=%v)", err, clicked)
+	if err != nil {
+		return "", fmt.Errorf("点击发布按钮失败: %w", err)
 	}
 	log.Printf("[PublishAuto:zhihu] 发布按钮已点击")
 
