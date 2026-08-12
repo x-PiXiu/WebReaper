@@ -36,8 +36,10 @@ var ContentFormats = map[string]ContentFormatPreset{
 	"xiaohongshu": {
 		Key:   "xiaohongshu",
 		Label: "小红书笔记",
-		Instruction: "输出格式为小红书种草笔记：标题吸睛（带 emoji），300-500 字，分段短句，" +
-			"多 emoji 点缀（✨😋📍💡等），文末带 3-5 个 #话题标签。语气亲切、有画面感。",
+		Instruction: "输出格式为小红书种草笔记：【标题硬约束】标题不超过 20 个字，必须精炼完整" +
+			"（如「成都美食｜春熙路必吃蜀香居🔥」），绝不能超过 20 字。" +
+			"正文 300-500 字，分段短句，多 emoji 点缀（✨😋📍💡等），" +
+			"文末带 3-5 个 #话题标签。语气亲切、有画面感。",
 	},
 	"script": {
 		Key:   "script",

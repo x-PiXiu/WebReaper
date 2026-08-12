@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, Spin, DatePicker } from 'antd'
+import { useSearchParams } from 'react-router-dom'
+import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, Spin, DatePicker, Input, Tooltip } from 'antd'
 import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, LinkOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
@@ -69,6 +70,28 @@ export default function Distribution() {
   // 小红书图文配图（MediaType：小红书 image 必填，URL 来自素材库）
   const [mediaUrls, setMediaUrls] = useState<string[]>([])
   const [showAssetPicker, setShowAssetPicker] = useState(false)
+  // D: 可编辑发布标题/正文（发布前可调整，不再只读 selectedContent）
+  const [publishTitle, setPublishTitle] = useState('')
+  const [publishContentText, setPublishContentText] = useState('')
+
+  // 选中内容变化时，初始化可编辑标题/正文
+  useEffect(() => {
+    if (selectedContent) {
+      setPublishTitle(selectedContent.title || '')
+      setPublishContentText(selectedContent.optimized_text || '')
+    }
+  }, [selectedContentId])
+
+  // B+C: 接收跳转参数（Content/Creation 的「去发布」入口预选内容/预填配图）
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    const qContentId = searchParams.get('contentId')
+    const qBrandId = searchParams.get('brandId')
+    const qMediaUrls = searchParams.get('mediaUrls')
+    if (qBrandId) setSelectedBrand(qBrandId)
+    if (qContentId) setSelectedContentId(qContentId)
+    if (qMediaUrls) setMediaUrls(qMediaUrls.split(',').filter(Boolean))
+  }, [searchParams])
 
   const { data: pickerAssets = [] } = useQuery({
     queryKey: ['media-assets'],
@@ -200,9 +223,13 @@ export default function Distribution() {
       if (autoSelect && publishMode === 'auto') {
         const platforms = [...new Set(healthyAccounts.map(a => a.platform))]
         for (const platform of platforms) {
+          // D: 按平台截断标题（小红书≤20字），用可编辑的 publishTitle/publishContentText
+          const titleForPlatform = platform === 'xiaohongshu'
+            ? (publishTitle && [...publishTitle].slice(0, 20).join(''))
+            : publishTitle
           results.push(await businessApi.publishContent({
             account_id: '', platform, content_id: selectedContent.id, brand_id: selectedBrand,
-            title: selectedContent.title || '', content: selectedContent.optimized_text, mode: publishMode,
+            title: titleForPlatform, content: publishContentText, mode: publishMode,
             scheduled_at: scheduledAt,
             content_type: platform === 'xiaohongshu' ? 'image' : 'article',
             media_urls: platform === 'xiaohongshu' ? mediaUrls : undefined,
@@ -212,9 +239,12 @@ export default function Distribution() {
         for (const accId of selectedAccountIds) {
           const acc = accounts.find((a) => a.id === accId)
           if (!acc) continue
+          const titleForPlatform = acc.platform === 'xiaohongshu'
+            ? (publishTitle && [...publishTitle].slice(0, 20).join(''))
+            : publishTitle
           results.push(await businessApi.publishContent({
             account_id: accId, platform: acc.platform, content_id: selectedContent.id, brand_id: selectedBrand,
-            title: selectedContent.title || '', content: selectedContent.optimized_text, mode: publishMode,
+            title: titleForPlatform, content: publishContentText, mode: publishMode,
             scheduled_at: scheduledAt,
             content_type: acc.platform === 'xiaohongshu' ? 'image' : 'article',
             media_urls: acc.platform === 'xiaohongshu' ? mediaUrls : undefined,
@@ -520,6 +550,58 @@ export default function Distribution() {
                           <Text style={{ fontSize: 13 }}>自动选号（系统自动选择最久未使用的健康账号，避免单号高频被封）</Text>
                         </div>
                       </>
+                    )}
+
+                    {/* D: 可编辑发布标题（带平台字数计数器——发布前可调整，解决截断问题） */}
+                    {selectedContent && (
+                      <div style={{ marginBottom: 16 }}>
+                        {(() => {
+                          // 检测选中平台：小红书标题≤20字，知乎≤100字，混合取最严(20)
+                          const selectedAccs = autoSelect ? healthyAccounts : accounts.filter(a => selectedAccountIds.includes(a.id))
+                          const hasXHS = selectedAccs.some(a => a.platform === 'xiaohongshu')
+                          const titleLimit = hasXHS ? 20 : 100
+                          const titleLen = [...publishTitle].length
+                          const overLimit = titleLen > titleLimit
+                          return (
+                            <>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                <Text strong style={{ fontSize: 13 }}>发布标题{hasXHS && <Tag color="red" style={{ marginLeft: 6, fontSize: 10 }}>小红书≤{titleLimit}字</Tag>}</Text>
+                                <Tooltip title={overLimit ? `超出${titleLen - titleLimit}字，发布时自动截断` : '可在发布前调整标题'}>
+                                  <Text style={{ fontSize: 12 }} type={overLimit ? 'danger' : 'secondary'}>{titleLen}/{titleLimit}</Text>
+                                </Tooltip>
+                              </div>
+                              <Input.TextArea
+                                rows={2}
+                                value={publishTitle}
+                                onChange={e => setPublishTitle(e.target.value)}
+                                placeholder="发布标题（可在发布前调整）"
+                                style={{ fontSize: 14, borderColor: overLimit ? 'var(--wr-danger)' : undefined }}
+                                showCount={false}
+                              />
+                              {overLimit && (
+                                <Text type="danger" style={{ fontSize: 11 }}>
+                                  当前{titleLen}字超限，发{hasXHS ? '小红书' : '该平台'}将截断为："{[...publishTitle].slice(0, titleLimit).join('')}"
+                                </Text>
+                              )}
+                            </>
+                          )
+                        })()}
+                      </div>
+                    )}
+
+                    {/* D: 正文预览（折叠展开，支持编辑） */}
+                    {selectedContent && publishContentText && (
+                      <details style={{ marginBottom: 16 }}>
+                        <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--wr-text-secondary)' }}>
+                          正文预览（{[...publishContentText].length} 字，点击展开编辑）
+                        </summary>
+                        <Input.TextArea
+                          rows={6}
+                          value={publishContentText}
+                          onChange={e => setPublishContentText(e.target.value)}
+                          style={{ marginTop: 8, fontSize: 13 }}
+                        />
+                      </details>
                     )}
 
                     {/* 小红书图文配图（小红书账号存在时显示；image 类型必填 ≥1 张） */}

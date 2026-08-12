@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Popconfirm, Switch } from 'antd'
 import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -53,6 +54,7 @@ const FORMAT_OPTIONS = [
 
 export default function Content() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [selectedBrand, setSelectedBrand] = useState<string | undefined>()
   const [originalText, setOriginalText] = useState('')
   const [optimizing, setOptimizing] = useState(false)
@@ -488,6 +490,17 @@ export default function Content() {
                   <Paragraph style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, margin: 0 }}>
                     {result.optimized_text}
                   </Paragraph>
+
+                  {/* B: 去「分发中心」发布到社交平台（预选该内容+品牌） */}
+                  <div style={{ marginTop: 16 }}>
+                    <Button
+                      type="primary"
+                      icon={<ExportOutlined />}
+                      onClick={() => navigate(`/m/distribution?contentId=${result.id}${selectedBrand ? `&brandId=${selectedBrand}` : ''}`)}
+                    >
+                      去分发中心发布到知乎/小红书
+                    </Button>
+                  </div>
 
                   {/* 公开链接（AI 引擎可爬取的公开文章页——发布为 published 后生效） */}
                   {result.id && (

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, message,
@@ -9,7 +10,7 @@ import {
   VideoCameraOutlined, PictureOutlined, AudioOutlined, RobotOutlined, AppstoreOutlined,
   UploadOutlined, DeleteOutlined, ReloadOutlined, PlayCircleOutlined, SoundOutlined,
   PlusOutlined, MinusCircleOutlined, FileImageOutlined, CloseCircleOutlined,
-  ThunderboltOutlined, ApartmentOutlined, SettingOutlined,
+  ThunderboltOutlined, ApartmentOutlined, SettingOutlined, ExportOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import type { GenerationTask, GenerationType, ModelCapability, MediaAsset, PromptRef } from '../../types/api'
@@ -320,6 +321,7 @@ function parseTaskParams(r: GenerationTask): Record<string, any> {
 
 // ---- 创作工作台（即梦式布局：左画布 + 右面板）----
 export default function CreationWorkbench() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('create')
   const [category, setCategory] = useState<string>('video')
@@ -1085,6 +1087,18 @@ export default function CreationWorkbench() {
           ) : null}
           {['failed', 'success'].includes(r.state) && (
             <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => regenerate(r)}>重新生成</Button>
+          )}
+          {/* C: 产物发布到社交平台（带 mediaUrls 跳转分发中心） */}
+          {r.state === 'success' && (r.creations || []).length > 0 && (
+            <Button
+              size="small" type="text" icon={<ExportOutlined />}
+              onClick={() => {
+                const urls = (r.creations || []).map(c => c.stored_url || c.url).filter(Boolean)
+                navigate(`/m/distribution?mediaUrls=${encodeURIComponent(urls.join(','))}${brandId ? `&brandId=${brandId}` : ''}`)
+              }}
+            >
+              发布
+            </Button>
           )}
         </Space>
       ),
