@@ -193,7 +193,8 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		URL:          h.baseURL + "/public/articles/" + content.ID,
 		Author:       brandName,
 		BrandName:    brandName,
-		ForceArticle: true, // 公开文章页固定 Article（GEO 内容就是文章）
+		PublishDate:  content.CreatedAt, // freshness 信号（Bing 指南：内容新鲜度）
+		ForceArticle: true,              // 公开文章页固定 Article（GEO 内容就是文章）
 		Store:        store,
 	})
 	jsonldTag := ""
@@ -235,7 +236,7 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		"Title":        title,
 		"Description":  truncateDescription(cleanText),
 		"CanonicalURL": h.baseURL + "/public/articles/" + content.ID,
-		"Meta":         fmt.Sprintf("GEO 优化内容 · 关键词可见度评分 %d", int(content.Score.Total)),
+		"Meta":         fmt.Sprintf("GEO 优化内容 · 关键词可见度评分 %d · 发布时间 %s", int(content.Score.Total), content.CreatedAt.Format("2006-01-02")),
 		"ContentHTML":  template.HTML(public.RenderMarkdown(cleanText)),
 		"JSONLD":       template.HTML(jsonldTag),
 		"BrandName":    brandName,
