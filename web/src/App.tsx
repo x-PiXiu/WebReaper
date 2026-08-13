@@ -1,95 +1,106 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import Login from './pages/Login'
-// 管理后台页面
-import Dashboard from './pages/admin/Dashboard'
-import Chat from './pages/admin/Chat'
-import AgentConfigs from './pages/admin/AgentConfigs'
-// 商户端 GEO 页面
-import MerchantHome from './pages/merchant/Home'
-import Brands from './pages/merchant/Brands'
-import Content from './pages/merchant/Content'
-import Keywords from './pages/merchant/Keywords'
-import Distribution from './pages/merchant/Distribution'
-import CreationWorkbench from './pages/merchant/Creation'
-import MyPlan from './pages/merchant/MyPlan'
-import Visibility from './pages/merchant/Visibility'
-import Nearby from './pages/merchant/Nearby'
-import Notifications from './pages/merchant/Notifications'
-// 管理端额外页面
-import AdminUsers from './pages/admin/Users'
-import Indexing from './pages/admin/Indexing'
-import AdminBrands from './pages/admin/Brands'
-import AdminContents from './pages/admin/Contents'
-import AdminSettings from './pages/admin/Settings'
-import AdminBilling from './pages/admin/Billing'
-import GenerationSpecs from './pages/admin/GenerationSpecs'
-import Providers from './pages/admin/Providers'
-import AdminPromptTemplates from './pages/admin/PromptTemplates'
-// 布局与守卫
+import { lazy, Suspense } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Skeleton } from 'antd'
+import { useAuthStore } from './store/auth'
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
 import ProtectedRoute from './components/ProtectedRoute'
+import ErrorBoundary from './components/ErrorBoundary'
+
+const Login = lazy(() => import('./pages/Login'))
+const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
+const Chat = lazy(() => import('./pages/admin/Chat'))
+const AgentConfigs = lazy(() => import('./pages/admin/AgentConfigs'))
+const MerchantHome = lazy(() => import('./pages/merchant/Home'))
+const Brands = lazy(() => import('./pages/merchant/Brands'))
+const Content = lazy(() => import('./pages/merchant/Content'))
+const Keywords = lazy(() => import('./pages/merchant/Keywords'))
+const Distribution = lazy(() => import('./pages/merchant/Distribution'))
+const CreationWorkbench = lazy(() => import('./pages/merchant/Creation'))
+const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
+const Visibility = lazy(() => import('./pages/merchant/Visibility'))
+const IndexingReport = lazy(() => import('./pages/merchant/IndexingReport'))
+const Nearby = lazy(() => import('./pages/merchant/Nearby'))
+const Notifications = lazy(() => import('./pages/merchant/Notifications'))
+const AdminUsers = lazy(() => import('./pages/admin/Users'))
+const Indexing = lazy(() => import('./pages/admin/Indexing'))
+const AdminBrands = lazy(() => import('./pages/admin/Brands'))
+const AdminContents = lazy(() => import('./pages/admin/Contents'))
+const AdminSettings = lazy(() => import('./pages/admin/Settings'))
+const AdminBilling = lazy(() => import('./pages/admin/Billing'))
+const GenerationSpecs = lazy(() => import('./pages/admin/GenerationSpecs'))
+const Providers = lazy(() => import('./pages/admin/Providers'))
+const AdminPromptTemplates = lazy(() => import('./pages/admin/PromptTemplates'))
+
+function PageFallback() {
+  return (
+    <div className="wr-page-content" style={{ paddingTop: 8 }}>
+      <Skeleton active title={{ width: 220 }} paragraph={{ rows: 2 }} style={{ marginBottom: 24 }} />
+      <Skeleton active paragraph={{ rows: 6 }} />
+    </div>
+  )
+}
+
+function LazyPage({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
+  return (
+    <ErrorBoundary resetKey={location.pathname}>
+      <Suspense fallback={<PageFallback />}>{children}</Suspense>
+    </ErrorBoundary>
+  )
+}
+
+function homePath(role: string | null | undefined) {
+  return role === 'admin' ? '/admin' : '/m'
+}
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 公开：登录 */}
-        <Route path="/login" element={<Login />} />
+        <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
 
-        {/* 商户端路由组（role=merchant）*/}
         <Route element={<ProtectedRoute><MerchantLayout /></ProtectedRoute>}>
-          <Route path="/m" element={<MerchantHome />} />
-          <Route path="/m/brands" element={<Brands />} />
-          <Route path="/m/keywords" element={<Keywords />} />
-          <Route path="/m/visibility" element={<Visibility />} />
-          <Route path="/m/nearby" element={<Nearby />} />
-          <Route path="/m/content" element={<Content />} />
-          <Route path="/m/creation" element={<CreationWorkbench />} />
-          <Route path="/m/distribution" element={<Distribution />} />
-          <Route path="/m/my-plan" element={<MyPlan />} />
-          <Route path="/m/chat" element={<Chat />} />
-          <Route path="/m/notifications" element={<Notifications />} />
+          <Route path="/m" element={<LazyPage><MerchantHome /></LazyPage>} />
+          <Route path="/m/brands" element={<LazyPage><Brands /></LazyPage>} />
+          <Route path="/m/keywords" element={<LazyPage><Keywords /></LazyPage>} />
+          <Route path="/m/visibility" element={<LazyPage><Visibility /></LazyPage>} />
+          <Route path="/m/monitor" element={<Navigate to="/m/indexing-report" replace />} />
+          <Route path="/m/indexing-report" element={<LazyPage><IndexingReport /></LazyPage>} />
+          <Route path="/m/nearby" element={<LazyPage><Nearby /></LazyPage>} />
+          <Route path="/m/content" element={<LazyPage><Content /></LazyPage>} />
+          <Route path="/m/creation" element={<LazyPage><CreationWorkbench /></LazyPage>} />
+          <Route path="/m/distribution" element={<LazyPage><Distribution /></LazyPage>} />
+          <Route path="/m/my-plan" element={<LazyPage><MyPlan /></LazyPage>} />
+          <Route path="/m/chat" element={<LazyPage><Chat /></LazyPage>} />
+          <Route path="/m/notifications" element={<LazyPage><Notifications /></LazyPage>} />
         </Route>
 
-        {/* 管理后台路由组（role=admin）*/}
         <Route element={<ProtectedRoute role="admin"><AdminLayout /></ProtectedRoute>}>
-          <Route path="/admin" element={<Dashboard />} />
-          <Route path="/admin/users" element={<AdminUsers />} />
-          <Route path="/admin/brands" element={<AdminBrands />} />
-          <Route path="/admin/contents" element={<AdminContents />} />
-          <Route path="/admin/settings" element={<AdminSettings />} />
-          <Route path="/admin/agent-configs" element={<AgentConfigs />} />
-          <Route path="/admin/indexing" element={<Indexing />} />
-          <Route path="/admin/generation-specs" element={<GenerationSpecs />} />
-          <Route path="/admin/providers" element={<Providers />} />
-          <Route path="/admin/prompt-templates" element={<AdminPromptTemplates />} />
-          <Route path="/admin/billing" element={<AdminBilling />} />
-          <Route path="/admin/chat" element={<Chat />} />
+          <Route path="/admin" element={<LazyPage><Dashboard /></LazyPage>} />
+          <Route path="/admin/users" element={<LazyPage><AdminUsers /></LazyPage>} />
+          <Route path="/admin/brands" element={<LazyPage><AdminBrands /></LazyPage>} />
+          <Route path="/admin/contents" element={<LazyPage><AdminContents /></LazyPage>} />
+          <Route path="/admin/settings" element={<LazyPage><AdminSettings /></LazyPage>} />
+          <Route path="/admin/agent-configs" element={<LazyPage><AgentConfigs /></LazyPage>} />
+          <Route path="/admin/indexing" element={<LazyPage><Indexing /></LazyPage>} />
+          <Route path="/admin/generation-specs" element={<LazyPage><GenerationSpecs /></LazyPage>} />
+          <Route path="/admin/providers" element={<LazyPage><Providers /></LazyPage>} />
+          <Route path="/admin/prompt-templates" element={<LazyPage><AdminPromptTemplates /></LazyPage>} />
+          <Route path="/admin/billing" element={<LazyPage><AdminBilling /></LazyPage>} />
+          <Route path="/admin/chat" element={<LazyPage><Chat /></LazyPage>} />
         </Route>
 
-        {/* 根路径：登录后统一进入用户界面（商户端）*/}
         <Route path="/" element={<RootRedirect />} />
-
-        {/* 未匹配路由兜底：已登录回用户界面（避免"路由缺失→莫名跳登录页"），未登录去登录页 */}
-        <Route path="*" element={<RootFallback />} />
+        <Route path="*" element={<RootRedirect />} />
       </Routes>
     </BrowserRouter>
   )
 }
 
-// RootRedirect 登录后统一进入用户界面。
-// 管理后台从用户界面的顶栏入口进入——管理员不再被直接抛进管理后台。
-import { useAuthStore } from './store/auth'
 function RootRedirect() {
   const token = useAuthStore((s) => s.token)
+  const role = useAuthStore((s) => s.role)
   if (!token) return <Navigate to="/login" replace />
-  return <Navigate to="/m" replace />
-}
-
-// RootFallback 未匹配路由兜底。
-function RootFallback() {
-  const token = useAuthStore((s) => s.token)
-  if (!token) return <Navigate to="/login" replace />
-  return <Navigate to="/m" replace />
+  return <Navigate to={homePath(role)} replace />
 }

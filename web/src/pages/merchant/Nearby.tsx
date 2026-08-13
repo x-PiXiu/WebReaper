@@ -204,7 +204,7 @@ export default function Nearby() {
               <Empty description="线上业务品牌无需门店与附近同行管理">
                 <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
                   线上业务的 GEO 核心是行业关键词监测 + 内容优化——<br />
-                  请前往「关键词管理」发起监测，在「品牌管理」用「从监测结果推荐」获取竞品。
+                  请前往「平台收录报表」发起任务，在「品牌知识库」用「从监测结果推荐」获取竞品。
                 </Text>
               </Empty>
             </Card>

@@ -1,13 +1,14 @@
 import React from 'react'
-import { Result, Button } from 'antd'
+import { Result, Button, Space } from 'antd'
 
-interface Props { children: React.ReactNode }
+interface Props {
+  children: React.ReactNode
+  /** 路由变化时自动清空错误态，避免卡在错误页 */
+  resetKey?: string
+}
 interface State { hasError: boolean; error?: Error }
 
-// ErrorBoundary 全局错误边界，防止任意组件运行时异常导致白屏。
-//
-// 用法：在 main.tsx 包裹 <App/>。捕获到错误时显示友好降级 UI + "刷新"按钮。
-// 注意：错误边界不捕获事件回调、setTimeout、异步错误——那些由 window.onerror 兜底。
+// ErrorBoundary：可嵌套在路由级，单页崩溃不拖垮整站壳。
 export default class ErrorBoundary extends React.Component<Props, State> {
   state: State = { hasError: false }
 
@@ -16,8 +17,17 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // 生产环境可接入错误上报（Sentry 等）；这里仅控制台输出
     console.error('Unhandled UI error:', error, info.componentStack)
+  }
+
+  componentDidUpdate(prevProps: Props) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false, error: undefined })
+    }
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: undefined })
   }
 
   handleReload = () => {
@@ -32,9 +42,12 @@ export default class ErrorBoundary extends React.Component<Props, State> {
           status="error"
           title="页面出了点问题"
           subTitle={this.state.error?.message || '发生了未预期的错误'}
-          extra={[
-        <Button type="primary" key="reload" onClick={this.handleReload}>刷新页面</Button>,
-          ]}
+          extra={
+            <Space>
+              <Button type="primary" onClick={this.handleRetry}>重试</Button>
+              <Button onClick={this.handleReload}>刷新页面</Button>
+            </Space>
+          }
         />
       )
     }

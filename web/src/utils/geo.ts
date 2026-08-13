@@ -49,3 +49,19 @@ export function deltaView(delta: number | null): DeltaView {
 export function markLastPoint<T>(points: T[]): (T & { is_last: boolean })[] {
   return points.map((p, i) => ({ ...p, is_last: i === points.length - 1 }))
 }
+
+/** 提及率 → 语义色（多页共用）。 */
+export function rateColor(rate: number): string {
+  if (rate >= 0.8) return 'var(--wr-success)'
+  if (rate >= 0.5) return 'var(--wr-accent)'
+  if (rate >= 0.2) return 'var(--wr-warning)'
+  return 'var(--wr-danger)'
+}
+
+/** 提及率 → 等级文案。 */
+export function rateLabel(rate: number): string {
+  if (rate >= 0.8) return '强势'
+  if (rate >= 0.5) return '稳定'
+  if (rate >= 0.2) return '偶尔'
+  return '缺席'
+}

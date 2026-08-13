@@ -1,9 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Input, Button, Spin, Typography, Select, Space, Tag, Popover, Switch, message as antdMessage } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
+import LazyChatMarkdown from '../../components/markdown/LazyChatMarkdown'
 import { getToken, useAuthStore } from '../../store/auth'
 import { businessApi } from '../../api/business'
 import type { ChatMessage, AgentConfig, LLMConfig, ToolView } from '../../types/api'
@@ -234,7 +232,7 @@ function MessageContent({ content, tools, savedBlocks, isStreaming }: { content:
           return <ThinkBlock key={`k${i}`} content={block.content} active={isActive} />
         }
         if (block.type === 'text' && block.content) {
-          return <div key={`x${i}`} style={{ marginBottom: 8 }}><ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>{block.content}</ReactMarkdown></div>
+          return <div key={`x${i}`} style={{ marginBottom: 8 }}><LazyChatMarkdown content={block.content} /></div>
         }
         return null
       })}

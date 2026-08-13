@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios'
 import { message as antdMessage, Modal as antdModal } from 'antd'
 import { getToken, useAuthStore } from '../store/auth'
-import { clearQueryCache } from '../main'
+import { clearQueryCache } from '../queryClient'
 import type { ApiEnvelope } from '../types/api'
 
 // Axios 实例 + 拦截器。

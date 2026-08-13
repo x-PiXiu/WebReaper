@@ -22,8 +22,8 @@ export default function MyPlan() {
   const queryClient = useQueryClient()
   const [buyModal, setBuyModal] = useState<Plan | null>(null)
 
-  const { data: usage } = useQuery({ queryKey: ['my-usage'], queryFn: () => businessApi.getMyUsage() })
-  const { data: plansRes } = useQuery({ queryKey: ['active-plans'], queryFn: () => businessApi.listActivePlans() })
+  const { data: usage, isLoading: usageLoading } = useQuery({ queryKey: ['my-usage'], queryFn: () => businessApi.getMyUsage() })
+  const { data: plansRes, isLoading: plansLoading } = useQuery({ queryKey: ['active-plans'], queryFn: () => businessApi.listActivePlans() })
   const { data: ordersRes } = useQuery({ queryKey: ['my-orders'], queryFn: () => businessApi.listMyOrders() })
 
   const plans = plansRes?.plans || []
@@ -34,7 +34,6 @@ export default function MyPlan() {
   const createOrderMut = useMutation({
     mutationFn: (planId: string) => businessApi.createOrder(planId),
     onSuccess: (res) => {
-      // mock 支付：直接确认（真实环境跳转 payment_url）
       if (res.payment_url) {
         message.loading({ content: '正在处理支付…', key: 'pay', duration: 1 })
         setTimeout(() => {
@@ -52,6 +51,14 @@ export default function MyPlan() {
     },
     onError: () => message.error('下单失败'),
   })
+
+  if (usageLoading || plansLoading) {
+    return (
+      <div className="wr-page-content" style={{ paddingTop: 8 }}>
+        <Card loading className="wr-glass-card" style={{ minHeight: 200 }} />
+      </div>
+    )
+  }
 
   return (
     <div className="wr-page-content">

@@ -1,27 +1,13 @@
 import { Typography, Card, Row, Col, Table, Tag, Space, Empty, Spin, Tooltip, List } from 'antd'
 import { RadarChartOutlined, TrophyOutlined, RiseOutlined, FallOutlined, BulbOutlined, LinkOutlined } from '@ant-design/icons'
-import { Line } from '@ant-design/charts'
+import { LazyLine as Line } from '../../components/charts/LazyCharts'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import { deltaView } from '../../utils/geo'
+import { deltaView, rateColor, rateLabel } from '../../utils/geo'
 import type { Brand, MonitoringResult, Advice } from '../../types/api'
 
 const { Title, Text } = Typography
-
-function rateColor(rate: number): string {
-  if (rate >= 0.8) return 'var(--wr-success)'
-  if (rate >= 0.5) return 'var(--wr-accent)'
-  if (rate >= 0.2) return 'var(--wr-warning)'
-  return 'var(--wr-danger)'
-}
-
-function rateLabel(rate: number): string {
-  if (rate >= 0.8) return '强势'
-  if (rate >= 0.5) return '稳定'
-  if (rate >= 0.2) return '偶尔'
-  return '缺席'
-}
 
 // P5-04 趋势降噪：对提及率时间序列做移动平均（窗口 3），
 // 平滑 AI 采样的随机波动，让老板看到"趋势"而非"噪声"。
@@ -46,7 +32,7 @@ export default function Visibility() {
   })
 
   const overviews = useQuery({
-    queryKey: ['geo-overviews-vis', brands.map((b: Brand) => b.id).join(',')],
+    queryKey: ['geo-overviews', brands.map((b: Brand) => b.id).join(',')],
     queryFn: async () => {
       const results = await Promise.all(
         brands.map((b: Brand) => businessApi.getBrandOverview(b.id, b.name).catch(() => null))
@@ -150,7 +136,7 @@ export default function Visibility() {
   return (
     <div className="wr-page-content">
       <div className="wr-page-header">
-        <h1><RadarChartOutlined style={{ marginRight: 8 }} />AI 可见度</h1>
+        <h1><RadarChartOutlined style={{ marginRight: 8 }} />可见度报表</h1>
         <p>
           你的品牌在 AI 搜索引擎中被提及的情况 · 跨品牌排行 · 竞品对比
           <Tooltip title="提及率 = AI 回答中提到你品牌的次数 ÷ 总采样次数。如 10 次提问里 AI 3 次提到你 = 30%。越高说明你在 AI 时代的曝光越强。">
@@ -221,7 +207,7 @@ export default function Visibility() {
           提及率趋势对比
         </Title>
         {trendData.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无监测数据——前往关键词管理发起监测" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无监测数据——前往平台收录报表发起任务" />
         ) : (
           <Line
             data={trendData}
@@ -300,7 +286,7 @@ export default function Visibility() {
                 {
                   title: '操作', key: 'action', width: 90,
                   render: () => (
-                    <a onClick={() => navigate('/m/keywords')} style={{ fontSize: 12 }}>查看详情 →</a>
+                    <a onClick={() => navigate('/m/indexing-report')} style={{ fontSize: 12 }}>查看详情 →</a>
                   ),
                 },
               ]}

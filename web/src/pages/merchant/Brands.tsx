@@ -140,8 +140,8 @@ export default function Brands() {
     <div className="wr-page-content" style={{ paddingTop: 0 }}>
       <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
-          <h1>品牌管理</h1>
-          <p>管理品牌资产与竞品——关键词管理请前往「关键词管理」页</p>
+          <h1>品牌知识库</h1>
+          <p>品牌定位、卖点与竞品——关键词请前往「关键词工程」</p>
         </div>
         <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>
           创建品牌

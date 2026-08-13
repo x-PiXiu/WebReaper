@@ -216,9 +216,14 @@ export default function Content() {
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* ① Hero 区 */}
-        <div className="wr-page-header">
-          <h1>内容工作台</h1>
-          <p>AI 原创生成与 GEO 优化，提升品牌在 AI 搜索引擎中的可见度</p>
+        <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <h1>内容生成</h1>
+            <p>文章/短内容 GEO 优化与生成；多媒体创作从右侧进入</p>
+          </div>
+          <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/creation')}>
+            多媒体创作
+          </Button>
         </div>
 
         {/* ② 品牌上下文条 */}

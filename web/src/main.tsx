@@ -2,21 +2,17 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
+import { queryClient } from './queryClient'
 import { useThemeStore } from './store/theme'
 import './index.css'
 
-const queryClient = new QueryClient()
+export { clearQueryCache } from './queryClient'
 
-// 全局登出清理：清空 React Query 缓存（避免旧租户/旧账号的数据残留闪现）。
-// 401 强制重新登录与手动退出都调用——不同账号间切换绝不显示他人缓存数据。
-export function clearQueryCache() {
-  queryClient.clear()
-}
+const fontFamily = "'DM Sans', 'Noto Sans SC', -apple-system, 'Segoe UI', 'PingFang SC', sans-serif"
 
-// 暗色主题配置
 const darkThemeConfig = {
   algorithm: antdTheme.darkAlgorithm,
   token: {
@@ -25,7 +21,7 @@ const darkThemeConfig = {
     colorSuccess: '#22d3ee',
     borderRadius: 10,
     borderRadiusLG: 14,
-    fontFamily: "'Inter', -apple-system, 'Segoe UI', 'Noto Sans SC', sans-serif",
+    fontFamily,
     fontSize: 15,
     controlHeight: 38,
     controlHeightLG: 44,
@@ -50,7 +46,6 @@ const darkThemeConfig = {
   },
 }
 
-// 亮色主题配置（B2B SaaS 数据驾驶舱风格——参考 Stripe/Vercel Analytics）
 const lightThemeConfig = {
   algorithm: antdTheme.defaultAlgorithm,
   token: {
@@ -61,7 +56,7 @@ const lightThemeConfig = {
     colorError: '#ef4444',
     borderRadius: 10,
     borderRadiusLG: 14,
-    fontFamily: "'Inter', -apple-system, 'Segoe UI', 'Noto Sans SC', sans-serif",
+    fontFamily,
     fontSize: 15,
     controlHeight: 38,
     controlHeightLG: 44,
@@ -86,12 +81,10 @@ const lightThemeConfig = {
   },
 }
 
-// 主题响应式包裹：监听 store 变化，切换 ConfigProvider
 function ThemedApp({ children }: { children: React.ReactNode }) {
   const mode = useThemeStore((s) => s.mode)
   const config = mode === 'dark' ? darkThemeConfig : lightThemeConfig
 
-  // 同步 data-theme 属性到 document（CSS 变量切换的关键）
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', mode)
     document.body.style.background = mode === 'dark' ? '#0a0a0f' : '#f4f4f5'

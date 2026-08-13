@@ -36,5 +36,5 @@ const adminMenu: NavItem[] = [
 
 // 管理后台布局。
 export default function AdminLayout() {
-  return <AppShell menuItems={adminMenu} brandName="GEO 管理后台" brandIcon="A" noPaddingKeys={['/admin/chat']} />
+  return <AppShell menuItems={adminMenu} brandName="智擎AI 管理" brandIcon="智" noPaddingKeys={['/admin/chat']} />
 }

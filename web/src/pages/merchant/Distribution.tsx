@@ -388,7 +388,7 @@ export default function Distribution() {
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div className="wr-page-header">
-          <h1>分发中心</h1>
+          <h1>自动发布</h1>
           <p>账号池维护 · 内容一键发布到各社媒平台 · 发布后提及率复测</p>
         </div>
 

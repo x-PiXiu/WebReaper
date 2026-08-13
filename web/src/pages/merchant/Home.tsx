@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message, Progress, Tooltip, List, Select, InputNumber } from 'antd'
 import { RocketOutlined, ArrowRightOutlined, RadarChartOutlined, BellOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
-import { Line, Pie } from '@ant-design/charts'
+import { LazyLine as Line, LazyPie as Pie } from '../../components/charts/LazyCharts'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import { deltaView, latestMonitor } from '../../utils/geo'
+import { deltaView, latestMonitor, rateColor, rateLabel } from '../../utils/geo'
 import type { Brand } from '../../types/api'
 
 const { Title, Text } = Typography
@@ -20,20 +20,6 @@ function useOnboardingSteps(brands: any[], ovData: any[]) {
   const allDone = hasBrands && hasCompetitors && hasKeywords && hasMonitor
   const doneCount = [hasBrands, hasCompetitors, hasKeywords, hasMonitor].filter(Boolean).length
   return { hasBrands, hasCompetitors, hasKeywords, hasMonitor, allDone, doneCount }
-}
-
-function rateColor(rate: number): string {
-  if (rate >= 0.8) return 'var(--wr-success)'
-  if (rate >= 0.5) return 'var(--wr-accent)'
-  if (rate >= 0.2) return 'var(--wr-warning)'
-  return 'var(--wr-danger)'
-}
-
-function rateLabel(rate: number): string {
-  if (rate >= 0.8) return '强势'
-  if (rate >= 0.5) return '稳定'
-  if (rate >= 0.2) return '偶尔'
-  return '缺席'
 }
 
 // 数据驾驶舱：品牌可见度总览（Linear 风大屏感）。
@@ -75,6 +61,34 @@ export default function MerchantHome() {
     staleTime: 60_000,
   })
 
+  // 工作台汇总：全品牌内容 + 发布任务（与侧栏模块对齐）
+  const { data: allContents = [] } = useQuery({
+    queryKey: ['geo-contents-all', brands.map((b: Brand) => b.id).join(',')],
+    queryFn: async () => {
+      const lists = await Promise.all(
+        brands.map((b: Brand) => businessApi.listContents(b.id).catch(() => []))
+      )
+      return lists.flat()
+    },
+    enabled: brands.length > 0,
+    staleTime: 60_000,
+  })
+  const { data: publishJobs = [] } = useQuery({
+    queryKey: ['geo-publish-jobs'],
+    queryFn: () => businessApi.listPublishJobs().catch(() => []),
+    staleTime: 60_000,
+  })
+
+  const articleCount = allContents.length
+  const draftContentCount = allContents.filter((c: { status?: string }) => c.status === 'draft').length
+  const publishJobCount = publishJobs.length
+  const pendingPublishCount = publishJobs.filter((j: { status?: string }) =>
+    j.status === 'pending' || j.status === 'running'
+  ).length + draftContentCount
+
+  const ovData = (overviews.data || []) as any[]
+  const steps = useOnboardingSteps(brands, ovData)
+
   if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
@@ -108,7 +122,7 @@ export default function MerchantHome() {
             {[
               { title: '创建品牌', desc: '填写定位/卖点/竞品', path: '/m/brands' },
               { title: '添加关键词', desc: 'AI 生成或蒸馏获取', path: '/m/keywords' },
-              { title: '立即监测', desc: '看 AI 怎么评价你', path: '/m/keywords' },
+              { title: '立即监测', desc: '看 AI 怎么评价你', path: '/m/indexing-report' },
               { title: '生成内容', desc: '优化 AI 可见度', path: '/m/content' },
             ].map((s, i) => (
               <div key={i} style={{
@@ -140,18 +154,13 @@ export default function MerchantHome() {
     )
   }
 
-  const ovData = (overviews.data || []) as any[]
-
   // 渐进式 Onboarding：基于数据判断步骤完成度（有品牌但未完成全流程时显示引导条）
-  const steps = useOnboardingSteps(brands, ovData)
   const showOnboarding = !steps.allDone && !onboardingDismissed && brands.length > 0
 
   const totalAvg = ovData.length > 0
     ? ovData.reduce((s: number, o: any) => s + (o.avg_mention_rate || 0), 0) / ovData.length
     : 0
   const totalKeywords = ovData.reduce((s: number, o: any) => s + (o.keyword_count || 0), 0)
-  const totalCompetitors = brands.reduce((s: number, b: Brand) => s + (b.competitors?.length || 0), 0)
-  const strongCount = ovData.filter((o: any) => (o.avg_mention_rate || 0) >= 0.5).length
 
   // 整体变化对比：各品牌最新 vs 上一次提及率的平均变化（delta）
   const brandDeltas = ovData.map((o: any) => {
@@ -184,8 +193,8 @@ export default function MerchantHome() {
       <div style={{ position: 'relative', zIndex: 1 }}>
         {/* 页面标题 */}
         <div className="wr-page-header">
-          <h1>数据驾驶舱</h1>
-          <p>你的品牌在 AI 搜索引擎中的可见度 · {brands.length} 个品牌 · {totalKeywords} 个监测关键词</p>
+          <h1>工作台</h1>
+          <p>业务总览 · {brands.length} 个品牌 · {totalKeywords} 个关键词 · AI 可见度一屏掌握</p>
         </div>
 
         {/* 渐进式 Onboarding 引导条（有品牌但未完成全流程时显示）*/}
@@ -204,7 +213,7 @@ export default function MerchantHome() {
                     { done: steps.hasBrands, label: '创建品牌', path: '/m/brands' },
                     { done: steps.hasCompetitors, label: '配置竞品', path: '/m/brands' },
                     { done: steps.hasKeywords, label: '添加关键词', path: '/m/keywords' },
-                    { done: steps.hasMonitor, label: '发起监测', path: '/m/keywords' },
+                    { done: steps.hasMonitor, label: '发起监测', path: '/m/indexing-report' },
                   ].map((s, i) => (
                     <Button
                       key={i}
@@ -230,22 +239,40 @@ export default function MerchantHome() {
           </Card>
         )}
 
-        {/* 核心指标卡（6 张）*/}
+        {/* 工作台汇总卡：对齐侧栏内容模块 */}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }} className="wr-stagger">
           <Col xs={12} sm={8} lg={4}>
-            <div className="wr-metric-card" onClick={() => navigate('/m/brands')} style={{ cursor: 'pointer' }}>
-              <div className="wr-metric-value wr-gradient-text">{brands.length}</div>
-              <div className="wr-metric-label">品牌数量</div>
+            <div className="wr-metric-card" onClick={() => navigate('/m/keywords')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/keywords')}>
+              <div className="wr-metric-value wr-gradient-text">{totalKeywords}</div>
+              <div className="wr-metric-label">关键词</div>
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4}>
-            <div className="wr-metric-card" onClick={() => navigate('/m/keywords')} style={{ cursor: 'pointer' }}>
-              <div className="wr-metric-value">{totalKeywords}</div>
-              <div className="wr-metric-label">监测关键词</div>
+            <div className="wr-metric-card" onClick={() => navigate('/m/brands')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/brands')}>
+              <div className="wr-metric-value">{brands.length}</div>
+              <div className="wr-metric-label">品牌知识</div>
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4}>
-            <div className="wr-metric-card">
+            <div className="wr-metric-card" onClick={() => navigate('/m/content')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/content')}>
+              <div className="wr-metric-value">{articleCount}</div>
+              <div className="wr-metric-label">生成文章</div>
+            </div>
+          </Col>
+          <Col xs={12} sm={8} lg={4}>
+            <div className="wr-metric-card" onClick={() => navigate('/m/distribution')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/distribution')}>
+              <div className="wr-metric-value">{publishJobCount}</div>
+              <div className="wr-metric-label">发布任务</div>
+            </div>
+          </Col>
+          <Col xs={12} sm={8} lg={4}>
+            <div className="wr-metric-card" onClick={() => navigate('/m/distribution')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/distribution')}>
+              <div className="wr-metric-value" style={{ color: pendingPublishCount > 0 ? 'var(--wr-warning)' : undefined }}>{pendingPublishCount}</div>
+              <div className="wr-metric-label">待发布</div>
+            </div>
+          </Col>
+          <Col xs={12} sm={8} lg={4}>
+            <div className="wr-metric-card" onClick={() => navigate('/m/visibility')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/visibility')}>
               <div className="wr-metric-value" style={{ color: rateColor(totalAvg) }}>
                 {(totalAvg * 100).toFixed(1)}<span style={{ fontSize: 16, fontWeight: 600 }}>%</span>
               </div>
@@ -253,24 +280,6 @@ export default function MerchantHome() {
               <div style={{ fontSize: 11, marginTop: 4, fontWeight: 600, color: overallDeltaView.color }}>
                 {overallDeltaView.arrow} {overallDeltaView.text} 较上期
               </div>
-            </div>
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <div className="wr-metric-card">
-              <div className="wr-metric-value" style={{ color: 'var(--wr-success)' }}>{strongCount}</div>
-              <div className="wr-metric-label">强势品牌 (≥50%)</div>
-            </div>
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <div className="wr-metric-card" onClick={() => navigate('/m/brands')} style={{ cursor: 'pointer' }}>
-              <div className="wr-metric-value">{totalCompetitors}</div>
-              <div className="wr-metric-label">竞品追踪</div>
-            </div>
-          </Col>
-          <Col xs={12} sm={8} lg={4}>
-            <div className="wr-metric-card" onClick={() => navigate('/m/content')} style={{ cursor: 'pointer' }}>
-              <div className="wr-metric-value wr-shimmer">→</div>
-              <div className="wr-metric-label">去内容工作台</div>
             </div>
           </Col>
         </Row>
@@ -377,7 +386,7 @@ export default function MerchantHome() {
                   })
                 })
                 if (trendData.length === 0) {
-                  return <div style={{ textAlign: 'center', padding: '60px 0' }}><Text type="secondary">暂无监测数据——前往「关键词管理」发起监测</Text></div>
+                  return <div style={{ textAlign: 'center', padding: '60px 0' }}><Text type="secondary">暂无监测数据——前往「平台收录报表」发起任务</Text></div>
                 }
                 // 按时间排序（Trend 已升序，双保险）
                 trendData.sort((a: any, b: any) => a.ts - b.ts)
@@ -487,9 +496,9 @@ export default function MerchantHome() {
                     <Button
                       size="small" type="text"
                       style={{ fontSize: 12, color: 'var(--wr-primary)' }}
-                      onClick={(e) => { e.stopPropagation(); navigate('/m/keywords') }}
+                      onClick={(e) => { e.stopPropagation(); navigate('/m/indexing-report') }}
                     >
-                      查看关键词与监测 →
+                      查看平台收录 →
                     </Button>
                   </div>
                 </div>
@@ -525,14 +534,14 @@ function AutoMonitorCard() {
   const [dropThreshold, setDropThreshold] = useState<number>(20)
   const [notifyOvertake, setNotifyOvertake] = useState<boolean>(true)
   const [loadedCfg, setLoadedCfg] = useState(false)
-  // 配置加载完成后同步到表单（只同步一次，避免每次渲染重置用户编辑）
-  if (data?.config && !loadedCfg) {
+  useEffect(() => {
+    if (!data?.config || loadedCfg) return
     setLoadedCfg(true)
     setFrequency(data.config.frequency || 'daily')
     setSampleSize(data.config.sample_size || 5)
     setDropThreshold(data.config.notify_drop_threshold || 20)
     setNotifyOvertake(data.config.notify_overtake !== false)
-  }
+  }, [data?.config, loadedCfg])
   const saveMutation = useMutation({
     mutationFn: ({ enabled, cfg }: { enabled: boolean; cfg?: any }) =>
       businessApi.setTenantAutoMonitor({ enabled, config: cfg }),

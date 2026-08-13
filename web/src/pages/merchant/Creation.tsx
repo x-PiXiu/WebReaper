@@ -1129,9 +1129,12 @@ export default function CreationWorkbench() {
   return (
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <div className="wr-page-header">
-          <h1>创作工作台</h1>
-          <p>选模型 · 选模式 · 引用素材 @ 自动翻译——结果即画即得</p>
+        <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <h1>多媒体创作</h1>
+            <p>视频 / 图片 / 音频生成——属于「内容生成」子能力</p>
+          </div>
+          <Button type="link" onClick={() => navigate('/m/content')}>← 返回内容生成</Button>
         </div>
 
         <Tabs

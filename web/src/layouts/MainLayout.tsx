@@ -2,9 +2,10 @@ import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input, Badge
 import { SearchOutlined, BellOutlined } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
-import { clearQueryCache } from '../main'
+import { clearQueryCache } from '../queryClient'
 import { businessApi } from '../api/business'
 
 const { Header, Sider, Content } = Layout
@@ -54,7 +55,7 @@ function findSelectedKey(items: NavItem[], pathname: string): string | undefined
 //   - 抽出 AppShell 后，新增角色布局只需传菜单，零重复代码
 export function AppShell({
   menuItems,
-  brandName = 'GEO 平台',
+  brandName = '智擎AI',
   brandIcon = 'G',
   noPaddingKeys = [],
 }: {
@@ -85,25 +86,31 @@ export function AppShell({
     || '/'
 
   const noPadding = noPaddingKeys.includes(selectedKey)
+  const pageTitle = findMenuLabel(menuItems, selectedKey) || '控制台'
 
-  // 全局资产搜索（品牌/关键词/发布任务快速跳转；数据来自租户级接口，缓存 60s）
+  useEffect(() => {
+    document.title = `${pageTitle} · 智擎AI`
+  }, [pageTitle])
+
+  // 全局资产搜索：复用业务页同一 queryKey；关键词/任务仅在聚焦搜索时拉取
+  const [searchReady, setSearchReady] = useState(false)
   const { data: brands = [] } = useQuery({
-    queryKey: ['global-search-brands'],
+    queryKey: ['geo-brands'],
     queryFn: () => businessApi.listBrands(),
     staleTime: 60_000,
     enabled: !inAdmin,
   })
   const { data: keywords = [] } = useQuery({
-    queryKey: ['global-search-keywords'],
+    queryKey: ['geo-all-keywords'],
     queryFn: () => businessApi.listAllKeywords(),
     staleTime: 60_000,
-    enabled: !inAdmin,
+    enabled: !inAdmin && searchReady,
   })
   const { data: publishJobs = [] } = useQuery({
-    queryKey: ['global-search-jobs'],
+    queryKey: ['geo-publish-jobs'],
     queryFn: () => businessApi.listPublishJobs(),
     staleTime: 60_000,
-    enabled: !inAdmin,
+    enabled: !inAdmin && searchReady,
   })
 
   const searchOptions = [
@@ -181,7 +188,7 @@ export function AppShell({
 
       <Layout style={{ background: 'var(--wr-bg-base)' }}>
         {/* 顶栏：玻璃质感 */}
-        <Header style={{
+        <Header className="wr-app-header" style={{
           background: 'var(--wr-bg-surface)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
@@ -195,15 +202,15 @@ export function AppShell({
           zIndex: 100,
           height: 60,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--wr-text-muted)', fontSize: 14 }}>{brandName}</span>
-            <span style={{ color: 'var(--wr-border-hover)' }}>/</span>
-            <span style={{ color: 'var(--wr-text-primary)', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>
-              {findMenuLabel(menuItems, selectedKey) || '控制台'}
+          <div className="wr-header-left" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span className="wr-header-brand" style={{ color: 'var(--wr-text-muted)', fontSize: 14 }}>{brandName}</span>
+            <span className="wr-header-sep" style={{ color: 'var(--wr-border-hover)' }}>/</span>
+            <span style={{ color: 'var(--wr-text-primary)', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+              {pageTitle}
             </span>
-            {/* 角色切换器（工作空间切换——admin 专属，显眼渐变样式）*/}
             {showRoleSwitch && (
               <Button
+                className="wr-header-role-switch"
                 size="small"
                 onClick={() => navigate(roleSwitchTarget)}
                 style={{
@@ -221,13 +228,14 @@ export function AppShell({
                 {inAdmin ? '← 返回用户界面' : '管理后台 →'}
               </Button>
             )}
-            {/* 全局资产搜索（商户端）*/}
             {!inAdmin && (
               <AutoComplete
+                className="wr-header-search"
                 options={searchOptions}
                 onSelect={handleSearchSelect}
                 style={{ width: 240, marginLeft: 16 }}
                 popupMatchSelectWidth={280}
+                onFocus={() => setSearchReady(true)}
               >
                 <Input
                   size="small"
@@ -240,16 +248,15 @@ export function AppShell({
             )}
           </div>
 
-          <Space size={12}>
-            {/* 站内通知铃铛（主动唤醒：提及率变化/自动复测/排期发布）*/}
+          <Space size={12} className="wr-header-right">
             <NotificationBell />
-            {/* 主题切换 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: 14 }}>{themeMode === 'dark' ? '深' : '亮'}</span>
+            <div className="wr-header-theme" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span className="wr-header-theme-label" style={{ fontSize: 14 }}>{themeMode === 'dark' ? '深' : '亮'}</span>
               <Switch
                 size="small"
                 checked={themeMode === 'light'}
                 onChange={() => toggleTheme()}
+                aria-label="切换主题"
               />
             </div>
             <Avatar size={28} style={{
@@ -258,7 +265,7 @@ export function AppShell({
             }}>
               {(username || '?')[0].toUpperCase()}
             </Avatar>
-            <span style={{ color: 'var(--wr-text-secondary)', fontSize: 14 }}>{username}</span>
+            <span className="wr-header-username" style={{ color: 'var(--wr-text-secondary)', fontSize: 14 }}>{username}</span>
             <Button
               size="small"
               type="text"
@@ -273,7 +280,7 @@ export function AppShell({
         {/* 内容区（外层极光背景）*/}
         <Content style={{
           margin: 0,
-          padding: noPadding ? 0 : 24,
+          padding: noPadding ? 0 : '16px 20px 24px',
           minHeight: 'calc(100vh - 60px)',
           overflow: noPadding ? 'hidden' : 'visible',
         }}>
@@ -281,17 +288,16 @@ export function AppShell({
             <div className="wr-fade-in">
               <Outlet />
             </div>
-            {/* 内容区底部：品牌信息 */}
             <div style={{
-              marginTop: 48,
-              paddingTop: 20,
+              marginTop: 32,
+              paddingTop: 16,
               borderTop: '1px solid var(--wr-border)',
               fontSize: 11,
               color: 'var(--wr-text-muted)',
               textAlign: 'center',
               opacity: 0.8,
             }}>
-              WebReaper GEO SaaS
+              智擎AI · GEO
             </div>
           </div>
         </Content>
