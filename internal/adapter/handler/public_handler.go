@@ -118,6 +118,12 @@ const articlePageTemplate = `<!DOCTYPE html>
   .author-box{margin-top:48px;padding:20px;background:#f8f8fc;border-radius:12px}
   .author-box .author-name{font-weight:600;font-size:1.05em;color:#1a1a2e}
   .author-box .author-desc{color:#666;font-size:0.9em;margin-top:4px;line-height:1.7}
+  .related{margin-top:40px;padding-top:20px;border-top:1px solid #eee}
+  .related h3{font-size:1.05em;margin-bottom:12px}
+  .related ul{list-style:none;padding:0;margin:0}
+  .related li{margin-bottom:8px}
+  .related a{text-decoration:none}
+  .related a:hover{text-decoration:underline}
   .store-box{margin-top:32px;padding:18px 20px;background:#f0f7ff;border:1px solid #dbeafe;border-radius:12px;line-height:1.9}
   .store-box .store-title{font-weight:600;margin-bottom:6px;color:#1a1a2e}
   .footer{margin-top:24px;padding-top:16px;border-top:1px solid #eee;color:#aaa;font-size:0.85em}
@@ -141,6 +147,16 @@ const articlePageTemplate = `<!DOCTYPE html>
   <div class="author-box">
     <div class="author-name">本文由 {{.BrandName}} 提供</div>
     {{if .BrandDesc}}<div class="author-desc">{{.BrandDesc}}</div>{{end}}
+  </div>
+  {{end}}
+  {{if .Related}}
+  <div class="related">
+    <h3>更多内容</h3>
+    <ul>
+      {{range .Related}}
+      <li><a href="/public/articles/{{.ID}}">{{.Title}}</a></li>
+      {{end}}
+    </ul>
   </div>
   {{end}}
 </article>
@@ -225,6 +241,23 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		}
 	}
 
+	// 相关文章（同品牌已发布内容）——内链结构：让爬虫/AI 引擎顺着页面发现更多
+	// 内容（Bing"已发现但未爬"的常见结构性原因=孤立页面无内链，爬虫无从顺爬）。
+	// 无同品牌内容时该区块隐藏（{{if .Related}}）。
+	related := []entity.OptimizedContent{}
+	if h.contentRepo != nil && content.BrandID != "" {
+		if all, rErr := h.contentRepo.ListByBrand(c.Request.Context(), content.TenantID, content.BrandID); rErr == nil {
+			for _, it := range all {
+				if it.Status == "published" && it.ID != content.ID {
+					related = append(related, it)
+					if len(related) >= 5 {
+						break
+					}
+				}
+			}
+		}
+	}
+
 	tpl, err := template.New("article").Parse(articlePageTemplate)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "render error")
@@ -244,6 +277,7 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		"StoreName":    storeName,
 		"StoreInfo":    template.HTML(storeInfo),
 		"StoreMapURL":  storeMapURL,
+		"Related":      related,
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render error")
 	}
