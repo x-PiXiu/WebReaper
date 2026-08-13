@@ -1,45 +1,24 @@
-import { useState } from 'react'
-import { Typography, Switch, Card, Space, message, Alert, Tag, Modal, Input, Table, Button } from 'antd'
-import { RadarChartOutlined, ThunderboltOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons'
+import { Typography, Switch, Space, message, Alert, Tag } from 'antd'
+import { RadarChartOutlined, EyeOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 
 const { Text } = Typography
-const { TextArea } = Input
 
-interface PromptTemplate {
-  key: string
-  version: number
-  content: string
-  updated_at: string
-}
-
-// 格式 key → 友好标签
-const FORMAT_LABELS: Record<string, string> = {
-  'content-generate': '内容生成（系统提示词）',
-  'content-optimize': '内容优化（系统提示词）',
-  'geo_format_article': '📄 SEO 文章格式',
-  'geo_format_review': '📝 点评文案格式',
-  'geo_format_xiaohongshu': '📕 小红书笔记格式',
-  'geo_format_script': '🎬 视频口播脚本格式',
-  'geo_format_faq': '❓ FAQ 问答格式',
-  'geo_format_comparison': '⚖️ 对比评测格式',
-}
-
-// 平台设置（管理后台）：运行时开关 + 提示词模板管理——配置即时生效，无需重启。
+// 平台设置（管理后台）：仅平台级运行时开关——修改即时生效，无需重启。
+// 提示词模板管理已迁至独立页（/admin/prompt-templates，属 GEO 内容引擎域）。
 export default function AdminSettings() {
   const queryClient = useQueryClient()
-  const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [editContent, setEditContent] = useState('')
 
   const { data: autoMonitor, isLoading } = useQuery({
     queryKey: ['settings-auto-monitor'],
     queryFn: () => businessApi.getAutoMonitor(),
   })
 
-  const { data: templates = [] } = useQuery({
-    queryKey: ['admin-prompt-templates'],
-    queryFn: () => businessApi.adminListPromptTemplates(),
+  // 浏览器可见性（正常 hooks 写法，非 IIFE 内联）
+  const { data: browserHeaded } = useQuery({
+    queryKey: ['settings-browser-headed'],
+    queryFn: () => businessApi.getBrowserHeaded(),
   })
 
   const toggleMutation = useMutation({
@@ -51,55 +30,19 @@ export default function AdminSettings() {
     onError: () => message.error('设置失败'),
   })
 
-  const saveTemplateMutation = useMutation({
-    mutationFn: ({ key, content }: { key: string; content: string }) =>
-      businessApi.adminUpdatePromptTemplate(key, content),
+  const toggleBrowser = useMutation({
+    mutationFn: (headed: boolean) => businessApi.setBrowserHeaded(headed),
     onSuccess: () => {
-      message.success('提示词模板已保存（即时生效）')
-      setEditingKey(null)
-      queryClient.invalidateQueries({ queryKey: ['admin-prompt-templates'] })
+      message.success('浏览器可见性已切换（下次 RPA 操作即时生效）')
+      queryClient.invalidateQueries({ queryKey: ['settings-browser-headed'] })
     },
-    onError: () => message.error('保存失败'),
   })
-
-  const templateColumns = [
-    {
-      title: '模板', dataIndex: 'key', key: 'key',
-      render: (key: string) => (
-        <Space>
-          <Tag color={key.startsWith('geo_format_') ? 'purple' : 'blue'} style={{ fontSize: 11 }}>
-            {key.startsWith('geo_format_') ? '格式' : '核心'}
-          </Tag>
-          <Text strong style={{ fontSize: 13 }}>{FORMAT_LABELS[key] || key}</Text>
-        </Space>
-      ),
-    },
-    {
-      title: '内容预览', dataIndex: 'content', key: 'content', ellipsis: true,
-      render: (content: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>{content?.slice(0, 80)}...</Text>
-      ),
-    },
-    {
-      title: '版本', dataIndex: 'version', key: 'version', width: 70,
-      render: (v: number) => <Tag>v{v}</Tag>,
-    },
-    {
-      title: '操作', key: 'action', width: 80,
-      render: (_: unknown, record: PromptTemplate) => (
-        <Button size="small" type="link" icon={<EditOutlined />}
-          onClick={() => { setEditingKey(record.key); setEditContent(record.content) }}>
-          编辑
-        </Button>
-      ),
-    },
-  ]
 
   return (
     <div className="wr-page-content">
       <div className="wr-page-header">
         <h1>平台设置</h1>
-        <p>平台级运行时开关 + 提示词模板管理——修改即时生效，无需重启服务</p>
+        <p>平台级运行时开关——修改即时生效，无需重启服务</p>
       </div>
 
       {/* 自动盯盘开关 */}
@@ -137,90 +80,26 @@ export default function AdminSettings() {
       </div>
 
       {/* 浏览器可见性开关 */}
-      {(() => {
-        const { data: browserHeaded } = useQuery({
-          queryKey: ['settings-browser-headed'],
-          queryFn: () => businessApi.getBrowserHeaded(),
-        })
-        const toggleBrowser = useMutation({
-          mutationFn: (headed: boolean) => businessApi.setBrowserHeaded(headed),
-          onSuccess: () => {
-            message.success('浏览器可见性已切换（下次 RPA 操作即时生效）')
-            queryClient.invalidateQueries({ queryKey: ['settings-browser-headed'] })
-          },
-        })
-        return (
-          <div className="wr-glass-card" style={{ padding: 24, marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24 }}>
-              <div style={{ flex: 1 }}>
-                <Space size={8} style={{ marginBottom: 8 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 15 }}>
-                    <EyeOutlined />
-                  </div>
-                  <Text strong style={{ fontSize: 15 }}>浏览器窗口可见性（RPA 发布/扫码登录）</Text>
-                  <Tag color={browserHeaded?.headed ? 'processing' : 'default'}>
-                    {browserHeaded?.headed ? '显示窗口（调试）' : 'Headless（生产）'}
-                  </Tag>
-                </Space>
-                <Text type="secondary" style={{ fontSize: 13, display: 'block', lineHeight: 1.7 }}>
-                  开启后扫码登录/自动发布时<strong>显示浏览器窗口</strong>（可看到操作过程，调试用）。
-                  关闭则<strong>后台静默执行</strong>（headless，生产默认）。切换即时生效，无需重启。
-                </Text>
+      <div className="wr-glass-card" style={{ padding: 24, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24 }}>
+          <div style={{ flex: 1 }}>
+            <Space size={8} style={{ marginBottom: 8 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 15 }}>
+                <EyeOutlined />
               </div>
-              <Switch checked={browserHeaded?.headed} loading={toggleBrowser.isPending} onChange={(v) => toggleBrowser.mutate(v)} />
-            </div>
+              <Text strong style={{ fontSize: 15 }}>浏览器窗口可见性（RPA 发布/扫码登录）</Text>
+              <Tag color={browserHeaded?.headed ? 'processing' : 'default'}>
+                {browserHeaded?.headed ? '显示窗口（调试）' : 'Headless（生产）'}
+              </Tag>
+            </Space>
+            <Text type="secondary" style={{ fontSize: 13, display: 'block', lineHeight: 1.7 }}>
+              开启后扫码登录/自动发布时<strong>显示浏览器窗口</strong>（可看到操作过程，调试用）。
+              关闭则<strong>后台静默执行</strong>（headless，生产默认）。切换即时生效，无需重启。
+            </Text>
           </div>
-        )
-      })()}
-
-      {/* 提示词模板管理（格式指令/生成/优化 prompt 热更新）*/}
-      <Card
-        className="wr-glass-card"
-        title={<Space><ThunderboltOutlined /><Text strong>提示词模板管理</Text></Space>}
-        style={{ marginBottom: 16 }}
-      >
-        <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
-          编辑内容生成/优化的系统提示词 + 各格式输出指令（字数/风格/结构）。
-          修改后<strong>即时生效</strong>（下次生成内容时使用新指令），无需重启服务。
-          格式模板控制用户选择"小红书/点评/脚本"等格式时的具体输出要求。
-        </Text>
-        <Table
-          dataSource={templates}
-          columns={templateColumns}
-          rowKey="key"
-          pagination={false}
-          size="small"
-        />
-      </Card>
-
-      {/* 编辑弹窗 */}
-      <Modal
-        title={`编辑 · ${FORMAT_LABELS[editingKey || ''] || editingKey}`}
-        open={!!editingKey}
-        onCancel={() => setEditingKey(null)}
-        width={680}
-        footer={
-          <Space>
-            <Button onClick={() => setEditingKey(null)}>取消</Button>
-            <Button type="primary" loading={saveTemplateMutation.isPending}
-              onClick={() => editingKey && saveTemplateMutation.mutate({ key: editingKey, content: editContent })}>
-              保存（即时生效）
-            </Button>
-          </Space>
-        }
-      >
-        <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
-          {editingKey?.startsWith('geo_format_')
-            ? '格式输出指令——控制此格式的字数/风格/结构。会以【优先级最高】注入 systemPrompt 开头，覆盖默认字数要求。'
-            : '系统提示词——控制 LLM 生成内容时的角色定位、优化方向和硬性要求。'}
-        </Text>
-        <TextArea
-          value={editContent}
-          onChange={(e) => setEditContent(e.target.value)}
-          autoSize={{ minRows: 8, maxRows: 20 }}
-          style={{ fontFamily: 'monospace', fontSize: 12 }}
-        />
-      </Modal>
+          <Switch checked={browserHeaded?.headed} loading={toggleBrowser.isPending} onChange={(v) => toggleBrowser.mutate(v)} />
+        </div>
+      </div>
     </div>
   )
 }

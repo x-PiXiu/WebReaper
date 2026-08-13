@@ -124,26 +124,6 @@ func (r *Router) HandleListActivePlans(c *gin.Context) {
 	success(c, gin.H{"plans": plans})
 }
 
-// HandleGetMyPlan GET /billing/my-plan —— 我的订阅（无订阅降级提示购买）。
-func (r *Router) HandleGetMyPlan(c *gin.Context) {
-	if r.billingUC == nil {
-		fail(c, errNotConfigured("计费"))
-		return
-	}
-	tenantID := middleware.CurrentTenantID(c)
-	if tenantID == "" {
-		fail(c, pkg.ErrInvalidArgument)
-		return
-	}
-	sub, err := r.billingUC.GetSubscription(c.Request.Context(), tenantID)
-	if err != nil {
-		// 无订阅——返回降级标记（前端引导购买，不报错）
-		success(c, gin.H{"subscription": nil, "hint": "未开通套餐，默认免费额度"})
-		return
-	}
-	success(c, gin.H{"subscription": sub})
-}
-
 // HandleListMyOrders GET /billing/orders —— 我的订单流水。
 func (r *Router) HandleListMyOrders(c *gin.Context) {
 	if r.billingUC == nil {

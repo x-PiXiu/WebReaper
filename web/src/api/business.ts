@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, CrawlConfig, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
+import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -43,25 +43,13 @@ export const businessApi = {
   saveMessage: (convId: string, data: { id: string; role: string; content: string; tool_calls?: string }) =>
     apiClient.post<unknown, ChatMessageRecord>(`/api/v1/conversations/${convId}/messages`, data),
 
-  renameConversation: (convId: string, title: string) =>
-    apiClient.put<unknown, unknown>(`/api/v1/conversations/${convId}`, { title }),
-
   deleteConversation: (convId: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/conversations/${convId}`),
-
-  // ---- 采集配置（运行时可调）----
-  getCrawlConfig: () =>
-    apiClient.get<unknown, CrawlConfig>('/api/v1/crawl-config'),
 
   // ---- 全局工具列表 ----
   listTools: () =>
     apiClient.get<unknown, ToolView[]>('/api/v1/tools'),
 
-  updateCrawlConfig: (data: Partial<CrawlConfig>) =>
-    apiClient.put<unknown, CrawlConfig>('/api/v1/crawl-config', data),
-
-  // ---- 外部推送系统 ----
-  // ---- 数据项 ----
   // ---- 工具面板 ----
   toggleTool: (name: string, enabled: boolean) =>
     apiClient.put<unknown, { name: string; enabled: boolean }>(`/api/v1/tools/${name}/toggle`, { enabled }),
@@ -135,10 +123,6 @@ export const businessApi = {
   addKeyword: (brandId: string, data: { term: string; intent?: string }) =>
     apiClient.post<unknown, Keyword>(`/api/v1/geo/brands/${brandId}/keywords`, data),
 
-  // AI 根据品牌定位自动生成候选关键词
-  generateKeywords: (brandId: string) =>
-    apiClient.post<unknown, { keywords: string[] }>(`/api/v1/geo/brands/${brandId}/keywords/generate`),
-
   // 关键词蒸馏（五种来源：brand/text/seed/file/web）
   distillKeywords: (data: {
     source: 'brand' | 'text' | 'seed' | 'file' | 'web'
@@ -158,28 +142,7 @@ export const businessApi = {
   deleteKeyword: (id: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/geo/keywords/${id}`),
 
-  // GEO 诊断（分析品牌为什么没被 AI 提及，给改进建议）
-  diagnoseBrand: (brandId: string, keywordId?: string) =>
-    apiClient.post<unknown, {
-      brand_id: string
-      keyword_id: string
-      content_coverage: number
-      brand_appearance_rate: number
-      competitor_stats: { name: string; appearance_rate: number; avg_position: number }[]
-      suggestions: string[]
-    }>(`/api/v1/geo/brands/${brandId}/diagnose`, { keyword_id: keywordId }),
-
   // ---- GEO 监测 ----
-  runMonitor: (data: { brand_id: string; engine_name?: string; sample_size?: number }) =>
-    apiClient.post<unknown, MonitoringResult[]>('/api/v1/geo/monitor', data),
-
-  getLatestMonitor: (keywordId: string) =>
-    apiClient.get<unknown, MonitoringResult[]>(`/api/v1/geo/monitor/${keywordId}`),
-
-  // 品牌批量监测结果
-  getLatestMonitorByBrand: (brandId: string) =>
-    apiClient.get<unknown, MonitoringResult[]>(`/api/v1/geo/brands/${brandId}/monitor-results`),
-
   // 租户全部监测结果（关键词一览页用，不依赖品牌筛选）
   getAllMonitorResults: () =>
     apiClient.get<unknown, MonitoringResult[]>('/api/v1/geo/monitor-results'),
@@ -209,10 +172,6 @@ export const businessApi = {
   // 内容状态流转：draft ↔ published（published 后公开站可访问，AI 引擎可爬取）
   setContentStatus: (brandId: string, contentId: string, status: 'draft' | 'published') =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/${contentId}/status`, { status }),
-
-  // 删除内容（内容工作台/管理后台）
-  deleteContent: (brandId: string, contentId: string) =>
-    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/geo/brands/${brandId}/contents/${contentId}`),
 
   // 商户端自助补提交收录（IndexNow——重新通知搜索引擎抓取已发布内容）
   resubmitIndex: (brandId: string, contentId: string) =>
@@ -343,9 +302,6 @@ export const businessApi = {
     watermark?: boolean
   }) => apiClient.post<unknown, GenerationTask>('/api/v1/generation/tasks', data),
 
-  getGenerationTask: (id: string) =>
-    apiClient.get<unknown, GenerationTask>(`/api/v1/generation/tasks/${id}`),
-
   listGenerationTasks: () =>
     apiClient.get<unknown, { tasks: GenerationTask[] }>('/api/v1/generation/tasks'),
 
@@ -369,13 +325,19 @@ export const businessApi = {
   saveProviderConfig: (provider: string, data: { api_key?: string; base_url?: string; enabled?: boolean }) =>
     apiClient.put<unknown, { providers: ProviderConfig[] }>(`/api/v1/admin/provider-configs/${provider}`, data),
 
+  // 生成规格（管理后台：Vidu 端点×模型矩阵——DB 驱动 30s 热生效）
+  adminListGenerationSpecs: () =>
+    apiClient.get<unknown, { specs: GenerationSpec[] }>('/api/v1/admin/generation/specs'),
+  adminSaveGenerationSpec: (subType: string, model: string, body: { capability: unknown; enabled: boolean }) =>
+    apiClient.put<unknown, { saved: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`, body),
+  adminDeleteGenerationSpec: (subType: string, model: string) =>
+    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`),
+
   // ---- 经济系统（套餐/订阅/订单/用量）----
 
   // 商户端
   listActivePlans: () =>
     apiClient.get<unknown, { plans: Plan[] }>('/api/v1/billing/plans'),
-  getMyPlan: () =>
-    apiClient.get<unknown, { subscription: Subscription | null; hint?: string }>('/api/v1/billing/my-plan'),
   getMyUsage: () =>
     apiClient.get<unknown, MyUsageSummary>('/api/v1/billing/usage'),
   listMyOrders: () =>

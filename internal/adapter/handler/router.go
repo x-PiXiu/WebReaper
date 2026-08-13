@@ -11,12 +11,11 @@ import (
 	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/domain/entity"
-	"webreaper/internal/usecase/agentconfig"
 	"webreaper/internal/usecase/account"
+	"webreaper/internal/usecase/agentconfig"
 	"webreaper/internal/usecase/auth"
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
-	"webreaper/internal/usecase/crawlconfig"
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
@@ -25,9 +24,9 @@ import (
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/providerconfig"
 	"webreaper/internal/usecase/stats"
-	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/structured"
-	taskuc "webreaper/internal/usecase/task")
+	"webreaper/internal/usecase/systemsettings"
+)
 
 // Router 组装所有 HTTP 路由。
 //
@@ -36,31 +35,28 @@ import (
 //   - 这样 handler 层薄化为"DTO 转换 + 调用 usecase"，业务流程编排全部在 usecase 层。
 //   - Agent 执行依赖 port.AgentSyncRunner 接口（非具体 TrpcAgentRunner），可替换。
 type Router struct {
-	authRegister     *auth.RegisterUseCase
-	authLogin        *auth.LoginUseCase
-	tokenParser      *authadapter.JWTGenerator
-	ai               port.AIGenerator
-	enqueueUC        *taskuc.EnqueueUseCase
-	agentRunner      port.AgentSyncRunner   // 接口，非具体 struct（DIP）
-	agentCfgUC       *agentconfig.AgentConfigUseCase
-	llmCfgUC         *llmconfig.LLMConfigUseCase
-	conversationUC   *conversation.ConversationUseCase
-	crawlCfgUC       *crawlconfig.CrawlConfigUseCase
-	toolRegistry     *port.ToolRegistry // 全局工具注册表（供 /tools 端点查询）
-	statsUC          *stats.StatsUseCase               // 仪表盘统计聚合
+	authRegister   *auth.RegisterUseCase
+	authLogin      *auth.LoginUseCase
+	tokenParser    *authadapter.JWTGenerator
+	ai             port.AIGenerator
+	agentCfgUC     *agentconfig.AgentConfigUseCase
+	llmCfgUC       *llmconfig.LLMConfigUseCase
+	conversationUC *conversation.ConversationUseCase
+	toolRegistry   *port.ToolRegistry  // 全局工具注册表（供 /tools 端点查询）
+	statsUC        *stats.StatsUseCase // 仪表盘统计聚合
 	// GEO 业务（商户端核心）——通过 SetGEO 延迟注入，可选
-	geoBrandUC   *geo.BrandUseCase
-	geoMonitorUC *geo.MonitorUseCase
-	geoRankUC    *geo.RankUseCase
-	geoContentUC *geo.ContentUseCase
+	geoBrandUC    *geo.BrandUseCase
+	geoMonitorUC  *geo.MonitorUseCase
+	geoRankUC     *geo.RankUseCase
+	geoContentUC  *geo.ContentUseCase
 	geoDiagnoseUC *geo.DiagnoseUseCase
-	geoDistillUC *geo.KeywordDistillUseCase // 关键词蒸馏用例（可选）
-	geoStoreUC   *geo.StoreLocationUseCase  // 门店档案用例（本地生活地基，可选）
-	geoNearbyUC  *geo.NearbyUseCase         // 附近同行双榜用例（可选）
-	geoAirProbeUC *geo.AIRankProbeUseCase   // AI 榜单探查用例（可选，v2：AI 榜数据源）
-	geoAdviceUC  *geo.AdviceUseCase         // 行动建议用例（可选，P5-05）
-	geoCitationUC *geo.CitationUseCase      // 内容引用统计用例（可选，P5-02）
-	inputTipper   port.InputTipper          // 地址联想（可选，P1；未注入→空列表降级）
+	geoDistillUC  *geo.KeywordDistillUseCase // 关键词蒸馏用例（可选）
+	geoStoreUC    *geo.StoreLocationUseCase  // 门店档案用例（本地生活地基，可选）
+	geoNearbyUC   *geo.NearbyUseCase         // 附近同行双榜用例（可选）
+	geoAirProbeUC *geo.AIRankProbeUseCase    // AI 榜单探查用例（可选，v2：AI 榜数据源）
+	geoAdviceUC   *geo.AdviceUseCase         // 行动建议用例（可选，P5-05）
+	geoCitationUC *geo.CitationUseCase       // 内容引用统计用例（可选，P5-02）
+	inputTipper   port.InputTipper           // 地址联想（可选，P1；未注入→空列表降级）
 	// 结构化数据用例（JSON-LD/llms.txt）——通过 SetStructured 注入，可选
 	structuredUC *structured.StructuredDataUseCase
 	// 公开内容站处理器——通过 SetPublic 注入，可选
@@ -68,7 +64,7 @@ type Router struct {
 	// 收录管理用例（运行时配置/提交日志/手动补提交）——通过 SetIndexing 注入，可选
 	indexingUC *indexing.IndexingUseCase
 	// 多平台发布账号域（扫码绑定 + 半自动发布）——通过 SetAccount 延迟注入，可选
-	accountUC *account.AccountUseCase
+	accountUC     *account.AccountUseCase
 	publishSemiUC *account.PublishUseCase
 	// 用户管理（管理端）——通过 SetAdmin 延迟注入，可选
 	userRepo port.UserRepository
@@ -77,9 +73,9 @@ type Router struct {
 	// 站内通知（主动唤醒）——通过 SetNotifications 注入，可选
 	notifyUC *notification.NotifyUseCase
 	// 统一生成（Vidu 全量接入：视频/图片/音频/数字人）
-	generationUC      *generation.GenerationUseCase
+	generationUC       *generation.GenerationUseCase
 	generationProvider port.GenerationProvider
-	generationRegistry port.EndpointRegistry   // 规格管理（管理后台矩阵）
+	generationRegistry port.EndpointRegistry // 规格管理（管理后台矩阵）
 	generationSpecRepo port.GenerationSpecRepository
 	providerConfigUC   *providerconfig.UseCase // 厂商配置（管理后台）
 	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
@@ -244,12 +240,6 @@ func (r *Router) SetAI(ai port.AIGenerator) {
 	r.ai = ai
 }
 
-// SetTask 注入异步任务用例（enqueue + agent runner）。
-func (r *Router) SetTask(enqueueUC *taskuc.EnqueueUseCase, agentRunner port.AgentSyncRunner) {
-	r.enqueueUC = enqueueUC
-	r.agentRunner = agentRunner
-}
-
 // SetAgentConfig 注入 Agent 配置管理用例。
 func (r *Router) SetAgentConfig(uc *agentconfig.AgentConfigUseCase) {
 	r.agentCfgUC = uc
@@ -263,11 +253,6 @@ func (r *Router) SetLLMConfig(uc *llmconfig.LLMConfigUseCase) {
 // SetConversation 注入对话历史用例。
 func (r *Router) SetConversation(uc *conversation.ConversationUseCase) {
 	r.conversationUC = uc
-}
-
-// SetCrawlConfig 注入采集配置用例（保留：crawler 速率/robots 策略）。
-func (r *Router) SetCrawlConfig(uc *crawlconfig.CrawlConfigUseCase) {
-	r.crawlCfgUC = uc
 }
 
 // SetToolRegistry 注入全局工具注册表（供 /tools 端点查询）。
@@ -306,11 +291,6 @@ func (r *Router) Engine() *gin.Engine {
 			authGroup.POST("/register", authHandler.HandleRegister)
 			authGroup.POST("/login", authHandler.HandleLogin)
 		}
-	}
-
-	// 采集政策（公开，无需认证，让外部可查询合规承诺）
-	if r.crawlCfgUC != nil {
-		root.GET("/api/v1/crawl-policy", NewCrawlConfigHandler(r.crawlCfgUC).HandlePolicy)
 	}
 
 	// 公开内容站（无认证——让 AI 引擎/搜索引擎可爬取已发布内容）
@@ -357,14 +337,6 @@ func (r *Router) Engine() *gin.Engine {
 		if r.statsUC != nil {
 			api.GET("/stats", r.handleGetStats)
 		}
-		// Agent 同步执行 + 异步任务投递
-		if r.agentRunner != nil {
-			api.POST("/agents/run", NewAgentHandler(r.agentRunner).HandleRun)
-		}
-		if r.enqueueUC != nil {
-			taskHandler := NewTaskHandler(r.enqueueUC)
-			api.POST("/tasks", taskHandler.HandleEnqueue)
-		}
 		// Agent 配置管理
 		if r.agentCfgUC != nil {
 			api.GET("/agents", r.handleListAgentConfigs)
@@ -388,14 +360,6 @@ func (r *Router) Engine() *gin.Engine {
 			api.POST("/conversations/:id/messages", convHandler.HandleSaveMessage)
 			api.PUT("/conversations/:id", convHandler.HandleRename)
 			api.DELETE("/conversations/:id", convHandler.HandleDelete)
-		}
-		// 采集配置（运行时可调的速率/robots 开关）
-		if r.crawlCfgUC != nil {
-			crawlCfgHandler := NewCrawlConfigHandler(r.crawlCfgUC)
-			api.GET("/crawl-config", crawlCfgHandler.HandleGet)
-			api.PUT("/crawl-config", crawlCfgHandler.HandleUpdate)
-		}
-		// 知识搜索（向量库配置后启用）
 		}
 
 		// GEO 业务路由（商户端核心：品牌/关键词/监测/排行榜/内容）
@@ -434,27 +398,24 @@ func (r *Router) Engine() *gin.Engine {
 			// 关键词（:id 即 brandId，handler 内用 c.Param("id") 取）
 			api.GET("/geo/brands/:id/keywords", geoHandler.HandleListKeywords)
 			api.POST("/geo/brands/:id/keywords", geoHandler.HandleAddKeyword)
-			api.POST("/geo/brands/:id/keywords/generate", geoHandler.HandleGenerateKeywords)
 			// 监测
 			api.POST("/geo/monitor", geoHandler.HandleMonitor)
-			api.POST("/geo/monitor-keyword", geoHandler.HandleMonitorKeyword) // 单关键词即时监测
+			api.POST("/geo/monitor-keyword", geoHandler.HandleMonitorKeyword)   // 单关键词即时监测
 			api.POST("/geo/monitor-multi", geoHandler.HandleMonitorMultiEngine) // 多引擎批量监测
 			// 商户端自动盯盘开关（租户级：我的品牌是否参与每日自动监测）
 			if r.settingsUC != nil {
 				api.GET("/geo/monitor-auto", r.HandleGetTenantAutoMonitor)
 				api.PUT("/geo/monitor-auto", r.HandleSetTenantAutoMonitor)
 			}
-			api.GET("/geo/monitor/:keywordId", geoHandler.HandleLatestMonitor)
-			api.GET("/geo/brands/:id/monitor-results", geoHandler.HandleLatestMonitorByBrand) // 品牌批量结果
 			api.GET("/geo/monitor-results", geoHandler.HandleAllMonitorResults) // 租户全部监测结果（关键词一览页用）
 			api.GET("/geo/brands/:id/overview", geoHandler.HandleBrandOverview)
 			// 内容优化
 			api.POST("/geo/optimize", geoHandler.HandleOptimizeContent)
 			api.GET("/geo/brands/:id/contents", geoHandler.HandleListContents)
 			api.POST("/geo/brands/:id/contents/generate", geoHandler.HandleGenerateContent)
-			api.POST("/geo/brands/:id/contents/generate-stream", geoHandler.HandleGenerateContentStream) // SSE 流式生成
-			api.POST("/geo/brands/:id/contents/:contentId/status", geoHandler.HandleSetContentStatus) // 状态流转 draft↔published
-			api.DELETE("/geo/brands/:id/contents/:contentId", geoHandler.HandleDeleteContent) // 删除内容（管理后台/工作台）
+			api.POST("/geo/brands/:id/contents/generate-stream", geoHandler.HandleGenerateContentStream)   // SSE 流式生成
+			api.POST("/geo/brands/:id/contents/:contentId/status", geoHandler.HandleSetContentStatus)      // 状态流转 draft↔published
+			api.DELETE("/geo/brands/:id/contents/:contentId", geoHandler.HandleDeleteContent)              // 删除内容（管理后台/工作台）
 			api.POST("/geo/brands/:id/contents/:contentId/resubmit-index", geoHandler.HandleResubmitIndex) // 商户端自助补提交收录
 			// GEO 诊断
 			api.POST("/geo/brands/:id/diagnose", geoHandler.HandleDiagnose)
@@ -526,15 +487,15 @@ func (r *Router) Engine() *gin.Engine {
 			api.DELETE("/media/assets/:id", mh.HandleDelete)
 		}
 
-			// 管理端路由（仅 admin 角色可访问）
-			if r.userRepo != nil {
-				adminGroup := api.Group("/admin")
-				adminGroup.Use(middleware.RequireRole("admin"))
-				{
-					userHandler := NewUserHandler(r.authRegister, r.userRepo)
-					adminGroup.GET("/users", userHandler.HandleListUsers)
-					adminGroup.POST("/users", userHandler.HandleCreateMerchant)
-					adminGroup.DELETE("/users/:id", userHandler.HandleDeleteUser)
+		// 管理端路由（仅 admin 角色可访问）
+		if r.userRepo != nil {
+			adminGroup := api.Group("/admin")
+			adminGroup.Use(middleware.RequireRole("admin"))
+			{
+				userHandler := NewUserHandler(r.authRegister, r.userRepo)
+				adminGroup.GET("/users", userHandler.HandleListUsers)
+				adminGroup.POST("/users", userHandler.HandleCreateMerchant)
+				adminGroup.DELETE("/users/:id", userHandler.HandleDeleteUser)
 				// 全平台资源管理（admin 旁路：显式全局查询，不走商户租户上下文）
 				if r.geoBrandUC != nil {
 					adminGroup.GET("/brands", geoHandler.HandleAdminListBrands)
@@ -548,62 +509,62 @@ func (r *Router) Engine() *gin.Engine {
 					adminGroup.GET("/tavily-status", r.handleTavilyStatus)
 					adminGroup.PUT("/tavily-key", r.handleUpdateTavilyKey)
 				}
-			// 平台系统设置（运行时开关）
-			if r.settingsUC != nil {
-				adminGroup.GET("/settings/auto-monitor", r.HandleGetAutoMonitor)
-				adminGroup.PUT("/settings/auto-monitor", r.HandleSetAutoMonitor)
-				// 浏览器可见性（RPA 发布/扫码登录时是否显示浏览器——动态切换无需重启）
-				adminGroup.GET("/settings/browser-headed", r.HandleGetBrowserHeaded)
-				adminGroup.PUT("/settings/browser-headed", r.HandleSetBrowserHeaded)
-			}
-			// 提示词模板管理（内容生成/优化系统提示词可管理、可热更新）
-			if r.promptTemplateRepo != nil {
-				adminGroup.GET("/prompt-templates", r.HandleListPromptTemplates)
-				adminGroup.PUT("/prompt-templates/:key", r.HandleUpdatePromptTemplate)
-			}
-			// 生成规格管理（Vidu 端点×模型矩阵——DB 驱动全局掌控，30s 热生效）
-			if r.generationRegistry != nil && r.generationSpecRepo != nil {
-				gh := NewGenerationAdminHandler(r.generationRegistry, r.generationSpecRepo)
-				adminGroup.GET("/generation/specs", gh.HandleListSpecs)
-				adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
-				adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
-			}
-			// 厂商配置管理（按厂商设置 API Key——保存后对已装配厂商热生效）
-			if r.providerConfigUC != nil {
-				pch := NewProviderConfigHandler(r.providerConfigUC, r.generationProvider)
-				adminGroup.GET("/provider-configs", pch.HandleList)
-				adminGroup.PUT("/provider-configs/:provider", pch.HandleSave)
-			}
-			// 收录管理（运行时配置/提交日志/手动补提交）
-			if r.indexingUC != nil {
-				adminGroup.GET("/indexing/config", r.HandleGetIndexingConfig)
-				adminGroup.PUT("/indexing/config", r.HandleUpdateIndexingConfig)
-				adminGroup.GET("/indexing/logs", r.HandleListIndexingLogs)
-				adminGroup.POST("/indexing/re-submit", r.HandleReSubmitAll)
-				adminGroup.POST("/indexing/generate-key", r.HandleGenerateIndexingKey) // 自动生成密钥（IndexNow 所有权证明）
-				adminGroup.GET("/indexing/verify-key", r.HandleVerifyIndexingKey)      // 验证 key 文件可访问
-			}
-			// 经济系统——套餐/订阅/订单管理（admin）
-			if r.billingUC != nil {
-				adminGroup.GET("/billing/plans", r.HandleAdminListPlans)
-				adminGroup.POST("/billing/plans", r.HandleAdminSavePlan)
-				adminGroup.DELETE("/billing/plans/:id", r.HandleAdminDeletePlan)
-				adminGroup.GET("/billing/subscriptions", r.HandleAdminListSubscriptions)
-				adminGroup.PUT("/billing/subscriptions/:tenant", r.HandleAdminAssignPlan) // 手动开通（线下收款）
-				adminGroup.GET("/billing/orders", r.HandleAdminListOrders)
-				adminGroup.GET("/billing/revenue", r.HandleAdminRevenueReport) // 收入概览
-				adminGroup.GET("/billing/cost-analysis", r.HandleAdminCostAnalysis) // 成本分析（X-01：收入 vs 成本双报表）
-				adminGroup.GET("/billing/payment-config", r.HandleGetPaymentConfig) // 支付网关配置
-				adminGroup.PUT("/billing/payment-config", r.HandleSetPaymentConfig) // 保存支付配置
-			}
-			// 经济系统——商户端（我的套餐/订阅/订单，多租户隔离）
-			if r.billingUC != nil {
-				api.GET("/billing/plans", r.HandleListActivePlans)
-				api.GET("/billing/my-plan", r.HandleGetMyPlan)
-				api.GET("/billing/usage", r.HandleGetMyUsage) // 配额余量（进度条）
-				api.GET("/billing/orders", r.HandleListMyOrders)
-				api.POST("/billing/orders", r.HandleCreateOrder)              // 下单购买
-				api.POST("/billing/orders/:id/confirm", r.HandleConfirmOrder) // 确认支付（mock 自动/真实回调）
+				// 平台系统设置（运行时开关）
+				if r.settingsUC != nil {
+					adminGroup.GET("/settings/auto-monitor", r.HandleGetAutoMonitor)
+					adminGroup.PUT("/settings/auto-monitor", r.HandleSetAutoMonitor)
+					// 浏览器可见性（RPA 发布/扫码登录时是否显示浏览器——动态切换无需重启）
+					adminGroup.GET("/settings/browser-headed", r.HandleGetBrowserHeaded)
+					adminGroup.PUT("/settings/browser-headed", r.HandleSetBrowserHeaded)
+				}
+				// 提示词模板管理（内容生成/优化系统提示词可管理、可热更新）
+				if r.promptTemplateRepo != nil {
+					adminGroup.GET("/prompt-templates", r.HandleListPromptTemplates)
+					adminGroup.PUT("/prompt-templates/:key", r.HandleUpdatePromptTemplate)
+				}
+				// 生成规格管理（Vidu 端点×模型矩阵——DB 驱动全局掌控，30s 热生效）
+				if r.generationRegistry != nil && r.generationSpecRepo != nil {
+					gh := NewGenerationAdminHandler(r.generationRegistry, r.generationSpecRepo)
+					adminGroup.GET("/generation/specs", gh.HandleListSpecs)
+					adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
+					adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
+				}
+				// 厂商配置管理（按厂商设置 API Key——保存后对已装配厂商热生效）
+				if r.providerConfigUC != nil {
+					pch := NewProviderConfigHandler(r.providerConfigUC, r.generationProvider)
+					adminGroup.GET("/provider-configs", pch.HandleList)
+					adminGroup.PUT("/provider-configs/:provider", pch.HandleSave)
+				}
+				// 收录管理（运行时配置/提交日志/手动补提交）
+				if r.indexingUC != nil {
+					adminGroup.GET("/indexing/config", r.HandleGetIndexingConfig)
+					adminGroup.PUT("/indexing/config", r.HandleUpdateIndexingConfig)
+					adminGroup.GET("/indexing/logs", r.HandleListIndexingLogs)
+					adminGroup.POST("/indexing/re-submit", r.HandleReSubmitAll)
+					adminGroup.POST("/indexing/generate-key", r.HandleGenerateIndexingKey) // 自动生成密钥（IndexNow 所有权证明）
+					adminGroup.GET("/indexing/verify-key", r.HandleVerifyIndexingKey)      // 验证 key 文件可访问
+				}
+				// 经济系统——套餐/订阅/订单管理（admin）
+				if r.billingUC != nil {
+					adminGroup.GET("/billing/plans", r.HandleAdminListPlans)
+					adminGroup.POST("/billing/plans", r.HandleAdminSavePlan)
+					adminGroup.DELETE("/billing/plans/:id", r.HandleAdminDeletePlan)
+					adminGroup.GET("/billing/subscriptions", r.HandleAdminListSubscriptions)
+					adminGroup.PUT("/billing/subscriptions/:tenant", r.HandleAdminAssignPlan) // 手动开通（线下收款）
+					adminGroup.GET("/billing/orders", r.HandleAdminListOrders)
+					adminGroup.GET("/billing/revenue", r.HandleAdminRevenueReport)      // 收入概览
+					adminGroup.GET("/billing/cost-analysis", r.HandleAdminCostAnalysis) // 成本分析（X-01：收入 vs 成本双报表）
+					adminGroup.GET("/billing/payment-config", r.HandleGetPaymentConfig) // 支付网关配置
+					adminGroup.PUT("/billing/payment-config", r.HandleSetPaymentConfig) // 保存支付配置
+				}
+				// 经济系统——商户端（我的套餐/订阅/订单，多租户隔离）
+				if r.billingUC != nil {
+					api.GET("/billing/plans", r.HandleListActivePlans)
+					api.GET("/billing/usage", r.HandleGetMyUsage) // 配额余量（进度条）
+					api.GET("/billing/orders", r.HandleListMyOrders)
+					api.POST("/billing/orders", r.HandleCreateOrder)              // 下单购买
+					api.POST("/billing/orders/:id/confirm", r.HandleConfirmOrder) // 确认支付（mock 自动/真实回调）
+				}
 			}
 		}
 	}

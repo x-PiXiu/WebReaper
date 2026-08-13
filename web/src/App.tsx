@@ -1,10 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
 // 管理后台页面
-import Dashboard from './pages/Dashboard'
-import Chat from './pages/Chat'
-import AgentConfigs from './pages/AgentConfigs'
-import Tools from './pages/Tools'
+import Dashboard from './pages/admin/Dashboard'
+import Chat from './pages/admin/Chat'
+import AgentConfigs from './pages/admin/AgentConfigs'
 // 商户端 GEO 页面
 import MerchantHome from './pages/merchant/Home'
 import Brands from './pages/merchant/Brands'
@@ -25,6 +24,7 @@ import AdminSettings from './pages/admin/Settings'
 import AdminBilling from './pages/admin/Billing'
 import GenerationSpecs from './pages/admin/GenerationSpecs'
 import Providers from './pages/admin/Providers'
+import AdminPromptTemplates from './pages/admin/PromptTemplates'
 // 布局与守卫
 import MerchantLayout from './layouts/MerchantLayout'
 import AdminLayout from './layouts/AdminLayout'
@@ -60,10 +60,10 @@ export default function App() {
           <Route path="/admin/contents" element={<AdminContents />} />
           <Route path="/admin/settings" element={<AdminSettings />} />
           <Route path="/admin/agent-configs" element={<AgentConfigs />} />
-          <Route path="/admin/tools" element={<Tools />} />
           <Route path="/admin/indexing" element={<Indexing />} />
           <Route path="/admin/generation-specs" element={<GenerationSpecs />} />
           <Route path="/admin/providers" element={<Providers />} />
+          <Route path="/admin/prompt-templates" element={<AdminPromptTemplates />} />
           <Route path="/admin/billing" element={<AdminBilling />} />
           <Route path="/admin/chat" element={<Chat />} />
         </Route>

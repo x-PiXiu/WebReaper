@@ -310,28 +310,6 @@ func (h *GEOHandler) HandleMonitor(c *gin.Context) {
 	success(c, monitoringResultsToView(results))
 }
 
-func (h *GEOHandler) HandleLatestMonitor(c *gin.Context) {
-	keywordID := c.Param("keywordId")
-	results, err := h.monitorUC.GetLatest(c.Request.Context(), middleware.CurrentTenantID(c), keywordID)
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	success(c, monitoringResultsToView(results))
-}
-
-// HandleLatestMonitorByBrand GET /api/v1/geo/brands/:id/monitor-results
-// 取某品牌下所有关键词的最新监测结果（关键词一览页用）。
-func (h *GEOHandler) HandleLatestMonitorByBrand(c *gin.Context) {
-	brandID := c.Param("id")
-	results, err := h.monitorUC.GetLatestByBrand(c.Request.Context(), middleware.CurrentTenantID(c), brandID)
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	success(c, monitoringResultsToView(results))
-}
-
 // HandleAllMonitorResults GET /api/v1/geo/monitor-results
 // 取租户下所有关键词的最新监测结果（不依赖品牌筛选，关键词一览页默认用这个）。
 func (h *GEOHandler) HandleAllMonitorResults(c *gin.Context) {
@@ -650,21 +628,6 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 	if flusher != nil {
 		flusher.Flush()
 	}
-}
-
-// ---- 关键词生成 ----
-
-// HandleGenerateKeywords POST /api/v1/geo/brands/:brandId/keywords/generate
-// AI 根据品牌定位自动生成候选关键词，供商户勾选添加。
-func (h *GEOHandler) HandleGenerateKeywords(c *gin.Context) {
-	brandID := c.Param("id")
-	tenantID := middleware.CurrentTenantID(c)
-	keywords, err := h.brandUC.GenerateKeywords(c.Request.Context(), tenantID, brandID)
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	success(c, gin.H{"keywords": keywords})
 }
 
 // ---- GEO 诊断 ----

@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Card, Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, Switch, message } from 'antd'
+import { Card, Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, Switch, message, Tabs } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { businessApi } from '../api/business'
-import type { AgentConfig, LLMConfig } from '../types/api'
+import { businessApi } from '../../api/business'
+import type { AgentConfig, LLMConfig, ToolView } from '../../types/api'
 
 const { Title, Text } = Typography
 
@@ -149,30 +149,6 @@ export default function AgentConfigs() {
     })
   }
 
-  // 预设模板（工具已全局可用，模板不再配置 tools）
-  const loadTemplate = (template: string) => {
-    const templates: Record<string, Partial<AgentConfig>> = {
-      tech_blog: {
-        name: 'tech-blog-agent',
-        system_prompt: '你是一个技术文章采集助手。采集技术博客和文档，提取标题、核心内容和关键知识点。用中文总结。',
-      },
-      data_analysis: {
-        name: 'data-analysis-agent',
-        system_prompt: '你是一个数据分析采集助手。通过API采集结构化数据，分析趋势和规律，输出结构化报告。',
-      },
-      content_curator: {
-        name: 'content-curator-agent',
-        system_prompt: '你是一个内容策展助手。搜索并采集特定主题的高质量内容，去重后生成摘要和标签。',
-      },
-    }
-    const tpl = templates[template]
-    if (tpl) {
-      openCreateAgent()
-      agentForm.setFieldsValue(tpl)
-      message.info('已加载模板，确认或修改后点击保存')
-    }
-  }
-
   // LLM 下拉选项
   const llmOptions = llmConfigs.map((l) => ({
     value: l.name,
@@ -248,7 +224,7 @@ export default function AgentConfigs() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <Title level={4} style={{ margin: 0 }}>Agent 配置</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>管理 Agent 与 LLM 配置；工具已全局可用，无需为 Agent 单独配置</Text>
+          <Text type="secondary" style={{ fontSize: 13 }}>管理 Agent、LLM 配置与工具启停；工具已全局可用，无需为 Agent 单独配置</Text>
         </div>
         <Space>
           <Button onClick={openCreateLLM}>新建 LLM 配置</Button>
@@ -256,43 +232,48 @@ export default function AgentConfigs() {
         </Space>
       </div>
 
-      {/* Agent 配置表 */}
-      <Card title="Agent 列表">
-        <Table dataSource={configs} columns={agentColumns} rowKey="name" pagination={false} size="middle" />
-        {configs.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 48 }}>
-            <Text type="secondary" style={{ fontSize: 14 }}>
-              暂无 Agent 配置。点击「创建 Agent」添加第一个，或使用下方模板快速开始。
-            </Text>
-          </div>
-        )}
-      </Card>
-
-      {/* LLM 配置表 */}
-      <Card title="LLM 配置" style={{ marginTop: 16 }}>
-        <Table dataSource={llmConfigs} columns={llmColumns} rowKey="name" pagination={false} size="middle" />
-        {llmConfigs.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 48 }}>
-            <Text type="secondary" style={{ fontSize: 14 }}>
-              暂无 LLM 配置。点击「新建 LLM 配置」添加厂商/模型（首次启动会自动 seed 一个 default）。
-            </Text>
-          </div>
-        )}
-      </Card>
-
-      {/* 快速模板 */}
-      <Card title="快速模板" style={{ marginTop: 16 }}>
-        <Space wrap>
-          <Button onClick={() => loadTemplate('tech_blog')}>技术文章采集 Agent</Button>
-          <Button onClick={() => loadTemplate('data_analysis')}>数据分析 Agent</Button>
-          <Button onClick={() => loadTemplate('content_curator')}>内容策展 Agent</Button>
-        </Space>
-      </Card>
-
-      {/* Tavily 搜索配置 */}
-      <Card title="Tavily 搜索配置" style={{ marginTop: 16 }}>
-        <TavilyConfigSection />
-      </Card>
+      <Tabs
+        defaultActiveKey="agents"
+        items={[
+          {
+            key: 'agents',
+            label: 'Agent 列表',
+            children: (
+              <Card>
+                <Table dataSource={configs} columns={agentColumns} rowKey="name" pagination={false} size="middle" />
+                {configs.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 48 }}>
+                    <Text type="secondary" style={{ fontSize: 14 }}>
+                      暂无 Agent 配置。点击「创建 Agent」添加第一个。
+                    </Text>
+                  </div>
+                )}
+              </Card>
+            ),
+          },
+          {
+            key: 'llm',
+            label: 'LLM 配置',
+            children: (
+              <Card>
+                <Table dataSource={llmConfigs} columns={llmColumns} rowKey="name" pagination={false} size="middle" />
+                {llmConfigs.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: 48 }}>
+                    <Text type="secondary" style={{ fontSize: 14 }}>
+                      暂无 LLM 配置。点击「新建 LLM 配置」添加厂商/模型（首次启动会自动 seed 一个 default）。
+                    </Text>
+                  </div>
+                )}
+              </Card>
+            ),
+          },
+          {
+            key: 'tools',
+            label: '工具面板',
+            children: <ToolsSection />,
+          },
+        ]}
+      />
 
       {/* 创建/编辑 Agent 弹窗 */}
       <Modal
@@ -393,62 +374,65 @@ export default function AgentConfigs() {
   )
 }
 
-// Tavily 搜索配置区（管理后台用）
-function TavilyConfigSection() {
+// 工具面板（Tab）：动态控制哪些工具可用/禁用。
+// 禁用的工具不会被 Agent 拿到（后端 ToolRegistry.All/GetByNames 自动过滤）。
+function ToolsSection() {
   const queryClient = useQueryClient()
-  const { data: status, isLoading } = useQuery({
-    queryKey: ['tavily-status'],
-    queryFn: () => businessApi.getTavilyStatus(),
+  const { data: tools = [] } = useQuery({
+    queryKey: ['tools'],
+    queryFn: () => businessApi.listTools(),
   })
 
-  const handleToggle = async (enabled: boolean) => {
+  const handleToggle = async (name: string, enabled: boolean) => {
     try {
-      await businessApi.updateTavilyKey({ enabled })
-      message.success(enabled ? 'Tavily 已启用' : 'Tavily 已禁用')
-      queryClient.invalidateQueries({ queryKey: ['tavily-status'] })
-    } catch {}
+      await businessApi.toggleTool(name, enabled)
+      message.success(`${enabled ? '启用' : '禁用'}工具：${name}`)
+      queryClient.invalidateQueries({ queryKey: ['tools'] })
+    } catch {
+      // axios 拦截器已提示
+    }
   }
 
-  if (isLoading) return <Text type="secondary">加载中...</Text>
+  const columns = [
+    {
+      title: '工具名', dataIndex: 'name', key: 'name', width: 220,
+      render: (name: string) => <Text code>{name}</Text>,
+    },
+    {
+      title: '说明', dataIndex: 'description', key: 'description',
+      ellipsis: true,
+    },
+    {
+      title: '状态', dataIndex: 'enabled', key: 'enabled', width: 120,
+      render: (enabled: boolean, record: ToolView) => (
+        <Space>
+          <Tag color={enabled ? 'green' : 'default'}>{enabled ? '启用' : '禁用'}</Tag>
+          <Switch
+            checked={enabled}
+            size="small"
+            onChange={(checked) => handleToggle(record.name, checked)}
+          />
+        </Space>
+      ),
+    },
+  ]
 
-  const registered = status?.registered
-  const enabled = status?.enabled
+  const enabledCount = tools.filter((t: ToolView) => t.enabled).length
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <Tag color={enabled ? 'success' : 'default'}>
-          {enabled ? '已启用' : '未启用'}
-        </Tag>
-        <Text type="secondary" style={{ fontSize: 13 }}>
-          Tavily 是专为 AI 设计的高质量搜索 API。配置后，GEO 监测的 Agent 会使用它搜索全网，
-          返回比普通搜索引擎更干净、更适合 AI 分析的内容。
-        </Text>
-      </div>
-      <Space direction="vertical" size={8}>
-        <div>
-          <Text type="secondary" style={{ fontSize: 13 }}>配置方式：</Text>
-          <Text code style={{ fontSize: 12 }}>在 .env 文件设置 TAVILY_API_KEY=tvly-xxxxx</Text>
-        </div>
-        <div>
-          <Text type="secondary" style={{ fontSize: 13 }}>获取 Key：</Text>
-          <a href="https://tavily.com" target="_blank" rel="noopener" style={{ fontSize: 13 }}>tavily.com</a>
-          <Text type="secondary" style={{ fontSize: 13 }}>（免费 1000 次/月）</Text>
-        </div>
-        {registered && (
-          <div style={{ marginTop: 8 }}>
-            <Switch checked={enabled} onChange={handleToggle} />
-            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-              {enabled ? 'Agent 监测时使用 Tavily 搜索' : 'Agent 监测时使用 Bing 搜索（降级）'}
-            </Text>
-          </div>
-        )}
-        {!registered && (
-          <Text type="warning" style={{ fontSize: 13 }}>
-            Tavily 工具未注册，请在 .env 配置 TAVILY_API_KEY 后重启服务
-          </Text>
-        )}
-      </Space>
+      <Text type="secondary">
+        动态控制 Agent 可用的工具。禁用的工具不会被 Agent 调用（如禁用 generate_content 则 Agent 不能生成结构化内容）。
+        当前 {enabledCount}/{tools.length} 个工具启用。
+      </Text>
+      <Table
+        style={{ marginTop: 16 }}
+        dataSource={tools}
+        columns={columns}
+        rowKey="name"
+        pagination={false}
+        size="middle"
+      />
     </div>
   )
 }

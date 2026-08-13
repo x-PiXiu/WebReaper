@@ -226,11 +226,6 @@ export default function AdminBilling() {
               </div>
             ),
           },
-          {
-            key: 'payment',
-            label: '支付配置',
-            children: <PaymentConfigTab />,
-          },
         ]}
       />
 
@@ -269,69 +264,3 @@ export default function AdminBilling() {
   )
 }
 
-// 支付网关配置子组件（admin 运行时设置——支持 ZPAY 通道）。
-function PaymentConfigTab() {
-  const queryClient = useQueryClient()
-  const [form] = Form.useForm()
-  const { data: cfgRes } = useQuery({
-    queryKey: ['payment-config'],
-    queryFn: () => businessApi.adminGetPaymentConfig(),
-  })
-  const config = cfgRes?.config || {}
-  const isZpay = config.gateway === 'zpay'
-
-  const saveMut = useMutation({
-    mutationFn: (vals: any) => businessApi.adminSetPaymentConfig(vals),
-    onSuccess: () => { message.success('支付配置已保存（重启服务后生效）'); queryClient.invalidateQueries({ queryKey: ['payment-config'] }) },
-    onError: () => message.error('保存失败'),
-  })
-
-  return (
-    <div style={{ maxWidth: 560 }}>
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Space>
-          <Text strong>当前通道：</Text>
-          <Tag color={isZpay ? 'green' : 'default'}>{isZpay ? 'ZPAY（真实收款）' : 'Mock（开发演示）'}</Tag>
-        </Space>
-        {!isZpay && <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-          未配置 ZPAY 或配置不完整——商户购买走 mock 自动确认。配置完整后重启服务切换为真实收款。
-        </Text>}
-      </Card>
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          gateway: config.gateway || 'mock',
-          pid: config.pid || '',
-          key: config.key || '',
-          notify_url: config.notify_url || '',
-          return_url: config.return_url || '',
-        }}
-        onFinish={(vals) => saveMut.mutate(vals)}
-      >
-        <Form.Item name="gateway" label="支付通道" rules={[{ required: true }]}>
-          <Select options={[{ value: 'mock', label: 'Mock（开发演示）' }, { value: 'zpay', label: 'ZPAY 易支付' }]} />
-        </Form.Item>
-        <Form.Item name="pid" label="商户 ID（PID）">
-          <Input placeholder="ZPAY 后台获取的商户 ID" />
-        </Form.Item>
-        <Form.Item name="key" label="商户密钥（KEY）" tooltip="保存后脱敏显示（只显示前 4 位）。留空则不修改原密钥。">
-          <Input.Password placeholder="ZPAY 后台获取的商户密钥" />
-        </Form.Item>
-        <Form.Item name="notify_url" label="异步回调地址" tooltip="支付成功后 ZPAY 服务器回调此地址，必须公网可达。">
-          <Input placeholder="https://your-domain.com/api/v1/billing/webhook/zpay" />
-        </Form.Item>
-        <Form.Item name="return_url" label="支付完成跳转地址" tooltip="用户支付完成后浏览器跳转的地址。">
-          <Input placeholder="https://your-domain.com/m/my-plan" />
-        </Form.Item>
-        <Form.Item>
-          <Button type="primary" htmlType="submit" loading={saveMut.isPending}>保存配置</Button>
-        </Form.Item>
-      </Form>
-      <Text type="secondary" style={{ fontSize: 12 }}>
-        注意：配置保存后需重启服务才生效（支付网关在启动时读取配置初始化）。
-        回调地址必须公网可达，否则 ZPAY 服务器无法通知支付结果。
-      </Text>
-    </div>
-  )
-}

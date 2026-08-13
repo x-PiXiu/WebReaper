@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Typography, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Switch, Select, Tooltip, Card } from 'antd'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '../../api/client'
+import { businessApi } from '../../api/business'
+import type { GenerationSpec } from '../../types/api'
 
 const { Text } = Typography
 
@@ -21,16 +22,6 @@ interface GenerationCapability {
   max_prompt_len?: number
 }
 
-interface GenSpec {
-  sub_type: string
-  model: string
-  endpoint: string
-  enabled: boolean
-  capabilities_json: string
-  has_override?: boolean
-  updated_at?: string
-}
-
 function capSummary(cap: GenerationCapability | null): string {
   if (!cap) return '-'
   const parts: string[] = []
@@ -43,7 +34,7 @@ function capSummary(cap: GenerationCapability | null): string {
 
 export default function GenerationSpecs() {
   const queryClient = useQueryClient()
-  const [editing, setEditing] = useState<GenSpec | null>(null)
+  const [editing, setEditing] = useState<GenerationSpec | null>(null)
   const [adding, setAdding] = useState(false)
   const [form] = Form.useForm()
   const [types, setTypes] = useState<string[]>([])
@@ -51,17 +42,17 @@ export default function GenerationSpecs() {
   const { data: specs = [], isLoading } = useQuery({
     queryKey: ['admin-gen-specs'],
     queryFn: async () => {
-      const r = await apiClient.get<unknown, { specs: GenSpec[] }>('/api/v1/admin/generation/specs')
+      const r = await businessApi.adminListGenerationSpecs()
       // 端点类型枚举（用于"新增模型"下拉）
-      const t = await apiClient.get<unknown, { types: { sub_type: string }[] }>('/api/v1/generation/types')
+      const t = await businessApi.listGenerationTypes()
       setTypes(t.types.map((x) => x.sub_type))
       return r.specs
     },
   })
 
   const saveMut = useMutation({
-    mutationFn: ({ subType, model, body }: { subType: string; model: string; body: any }) =>
-      apiClient.put(`/api/v1/admin/generation/specs/${subType}/${model}`, body),
+    mutationFn: ({ subType, model, body }: { subType: string; model: string; body: { capability: GenerationCapability; enabled: boolean } }) =>
+      businessApi.adminSaveGenerationSpec(subType, model, body),
     onSuccess: () => {
       message.success('已保存（30 秒内热生效，无需重启）')
       setEditing(null)
@@ -73,7 +64,7 @@ export default function GenerationSpecs() {
 
   const deleteMut = useMutation({
     mutationFn: ({ subType, model }: { subType: string; model: string }) =>
-      apiClient.delete(`/api/v1/admin/generation/specs/${subType}/${model}`),
+      businessApi.adminDeleteGenerationSpec(subType, model),
     onSuccess: () => {
       message.success('已删除（恢复出厂默认）')
       queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] })
@@ -81,7 +72,7 @@ export default function GenerationSpecs() {
     onError: (e: Error) => message.error('删除失败：' + e.message),
   })
 
-  const openEdit = (spec: GenSpec) => {
+  const openEdit = (spec: GenerationSpec) => {
     let cap: GenerationCapability | null = null
     try { cap = spec.capabilities_json ? JSON.parse(spec.capabilities_json) : null } catch { /* ignore */ }
     form.setFieldsValue({
@@ -116,7 +107,7 @@ export default function GenerationSpecs() {
     { title: '模型', dataIndex: 'model', width: 140, render: (m: string) => <Text strong>{m}</Text> },
     {
       title: '能力摘要', key: 'cap',
-      render: (_: unknown, r: GenSpec) => {
+      render: (_: unknown, r: GenerationSpec) => {
         let cap: GenerationCapability | null = null
         try { cap = r.capabilities_json ? JSON.parse(r.capabilities_json) : null } catch { /* ignore */ }
         return <Text type="secondary" style={{ fontSize: 12 }}>{capSummary(cap)}</Text>
@@ -128,7 +119,7 @@ export default function GenerationSpecs() {
     },
     {
       title: '来源', key: 'src', width: 90,
-      render: (_: unknown, r: GenSpec) => (
+      render: (_: unknown, r: GenerationSpec) => (
         <Tooltip title={r.has_override ? '数据库覆盖行——删除可恢复出厂默认' : '出厂默认值（未覆盖）'}>
           <Tag color={r.has_override ? 'blue' : 'default'} style={{ fontSize: 10 }}>{r.has_override ? 'DB 覆盖' : '出厂'}</Tag>
         </Tooltip>
@@ -136,7 +127,7 @@ export default function GenerationSpecs() {
     },
     {
       title: '操作', key: 'action', width: 180,
-      render: (_: unknown, r: GenSpec) => (
+      render: (_: unknown, r: GenerationSpec) => (
         <Space size={4}>
           <Button size="small" type="link" onClick={() => openEdit(r)}>编辑</Button>
           {r.has_override && (

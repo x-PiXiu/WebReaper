@@ -4,9 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { getToken, useAuthStore } from '../store/auth'
-import { businessApi } from '../api/business'
-import type { ChatMessage, AgentConfig, LLMConfig, ToolView } from '../types/api'
+import { getToken, useAuthStore } from '../../store/auth'
+import { businessApi } from '../../api/business'
+import type { ChatMessage, AgentConfig, LLMConfig, ToolView } from '../../types/api'
 
 const { Text } = Typography
 const { TextArea } = Input

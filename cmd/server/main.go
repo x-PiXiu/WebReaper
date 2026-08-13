@@ -24,11 +24,11 @@ import (
 	"webreaper/internal/adapter/lock"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/mock"
+	"webreaper/internal/adapter/payment"
 	"webreaper/internal/adapter/provider"
 	"webreaper/internal/adapter/provider/vidu"
 	"webreaper/internal/adapter/provider/viduendpoint"
 	"webreaper/internal/adapter/publisher"
-	"webreaper/internal/adapter/payment"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
@@ -42,20 +42,18 @@ import (
 	"webreaper/internal/usecase/auth"
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
-	"webreaper/internal/usecase/crawlconfig"
+	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/notification"
 	"webreaper/internal/usecase/port"
+	"webreaper/internal/usecase/providerconfig"
 	"webreaper/internal/usecase/quota"
 	"webreaper/internal/usecase/scheduler"
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
 	"webreaper/internal/usecase/systemsettings"
-	taskuc "webreaper/internal/usecase/task"
-	"webreaper/internal/usecase/generation"
-	"webreaper/internal/usecase/providerconfig"
 )
 
 func main() {
@@ -91,7 +89,7 @@ func main() {
 	log.Info("WebReaper 启动中", port.String("env", cfg.Server.Env))
 
 	// 初始化仓储（降级 mock）
-	agentConfigRepo, llmConfigRepo, taskRepo, userRepo, convRepo, msgRepo, settingRepo := initRepositories(cfg.DB, logger)
+	agentConfigRepo, llmConfigRepo, userRepo, convRepo, msgRepo, settingRepo := initRepositories(cfg.DB, logger)
 
 	// 爬虫限流策略（从 config 读取，可经 .env 的 CRAWLER_REQUEST_INTERVAL_MS 调配）
 	crawlPolicy := cfg.Crawler.ToPolicy()
@@ -148,7 +146,6 @@ func main() {
 		})
 	}
 
-
 	// 认证
 	hasher := authadapter.NewBcryptHasher()
 	var tokenGen port.TokenGenerator = authadapter.NewJWTGenerator(cfg.JWT.Secret, cfg.JWT.Expiration)
@@ -168,16 +165,10 @@ func main() {
 		log.Info("已 seed 默认管理员账号 admin/admin123（请立即修改密码）")
 	}
 
-	// Agent 执行器（解耦后不依赖 DataItemRepository——工具结果不自动落库）
-	agentRunner := agentadapter.NewTrpcAgentRunner(llmConfigRepo, toolRegistry, logger)
-
 	// 业务用例装配（handler 只依赖这些 usecase，不直接持有仓储）
 	var statsUC *stats.StatsUseCase
 	agentCfgUC := agentconfig.NewAgentConfigUseCase(agentConfigRepo)
 	conversationUC := conversation.NewConversationUseCase(convRepo, msgRepo)
-	crawlCfgUC := crawlconfig.NewCrawlConfigUseCase(settingRepo)
-	// 首次启动 seed 默认采集策略
-	_ = crawlCfgUC.EnsureDefault(context.Background())
 
 	// 框架内容编排工具（图编排：探查→生成→校验→补生成）。
 	// 仅配了 LLM 时启用；包装成 generate_content 工具注册进工具池。
@@ -195,33 +186,14 @@ func main() {
 		log.Info("未配置 LLM，内容生成工具降级禁用")
 	}
 
-	// 异步任务
-	taskQueue := mock.NewMockTaskQueue(100)
-	enqueueUC := taskuc.NewEnqueueUseCase(taskQueue, taskRepo)
-
-	// 注册 Agent 异步处理器
-	handlerRegistry := taskuc.NewHandlerRegistry()
-	handlerRegistry.Register(taskuc.NewAgentHandler(agentRunner))
-	dispatchUC := taskuc.NewDispatchUseCase(handlerRegistry, logger)
-	worker := taskuc.NewWorker(taskQueue, taskRepo, dispatchUC, logger)
-	workerCtx, workerCancel := context.WithCancel(context.Background())
-	go worker.Start(workerCtx)
-
-	// mocksite
-	if os.Getenv("MOCKSITE_ENABLED") == "true" {
-		go startMockSite(log)
-	}
-
 	// 路由 + HTTP 服务（handler 只依赖 usecase 与 port 接口，不直接持有仓储/具体 adapter struct）
 	// 路由器（零参数——所有依赖通过 SetXxx 可选注入，端点按注入条件注册）
 	router := handler.NewRouter()
 	router.SetAuth(registerUC, loginUC, tokenParser)
 	router.SetAI(aiGenerator)
-	router.SetTask(enqueueUC, agentRunner)
 	router.SetAgentConfig(agentCfgUC)
 	router.SetLLMConfig(llmCfgUC)
 	router.SetConversation(conversationUC)
-	router.SetCrawlConfig(crawlCfgUC)
 	router.SetToolRegistry(toolRegistry)
 
 	// GEO 业务装配（商户端核心）。需要 DB + LLM 才启用。
@@ -284,8 +256,8 @@ func main() {
 	var geoMonitorUCRef *geo.MonitorUseCase
 	var geoContentUCRef *geo.ContentUseCase
 	var geoDistillUCRef *geo.KeywordDistillUseCase
-	var geoNearbyUCRef *geo.NearbyUseCase      // X-01：附近同行配额注入用
-	var geoDiagnoseUCRef *geo.DiagnoseUseCase  // X-01：诊断配额注入用
+	var geoNearbyUCRef *geo.NearbyUseCase     // X-01：附近同行配额注入用
+	var geoDiagnoseUCRef *geo.DiagnoseUseCase // X-01：诊断配额注入用
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
 		geoScorer := ai.NewLLMGEOScorer(aiGenerator)
 		geoBrandUC := geo.NewBrandUseCase(geoRepos.brand, geoRepos.keyword)
@@ -345,10 +317,10 @@ func main() {
 		// 否则 mock 降级（门店照常创建 geo_status=pending，附近同行只显示 AI 榜）。
 		geoLocator := geoadapter.NewAmapGeoCoder(cfg.AMap.APIKey)
 		geoPOISearcher := geoadapter.NewAmapPOISearcher(cfg.AMap.APIKey, cfg.AMap.APIVersion)
-		geoInputTipper := geoadapter.NewAmapInputTipper(cfg.AMap.APIKey)          // P1 地址联想
-		geoMeasurer := geoadapter.NewAmapDistanceMeasurer(cfg.AMap.APIKey)        // P2 驾车耗时
+		geoInputTipper := geoadapter.NewAmapInputTipper(cfg.AMap.APIKey)   // P1 地址联想
+		geoMeasurer := geoadapter.NewAmapDistanceMeasurer(cfg.AMap.APIKey) // P2 驾车耗时
 		if cfg.AMap.IsConfigured() {
-			log.Info("本地生活位置服务已启用（高德：地理编码 + 周边 POI 搜索 v"+cfg.AMap.APIVersion+" + 地址联想 + 距离测量）")
+			log.Info("本地生活位置服务已启用（高德：地理编码 + 周边 POI 搜索 v" + cfg.AMap.APIVersion + " + 地址联想 + 距离测量）")
 		} else {
 			log.Info("本地生活位置服务未配置 AMAP_API_KEY（门店暂不编码，附近同行仅 AI 榜）")
 		}
@@ -692,8 +664,6 @@ func main() {
 	log.Info("正在关闭服务...")
 	schedulerCancel()
 	taskScheduler.Stop()
-	workerCancel()
-	_ = taskQueue.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // RPA 发布可能需要较长时间完成
 	defer cancel()
 	_ = server.Shutdown(ctx)
@@ -702,14 +672,14 @@ func main() {
 
 func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 	port.AgentConfigRepository,
-	port.LLMConfigRepository, port.TaskRepository, port.UserRepository,
+	port.LLMConfigRepository, port.UserRepository,
 	port.ConversationRepository, port.MessageRepository, port.SystemSettingRepository,
 ) {
 	log := logger.With(port.String("component", "repository"))
 	if !dbCfg.IsConfigured() {
 		log.Info("未配置数据库，使用内存 mock")
 		return mock.NewMockAgentConfigRepository(), mock.NewMockLLMConfigRepository(),
-			mock.NewMockTaskRepository(), mock.NewMockUserRepository(),
+			mock.NewMockUserRepository(),
 			mock.NewMockConversationRepository(), mock.NewMockMessageRepository(),
 			mock.NewMockSystemSettingRepository()
 	}
@@ -721,7 +691,7 @@ func initRepositories(dbCfg config.DBConfig, logger port.Logger) (
 	}
 	log.Info("MySQL 连接成功")
 	return repository.NewGormAgentConfigRepository(db), repository.NewGormLLMConfigRepository(db),
-		repository.NewGormTaskRepository(db), repository.NewGormUserRepository(db),
+		repository.NewGormUserRepository(db),
 		repository.NewGormConversationRepository(db), repository.NewGormMessageRepository(db),
 		repository.NewGormSystemSettingRepository(db)
 }
@@ -806,19 +776,3 @@ func initAIGenerator(llmCfg config.LLMConfig, llmCfgRepo port.LLMConfigRepositor
 	log.Info("trpc-agent-go LLM 就绪（按 LLMConfig 动态选择 + 会话历史恢复）")
 	return gen
 }
-
-const mockSiteHTML = `<!DOCTYPE html><html><body><div class="job-list">
-<div class="job-item"><h3 class="position">Go 后端工程师</h3><span class="company">字节跳动</span><span class="salary">25-40K</span><ul class="requirements"><li>3年以上Go经验</li><li>熟悉Gin/GORM</li></ul></div>
-<div class="job-item"><h3 class="position">前端工程师</h3><span class="company">腾讯</span><span class="salary">20-35K</span><ul class="requirements"><li>精通React/Vue</li><li>熟悉TypeScript</li></ul></div>
-</div></body></html>`
-
-func startMockSite(log port.Logger) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/jobs", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(mockSiteHTML))
-	})
-	log.Info("示例招聘站已启动", port.String("url", "http://localhost:8088/jobs"))
-	_ = http.ListenAndServe(":8088", mux)
-}
-

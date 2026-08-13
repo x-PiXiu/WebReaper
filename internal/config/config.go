@@ -83,8 +83,8 @@ func (c CrawlerConfig) ToPolicy() entity.CrawlPolicy {
 
 // AgentCoreConfig 是 AgentCore 目标系统的配置（爬虫采集 AgentCore 会话用）。
 type AgentCoreConfig struct {
-	BaseURL     string // AgentCore 后端地址，如 http://localhost:8081
-	AdminToken  string // 采集用的认证 token（AgentCore 的 JWT 或 API Key）
+	BaseURL    string // AgentCore 后端地址，如 http://localhost:8081
+	AdminToken string // 采集用的认证 token（AgentCore 的 JWT 或 API Key）
 }
 
 // IsConfigured 判断 AgentCore 配置是否就绪。
@@ -97,7 +97,6 @@ type PublishConfig struct {
 	CookieSecret  string // 多平台发布 cookie 加密密钥（AES-GCM，从 PUBLISH_COOKIE_SECRET 读取）
 	QRLoginHeaded bool   // 扫码登录是否显示浏览器窗口（调试用，生产保持 false 走灰盒 headless）
 }
-
 
 // ServerConfig 服务配置。
 type ServerConfig struct {
@@ -119,9 +118,8 @@ type ServerConfig struct {
 	// BingSiteURL Bing 已验证的站点地址（如 https://content.example.com）。
 	BingSiteURL string
 	// ViduAPIKey Vidu 视频生成 API Key（可选）。未配置时视频工作台走 mock 模拟进度。
+	// 运行时以 DB 厂商配置（provider_configs.vidu）优先，env 仅作启动兜底。
 	ViduAPIKey string
-	// ViduModel Vidu 视频生成模型（默认 viduq3-pro；可换 viduq3-turbo 等）。
-	ViduModel string
 	// AutoMonitorEnabled 是否启用每日自动监测（AUTO_MONITOR_ENABLED=true）。
 	// 启用后调度器每天对全平台品牌执行一次监测，趋势图自动生长。
 	AutoMonitorEnabled bool
@@ -273,15 +271,14 @@ func Load() Config {
 
 	return Config{
 		Server: ServerConfig{
-			Port:          getenvDefault("SERVER_PORT", "8082"),
-			Env:           getenvDefault("APP_ENV", "development"),
-			APIPrefix:     getenvDefault("API_PREFIX", ""),
-			PublicBaseURL: getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
-			IndexNowKey:   os.Getenv("INDEXNOW_KEY"),
-			BingAPIKey:    os.Getenv("BING_API_KEY"),
-			BingSiteURL:   os.Getenv("BING_SITE_URL"),
-			ViduAPIKey:    os.Getenv("VIDU_API_KEY"),
-			ViduModel:     getenvDefault("VIDU_MODEL", "viduq3-pro"),
+			Port:               getenvDefault("SERVER_PORT", "8082"),
+			Env:                getenvDefault("APP_ENV", "development"),
+			APIPrefix:          getenvDefault("API_PREFIX", ""),
+			PublicBaseURL:      getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
+			IndexNowKey:        os.Getenv("INDEXNOW_KEY"),
+			BingAPIKey:         os.Getenv("BING_API_KEY"),
+			BingSiteURL:        os.Getenv("BING_SITE_URL"),
+			ViduAPIKey:         os.Getenv("VIDU_API_KEY"),
 			AutoMonitorEnabled: os.Getenv("AUTO_MONITOR_ENABLED") == "true",
 		},
 		DB: DBConfig{
@@ -293,10 +290,10 @@ func Load() Config {
 			SSLMode:  getenvDefault("DB_SSLMODE", "disable"),
 		},
 		LLM: LLMConfig{
-			Provider: getenvDefault("LLM_PROVIDER", "minimax"),
-			APIKey:   os.Getenv("LLM_API_KEY"),
-			BaseURL:  getenvDefault("LLM_BASE_URL", "https://api.minimaxi.com/v1"),
-			Model:    getenvDefault("LLM_MODEL", "MiniMax-M2.5"),
+			Provider:           getenvDefault("LLM_PROVIDER", "minimax"),
+			APIKey:             os.Getenv("LLM_API_KEY"),
+			BaseURL:            getenvDefault("LLM_BASE_URL", "https://api.minimaxi.com/v1"),
+			Model:              getenvDefault("LLM_MODEL", "MiniMax-M2.5"),
 			CostPerMTokenCents: getenvInt("LLM_COST_PER_MToken", 100), // 默认 ¥1/百万 tokens
 		},
 		Tavily: TavilyConfig{

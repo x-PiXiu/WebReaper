@@ -370,6 +370,17 @@ export interface GenerationType {
   }>
 }
 
+// 生成规格（管理后台：Vidu 端点×模型矩阵——DB 驱动 30s 热生效）
+export interface GenerationSpec {
+  sub_type: string
+  model: string
+  endpoint: string
+  enabled: boolean
+  capabilities_json: string
+  has_override?: boolean
+  updated_at?: string
+}
+
 export interface GenerationCreation {
   id: string
   url: string

@@ -2,8 +2,8 @@ import { Row, Col, Typography, Spin } from 'antd'
 import { DollarOutlined, CrownOutlined, RiseOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { useAuthStore } from '../store/auth'
-import { businessApi } from '../api/business'
+import { useAuthStore } from '../../store/auth'
+import { businessApi } from '../../api/business'
 
 const { Text } = Typography
 
