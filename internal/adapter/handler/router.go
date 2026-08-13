@@ -303,6 +303,8 @@ func (r *Router) Engine() *gin.Engine {
 		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
 		e.GET("/public/store-map/:brandId", r.publicHandler.GetStoreMap)
 		e.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
+		// robots.txt 协议要求域名根目录（爬虫访问规则 + sitemap 指向）
+		e.GET("/robots.txt", r.publicHandler.GetRobotsTXT)
 		// IndexNow 协议要求密钥文件在域名根目录（不加前缀）
 		e.GET("/:key.txt", r.publicHandler.GetIndexNowKeyFile)
 	}

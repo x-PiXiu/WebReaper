@@ -102,6 +102,7 @@ const articlePageTemplate = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
 <meta name="description" content="{{.Description}}">
+<link rel="canonical" href="{{.CanonicalURL}}">
 {{.JSONLD}}
 <style>
   body{max-width:760px;margin:0 auto;padding:32px 20px 80px;font-family:-apple-system,'PingFang SC','Noto Sans SC',sans-serif;line-height:1.9;color:#1a1a2e}
@@ -231,19 +232,57 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := tpl.Execute(c.Writer, gin.H{
-		"Title":       title,
-		"Description": truncateDescription(cleanText),
-		"Meta":        fmt.Sprintf("GEO 优化内容 · 关键词可见度评分 %d", int(content.Score.Total)),
-		"ContentHTML": template.HTML(public.RenderMarkdown(cleanText)),
-		"JSONLD":      template.HTML(jsonldTag),
-		"BrandName":   brandName,
-		"BrandDesc":   brandDesc,
-		"StoreName":   storeName,
-		"StoreInfo":   template.HTML(storeInfo),
-		"StoreMapURL": storeMapURL,
+		"Title":        title,
+		"Description":  truncateDescription(cleanText),
+		"CanonicalURL": h.baseURL + "/public/articles/" + content.ID,
+		"Meta":         fmt.Sprintf("GEO 优化内容 · 关键词可见度评分 %d", int(content.Score.Total)),
+		"ContentHTML":  template.HTML(public.RenderMarkdown(cleanText)),
+		"JSONLD":       template.HTML(jsonldTag),
+		"BrandName":    brandName,
+		"BrandDesc":    brandDesc,
+		"StoreName":    storeName,
+		"StoreInfo":    template.HTML(storeInfo),
+		"StoreMapURL":  storeMapURL,
 	}); err != nil {
 		c.String(http.StatusInternalServerError, "render error")
 	}
+}
+
+// GetRobotsTXT GET /robots.txt —— 爬虫访问规则（协议要求域名根目录）。
+//
+// GEO 设计：公开站是给搜索引擎 + AI 引擎爬取的资产——robots 不设任何限制，
+// 并显式欢迎主流 AI 爬虫（GPTBot/ClaudeBot/PerplexityBot 等）；同时指向
+// sitemap.xml 让引擎发现全部公开文章。
+func (h *PublicHandler) GetRobotsTXT(c *gin.Context) {
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintf(c.Writer, `# WebReaper GEO 公开站 —— 欢迎所有搜索引擎与 AI 爬虫
+User-agent: *
+Allow: /
+
+# AI 引擎爬虫（GEO 核心：让 AI 搜索引擎可引用内容）
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+Sitemap: %s/public/sitemap.xml
+`, strings.TrimRight(h.baseURL, "/"))
 }
 
 // GetSitemapXML GET /public/sitemap.xml —— 站点地图（让搜索引擎发现全部公开文章）。
