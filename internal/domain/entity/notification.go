@@ -21,9 +21,10 @@ type Notification struct {
 
 // NotificationType 通知类型常量。
 const (
-	NotificationTypeMentionDrop       = "mention_drop"        // 提及率显著下降
+	NotificationTypeMentionDrop        = "mention_drop"        // 提及率显著下降
 	NotificationTypeCompetitorOvertake = "competitor_overtake" // 竞品反超
 	NotificationTypeRecheckDone        = "recheck_done"        // 自动复测完成
 	NotificationTypeScheduledPublish   = "scheduled_publish"   // 排期发布完成
+	NotificationTypeContentIndexed     = "content_indexed"     // 内容已被搜索引擎收录（付费说服力事件）
 	NotificationTypeSystem             = "system"              // 系统通知
 )

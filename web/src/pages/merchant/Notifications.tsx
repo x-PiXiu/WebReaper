@@ -13,6 +13,7 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
   competitor_overtake: { label: '竞品反超', color: 'warning' },
   recheck_done: { label: '复测完成', color: 'blue' },
   scheduled_publish: { label: '排期发布', color: 'processing' },
+  content_indexed: { label: '内容已收录', color: 'success' },
   system: { label: '系统', color: 'default' },
 }
 

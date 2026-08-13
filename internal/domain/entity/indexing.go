@@ -60,6 +60,7 @@ type IndexingChannel string
 const (
 	IndexingChannelIndexNow IndexingChannel = "indexnow" // Bing/Yandex/Naver
 	IndexingChannelBaidu    IndexingChannel = "baidu"    // 百度主动推送
+	IndexingChannelAuto     IndexingChannel = "auto"     // 自动触发（发布/补提交时的批量提交，渠道由配置决定）
 )
 
 // IndexingSubmitLog 是一次收录提交的审计记录（排查"为什么没被收录"）。

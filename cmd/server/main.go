@@ -251,7 +251,9 @@ func main() {
 		indexingLogRepo := repository.NewGormIndexingLogRepository(geoRepos.db)
 		indexingUC = indexing.NewIndexingUseCase(settingRepo, indexingLogRepo, geoRepos.content, cachedSubmitter, cfg.Server.PublicBaseURL)
 		router.SetIndexing(indexingUC)
-		indexNowSubmitter = cachedSubmitter
+		// 发布/补提交等"自动触发"的收录提交套审计日志装饰器——
+		// 成功/失败都进"提交日志"页（此前只有手动补提交有日志，发布提交无从排查）
+		indexNowSubmitter = urlsubmit.NewLoggingSubmitter(cachedSubmitter, indexingLogRepo)
 	}
 	var geoMonitorUCRef *geo.MonitorUseCase
 	var geoContentUCRef *geo.ContentUseCase
@@ -558,8 +560,14 @@ func main() {
 		var indexChecker port.IndexStatusChecker
 		if cfg.Server.BingAPIKey != "" {
 			indexChecker = bing.NewChecker(cfg.Server.BingAPIKey, cfg.Server.BingSiteURL)
+		} else {
+			log.Warn("BING_API_KEY 未配置——收录状态验证未启用（内容将长期显示「待收录」，配置后重启生效）")
 		}
-		_ = taskScheduler.Register(scheduledtask.NewIndexCheckTask(geoRepos.content, indexChecker, cfg.Server.PublicBaseURL, log))
+		indexTask := scheduledtask.NewIndexCheckTask(geoRepos.content, indexChecker, cfg.Server.PublicBaseURL, log)
+		if notifyUC != nil {
+			indexTask.SetNotifier(notifyUC) // 内容被收录时站内通知商户（付费说服力事件）
+		}
+		_ = taskScheduler.Register(indexTask)
 	}
 
 	// ③ 统一生成任务（Vidu 全量接入：视频 5+图片/音频/数字人——Docs/Plans/03 计划文档）
