@@ -1,0 +1,42 @@
+# 构建上下文优化——排除不需要打进 Docker 镜像的文件
+# 显著减小 build context（从 GB 级降到 MB 级）
+
+# 依赖与构建产物（Dockerfile 内重新构建）
+node_modules/
+web/node_modules/
+web/dist/
+bin/
+*.exe
+*.exe~
+
+# 版本控制与文档
+.git/
+.gitignore
+*.md
+docs/
+Docs/
+
+# 运行时数据（容器内重新生成）
+data/
+configs/.env
+.env
+.env.*
+!.env.example
+
+# 测试与调试
+gui-test-screenshots/
+*_test.go
+**/*_test.go
+
+# IDE/系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Docker 自身
+Dockerfile
+docker-compose.yml
+.dockerignore

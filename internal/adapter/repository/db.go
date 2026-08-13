@@ -21,17 +21,34 @@ import (
 //   - ConnMaxLifetime < MySQL 的 wait_timeout（通常 8h，设 3h 留余量）
 //   - ConnMaxIdleTime 也要 < wait_timeout（空闲连接主动回收）
 func NewMySQLDB(dsn string) (*gorm.DB, error) {
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
-	})
+	var db *gorm.DB
+	var err error
+	// 连接重试（容器启动时 MySQL 可能还没就绪——最多重试 30s，每 2s 一次）
+	for attempt := 1; attempt <= 15; attempt++ {
+		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
+			Logger: logger.Default.LogMode(logger.Warn),
+		})
+		if err == nil {
+			sqlDB, _ := db.DB()
+			if pingErr := sqlDB.Ping(); pingErr == nil {
+				break
+			} else {
+				err = pingErr
+			}
+		}
+		if attempt < 15 {
+			fmt.Printf("[db] MySQL 连接重试 %d/15（%v），2s 后重试...\n", attempt, err)
+			time.Sleep(2 * time.Second)
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("open mysql: %w", err)
+		return nil, fmt.Errorf("MySQL 连接失败（重试 30s）: %w", err)
 	}
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(25)
 	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxLifetime(3 * time.Hour)  // < MySQL wait_timeout（默认 8h）
-	sqlDB.SetConnMaxIdleTime(30 * time.Minute) // 空闲 30 分钟主动回收
+	sqlDB.SetConnMaxLifetime(3 * time.Hour)
+	sqlDB.SetConnMaxIdleTime(30 * time.Minute)
 	if err := applyMigrations(db); err != nil {
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}

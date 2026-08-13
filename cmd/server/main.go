@@ -63,6 +63,12 @@ func main() {
 	logger := zaplogger.MustNewZapLogger(cfg.Server.Env)
 	defer logger.Sync()
 
+	// 生产环境配置校验（fail-fast——缺失必填项直接退出）
+	if vErr := cfg.Validate(); vErr != nil {
+		fmt.Println(vErr)
+		os.Exit(1)
+	}
+
 	traceShutdown, _, err := telemetry.Init(telemetry.Config{
 		Enabled:      cfg.Telemetry.Enabled,
 		Exporter:     telemetry.ExporterKind(cfg.Telemetry.Exporter),
@@ -652,6 +658,13 @@ func main() {
 
 	// 路由统一前缀（生产部署在 nginx 后面分流用，如 /webreaper；空=无前缀）
 	router.SetAPIPrefix(cfg.Server.APIPrefix)
+	// 健康检查（healthz 端点检查 DB 连通性——Docker healthcheck 用）
+	if geoRepos != nil {
+		router.SetHealthCheck(func() error {
+			sqlDB, _ := geoRepos.db.DB()
+			return sqlDB.Ping()
+		})
+	}
 
 	server := &http.Server{Addr: ":" + cfg.Server.Port, Handler: router.Engine()}
 
@@ -675,7 +688,7 @@ func main() {
 	taskScheduler.Stop()
 	workerCancel()
 	_ = taskQueue.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // RPA 发布可能需要较长时间完成
 	defer cancel()
 	_ = server.Shutdown(ctx)
 	log.Info("服务已停止")

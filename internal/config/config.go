@@ -338,6 +338,31 @@ func getenvDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
+// Validate 生产环境配置校验（fail-fast——缺失必填项直接报错退出，避免运行时才暴露）。
+// 开发环境（APP_ENV != production）跳过校验。
+func (c Config) Validate() error {
+	if c.Server.Env != "production" {
+		return nil // 开发环境宽容
+	}
+	var errs []string
+	if c.JWT.Secret == "" {
+		errs = append(errs, "JWT_SECRET 未配置")
+	}
+	if c.DB.Password == "" {
+		errs = append(errs, "DB_PASSWORD 未配置")
+	}
+	if c.Publish.CookieSecret == "" {
+		errs = append(errs, "PUBLISH_COOKIE_SECRET 未配置")
+	}
+	if c.LLM.APIKey == "" {
+		errs = append(errs, "LLM_API_KEY 未配置（核心功能依赖 LLM）")
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("生产环境配置校验失败: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // getenvInt 读取整型环境变量，缺失或格式错误时返回默认值。
 func getenvInt(key string, defaultVal int) int {
 	if v := os.Getenv(key); v != "" {

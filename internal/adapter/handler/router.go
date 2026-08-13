@@ -85,6 +85,7 @@ type Router struct {
 	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
 	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
 	apiPrefix          string                  // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
+	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
@@ -203,6 +204,11 @@ func (r *Router) SetAPIPrefix(prefix string) {
 	r.apiPrefix = strings.TrimSuffix(prefix, "/")
 }
 
+// SetHealthCheck 注入健康检查函数（healthz 端点调用——检查 DB 连通性等）。
+func (r *Router) SetHealthCheck(fn func() error) {
+	r.healthCheck = fn
+}
+
 // SetPromptTemplates 注入提示词模板仓库（可选；admin 管理内容生成/优化提示词）。
 func (r *Router) SetPromptTemplates(repo port.PromptTemplateRepository) {
 	r.promptTemplateRepo = repo
@@ -277,7 +283,15 @@ func (r *Router) Engine() *gin.Engine {
 	// 统一前缀（nginx 分流用；空前缀时 root 等同 e，本地开发零影响）
 	root := e.Group(r.apiPrefix)
 
-	root.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	root.GET("/healthz", func(c *gin.Context) {
+		if r.healthCheck != nil {
+			if err := r.healthCheck(); err != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unhealthy", "error": err.Error()})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	// 媒体静态托管（素材/转存产物——LocalMediaStore 的数据目录对外只读）
 	if r.mediaDir != "" {
@@ -319,6 +333,8 @@ func (r *Router) Engine() *gin.Engine {
 	// 业务路由（受 JWT 中间件保护）
 	api := root.Group("/api/v1")
 	api.Use(middleware.JWTAuth(r.tokenParser))
+	// API 限流（令牌桶，IP 维度——防恶意高频调用耗尽 LLM 配额）
+	api.Use(middleware.NewRateLimiter(20, 40).Middleware())
 	{
 		// AI 对话（SSE 流式）——配额检查在 SSE 头设置前，超限返回 JSON 402
 		if r.ai != nil {
