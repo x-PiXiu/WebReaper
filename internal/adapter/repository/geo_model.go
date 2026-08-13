@@ -107,7 +107,7 @@ type OptimizedContentPO struct {
 	Recency       float64   `gorm:"type:decimal(5,2)"`
 	Status        string    `gorm:"size:32"`
 	IndexStatus   string    `gorm:"size:16"` // 收录状态：pending/indexed/error
-	IndexedAt     time.Time // 收录确认时间
+	IndexedAt     *time.Time // 收录确认时间（DATETIME NULL 列，*time.Time 防零日期）
 	CreatedAt     time.Time
 }
 

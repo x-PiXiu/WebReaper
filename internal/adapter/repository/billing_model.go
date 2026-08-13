@@ -39,15 +39,15 @@ func (SubscriptionPO) TableName() string { return "subscriptions" }
 
 // OrderPO 订单。
 type OrderPO struct {
-	ID             string    `gorm:"primaryKey;size:64"`
-	TenantID       string    `gorm:"size:64;index"`
-	PlanID         string    `gorm:"size:64"`
+	ID             string     `gorm:"primaryKey;size:64"`
+	TenantID       string     `gorm:"size:64;index"`
+	PlanID         string     `gorm:"size:64"`
 	AmountCents    int
-	Status         string    `gorm:"size:16;index"`
-	PaymentGateway string    `gorm:"size:32"`
-	PaymentID      string    `gorm:"size:128"`
-	CreatedAt      time.Time `gorm:"index"`
-	PaidAt         time.Time
+	Status         string     `gorm:"size:16;index"`
+	PaymentGateway string     `gorm:"size:32"`
+	PaymentID      string     `gorm:"size:128"`
+	CreatedAt      time.Time  `gorm:"index"`
+	PaidAt         *time.Time // 支付时间（DATETIME NULL 列，未支付为 NULL）
 }
 
 func (OrderPO) TableName() string { return "orders" }

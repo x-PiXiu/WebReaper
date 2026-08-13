@@ -2,12 +2,34 @@ package repository
 
 import (
 	"encoding/json"
+	"time"
 
 	"gorm.io/datatypes"
 
 	"webreaper/internal/domain/entity"
-	"webreaper/internal/domain/valueobject"
 )
+
+// ---- 时间辅助 ----
+// MySQL 严格模式（NO_ZERO_DATE）拒绝 '0000-00-00' 零日期：
+// 可空时间列（DATETIME NULL）的 PO 字段必须用 *time.Time——
+// 零值 time.Time 写库会被驱动转成零日期报 Error 1292（云端宝塔 MySQL 已踩）。
+// entity 层保持 time.Time，mapper 在此转换（nil ↔ 零值语义等价，业务层零改动）。
+
+// timeToPtr entity(time.Time) → PO(*time.Time)：零值转 nil（写 NULL），有值转指针。
+func timeToPtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// ptrToTime PO(*time.Time) → entity(time.Time)：nil 转零值。
+func ptrToTime(p *time.Time) time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	return *p
+}
 
 // ---- JSON 辅助 ----
 
@@ -74,22 +96,6 @@ func userFromPO(p UserPO) entity.User {
 	return entity.User{
 		ID: p.ID, Username: p.Username, PasswordHash: p.PasswordHash,
 		Role: p.Role, TenantID: p.TenantID, CreatedAt: p.CreatedAt,
-	}
-}
-
-// ---- Task ----
-
-func taskToPO(e entity.Task) TaskPO {
-	return TaskPO{
-		ID: e.ID, Type: string(e.Type), Input: e.Input, Output: e.Output, Progress: e.Progress,
-		Status: string(e.Status), Error: e.Error, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
-	}
-}
-
-func taskFromPO(p TaskPO) entity.Task {
-	return entity.Task{
-		ID: p.ID, Type: entity.TaskType(p.Type), Input: p.Input, Output: p.Output, Progress: p.Progress,
-		Status: valueobject.TaskStatus(p.Status), Error: p.Error, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
 

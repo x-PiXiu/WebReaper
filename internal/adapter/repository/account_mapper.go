@@ -12,7 +12,7 @@ func accountToPO(e entity.Account) AccountPO {
 	return AccountPO{
 		ID: e.ID, TenantID: e.TenantID, Platform: e.Platform, DisplayName: e.DisplayName,
 		CookieEncrypted: e.CookieEncrypted, Health: e.Health, LoginMethod: e.LoginMethod,
-		ExpiresAt: e.ExpiresAt, BoundAt: e.BoundAt, LastUsedAt: e.LastUsedAt,
+		ExpiresAt: timeToPtr(e.ExpiresAt), BoundAt: timeToPtr(e.BoundAt), LastUsedAt: timeToPtr(e.LastUsedAt),
 	}
 }
 
@@ -24,7 +24,7 @@ func accountFromPO(p AccountPO) entity.Account {
 	return entity.Account{
 		ID: p.ID, TenantID: p.TenantID, Platform: p.Platform, DisplayName: p.DisplayName,
 		CookieEncrypted: p.CookieEncrypted, Health: health, LoginMethod: p.LoginMethod,
-		ExpiresAt: p.ExpiresAt, BoundAt: p.BoundAt, LastUsedAt: p.LastUsedAt,
+		ExpiresAt: ptrToTime(p.ExpiresAt), BoundAt: ptrToTime(p.BoundAt), LastUsedAt: ptrToTime(p.LastUsedAt),
 	}
 }
 
@@ -33,9 +33,9 @@ func publishJobToPO(e entity.PublishJob) PublishJobPO {
 		ID: e.ID, TenantID: e.TenantID, AccountID: e.AccountID, Platform: e.Platform,
 		ContentID: e.ContentID, BrandID: e.BrandID, Title: e.Title, Content: e.Content,
 		Mode: e.Mode, Status: e.Status, ExternalURL: e.ExternalURL,
-		ErrorMsg: e.ErrorMsg, CreatedAt: e.CreatedAt, PublishedAt: e.PublishedAt,
+		ErrorMsg: e.ErrorMsg, CreatedAt: e.CreatedAt, PublishedAt: timeToPtr(e.PublishedAt),
 		PreMentionRate: e.PreMentionRate, PostMentionRate: e.PostMentionRate,
-		ScheduledAt: e.ScheduledAt, StoreAddress: e.StoreAddress,
+		ScheduledAt: timeToPtr(e.ScheduledAt), StoreAddress: e.StoreAddress,
 		ContentType: e.ContentType, MediaURLsJSON: mediaURLsToJSON(e.MediaURLs), CoverURL: e.CoverURL,
 	}
 }
@@ -53,9 +53,9 @@ func publishJobFromPO(p PublishJobPO) entity.PublishJob {
 		ID: p.ID, TenantID: p.TenantID, AccountID: p.AccountID, Platform: p.Platform,
 		ContentID: p.ContentID, BrandID: p.BrandID, Title: p.Title, Content: p.Content,
 		Mode: mode, Status: status, ExternalURL: p.ExternalURL,
-		ErrorMsg: p.ErrorMsg, CreatedAt: p.CreatedAt, PublishedAt: p.PublishedAt,
+		ErrorMsg: p.ErrorMsg, CreatedAt: p.CreatedAt, PublishedAt: ptrToTime(p.PublishedAt),
 		PreMentionRate: p.PreMentionRate, PostMentionRate: p.PostMentionRate,
-		ScheduledAt: p.ScheduledAt, StoreAddress: p.StoreAddress,
+		ScheduledAt: ptrToTime(p.ScheduledAt), StoreAddress: p.StoreAddress,
 		ContentType: p.ContentType, MediaURLs: mediaURLsFromJSON(p.MediaURLsJSON), CoverURL: p.CoverURL,
 	}
 }

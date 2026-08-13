@@ -209,7 +209,7 @@ func orderToPO(o entity.Order) OrderPO {
 	return OrderPO{
 		ID: o.ID, TenantID: o.TenantID, PlanID: o.PlanID, AmountCents: o.AmountCents,
 		Status: o.Status, PaymentGateway: o.PaymentGateway, PaymentID: o.PaymentID,
-		CreatedAt: o.CreatedAt, PaidAt: o.PaidAt,
+		CreatedAt: o.CreatedAt, PaidAt: timeToPtr(o.PaidAt),
 	}
 }
 
@@ -217,7 +217,7 @@ func orderFromPO(p OrderPO) entity.Order {
 	return entity.Order{
 		ID: p.ID, TenantID: p.TenantID, PlanID: p.PlanID, AmountCents: p.AmountCents,
 		Status: p.Status, PaymentGateway: p.PaymentGateway, PaymentID: p.PaymentID,
-		CreatedAt: p.CreatedAt, PaidAt: p.PaidAt,
+		CreatedAt: p.CreatedAt, PaidAt: ptrToTime(p.PaidAt),
 	}
 }
 
