@@ -13,7 +13,8 @@ import (
 // RenderMarkdown 把轻量 markdown 渲染为 HTML（纯函数，可单测）。
 //
 // 支持的语法（覆盖 GEO 生成内容的常用子集）：
-//   - 标题：#/##/### → h1/h2/h3
+//   - 标题：#/##/### → h2/h3/h4（**整体降一级**——h1 由页面模板的文章标题独占，
+//     SEO 单 h1 约束；正文从 h2 开始保持完整层级，避免多 h1 被搜索引擎标记问题）
 //   - 无序列表：- / * 开头 → <ul><li>
 //   - 有序列表：数字. 开头 → <ol><li>
 //   - 引用：> 开头 → <blockquote>
@@ -68,13 +69,14 @@ func RenderMarkdown(md string) string {
 			sb.WriteString("\n")
 		case strings.HasPrefix(trimmed, "### "):
 			closeList()
-			sb.WriteString("<h3>" + inlineFormat(escapeHTML(trimmed[4:])) + "</h3>\n")
+			sb.WriteString("<h4>" + inlineFormat(escapeHTML(trimmed[4:])) + "</h4>\n")
 		case strings.HasPrefix(trimmed, "## "):
 			closeList()
-			sb.WriteString("<h2>" + inlineFormat(escapeHTML(trimmed[3:])) + "</h2>\n")
+			sb.WriteString("<h3>" + inlineFormat(escapeHTML(trimmed[3:])) + "</h3>\n")
 		case strings.HasPrefix(trimmed, "# "):
+			// 正文一级标题降为 h2——h1 由页面模板的文章标题独占（SEO 单 h1 约束）
 			closeList()
-			sb.WriteString("<h1>" + inlineFormat(escapeHTML(trimmed[2:])) + "</h1>\n")
+			sb.WriteString("<h2>" + inlineFormat(escapeHTML(trimmed[2:])) + "</h2>\n")
 		case strings.HasPrefix(trimmed, "> "):
 			closeList()
 			sb.WriteString("<blockquote>" + inlineFormat(escapeHTML(trimmed[2:])) + "</blockquote>\n")

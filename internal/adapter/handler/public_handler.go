@@ -108,6 +108,7 @@ const articlePageTemplate = `<!DOCTYPE html>
   h1{font-size:1.8em;letter-spacing:-0.02em;line-height:1.4}
   h2{font-size:1.3em;margin-top:2em}
   h3{font-size:1.1em}
+  h4{font-size:1em;margin-top:1.5em}
   pre{background:#f5f5f8;padding:16px;border-radius:8px;overflow-x:auto}
   code{background:#f5f5f8;padding:2px 6px;border-radius:4px;font-size:0.92em}
   blockquote{border-left:4px solid #6366f1;margin-left:0;padding-left:16px;color:#555}

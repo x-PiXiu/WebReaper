@@ -6,16 +6,21 @@ import (
 )
 
 func TestRenderMarkdown_Headings(t *testing.T) {
+	// 正文标题整体降一级（h1 由页面模板的文章标题独占——SEO 单 h1 约束）
 	md := "# 大标题\n\n## 小标题\n\n### 三级"
 	html := RenderMarkdown(md)
-	if !strings.Contains(html, "<h1>大标题</h1>") {
-		t.Errorf("缺少 h1: %s", html)
+	if !strings.Contains(html, "<h2>大标题</h2>") {
+		t.Errorf("一级标题应降为 h2: %s", html)
 	}
-	if !strings.Contains(html, "<h2>小标题</h2>") {
-		t.Errorf("缺少 h2: %s", html)
+	if !strings.Contains(html, "<h3>小标题</h3>") {
+		t.Errorf("二级标题应降为 h3: %s", html)
 	}
-	if !strings.Contains(html, "<h3>三级</h3>") {
-		t.Errorf("缺少 h3: %s", html)
+	if !strings.Contains(html, "<h4>三级</h4>") {
+		t.Errorf("三级标题应降为 h4: %s", html)
+	}
+	// 关键约束：正文绝不能产生 h1（页面 h1 唯一）
+	if strings.Contains(html, "<h1>") {
+		t.Errorf("正文不应出现 h1（单 h1 约束）: %s", html)
 	}
 }
 
