@@ -1,5 +1,6 @@
 # Stage 1: Go 编译（纯静态，CGO_ENABLED=0）
-FROM golang:1.23-alpine AS builder
+# 注意：builder 镜像版本必须 ≥ go.mod 声明的 go 版本（当前 go 1.26.1）
+FROM golang:1.26-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
