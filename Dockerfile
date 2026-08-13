@@ -14,9 +14,10 @@ FROM debian:bookworm-slim
 # 国内网络：apt 换阿里云镜像（deb.debian.org 境外直连慢/超时）
 RUN sed -i -e 's|deb.debian.org|mirrors.aliyun.com|g' \
            -e 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources
-# Chromium（RPA 发布用）+ 中文字体（网页渲染/截图）+ CA 证书
+# Chromium（RPA 发布用）+ 中文字体（网页渲染/截图）+ CA 证书 + dbus（Chromium 系统总线）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
+    dbus \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     ca-certificates \

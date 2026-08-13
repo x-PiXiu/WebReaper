@@ -15,6 +15,7 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
+	"webreaper/internal/adapter/chromedputil"
 	"webreaper/internal/config"
 	"webreaper/internal/usecase/port"
 )
@@ -73,10 +74,10 @@ var platformConfigs = map[string]platformConfig{
 		// 知乎支持多种登录方式：默认知乎App扫码，也可选微信/QQ/微博
 		// 按钮通过 SVG class 区分：ZDI--Wechat24 / ZDI--Qq24 / ZDI--Weibo24
 		LoginMethods: map[string]string{
-			"zhihu":   "",               // 默认知乎App扫码（无需点第三方按钮）
-			"wechat":  "ZDI--Wechat24",  // 微信登录
-			"qq":      "ZDI--Qq24",      // QQ登录
-			"weibo":   "ZDI--Weibo24",   // 微博登录
+			"zhihu":  "",              // 默认知乎App扫码（无需点第三方按钮）
+			"wechat": "ZDI--Wechat24", // 微信登录
+			"qq":     "ZDI--Qq24",     // QQ登录
+			"weibo":  "ZDI--Weibo24",  // 微博登录
 		},
 	},
 	"xiaohongshu": {
@@ -199,22 +200,14 @@ const clickTabByTextJS = `(text) => {
 }`
 
 func (q *ChromedpQRLogin) allocOpts() []chromedp.ExecAllocatorOption {
-	opts := []chromedp.ExecAllocatorOption{
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
+	opts := chromedputil.HeadlessOptions(config.IsBrowserHeaded())
+	opts = append(opts,
 		chromedp.WindowSize(1280, 800),
-		chromedp.Flag("enable-automation", false),
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
 		// 每次用独立的临时用户数据目录，确保不残留上次登录的 cookie/session
 		// （否则上次扫码登录的状态会被新会话继承，导致"未扫码就显示已登录"）
 		chromedp.Flag("incognito", true),
-	}
-	if config.IsBrowserHeaded() {
-		opts = append(opts, chromedp.Flag("headless", false))
-	} else {
-		opts = append(opts, chromedp.Headless, chromedp.Flag("no-sandbox", true))
-	}
+	)
 	return opts
 }
 
@@ -390,7 +383,6 @@ func (q *ChromedpQRLogin) captureQRCode(ctx context.Context, sessionID string, p
 	q.captureQRFromPage(ctx, sessionID, method, pc)
 }
 
-
 // processQRDetection 处理 JS 检测结果，返回是否成功提取二维码。
 func (q *ChromedpQRLogin) processQRDetection(ctx context.Context, sessionID string, det *qrDetection) bool {
 	log.Printf("[QRLogin:%s] 处理二维码: type=%s class=%s %vx%v dataURL长度=%d jsPath=%s",
@@ -538,7 +530,7 @@ func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, meth
 // qrDetection JS 检测到的二维码信息。
 type qrDetection struct {
 	Found   bool    `json:"found"`
-	Type    string  `json:"type"`    // canvas-dataurl / canvas-screenshot / img
+	Type    string  `json:"type"` // canvas-dataurl / canvas-screenshot / img
 	Width   float64 `json:"width"`
 	Height  float64 `json:"height"`
 	Class   string  `json:"className"`

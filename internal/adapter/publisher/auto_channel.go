@@ -16,6 +16,7 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
+	"webreaper/internal/adapter/chromedputil"
 	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -37,21 +38,15 @@ import (
 //     零改动（PublishJob.StoreAddress 已就位，见 usecase/account/account.go）。
 //   - 半自动兜底：前端"分发中心"提供定位操作指引（手动选定位，最稳）。
 
-// allocOpts 反检测浏览器选项（与 qrlogin 模块一致）
-// 容器环境（QR_LOGIN_HEADED != true）自动启用 headless + no-sandbox（容器内 Chromium 需要）
+// allocOpts 浏览器启动参数（环境安全参数来自 chromedputil 公共工厂——
+// 与 qrlogin 共用避免两份参数漂移；业务参数在此补充）。
+// 容器环境（非 headed）自动启用 headless=new + no-sandbox（容器内 Chromium 需要）。
 func allocOpts() []chromedp.ExecAllocatorOption {
-	opts := []chromedp.ExecAllocatorOption{
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
+	opts := chromedputil.HeadlessOptions(config.IsBrowserHeaded())
+	opts = append(opts,
 		chromedp.WindowSize(1280, 800),
-		chromedp.Flag("enable-automation", false),
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
-	}
-	// headless 模式：管理后台动态控制（config.IsBrowserHeaded），非 true 时 headless + no-sandbox
-	if !config.IsBrowserHeaded() {
-		opts = append(opts, chromedp.Headless, chromedp.Flag("no-sandbox", true))
-	}
+	)
 	return opts
 }
 
@@ -86,9 +81,11 @@ var _ port.AutoPublishChannel = (*ZhihuAutoChannel)(nil)
 
 func NewZhihuAutoChannel() *ZhihuAutoChannel { return &ZhihuAutoChannel{} }
 
-func (c *ZhihuAutoChannel) Platform() string           { return "zhihu" }
+func (c *ZhihuAutoChannel) Platform() string             { return "zhihu" }
 func (c *ZhihuAutoChannel) SupportedMediaType() []string { return []string{"text"} }
-func (c *ZhihuAutoChannel) SupportedContentTypes() []string { return []string{entity.ContentTypeArticle} }
+func (c *ZhihuAutoChannel) SupportedContentTypes() []string {
+	return []string{entity.ContentTypeArticle}
+}
 
 // PublishSemiAuto 半自动模式：返回知乎写文章页 URL
 func (c *ZhihuAutoChannel) PublishSemiAuto(_ context.Context, job entity.PublishJob, _ entity.Account) (string, error) {
@@ -261,7 +258,7 @@ var _ port.AutoPublishChannel = (*XiaohongshuAutoChannel)(nil)
 
 func NewXiaohongshuAutoChannel() *XiaohongshuAutoChannel { return &XiaohongshuAutoChannel{} }
 
-func (c *XiaohongshuAutoChannel) Platform() string           { return "xiaohongshu" }
+func (c *XiaohongshuAutoChannel) Platform() string             { return "xiaohongshu" }
 func (c *XiaohongshuAutoChannel) SupportedMediaType() []string { return []string{"text", "image"} }
 func (c *XiaohongshuAutoChannel) SupportedContentTypes() []string {
 	return []string{entity.ContentTypeImage, entity.ContentTypeVideo, entity.ContentTypeArticle, entity.ContentTypeAudio}
