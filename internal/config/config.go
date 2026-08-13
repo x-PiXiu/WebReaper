@@ -15,11 +15,21 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/joho/godotenv"
 
 	"webreaper/internal/domain/entity"
 )
+
+// browserHeaded 浏览器可见性（运行时可变——管理后台动态切换，无需重启）。
+var browserHeaded atomic.Bool
+
+// SetBrowserHeaded 设置浏览器可见性（即时生效，下次 RPA 操作用新值）。
+func SetBrowserHeaded(headed bool) { browserHeaded.Store(headed) }
+
+// IsBrowserHeaded 读取浏览器可见性（RPA allocOpts 调用）。
+func IsBrowserHeaded() bool { return browserHeaded.Load() }
 
 // Config 是应用的全局配置根。
 type Config struct {

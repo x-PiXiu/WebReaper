@@ -15,6 +15,7 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
+	"webreaper/internal/config"
 	"webreaper/internal/usecase/port"
 )
 
@@ -209,7 +210,7 @@ func (q *ChromedpQRLogin) allocOpts() []chromedp.ExecAllocatorOption {
 		// （否则上次扫码登录的状态会被新会话继承，导致"未扫码就显示已登录"）
 		chromedp.Flag("incognito", true),
 	}
-	if q.headed {
+	if config.IsBrowserHeaded() {
 		opts = append(opts, chromedp.Flag("headless", false))
 	} else {
 		opts = append(opts, chromedp.Headless, chromedp.Flag("no-sandbox", true))

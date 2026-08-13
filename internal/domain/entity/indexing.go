@@ -82,3 +82,4 @@ const SettingKeyAutoMonitor = "auto_monitor_enabled"
 // admin 后台运行时配置——支持多通道动态切换（当前 zpay）。
 // 值为 JSON 字符串，由 BillingUseCase 解析为具体网关配置。
 const SettingKeyPaymentConfig = "payment_config"
+const SettingKeyBrowserHeaded = "browser_headed"

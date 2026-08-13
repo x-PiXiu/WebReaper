@@ -528,6 +528,12 @@ func main() {
 	tenantSettingRepo := repository.NewGormTenantSettingRepository(geoRepos.db)
 	settingsUC := systemsettings.NewSystemSettingsUseCase(settingRepo)
 	settingsUC.SetTenantSettingRepo(tenantSettingRepo)
+	// 初始化浏览器可见性（从 DB 读管理后台上次设置，默认 headless）
+	if headed, hErr := settingsUC.GetBrowserHeaded(context.Background()); hErr == nil {
+		config.SetBrowserHeaded(headed)
+	} else {
+		config.SetBrowserHeaded(cfg.Publish.QRLoginHeaded) // fallback 到环境变量
+	}
 	router.SetSystemSettings(settingsUC)
 
 	// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）

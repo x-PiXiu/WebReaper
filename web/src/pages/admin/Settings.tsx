@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Typography, Switch, Card, Space, message, Alert, Tag, Modal, Input, Table, Button } from 'antd'
-import { RadarChartOutlined, ThunderboltOutlined, EditOutlined } from '@ant-design/icons'
+import { RadarChartOutlined, ThunderboltOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 
@@ -135,6 +135,43 @@ export default function AdminSettings() {
           />
         </div>
       </div>
+
+      {/* 浏览器可见性开关 */}
+      {(() => {
+        const { data: browserHeaded } = useQuery({
+          queryKey: ['settings-browser-headed'],
+          queryFn: () => businessApi.getBrowserHeaded(),
+        })
+        const toggleBrowser = useMutation({
+          mutationFn: (headed: boolean) => businessApi.setBrowserHeaded(headed),
+          onSuccess: () => {
+            message.success('浏览器可见性已切换（下次 RPA 操作即时生效）')
+            queryClient.invalidateQueries({ queryKey: ['settings-browser-headed'] })
+          },
+        })
+        return (
+          <div className="wr-glass-card" style={{ padding: 24, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24 }}>
+              <div style={{ flex: 1 }}>
+                <Space size={8} style={{ marginBottom: 8 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 15 }}>
+                    <EyeOutlined />
+                  </div>
+                  <Text strong style={{ fontSize: 15 }}>浏览器窗口可见性（RPA 发布/扫码登录）</Text>
+                  <Tag color={browserHeaded?.headed ? 'processing' : 'default'}>
+                    {browserHeaded?.headed ? '显示窗口（调试）' : 'Headless（生产）'}
+                  </Tag>
+                </Space>
+                <Text type="secondary" style={{ fontSize: 13, display: 'block', lineHeight: 1.7 }}>
+                  开启后扫码登录/自动发布时<strong>显示浏览器窗口</strong>（可看到操作过程，调试用）。
+                  关闭则<strong>后台静默执行</strong>（headless，生产默认）。切换即时生效，无需重启。
+                </Text>
+              </div>
+              <Switch checked={browserHeaded?.headed} loading={toggleBrowser.isPending} onChange={(v) => toggleBrowser.mutate(v)} />
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 提示词模板管理（格式指令/生成/优化 prompt 热更新）*/}
       <Card

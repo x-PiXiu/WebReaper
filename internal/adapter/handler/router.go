@@ -552,6 +552,9 @@ func (r *Router) Engine() *gin.Engine {
 			if r.settingsUC != nil {
 				adminGroup.GET("/settings/auto-monitor", r.HandleGetAutoMonitor)
 				adminGroup.PUT("/settings/auto-monitor", r.HandleSetAutoMonitor)
+				// 浏览器可见性（RPA 发布/扫码登录时是否显示浏览器——动态切换无需重启）
+				adminGroup.GET("/settings/browser-headed", r.HandleGetBrowserHeaded)
+				adminGroup.PUT("/settings/browser-headed", r.HandleSetBrowserHeaded)
 			}
 			// 提示词模板管理（内容生成/优化系统提示词可管理、可热更新）
 			if r.promptTemplateRepo != nil {

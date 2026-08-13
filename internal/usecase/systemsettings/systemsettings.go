@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
@@ -51,6 +52,29 @@ func (uc *SystemSettingsUseCase) SetAutoMonitor(ctx context.Context, enabled boo
 	}
 	return uc.settingRepo.Save(ctx, entity.SystemSetting{
 		Key:   entity.SettingKeyAutoMonitor,
+		Value: value,
+	})
+}
+
+// GetBrowserHeaded 读浏览器可见性开关（RPA 发布/扫码登录时是否显示浏览器窗口）。
+// 未配置返回 false（headless 模式——生产默认）。
+func (uc *SystemSettingsUseCase) GetBrowserHeaded(ctx context.Context) (bool, error) {
+	s, err := uc.settingRepo.Get(ctx, entity.SettingKeyBrowserHeaded)
+	if err != nil {
+		return false, nil // 未配置默认 false
+	}
+	return s.Value == "true", nil
+}
+
+// SetBrowserHeaded 写浏览器可见性开关 + 同步内存（即时生效——下次 RPA 操作用新值）。
+func (uc *SystemSettingsUseCase) SetBrowserHeaded(ctx context.Context, headed bool) error {
+	value := "false"
+	if headed {
+		value = "true"
+	}
+	config.SetBrowserHeaded(headed) // 同步全局内存（allocOpts 即时读新值）
+	return uc.settingRepo.Save(ctx, entity.SystemSetting{
+		Key:   entity.SettingKeyBrowserHeaded,
 		Value: value,
 	})
 }

@@ -299,6 +299,12 @@ export const businessApi = {
   setAutoMonitor: (enabled: boolean) =>
     apiClient.put<unknown, { auto_monitor_enabled: boolean }>('/api/v1/admin/settings/auto-monitor', { enabled }),
 
+  // 浏览器可见性（RPA 发布/扫码登录时是否显示浏览器窗口——动态切换）
+  getBrowserHeaded: () =>
+    apiClient.get<unknown, { headed: boolean }>('/api/v1/admin/settings/browser-headed'),
+  setBrowserHeaded: (headed: boolean) =>
+    apiClient.put<unknown, { headed: boolean }>('/api/v1/admin/settings/browser-headed', { headed }),
+
   // ---- 站内通知（主动唤醒）----
   listNotifications: () =>
     apiClient.get<unknown, { id: string; type: string; title: string; content: string; link: string; read: boolean; created_at: string }[]>('/api/v1/notifications'),

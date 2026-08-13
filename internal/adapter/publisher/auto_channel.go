@@ -16,6 +16,7 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
+	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
@@ -47,8 +48,8 @@ func allocOpts() []chromedp.ExecAllocatorOption {
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
 	}
-	// headless 模式：QR_LOGIN_HEADED != "true" 时启用（容器/无显示器环境必须 headless）
-	if os.Getenv("QR_LOGIN_HEADED") != "true" {
+	// headless 模式：管理后台动态控制（config.IsBrowserHeaded），非 true 时 headless + no-sandbox
+	if !config.IsBrowserHeaded() {
 		opts = append(opts, chromedp.Headless, chromedp.Flag("no-sandbox", true))
 	}
 	return opts

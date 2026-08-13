@@ -45,6 +45,37 @@ func (r *Router) HandleSetAutoMonitor(c *gin.Context) {
 	success(c, gin.H{"auto_monitor_enabled": req.Enabled})
 }
 
+// HandleGetBrowserHeaded GET /api/v1/admin/settings/browser-headed —— 读浏览器可见性。
+func (r *Router) HandleGetBrowserHeaded(c *gin.Context) {
+	if r.settingsUC == nil {
+		fail(c, errNotConfigured("系统设置"))
+		return
+	}
+	headed, _ := r.settingsUC.GetBrowserHeaded(c.Request.Context())
+	success(c, gin.H{"headed": headed})
+}
+
+// HandleSetBrowserHeaded PUT /api/v1/admin/settings/browser-headed —— 写浏览器可见性。
+// true=显示浏览器窗口（调试/扫码可见）；false=headless（生产默认）。即时生效。
+func (r *Router) HandleSetBrowserHeaded(c *gin.Context) {
+	if r.settingsUC == nil {
+		fail(c, errNotConfigured("系统设置"))
+		return
+	}
+	var req struct {
+		Headed bool `json:"headed"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	if err := r.settingsUC.SetBrowserHeaded(c.Request.Context(), req.Headed); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"headed": req.Headed})
+}
+
 // HandleGetTenantAutoMonitor GET /api/v1/geo/monitor-auto —— 商户端自动盯盘状态 + 配置。
 // 返回：租户开关（可自控）+ 平台总闸（管理员控制）+ 盯盘配置（频率/采样/通知阈值）。
 func (r *Router) HandleGetTenantAutoMonitor(c *gin.Context) {
