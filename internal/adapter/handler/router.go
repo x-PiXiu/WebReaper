@@ -298,6 +298,9 @@ func (r *Router) Engine() *gin.Engine {
 	// 资产，必须干净（https://geo.zhichen.chat/public/articles/xxx），
 	// 与 IndexNow key 文件（/:key.txt）同一设计原则；nginx 用 location /public/ 反代。
 	if r.publicHandler != nil {
+		// 文章列表页（站点"首页/目录"——爬虫与用户从单一入口发现全部文章）
+		e.GET("/public", r.publicHandler.GetPublicIndex)
+		e.GET("/public/", r.publicHandler.GetPublicIndex)
 		e.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
 		e.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
 		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
