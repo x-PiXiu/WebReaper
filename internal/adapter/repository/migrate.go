@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -110,6 +111,10 @@ func loadMigrations() ([]migrationFile, error) {
 // executeMigration 执行单个迁移文件（按分号分割语句逐条执行）。
 // 注意：简单实现，不支持多行触发器/存储过程等含分号的复杂语句。
 // 当前迁移都是简单 DDL，足够用。
+//
+// 幂等性：ADD COLUMN / ADD INDEX 若目标已存在则跳过该语句——
+// 历史上出现过"建表迁移已含该列、但补丁迁移重复 ADD"（如 015 撞 014 更新），
+// 全新库会报 Duplicate column name。此处统一免疫，无需改迁移文件。
 func executeMigration(db *gorm.DB, m migrationFile) error {
 	stmts := splitStatements(m.content)
 	for _, stmt := range stmts {
@@ -117,11 +122,34 @@ func executeMigration(db *gorm.DB, m migrationFile) error {
 		if stmt == "" {
 			continue
 		}
+		if skipIfDDLTargetExists(db, stmt) {
+			continue
+		}
 		if err := db.Exec(stmt).Error; err != nil {
 			return fmt.Errorf("execute statement: %w", err)
 		}
 	}
 	return nil
+}
+
+// 幂等 DDL 匹配：ALTER TABLE x ADD COLUMN col / ADD [UNIQUE] INDEX name
+// （迁移 SQL 均为裸标识符，无需支持反引号包裹的表名/列名）
+var (
+	addColumnRe = regexp.MustCompile(`(?i)^ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)`)
+	addIndexRe  = regexp.MustCompile(`(?i)^ALTER\s+TABLE\s+(\w+)\s+ADD\s+(UNIQUE\s+|FULLTEXT\s+|SPATIAL\s+)?(?:INDEX|KEY)\s+(\w+)`)
+)
+
+// skipIfDDLTargetExists 判断 ALTER 目标（列/索引）是否已存在——已存在则跳过整条语句。
+// 复合语句（一个 ALTER 多个 ADD）以第一个 ADD COLUMN/ADD INDEX 的目标为准。
+func skipIfDDLTargetExists(db *gorm.DB, stmt string) bool {
+	if m := addColumnRe.FindStringSubmatch(stmt); m != nil {
+		return columnExists(db, m[1], m[2])
+	}
+	if m := addIndexRe.FindStringSubmatch(stmt); m != nil {
+		// 捕获组：1=表名，2=UNIQUE/FULLTEXT 等前缀（可为空），3=索引名
+		return indexExists(db, m[1], m[3])
+	}
+	return false
 }
 
 // splitStatements 按分号分割 SQL 语句（简单的分行处理）。
@@ -168,6 +196,13 @@ func columnExists(db *gorm.DB, table, column string) bool {
 	return n > 0
 }
 
+// indexExists 检查索引是否存在（幂等 ADD INDEX 的前置条件）。
+func indexExists(db *gorm.DB, table, index string) bool {
+	var n int64
+	db.Raw("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?", table, index).Scan(&n)
+	return n > 0
+}
+
 // fixColumnMismatches 修复 PO 与实际表结构的列名/列差异（幂等）。
 //
 // 根因：早期迁移 022 建的列名与后来修改的 GORM PO 不一致：
@@ -177,8 +212,8 @@ func columnExists(db *gorm.DB, table, column string) bool {
 // 幂等：每次启动都跑，列已对齐的 ALTER 被 columnExists 跳过。
 func fixColumnMismatches(db *gorm.DB) error {
 	type fix struct {
-		check  func() bool
-		exec   string
+		check func() bool
+		exec  string
 	}
 
 	// tenant_settings: `key` → setting_key
