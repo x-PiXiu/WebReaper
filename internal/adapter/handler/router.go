@@ -294,12 +294,15 @@ func (r *Router) Engine() *gin.Engine {
 	}
 
 	// 公开内容站（无认证——让 AI 引擎/搜索引擎可爬取已发布内容）
+	// 注意：公开站路由挂 e（无 apiPrefix 前缀）——URL 是给外部爬虫/AI 引擎用的
+	// 资产，必须干净（https://geo.zhichen.chat/public/articles/xxx），
+	// 与 IndexNow key 文件（/:key.txt）同一设计原则；nginx 用 location /public/ 反代。
 	if r.publicHandler != nil {
-		root.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
-		root.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
-		root.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
-		root.GET("/public/store-map/:brandId", r.publicHandler.GetStoreMap)
-		root.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
+		e.GET("/public/articles/:id", r.publicHandler.GetArticleHTML)
+		e.GET("/public/sitemap.xml", r.publicHandler.GetSitemapXML)
+		e.GET("/public/llms.txt", r.publicHandler.GetLLMSTxt)
+		e.GET("/public/store-map/:brandId", r.publicHandler.GetStoreMap)
+		e.GET("/public/indexnow-key.txt", r.publicHandler.GetIndexNowKeyFile)
 		// IndexNow 协议要求密钥文件在域名根目录（不加前缀）
 		e.GET("/:key.txt", r.publicHandler.GetIndexNowKeyFile)
 	}
