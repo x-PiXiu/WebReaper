@@ -144,7 +144,7 @@ const articlePageTemplate = `<!DOCTYPE html>
   </div>
   {{end}}
 </article>
-<div class="footer">本文由 WebReaper GEO 引擎生成并发布</div>
+<div class="footer">© WebReaper · 内容定期更新</div>
 </body>
 </html>`
 
@@ -236,7 +236,7 @@ func (h *PublicHandler) GetArticleHTML(c *gin.Context) {
 		"Title":        title,
 		"Description":  truncateDescription(cleanText),
 		"CanonicalURL": h.baseURL + "/public/articles/" + content.ID,
-		"Meta":         fmt.Sprintf("GEO 优化内容 · 关键词可见度评分 %d · 发布时间 %s", int(content.Score.Total), content.CreatedAt.Format("2006-01-02")),
+		"Meta":         fmt.Sprintf("发布时间 %s", content.CreatedAt.Format("2006-01-02")),
 		"ContentHTML":  template.HTML(public.RenderMarkdown(cleanText)),
 		"JSONLD":       template.HTML(jsonldTag),
 		"BrandName":    brandName,
