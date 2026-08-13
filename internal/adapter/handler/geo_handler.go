@@ -556,7 +556,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	oc, err := h.contentUC.Generate(c.Request.Context(), geo.GenerateInput{
+	oc, warnings, err := h.contentUC.Generate(c.Request.Context(), geo.GenerateInput{
 		TenantID:      middleware.CurrentTenantID(c),
 		BrandID:       brandID,
 		Keywords:      req.Keywords,
@@ -570,7 +570,12 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	success(c, optimizedContentToView(oc))
+	// 重复内容软提示（A4）：同品牌已有相似已发布内容——前端展示但不阻断
+	view := optimizedContentToView(oc)
+	if len(warnings) > 0 {
+		view["duplicate_warnings"] = warnings
+	}
+	success(c, view)
 }
 
 // HandleGenerateContentStream POST /api/v1/geo/brands/:id/contents/generate-stream

@@ -83,3 +83,19 @@ func TestRenderMarkdown_Blockquote(t *testing.T) {
 		t.Errorf("引用渲染错误: %s", html)
 	}
 }
+
+func TestRenderMarkdown_Link(t *testing.T) {
+	// 合法 http/https 链接 → <a>（nofollow noopener）
+	html := RenderMarkdown("查看 [品牌官网](https://example.com) 详情")
+	if !strings.Contains(html, `<a href="https://example.com" rel="nofollow noopener">品牌官网</a>`) {
+		t.Errorf("合法链接渲染错误: %s", html)
+	}
+	// 危险协议（javascript:）不生成链接——按纯文本输出，防注入
+	html = RenderMarkdown("点击 [危险](javascript:alert(1)) 链接")
+	if strings.Contains(html, "<a href=\"javascript:") {
+		t.Errorf("危险协议不应生成链接（注入风险）: %s", html)
+	}
+	if !strings.Contains(html, "危险") {
+		t.Errorf("危险链接应保留文字: %s", html)
+	}
+}

@@ -125,7 +125,7 @@ func escapeHTML(s string) string {
 	return s
 }
 
-// inlineFormat 行内格式：粗体/斜体/行内代码。
+// inlineFormat 行内格式：粗体/斜体/行内代码/链接。
 // 注意：在 HTML 转义之后执行（此时 < > 已是实体，不会破坏标签）。
 func inlineFormat(s string) string {
 	// 行内代码（`x`）
@@ -135,5 +135,19 @@ func inlineFormat(s string) string {
 	s = regexp.MustCompile(`__([^_]+)__`).ReplaceAllString(s, "<strong>$1</strong>")
 	// 斜体 *x*（避免误伤粗体已生成的 <strong> 内内容）
 	s = regexp.MustCompile(`\*([^*]+)\*`).ReplaceAllString(s, "<em>$1</em>")
+	// 链接 [文字](https://...)——放最后（此时已转义、已处理其他行内格式）。
+	// 安全：仅允许 http/https 协议（javascript: 等一律按纯文本输出，防注入）。
+	s = markdownLinkRe.ReplaceAllStringFunc(s, func(m string) string {
+		p := markdownLinkRe.FindStringSubmatch(m)
+		text, href := p[1], p[2]
+		if !strings.HasPrefix(href, "http://") && !strings.HasPrefix(href, "https://") {
+			return text // 非 http(s) 协议：不生成链接（防 javascript: 注入）
+		}
+		// rel=nofollow：外部链接不传递权重（防被判定交换链接），noopener 防新页劫持
+		return `<a href="` + href + `" rel="nofollow noopener">` + text + `</a>`
+	})
 	return s
 }
+
+// markdownLinkRe markdown 链接 [text](url)。
+var markdownLinkRe = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)

@@ -137,6 +137,11 @@ export default function Content() {
       const modeLabel = genKeywords.length > 1 ? `（${genKeywords.length} 个关键词组合）` : ''
       const scoreLabel = res.score?.total ? `，GEO 评分 ${res.score.total.toFixed(0)}` : ''
       message.success(`内容生成成功${modeLabel}${scoreLabel}${useDiagnose ? '（已按诊断建议优化）' : ''}`)
+      // A4 重复内容软提示：同品牌已有相似已发布内容
+      const dups = (res as OptimizedContent & { duplicate_warnings?: string[] }).duplicate_warnings
+      if (dups?.length) {
+        message.warning(dups[0], 6)
+      }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
     } catch (e) {
       message.error('生成失败：' + ((e as Error)?.message || ''))
@@ -151,7 +156,14 @@ export default function Content() {
       await businessApi.setContentStatus(selectedBrand!, c.id, status)
       if (status === 'published') {
         // 收录预期管理：发布后 IndexNow 立即通知，引擎爬取+引用约 1-2 周
-        message.success(`「${c.title || c.id}」已发布到公开站（已通知搜索引擎收录，预计 1-2 周生效，届时可复测提及率）`, 5)
+        // B1 质量护栏：低分内容（<50）只上线不自动提交收录，需手动补提交
+        const lowScore = (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 50
+        message.success(
+          lowScore
+            ? `「${c.title || c.id}」已发布到公开站。评分较低（${c.score?.total?.toFixed(0)} 分），未自动提交收录——可在内容列表点「补提交收录」手动提交`
+            : `「${c.title || c.id}」已发布到公开站（已通知搜索引擎收录，预计 1-2 周生效，届时可复测提及率）`,
+          5,
+        )
       } else {
         message.success('已下线')
       }

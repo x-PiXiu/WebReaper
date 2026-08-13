@@ -267,6 +267,9 @@ type OptimizedContent struct {
 	IndexStatus   string    // 收录状态：pending（已提交未收录）/ indexed（已收录）/ error（查询失败）
 	IndexedAt     time.Time // 收录确认时间
 	CreatedAt     time.Time
+	// QualityProblems 生成质量校验未通过项（A1 护栏：首轮校验失败时记录，
+	// 供自动重生成注入修正指令；不落库、不参与业务判断）
+	QualityProblems string
 }
 
 // 收录状态常量（收录验证任务写入，公开站点/管理后台展示）。

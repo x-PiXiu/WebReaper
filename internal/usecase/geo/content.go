@@ -72,6 +72,10 @@ const (
 6. 必须引用真实来源：在正文中以"据 XX 官方资料""根据 XX 行业报告""（来源：XX）"等形式
    标注 1-3 处引用（品牌官网/官方数据/行业公认事实均可），增强可信度与论述水平——
    带引用和数据源的内容在搜索引擎中排名更高；严禁编造来源，不确定的信息宁可不写
+7. 权威外部链接：在正文中自然引用 1-2 个权威来源的 markdown 链接
+   （品牌官网/官方文档/行业报告，格式 [文字说明](https://真实地址)），链接必须真实相关，严禁编造
+8. 开头与结构多样化：每次生成使用不同的开头方式（提问/数据/场景/观点切入）和段落组织，
+   避免模板化开头——内容应是"为人而写"的原创文章，而不是套模板的批量产物
 
 硬性要求：
 - 严禁输出任何思考过程、推理过程或 <think> 内容——只输出最终文章
@@ -582,6 +586,36 @@ func (uc *ContentUseCase) Delete(ctx context.Context, tenantID, contentID string
 	return uc.contentRepo.Delete(ctx, tenantID, contentID)
 }
 
+// checkDuplicateTitles 重复内容软提示（A4）：同品牌已发布内容标题与本次生成
+// 关键词重叠时返回提示（不阻断生成——决定权在用户）。防止站内重复内容
+// 被搜索引擎标记（Bing 指南明确点名 duplicate content）。
+func (uc *ContentUseCase) checkDuplicateTitles(ctx context.Context, tenantID, brandID string, keywords []string) []string {
+	if uc.contentRepo == nil || len(keywords) == 0 {
+		return nil
+	}
+	all, err := uc.contentRepo.ListByBrand(ctx, tenantID, brandID)
+	if err != nil {
+		return nil // 查询失败静默（提示是锦上添花，不阻断生成）
+	}
+	var warnings []string
+	for _, k := range keywords {
+		kw := strings.TrimSpace(k)
+		if len([]rune(kw)) < 2 {
+			continue // 单字词跳过（重叠判定无意义）
+		}
+		for _, it := range all {
+			if it.Status != "published" || it.ID == "" {
+				continue
+			}
+			if strings.Contains(it.Title, kw) || strings.Contains(kw, strings.TrimSpace(it.Title)) {
+				warnings = append(warnings, fmt.Sprintf("「%s」与已发布内容《%s》高度重叠，建议检查是否重复（或差异化标题/内容后再发布）", kw, it.Title))
+				break
+			}
+		}
+	}
+	return warnings
+}
+
 // SetStatus 内容状态流转（draft → published 发布到公开站 / published → draft 下线）。
 //
 // 状态语义：
@@ -631,8 +665,12 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
 	}
 
-	// 发布副作用：通知搜索引擎收录（IndexNow，尽力而为——失败不影响发布）
-	if status == "published" && uc.urlSubmitter != nil && uc.publicBaseURL != "" {
+	// 发布副作用：通知搜索引擎收录（IndexNow，尽力而为——失败不影响发布）。
+	// B1 质量护栏：低分内容（< WarnPublishScore）只上线不自动提交收录——
+	// 提交低质内容浪费 IndexNow 配额并拉低站点头信任（Bing 对站点整体信任
+	// 下降 = 全站爬取频率下降）；评分 0 的历史数据正常提交（无评分可判）。
+	if status == "published" && uc.urlSubmitter != nil && uc.publicBaseURL != "" &&
+		(oc.Score.Total == 0 || oc.Score.Total >= entity.WarnPublishScore) {
 		publicURL := strings.TrimRight(uc.publicBaseURL, "/") + "/public/articles/" + oc.ID
 		_ = uc.urlSubmitter.SubmitURLs(ctx, []string{publicURL})
 	}
@@ -675,13 +713,69 @@ type GenerateInput struct {
 	// true 时先生成一次诊断报告，把改进建议注入 prompt——"先诊断再对症下药"。
 	// 诊断烧 token，仅在用户主动勾选时开启。
 	UseDiagnose bool
+	// RetryHint 内部重生成修正指令（A1 质量护栏：首轮生成未通过结构校验时，
+	// 第二轮带此修正指令重生成；前端不传此字段）。
+	RetryHint string
 }
 
 // Generate 从零生成内容：根据品牌信息 + 关键词，AI 原创一篇 GEO 优化文章。
 // 支持单关键词（一个词一篇文章）或多关键词组合（多个词合成一篇深度文）。
 // 这是"关键词→内容"闭环的核心——关键词确定后，直接生成可发布的内容。
-func (uc *ContentUseCase) Generate(ctx context.Context, in GenerateInput) (entity.OptimizedContent, error) {
-	return uc.GenerateStream(ctx, in, nil) // 非流式 = 流式但不回调
+//
+// 质量护栏（A1）：生成结果做结构校验（标题/字数/小标题），未通过时带修正指令
+// 自动重生成一次（最多 2 轮）——拦截 AI 偶发的残次品，避免低质页面进入公开站。
+// 返回的 warnings 为重复内容软提示（同品牌已有相似已发布内容，不阻断生成）。
+func (uc *ContentUseCase) Generate(ctx context.Context, in GenerateInput) (entity.OptimizedContent, []string, error) {
+	// 重复内容软提示（A4）：同品牌已发布内容标题与本次关键词重叠时提示（不阻断）
+	warnings := uc.checkDuplicateTitles(ctx, in.TenantID, in.BrandID, in.Keywords)
+
+	var oc entity.OptimizedContent
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			// 第二轮：注入首轮校验发现的问题，要求修正后重新输出完整文章
+			in.RetryHint = fmt.Sprintf("上一版生成未通过质量校验（问题：%s），请针对问题修正后重新输出完整文章", oc.QualityProblems)
+			uc.logger.Warn("生成内容未通过结构校验，自动重生成",
+				port.String("brand", in.BrandID), port.String("problems", oc.QualityProblems))
+		}
+		oc, err = uc.GenerateStream(ctx, in, nil)
+		if err != nil {
+			return entity.OptimizedContent{}, warnings, err
+		}
+		// 结构校验：标题/字数/小标题（按格式差异化）
+		problems := validateGeneratedContent(oc.OptimizedText, oc.Title, in.Format)
+		if len(problems) == 0 {
+			break
+		}
+		oc.QualityProblems = strings.Join(problems, "；")
+	}
+	return oc, warnings, nil
+}
+
+// validateGeneratedContent 生成结果结构校验（纯函数，可单测）。
+// 返回不合格项列表（空 = 通过）。阈值按格式差异化：
+//   - article/comparison：正文 ≥400 字且必须有小标题（深度内容）
+//   - 其他格式（review/xiaohongshu/script/faq）：正文 ≥150 字
+//   - 所有格式：标题 ≥4 字
+func validateGeneratedContent(text, title, format string) []string {
+	var problems []string
+	if len([]rune(title)) < 4 {
+		problems = append(problems, "标题缺失或过短")
+	}
+	runes := len([]rune(strings.TrimSpace(text)))
+	minLen := 150
+	if format == "" || format == "article" || format == "comparison" {
+		minLen = 400
+	}
+	if runes < minLen {
+		problems = append(problems, fmt.Sprintf("正文过短（%d 字，需 ≥%d 字）", runes, minLen))
+	}
+	// 深度格式必须有分节小标题（AI 生成的"墙式文本"结构缺失）
+	if (format == "" || format == "article" || format == "comparison") &&
+		!strings.Contains(text, "##") && !strings.Contains(text, "###") {
+		problems = append(problems, "缺少小标题分节（建议用 ## 或 ### 组织段落）")
+	}
+	return problems
 }
 
 // GenerateStream 流式生成内容。
@@ -723,6 +817,10 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 		if hints := uc.buildDiagnoseHints(ctx, in.TenantID, in.BrandID, in.Keywords[0]); len(hints) > 0 {
 			userPrompt += "\n\n诊断改进建议（必须逐条落实在文章中，与品牌信息保持一致）：\n- " + strings.Join(hints, "\n- ")
 		}
+	}
+	// 内部重生成（A1 质量护栏）：首轮校验失败时带修正指令重生成
+	if in.RetryHint != "" {
+		userPrompt += "\n\n注意：上一版生成未通过质量校验，请针对以下问题修正后重新输出完整文章：\n" + in.RetryHint
 	}
 
 		// RAG 增强：生成前检索"品牌 + 关键词"真实信息注入 prompt（可选，失败降级为纯 LLM）。
