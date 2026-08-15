@@ -11,6 +11,7 @@ const { Text } = Typography
 export default function AdminUsers() {
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
+  const [search, setSearch] = useState('')
   const [form] = Form.useForm()
 
   const { data: users = [] } = useQuery({
@@ -52,6 +53,23 @@ export default function AdminUsers() {
     {
       title: '角色', dataIndex: 'role', key: 'role', width: 110,
       render: (r: string) => <Tag color={r === 'admin' ? 'red' : 'blue'}>{r === 'admin' ? '管理员' : '商户'}</Tag>,
+    },
+    {
+      // F3-1 运营列：品牌数与最近活跃（最近一次监测时间）——判断"谁在用、谁沉睡"
+      title: '品牌', dataIndex: 'brand_count', key: 'brand_count', width: 70, align: 'center' as const,
+      render: (n: number) => <Text strong style={{ color: n > 0 ? 'var(--wr-accent)' : 'var(--wr-text-muted)' }}>{n ?? 0}</Text>,
+    },
+    {
+      title: '最近活跃', dataIndex: 'last_active', key: 'last_active', width: 130,
+      render: (t: string) => {
+        if (!t) return <Tag style={{ margin: 0 }}>从未使用</Tag>
+        const days = Math.floor((Date.now() - new Date(t).getTime()) / 86400000)
+        return (
+          <Text style={{ fontSize: 12, color: days > 30 ? 'var(--wr-warning)' : 'var(--wr-text-secondary)' }}>
+            {t.slice(5, 16)}{days > 30 ? `（${days} 天前）` : ''}
+          </Text>
+        )
+      },
     },
     {
       title: '租户', dataIndex: 'tenant_id', key: 'tenant_id', width: 140, ellipsis: true,
@@ -110,10 +128,18 @@ export default function AdminUsers() {
         </Col>
       </Row>
 
-      {/* 用户表格 */}
+      {/* 用户表格（F3-1：搜索框——用户名/租户模糊过滤，90 户也能定位） */}
       <div className="wr-glass-card" style={{ padding: 8 }}>
+        <Input.Search
+          placeholder="搜索用户名 / 租户 ID"
+          allowClear
+          style={{ maxWidth: 320, margin: '4px 8px 12px' }}
+          onChange={(e) => setSearch(e.target.value.trim().toLowerCase())}
+        />
         <Table
-          dataSource={users}
+          dataSource={users.filter((u: UserView) =>
+            !search || u.username.toLowerCase().includes(search) || (u.tenant_id || '').toLowerCase().includes(search)
+          )}
           columns={columns}
           rowKey="id"
           pagination={false}

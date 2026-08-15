@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, Spin, DatePicker, Input, Tooltip } from 'antd'
-import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, LinkOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, DatePicker, Input, Tooltip, Tabs } from 'antd'
+import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
 import { businessApi } from '../../api/business'
+import { scoreColor } from '../../utils/geo'
+import { useBrandContext } from '../../hooks/useBrands'
+import AssetPicker from '../../components/AssetPicker'
+import QRLoginModal from './distribution/QRLoginModal'
+import PublishJobTable, { statusConfig } from './distribution/PublishJobTable'
 import type { Brand, OptimizedContent, Account, PublishJob } from '../../types/api'
 
 const { Text, Paragraph } = Typography
@@ -16,7 +21,7 @@ const PLATFORMS = [
 ]
 const PLATFORM_NAMES: Record<string, string> = { zhihu: '知乎', xiaohongshu: '小红书' }
 
-// 健康度 → 显示配置
+// 健康度 → 显示配置（账号池表格用）
 function healthConfig(health: string) {
   switch (health) {
     case 'active': return { color: 'var(--wr-success)', label: '健康', icon: <CheckCircleOutlined /> }
@@ -26,38 +31,21 @@ function healthConfig(health: string) {
   }
 }
 
-// 发布状态 → 显示
-function statusConfig(status: string) {
-  switch (status) {
-    case 'published': return { color: 'var(--wr-success)', label: '已发布', icon: <CheckCircleOutlined /> }
-    case 'running': return { color: 'var(--wr-primary)', label: '自动发布中', icon: <LoadingOutlined /> }
-    case 'pending': return { color: 'var(--wr-warning)', label: '待确认', icon: <ClockCircleOutlined /> }
-    case 'failed': return { color: 'var(--wr-danger)', label: '失败', icon: <CloseCircleOutlined /> }
-    default: return { color: 'var(--wr-text-muted)', label: status, icon: <ClockCircleOutlined /> }
-  }
-}
-
-function scoreColor(s: number): string {
-  if (s >= 80) return 'var(--wr-success)'
-  if (s >= 65) return 'var(--wr-accent)'
-  if (s >= 50) return 'var(--wr-warning)'
-  return 'var(--wr-danger)'
-}
-
 // 分发中心：账号池（绑定/维护）+ 内容发布（半自动/全自动）整合页。
 // 发布强依赖账号——账号池是分发基础设施，合并后一个页面完成「选号 → 发布 → 复测」闭环。
+// 子组件：QRLoginModal（扫码绑定）/ PublishJobTable（发布记录+复测）/ AssetPicker（配图，与多媒体创作共用）。
 export default function Distribution() {
   const queryClient = useQueryClient()
 
   // ---- 账号池状态 ----
+  // 扫码会话细节（二维码/轮询/取消）封装在 QRLoginModal 内，页面只管开关与平台
   const [qrModalOpen, setQrModalOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('accounts') // 页内 Tab（账号池/发布/发布记录）
   const [activePlatform, setActivePlatform] = useState('')
-  const [sessionId, setSessionId] = useState('')
-  const [qrImage, setQrImage] = useState('')
-  const [loginMethod, setLoginMethod] = useState('')
 
   // ---- 发布状态 ----
-  const [selectedBrand, setSelectedBrand] = useState<string | undefined>()
+  // 品牌走全局上下文（与内容生成/监测页共享）；仅内容 ID 是本页局部状态
+  const { brands, brandId: selectedBrand, setCurrentBrand } = useBrandContext()
   const [selectedContentId, setSelectedContentId] = useState<string>()
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([])
   const [publishing, setPublishing] = useState(false)
@@ -82,32 +70,20 @@ export default function Distribution() {
     }
   }, [selectedContentId])
 
-  // B+C: 接收跳转参数（Content/Creation 的「去发布」入口预选内容/预填配图）
+  // B+C: 接收跳转参数（内容生成的「去社媒分发」入口预选内容；配图来自多媒体创作）
   const [searchParams] = useSearchParams()
   useEffect(() => {
     const qContentId = searchParams.get('contentId')
     const qBrandId = searchParams.get('brandId')
     const qMediaUrls = searchParams.get('mediaUrls')
-    if (qBrandId) setSelectedBrand(qBrandId)
+    if (qBrandId) setCurrentBrand(qBrandId)
     if (qContentId) setSelectedContentId(qContentId)
     if (qMediaUrls) setMediaUrls(qMediaUrls.split(',').filter(Boolean))
-  }, [searchParams])
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { data: pickerAssets = [] } = useQuery({
-    queryKey: ['media-assets'],
-    queryFn: () => businessApi.listAssets().then(r => r.assets),
-    enabled: showAssetPicker,
-  })
-  const pickerImages = pickerAssets.filter(a => a.mime.startsWith('image'))
-
-  // ---- 数据 ----
   const { data: accounts = [], isLoading: accountsLoading } = useQuery({
     queryKey: ['geo-accounts'],
     queryFn: () => businessApi.listAccounts(),
-  })
-  const { data: brands = [] } = useQuery({
-    queryKey: ['geo-brands'],
-    queryFn: () => businessApi.listBrands(),
   })
   const { data: contents = [] } = useQuery({
     queryKey: ['geo-contents', selectedBrand],
@@ -117,17 +93,6 @@ export default function Distribution() {
   const { data: jobs = [] } = useQuery({
     queryKey: ['geo-publish-jobs'],
     queryFn: () => businessApi.listPublishJobs(),
-  })
-
-  // 扫码状态轮询（条件轮询：会话进行中每 2s）
-  const { data: pollData } = useQuery({
-    queryKey: ['qr-status', sessionId, activePlatform],
-    queryFn: () => businessApi.pollQRLogin(sessionId, activePlatform, loginMethod),
-    enabled: !!sessionId && qrModalOpen,
-    refetchInterval: (query) => {
-      const s = query.state.data?.status
-      return s && (s === 'preparing' || s === 'waiting' || s === 'scanned') ? 2000 : false
-    },
   })
 
   // 全自动发布状态轮询
@@ -154,52 +119,13 @@ export default function Distribution() {
     }
   }, [autoStatus, queryClient])
 
-  // 轮询登录成功 → 刷新账号池
-  useEffect(() => {
-    if (pollData?.status === 'success' && qrModalOpen) {
-      const pfName = PLATFORMS.find((p) => p.key === activePlatform)?.name || '账号'
-      message.success(`${pfName}「${pollData.account_name || ''}」绑定成功`)
-      setQrModalOpen(false)
-      setSessionId('')
-      setQrImage('')
-      queryClient.invalidateQueries({ queryKey: ['geo-accounts'] })
-    }
-  }, [pollData, qrModalOpen, activePlatform, queryClient])
-
   const selectedContent = contents.find((c) => c.id === selectedContentId)
   const healthyAccounts = accounts.filter((a) => a.health === 'active')
-  const currentQrImage = pollData?.qr_image || qrImage
 
   // ---- 账号操作 ----
   const openBindModal = (platform: string) => {
     setActivePlatform(platform)
-    setLoginMethod('')
-    setQrImage('')
-    setSessionId('')
     setQrModalOpen(true)
-    if (platform === 'xiaohongshu') handleStartQR(platform)
-  }
-
-  const handleStartQR = async (platform: string, method?: string) => {
-    setActivePlatform(platform)
-    setLoginMethod(method || '')
-    setQrImage('')
-    setSessionId('')
-    setQrModalOpen(true)
-    try {
-      const res = await businessApi.startQRLogin(platform, method)
-      setSessionId(res.session_id)
-    } catch (e) {
-      message.error('启动扫码失败：' + ((e as Error)?.message || '浏览器自动化可能未配置'))
-      setQrModalOpen(false)
-    }
-  }
-
-  const handleCloseModal = async () => {
-    if (sessionId) { try { await businessApi.cancelQRLogin(sessionId) } catch {} }
-    setQrModalOpen(false)
-    setSessionId('')
-    setQrImage('')
   }
 
   const handleDeleteAccount = async (id: string) => {
@@ -265,8 +191,7 @@ export default function Distribution() {
         setPublishing(false)
       }
       queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
-    } catch (e) {
-      message.error('发布失败：' + ((e as Error)?.message || ''))
+    } catch { /* 拦截器已提示 */ } finally {
       setPublishing(false)
     }
   }
@@ -277,16 +202,6 @@ export default function Distribution() {
       message.success('已标记为发布')
       queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
     } catch {}
-  }
-
-  const handleReMonitor = async (jobId: string) => {
-    try {
-      const job = await businessApi.reMonitorJob(jobId)
-      message.success(`复测完成：提及率 ${(job.pre_mention_rate * 100).toFixed(1)}% → ${(job.post_mention_rate * 100).toFixed(1)}%`)
-      queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
-    } catch (e) {
-      message.error('复测失败：' + ((e as Error)?.message || '监测可能未配置'))
-    }
   }
 
   // ---- 表格列 ----
@@ -331,67 +246,21 @@ export default function Distribution() {
     },
   ]
 
-  const jobColumns = [
-    {
-      title: '标题', dataIndex: 'title', key: 'title',
-      render: (t: string) => <Text strong style={{ fontSize: 13 }}>{t || '-'}</Text>,
-    },
-    {
-      title: '平台', dataIndex: 'platform', key: 'platform', width: 90,
-      render: (p: string) => <Tag>{PLATFORM_NAMES[p] || p}</Tag>,
-    },
-    {
-      title: '模式', dataIndex: 'mode', key: 'mode', width: 90,
-      render: (m: string) => <Text type="secondary" style={{ fontSize: 12 }}>{m === 'semi-auto' ? '半自动' : m}</Text>,
-    },
-    {
-      title: '状态', dataIndex: 'status', key: 'status', width: 110,
-      render: (s: string) => {
-        const cfg = statusConfig(s)
-        return <Space><span style={{ color: cfg.color }}>{cfg.icon}</span><Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.label}</Text></Space>
-      },
-    },
-    {
-      title: '创建时间', dataIndex: 'created_at', key: 'time', width: 150,
-      render: (t: string) => <Text type="secondary" style={{ fontSize: 12 }}>{t ? new Date(t).toLocaleString() : '-'}</Text>,
-    },
-    {
-      title: '提及率变化', key: 'mention_rate', width: 140,
-      render: (_: unknown, r: PublishJob) => {
-        if (!r.post_mention_rate) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
-        const pre = (r.pre_mention_rate * 100).toFixed(1)
-        const post = (r.post_mention_rate * 100).toFixed(1)
-        const diff = r.post_mention_rate - r.pre_mention_rate
-        const color = diff > 0 ? 'var(--wr-success)' : diff < 0 ? 'var(--wr-danger)' : 'var(--wr-text-muted)'
-        return <Text style={{ fontSize: 12, color }}>{pre}% → {post}%{diff !== 0 && ` (${diff > 0 ? '+' : ''}${(diff * 100).toFixed(1)}%)`}</Text>
-      },
-    },
-    {
-      title: '操作', key: 'action', width: 140,
-      render: (_: unknown, r: PublishJob) => (
-        <Space>
-          {r.external_url && (
-            <Button size="small" type="link" icon={<ExportOutlined />} href={r.external_url} target="_blank">跳转</Button>
-          )}
-          {r.status === 'published' && (
-            <Button size="small" type="link" onClick={() => handleReMonitor(r.id)}>复测提及率</Button>
-          )}
-          {r.status === 'pending' && (
-            <Button size="small" type="link" onClick={() => handleMarkPublished(r.id)}>标记已发布</Button>
-          )}
-        </Space>
-      ),
-    },
-  ]
-
   return (
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div className="wr-page-header">
-          <h1>自动发布</h1>
-          <p>账号池维护 · 内容一键发布到各社媒平台 · 发布后提及率复测</p>
+          <h1>社媒分发</h1>
+          <p>账号池维护 · 内容一键发布到知乎 / 小红书 · 发布后提及率复测</p>
         </div>
 
+        {/* P1-6-1：单页五任务 → 三 Tab（账号池 / 发布 / 发布记录）——重页 Tab 化 */}
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          style={{ marginBottom: 12 }}
+          items={[
+            { key: 'accounts', label: '账号池', children: (<>
         {/* P4-03 半自动定位指引：平台 POI 挂载（RPA 自动定位暂缓） */}
         <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
           <Space align="start" style={{ width: '100%' }}>
@@ -402,7 +271,7 @@ export default function Distribution() {
                 平台"添加定位"（POI 挂载）自动化为暂缓项（RPA 定位风控高、抖音官方通道需服务商资质）——先用最稳的半自动方式：
               </Paragraph>
               <Space direction="vertical" size={2} style={{ fontSize: 12, color: 'var(--wr-text-secondary)' }}>
-                <div>① 门店档案维护好真实地址（品牌管理 → 附近同行 → 门店档案）</div>
+                <div>① 门店档案维护好真实地址（左侧菜单「附近同行」→ 门店档案）</div>
                 <div>② 发布内容已自动附带"📍 门店地址"行（发布时 store_address 非空）</div>
                 <div>③ 平台发布页手动选择"添加定位 → 搜索门店地址 → 选中"后发布</div>
                 <div>④ 带定位的内容更容易被附近的人搜到，也增强 AI 本地回答的引用概率</div>
@@ -478,6 +347,8 @@ export default function Distribution() {
         )}
 
         {/* ===== ② 发布工作台 ===== */}
+        </>)},
+            { key: 'publish', label: '发布', children: (<>
         <Card className="wr-glass-card" title="内容发布" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
             <Text strong style={{ whiteSpace: 'nowrap' }}>选择品牌</Text>
@@ -485,7 +356,7 @@ export default function Distribution() {
               style={{ maxWidth: 320, minWidth: 200, flex: 1 }}
               placeholder="选择品牌查看其内容"
               value={selectedBrand}
-              onChange={(v) => { setSelectedBrand(v); setSelectedContentId(undefined) }}
+              onChange={(v) => { setCurrentBrand(v); setSelectedContentId(undefined) }}
               options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
             />
           </div>
@@ -496,7 +367,7 @@ export default function Distribution() {
                 {!selectedBrand ? (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择品牌" style={{ padding: 40 }} />
                 ) : contents.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该品牌暂无内容，前往内容工作台生成" style={{ padding: 40 }} />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该品牌暂无内容，前往「内容生成」创建" style={{ padding: 40 }} />
                 ) : (
                   <Radio.Group value={selectedContentId} onChange={(e) => setSelectedContentId(e.target.value)} style={{ width: '100%' }}>
                     <Space direction="vertical" style={{ width: '100%' }}>
@@ -707,50 +578,50 @@ export default function Distribution() {
         </Card>
 
         {/* ===== ③ 发布记录 ===== */}
-        <Card className="wr-glass-card" title="发布记录">
-          {jobs.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无发布记录" style={{ padding: 40 }} />
-          ) : (
-            <Table dataSource={jobs} columns={jobColumns} rowKey="id" pagination={{ pageSize: 10 }} size="small" />
-          )}
+        </>)},
+            { key: 'records', label: '发布记录', children: (<>
+        {/* 效果聚合卡（P1-6-2）：平台×篇数×复测均值变化——分发效果一目了然 */}
+        <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            {PLATFORMS.map((pf) => {
+              const pj = jobs.filter((j: PublishJob) => j.platform === pf.key)
+              const monitored = pj.filter((j: PublishJob) => j.post_mention_rate != null)
+              const avgDelta = monitored.length > 0
+                ? monitored.reduce((s: number, j: PublishJob) => s + (j.post_mention_rate - (j.pre_mention_rate || 0)), 0) / monitored.length
+                : null
+              return (
+                <div key={pf.key} style={{ padding: '12px 16px', background: 'var(--wr-bg-elevated)', borderRadius: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: pf.color, display: 'inline-block' }} />
+                    <Text strong style={{ fontSize: 13 }}>{pf.name}</Text>
+                    <Tag style={{ margin: 0, fontSize: 10 }}>{pj.length} 篇</Tag>
+                  </div>
+                  <Text style={{ fontSize: 12, color: 'var(--wr-text-muted)' }}>
+                    {avgDelta === null
+                      ? '暂无复测数据（发布 1-2 周后可复测）'
+                      : <>复测均值变化 <b style={{ color: avgDelta >= 0 ? 'var(--wr-success)' : 'var(--wr-danger)' }}>
+                          {avgDelta >= 0 ? '+' : ''}{(avgDelta * 100).toFixed(1)}%</b>
+                          （{monitored.length} 篇已复测）</>}
+                  </Text>
+                </div>
+              )
+            })}
+          </div>
         </Card>
+        <Card className="wr-glass-card" title="发布记录">
+          <PublishJobTable
+            jobs={jobs}
+            onRefresh={() => queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })}
+            reMonitorPending={null}
+          />
+        </Card>
+        </>)},
+          ]}
+        />
       </div>
 
-      {/* 扫码登录弹窗 */}
-      <Modal
-        title={`绑定 ${PLATFORMS.find((p) => p.key === activePlatform)?.name || ''} 账号`}
-        open={qrModalOpen} onCancel={handleCloseModal} footer={null} width={400} centered
-      >
-        <div style={{ textAlign: 'center', padding: '12px 0' }}>
-          {activePlatform === 'zhihu' && !sessionId && (
-            <div style={{ marginBottom: 16 }}>
-              <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>选择登录方式</Text>
-              <Space>
-                <Button size="small" onClick={() => handleStartQR('zhihu', 'zhihu')}>知乎App</Button>
-                <Button size="small" onClick={() => handleStartQR('zhihu', 'wechat')}>微信</Button>
-                <Button size="small" onClick={() => handleStartQR('zhihu', 'qq')}>QQ</Button>
-                <Button size="small" onClick={() => handleStartQR('zhihu', 'weibo')}>微博</Button>
-              </Space>
-            </div>
-          )}
-          {currentQrImage ? (
-            <>
-              <div style={{ display: 'inline-block', padding: 16, background: '#fff', borderRadius: 12, marginBottom: 16 }}>
-                <img
-                  src={currentQrImage.startsWith('http') ? currentQrImage : `data:image/png;base64,${currentQrImage}`}
-                  alt="登录二维码" style={{ width: 240, height: 'auto', maxHeight: 320, display: 'block' }}
-                />
-              </div>
-              <QRStatusIndicator status={pollData?.status} platform={activePlatform} />
-            </>
-          ) : (
-            <div style={{ padding: 60 }}>
-              <Spin size="large" />
-              <Paragraph type="secondary" style={{ marginTop: 16 }}>正在启动浏览器获取二维码...</Paragraph>
-            </div>
-          )}
-        </div>
-      </Modal>
+      {/* 扫码登录弹窗（二维码/轮询/取消自包含在组件内） */}
+      <QRLoginModal open={qrModalOpen} platform={activePlatform} onClose={() => setQrModalOpen(false)} />
 
       {/* 发布链接弹窗 */}
       <Modal
@@ -778,65 +649,15 @@ export default function Distribution() {
         </Space>
       </Modal>
 
-      {/* 素材库选图 Modal（小红书图文配图） */}
-      <Modal
-        title="从素材库选择图片"
+      {/* 配图选择（与多媒体创作共用 AssetPicker——支持就地上传，无需先去创作页） */}
+      <AssetPicker
         open={showAssetPicker}
-        onCancel={() => setShowAssetPicker(false)}
-        onOk={() => setShowAssetPicker(false)}
-        okText="完成"
-        width={640}
-      >
-        {pickerImages.length === 0 ? (
-          <Empty description="暂无图片素材，请先在创作工作台上传" />
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, maxHeight: 380, overflow: 'auto' }}>
-            {pickerImages.map(a => {
-              const active = mediaUrls.includes(a.url)
-              return (
-                <div
-                  key={a.id}
-                  onClick={() => setMediaUrls(prev => active ? prev.filter(u => u !== a.url) : [...prev, a.url])}
-                  style={{
-                    border: active ? '2px solid var(--wr-primary)' : '1px solid #e5e7eb',
-                    borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
-                  }}
-                >
-                  <img src={a.url} alt="" style={{ width: '100%', height: 88, objectFit: 'cover' }} />
-                  <div style={{ padding: 4, fontSize: 11, color: '#999', textAlign: 'center' }}>
-                    {Math.round(a.size_bytes / 1024)}KB
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-        <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>已选 {mediaUrls.length} 张（点击图片切换选中）</div>
-      </Modal>
+        mode="multi"
+        accept="image"
+        title="选择配图（小红书图文）"
+        onClose={() => setShowAssetPicker(false)}
+        onSelect={(assets) => setMediaUrls(assets.map(a => a.url))}
+      />
     </div>
   )
-}
-
-// 扫码状态指示器
-function QRStatusIndicator({ status, platform }: { status?: string; platform: string }) {
-  const pfName = PLATFORMS.find((p) => p.key === platform)?.name || ''
-  if (!status || status === 'preparing') {
-    return <Space><Spin size="small" /><Text type="secondary">浏览器已打开，正在获取二维码...</Text></Space>
-  }
-  if (status === 'waiting') {
-    return (
-      <Space>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--wr-primary)', display: 'inline-block', animation: 'wr-pulse 1.5s infinite' }} />
-        <Text type="secondary">请用{pfName}App扫码登录</Text>
-      </Space>
-    )
-  }
-  if (status === 'scanned') {
-    return <Space><CheckCircleOutlined style={{ color: 'var(--wr-accent)' }} /><Text style={{ color: 'var(--wr-accent)' }}>已扫码，请在手机确认登录</Text></Space>
-  }
-  if (status === 'expired') return <Text type="warning">二维码已过期，请关闭后重新获取</Text>
-  if (status === 'success') {
-    return <Space><CheckCircleOutlined style={{ color: 'var(--wr-success)' }} /><Text style={{ color: 'var(--wr-success)' }}>登录成功，正在绑定...</Text></Space>
-  }
-  return <Text type="danger">扫码异常：{status}</Text>
 }

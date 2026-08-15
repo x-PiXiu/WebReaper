@@ -20,6 +20,9 @@ type Brand struct {
 	Competitors  []string // 竞品名清单（监测时对比）
 	// BizType 业务类型："local"本地生意 / "online"线上业务（详见常量注释）。
 	BizType string
+	// Industry 行业（如 "餐饮"/"美业"/"线上服务"）——知识库采集与素材检索的过滤维度。
+	// 空值兼容：检索时从定位推断兜底（与 BrandWebSearcher.extractIndustryQuery 同思路）。
+	Industry string
 	// WebsiteURL 官网地址（online 品牌的"NAP"——替代地址/电话）。
 	// 内容生成时注入（"了解更多：https://..."）、收录提交用、公开站链接用。
 	// local 品牌也可填（官网 + 门店地址并存的场景）。
@@ -127,6 +130,10 @@ type MonitoringResult struct {
 	// 用户需要坐标系"我 45% vs 竞品 80%"才知道自己好不好。
 	// 与 Competitors 同源（探测时统计），落库时按采样数归一化。
 	CompetitorRates map[string]float64
+	// CompetitorSentiments 竞品名 → 情感（positive/neutral/negative）。
+	// 竞品情感并排：自家 sentiment 之外的第二语义维度——"竞品被提到且被推荐/被批评"，
+	// 对标视图（自家 vs 竞品 提及率+情感）的数据源。旧数据缺省为空（展示按中性处理）。
+	CompetitorSentiments map[string]string
 	// CandidateCompetitors AI 回答中自然出现的其他品牌（非品牌自身、非已配置竞品，去重）。
 	// 竞品沉淀（P1-4）数据源：监测时 LLM 客观列出回答中所有品牌，只有已配置竞品会被计入
 	// CompetitorRates（排除自身）；其余名字沉淀到这里——「从监测结果推荐」据此蒸馏新竞品候选。
@@ -140,6 +147,23 @@ type MonitoringResult struct {
 	// SelfSourceCount 来源中包含自营公开站域名的次数（P5-01）。
 	// >0 = AI 回答实际引用了我们发布的内容——内容 GEO 的直接效果证据。
 	SelfSourceCount int
+	// FirstPickCount 被提及且位次=1 的采样数——"首选率"（FirstPickCount/SampleCount）
+	// 的数据地基。此前只有均值位次，前端只能用 avg_position==1 近似首选率（语义偏差）。
+	// 旧数据缺省 0（增量兼容，与 sentiment 同模式）。
+	FirstPickCount int
+	// SemanticDegraded 采样中出现过解析降级（字符串匹配兜底）——情感/位次可能失真，
+	// 展示端需提示"结果可能不可信"。旧数据缺省 false。
+	SemanticDegraded bool
+}
+
+// NormalizeSentiment 情感值归一（实体层规则）：合法值仅 positive/negative/neutral。
+// LLM 解析可能返回任意字符串——不可透传落库；探测降级路径的空值同样归一为 neutral
+//（存量旧数据缺省空串，展示端按中性处理，口径一致）。
+func NormalizeSentiment(s string) string {
+	if s == "positive" || s == "negative" {
+		return s
+	}
+	return "neutral"
 }
 
 // AIRankProbeResult AI 榜单探查结果（附近同行"AI 榜"数据源）。

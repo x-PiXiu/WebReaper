@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -31,6 +32,8 @@ type GEOHandler struct {
 	airProbeUC *geo.AIRankProbeUseCase   // AI 榜单探查（可选注入，v2：AI 榜数据源）
 	adviceUC   *geo.AdviceUseCase        // 行动建议（可选注入，P5-05）
 	citationUC *geo.CitationUseCase      // 内容引用统计（可选注入，P5-02）
+	healthUC   *geo.HealthUseCase        // 健康报告聚合（可选注入，v3 归位：单一事实源）
+	industryUC *geo.IndustryUseCase      // 行业全景聚合（可选注入，v3 P2：admin 看板）
 	inputTipper port.InputTipper         // 地址联想（可选注入，P1；未注入→空列表降级）
 }
 
@@ -68,6 +71,16 @@ func (h *GEOHandler) SetCitationUC(uc *geo.CitationUseCase) {
 	h.citationUC = uc
 }
 
+// SetHealthUC 注入健康报告聚合用例（可选；未注入则健康报告端点不注册）。
+func (h *GEOHandler) SetHealthUC(uc *geo.HealthUseCase) {
+	h.healthUC = uc
+}
+
+// SetIndustryUC 注入行业全景聚合用例（可选；未注入则行业看板端点不注册）。
+func (h *GEOHandler) SetIndustryUC(uc *geo.IndustryUseCase) {
+	h.industryUC = uc
+}
+
 // SetInputTipper 注入地址联想服务（可选；未注入则联想端点返回空列表，表单纯手输）。
 func (h *GEOHandler) SetInputTipper(t port.InputTipper) {
 	if t != nil {
@@ -86,6 +99,7 @@ func brandToView(b entity.Brand) gin.H {
 		"core_selling": b.CoreSelling,
 		"competitors":  b.Competitors,
 		"biz_type":     b.BizType,
+		"industry":     b.Industry,
 		"website_url":  b.WebsiteURL,
 		"created_at":   b.CreatedAt,
 	}
@@ -118,30 +132,63 @@ func keywordsToView(ks []entity.Keyword) []gin.H {
 	return out
 }
 
-func monitoringResultToView(r entity.MonitoringResult) gin.H {
-	return gin.H{
-		"id":               r.ID,
-		"tenant_id":        r.TenantID,
-		"brand_id":         r.BrandID,
-		"keyword_id":       r.KeywordID,
-		"engine_name":      r.EngineName,
-		"sample_count":     r.SampleCount,
-		"mention_count":    r.MentionCount,
-		"mention_rate":     r.MentionRate,
-		"avg_position":     r.AvgPosition,
-		"sentiment":        r.Sentiment,
-		"competitors":      r.Competitors,
-		"competitor_rates": r.CompetitorRates, // 竞品提及率（对比坐标系）
-		// 竞品沉淀候选（AI 回答中自然出现的其他品牌）——「从监测结果推荐」数据源
-		"candidate_competitors": r.CandidateCompetitors,
-		"confidence":       r.Confidence,
-		"probed_at":        r.ProbedAt,
-		"raw_sample":       r.RawSample,
+// monitoringResultView 监测结果 API 视图（typed struct）。
+// 整洁架构要点：视图曾用 gin.H（map 无编译期字段检查）——实体新增字段时序列化
+// 静默丢失（信源断流缺陷根因）。改为 struct 后由编译期 + 契约守护测试
+//（geo_handler_view_test.go 反射断言"实体公开字段 ⊆ 视图 json 字段"）双重保障。
+type monitoringResultView struct {
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	BrandID              string             `json:"brand_id"`
+	KeywordID            string             `json:"keyword_id"`
+	EngineName           string             `json:"engine_name"`
+	SampleCount          int                `json:"sample_count"`
+	MentionCount         int                `json:"mention_count"`
+	MentionRate          float64            `json:"mention_rate"`
+	AvgPosition          int                `json:"avg_position"`
+	Sentiment            string             `json:"sentiment"`
+	Competitors          []string           `json:"competitors"`
+	CompetitorRates      map[string]float64 `json:"competitor_rates"`      // 竞品提及率（对比坐标系）
+	CompetitorSentiments map[string]string  `json:"competitor_sentiments"` // 竞品情感（对标视图语义维度）
+	// 竞品沉淀候选（AI 回答中自然出现的其他品牌）——「从监测结果推荐」数据源
+	CandidateCompetitors []string  `json:"candidate_competitors"`
+	Confidence           float64   `json:"confidence"`
+	ProbedAt             time.Time `json:"probed_at"`
+	RawSample            string    `json:"raw_sample"`
+	Sources              []string  `json:"sources"`           // 引用来源（链接/平台名，归因 P5-01）
+	SelfSourceCount      int       `json:"self_source_count"` // 自营公开站被引用次数（>0 = 内容真的被 AI 引用）
+	FirstPickCount       int       `json:"first_pick_count"`  // 被提及且位次=1 的采样数（首选率分子；迁移 045）
+	SemanticDegraded     bool      `json:"semantic_degraded"` // 采样中出现过解析降级（情感/位次可能失真）
+}
+
+func monitoringResultToView(r entity.MonitoringResult) monitoringResultView {
+	return monitoringResultView{
+		ID:                   r.ID,
+		TenantID:             r.TenantID,
+		BrandID:              r.BrandID,
+		KeywordID:            r.KeywordID,
+		EngineName:           r.EngineName,
+		SampleCount:          r.SampleCount,
+		MentionCount:         r.MentionCount,
+		MentionRate:          r.MentionRate,
+		AvgPosition:          r.AvgPosition,
+		Sentiment:            r.Sentiment,
+		Competitors:          r.Competitors,
+		CompetitorRates:      r.CompetitorRates,
+		CompetitorSentiments: r.CompetitorSentiments,
+		CandidateCompetitors: r.CandidateCompetitors,
+		Confidence:           r.Confidence,
+		ProbedAt:             r.ProbedAt,
+		RawSample:            r.RawSample,
+		Sources:              r.Sources,
+		SelfSourceCount:      r.SelfSourceCount,
+		FirstPickCount:       r.FirstPickCount,
+		SemanticDegraded:     r.SemanticDegraded,
 	}
 }
 
-func monitoringResultsToView(rs []entity.MonitoringResult) []gin.H {
-	out := make([]gin.H, 0, len(rs))
+func monitoringResultsToView(rs []entity.MonitoringResult) []monitoringResultView {
+	out := make([]monitoringResultView, 0, len(rs))
 	for _, r := range rs {
 		out = append(out, monitoringResultToView(r))
 	}
@@ -203,7 +250,8 @@ func (h *GEOHandler) HandleCreateBrand(c *gin.Context) {
 		CoreSelling []string `json:"core_selling"`
 		Competitors []string `json:"competitors"`
 		BizType     string   `json:"biz_type"`
-		WebsiteURL string   `json:"website_url"`
+		WebsiteURL  string   `json:"website_url"`
+		Industry    string   `json:"industry"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -212,6 +260,7 @@ func (h *GEOHandler) HandleCreateBrand(c *gin.Context) {
 	brand, err := h.brandUC.Create(c.Request.Context(), middleware.CurrentTenantID(c), geo.BrandInput{
 		Name: req.Name, Positioning: req.Positioning, CoreSelling: req.CoreSelling,
 		Competitors: req.Competitors, BizType: req.BizType, WebsiteURL: req.WebsiteURL,
+		Industry: req.Industry,
 	})
 	if err != nil {
 		fail(c, err)
@@ -237,7 +286,8 @@ func (h *GEOHandler) HandleUpdateBrand(c *gin.Context) {
 		CoreSelling []string `json:"core_selling"`
 		Competitors []string `json:"competitors"`
 		BizType     string   `json:"biz_type"`
-		WebsiteURL string   `json:"website_url"`
+		WebsiteURL  string   `json:"website_url"`
+		Industry    string   `json:"industry"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -246,6 +296,7 @@ func (h *GEOHandler) HandleUpdateBrand(c *gin.Context) {
 	brand, err := h.brandUC.Update(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), geo.BrandInput{
 		Name: req.Name, Positioning: req.Positioning, CoreSelling: req.CoreSelling,
 		Competitors: req.Competitors, BizType: req.BizType, WebsiteURL: req.WebsiteURL,
+		Industry: req.Industry,
 	})
 	if err != nil {
 		fail(c, err)
@@ -384,6 +435,136 @@ func (h *GEOHandler) HandleBrandOverview(c *gin.Context) {
 		"last_probed_at":   overview.LastProbedAt,
 		"trend":            monitoringResultsToView(overview.Trend),
 	})
+}
+
+// HandleGetAIRank GET /api/v1/geo/brands/:id/ai-rank —— AI 榜最近一次缓存（F4 品牌卡徽章；
+// 只读缓存不重跑——强制刷新走 POST ai-rank-probe）。返回全部条目（含未提及），
+// 品牌自身位次由前端按门店名匹配计算（榜上门店来自该品牌的门店档案）。
+func (h *GEOHandler) HandleGetAIRank(c *gin.Context) {
+	if h.airProbeUC == nil {
+		fail(c, fmt.Errorf("AI 榜用例未初始化"))
+		return
+	}
+	res, err := h.airProbeUC.Latest(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"))
+	if err != nil {
+		success(c, gin.H{"available": false})
+		return
+	}
+	type item struct {
+		Name      string  `json:"name"`
+		Rate      float64 `json:"rate"`
+		Mentioned bool    `json:"mentioned"`
+		AvgPos    int     `json:"avg_pos"`
+	}
+	items := make([]item, 0, len(res.Results))
+	for _, it := range res.Results {
+		items = append(items, item{Name: it.Name, Rate: it.Rate, Mentioned: it.Mentioned, AvgPos: it.AvgPos})
+	}
+	success(c, gin.H{
+		"available": true,
+		"probed_at": res.ProbedAt,
+		"expire_at": res.ExpireAt,
+		"items":     items,
+	})
+}
+
+// ---- 健康报告（v3 归位：后端聚合单一事实源）----
+
+type healthThreatView struct {
+	Name      string  `json:"name"`
+	AvgRate   float64 `json:"avg_rate"`   // 0-100
+	Sentiment string  `json:"sentiment"`  // positive/negative/""（中性）
+}
+
+type healthBrandView struct {
+	BrandID        string  `json:"brand_id"`
+	BrandName      string  `json:"brand_name"`
+	Total          float64 `json:"total"`            // 与总分同口径（三处展示位统一）
+	AvgMentionRate float64 `json:"avg_mention_rate"` // 0-1
+}
+
+type healthReportView struct {
+	Total      float64 `json:"total"`
+	Indicators struct {
+		MentionCoverage float64 `json:"mention_coverage"`
+		SentimentScore  float64 `json:"sentiment_score"`
+		FirstPickRate   float64 `json:"first_pick_rate"`
+		ContentAsset    float64 `json:"content_asset"`
+		SourceIntegrity float64 `json:"source_integrity"`
+	} `json:"indicators"`
+	PrevTotal   *float64 `json:"prev_total"` // 上一期总分（无历史为 null）
+	HasPrev     bool     `json:"has_prev"`
+	Competitor  struct {
+		SelfAvg float64            `json:"self_avg"` // 0-1
+		CompAvg float64            `json:"comp_avg"` // 0-1
+		GapPct  float64            `json:"gap_pct"`  // 百分点（+领先/-落后）
+		Size    int                `json:"size"`
+		Threats []healthThreatView `json:"threats"` // 按提及率降序
+	} `json:"competitor"`
+	Brands []healthBrandView `json:"brands"`
+}
+
+// HandleHealthReport GET /api/v1/geo/health-report
+// 租户健康报告（总分+五指数+环比+竞品对标+品牌级分值）——驾驶舱/品牌徽章的单一数据源。
+func (h *GEOHandler) HandleHealthReport(c *gin.Context) {
+	if h.healthUC == nil {
+		fail(c, fmt.Errorf("健康报告用例未初始化"))
+		return
+	}
+	report, err := h.healthUC.Report(c.Request.Context(), middleware.CurrentTenantID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var view healthReportView
+	view.Total = report.Total
+	view.Indicators.MentionCoverage = report.Indicators.MentionCoverage
+	view.Indicators.SentimentScore = report.Indicators.SentimentScore
+	view.Indicators.FirstPickRate = report.Indicators.FirstPickRate
+	view.Indicators.ContentAsset = report.Indicators.ContentAsset
+	view.Indicators.SourceIntegrity = report.Indicators.SourceIntegrity
+	view.PrevTotal = report.PrevTotal
+	view.HasPrev = report.PrevTotal != nil
+	view.Competitor.SelfAvg = report.Competitor.SelfAvg
+	view.Competitor.CompAvg = report.Competitor.CompAvg
+	view.Competitor.GapPct = report.Competitor.GapPct
+	view.Competitor.Size = report.Competitor.Size
+	view.Competitor.Threats = make([]healthThreatView, 0, len(report.Competitor.Threats))
+	for _, t := range report.Competitor.Threats {
+		view.Competitor.Threats = append(view.Competitor.Threats, healthThreatView{Name: t.Name, AvgRate: t.AvgRate, Sentiment: t.Sentiment})
+	}
+	view.Brands = make([]healthBrandView, 0, len(report.Brands))
+	for _, b := range report.Brands {
+		view.Brands = append(view.Brands, healthBrandView{BrandID: b.BrandID, BrandName: b.BrandName, Total: b.Total, AvgMentionRate: b.AvgMentionRate})
+	}
+	success(c, view)
+}
+
+// HandleAdminIndustryOverview GET /api/v1/admin/geo/industry-overview
+// 行业全景看板（跨商户聚合）：行业能见度榜 + 品牌美誉度榜 + 信源域名榜。
+func (h *GEOHandler) HandleAdminIndustryOverview(c *gin.Context) {
+	if h.industryUC == nil {
+		fail(c, fmt.Errorf("行业全景用例未初始化"))
+		return
+	}
+	ov, err := h.industryUC.Overview(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	industries := make([]gin.H, 0, len(ov.Industries))
+	for _, i := range ov.Industries {
+		industries = append(industries, gin.H{"industry": i.Industry, "avg_rate": i.AvgRate, "brand_count": i.BrandCount})
+	}
+	reputation := make([]gin.H, 0, len(ov.Reputation))
+	for _, r := range ov.Reputation {
+		reputation = append(reputation, gin.H{"brand_name": r.BrandName, "industry": r.Industry, "positive_rate": r.PositiveRate, "sample_count": r.SampleCount})
+	}
+	sources := make([]gin.H, 0, len(ov.TopSources))
+	for _, s := range ov.TopSources {
+		sources = append(sources, gin.H{"domain": s.Domain, "count": s.Count})
+	}
+	success(c, gin.H{"industries": industries, "reputation": reputation, "top_sources": sources})
 }
 
 // ---- 内容优化 ----
@@ -551,20 +732,22 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		TargetEngine  string   `json:"target_engine"`
 		UseDiagnose   bool     `json:"use_diagnose"` // 诊断→优化闭环（P5-03）
 		Format        string   `json:"format"`
+		CitationToggles []string `json:"citation_toggles"` // 可引用结构开关（v3 P2，可组合）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
 	oc, warnings, err := h.contentUC.Generate(c.Request.Context(), geo.GenerateInput{
-		TenantID:      middleware.CurrentTenantID(c),
-		BrandID:       brandID,
-		Keywords:      req.Keywords,
-		BrandInfo:     req.BrandInfo,
-		LLMConfigName: req.LLMConfigName,
-		TargetEngine:  req.TargetEngine,
-		UseDiagnose:   req.UseDiagnose,
-		Format:        req.Format,
+		TenantID:         middleware.CurrentTenantID(c),
+		BrandID:          brandID,
+		Keywords:         req.Keywords,
+		BrandInfo:        req.BrandInfo,
+		LLMConfigName:    req.LLMConfigName,
+		TargetEngine:     req.TargetEngine,
+		UseDiagnose:      req.UseDiagnose,
+		Format:           req.Format,
+		CitationToggles:  req.CitationToggles,
 	})
 	if err != nil {
 		fail(c, err)
@@ -589,6 +772,7 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 		LLMConfigName string   `json:"llm_config_name"`
 		TargetEngine  string   `json:"target_engine"`
 		Format        string   `json:"format"`
+		CitationToggles []string `json:"citation_toggles"` // 可引用结构开关（v3 P2，可组合）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -606,13 +790,14 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 
 	// 流式生成（onDelta 实时推送正文增量）
 	oc, err := h.contentUC.GenerateStream(ctx, geo.GenerateInput{
-		TenantID:      middleware.CurrentTenantID(c),
-		BrandID:       brandID,
-		Keywords:      req.Keywords,
-		BrandInfo:     req.BrandInfo,
-		LLMConfigName: req.LLMConfigName,
-		TargetEngine:  req.TargetEngine,
-		Format:        req.Format,
+		TenantID:         middleware.CurrentTenantID(c),
+		BrandID:          brandID,
+		Keywords:         req.Keywords,
+		BrandInfo:        req.BrandInfo,
+		LLMConfigName:    req.LLMConfigName,
+		TargetEngine:     req.TargetEngine,
+		Format:           req.Format,
+		CitationToggles:  req.CitationToggles,
 	}, func(delta string) {
 		// 只推正文 content delta（AI SDK text-delta 格式）
 		writeSSE(c.Writer, map[string]any{"type": "text-delta", "textDelta": delta})
@@ -705,7 +890,7 @@ func (h *GEOHandler) HandleDistillKeywords(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	keywords, err := h.distillUC.Distill(c.Request.Context(), req.Source, port.KeywordSourceInput{
+	keywords, intents, err := h.distillUC.DistillWithIntents(c.Request.Context(), req.Source, port.KeywordSourceInput{
 		TenantID:  middleware.CurrentTenantID(c),
 		BrandID:   req.BrandID,
 		Text:      req.Text,
@@ -717,7 +902,8 @@ func (h *GEOHandler) HandleDistillKeywords(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	success(c, gin.H{"keywords": keywords})
+	// F3-2：questions 源附带意图标注（信息型/比较型/推荐型）——前端结果列表展示标签
+	success(c, gin.H{"keywords": keywords, "keyword_intents": intents})
 }
 
 // HandleListAllKeywords GET /api/v1/geo/keywords

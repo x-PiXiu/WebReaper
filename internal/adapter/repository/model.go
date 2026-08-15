@@ -130,5 +130,7 @@ func allModels() []any {
 		&PlanPO{},
 		&SubscriptionPO{},
 		&OrderPO{},
+		// 平台知识库（043_knowledge_materials.sql：按行业采集素材，带来源溯源）
+		&KnowledgeMaterialPO{},
 	}
 }

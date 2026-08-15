@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/port"
 )
@@ -60,7 +61,10 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 	mentionCount := 0
 	positionSum := 0
 	sentimentPos, sentimentNeg := 0, 0
+	firstPick := 0                                   // 被提及且位次=1 的采样数（首选率分子）
+	degradedSamples := 0                             // 解析降级采样数（字符串匹配兜底）
 	competitorMentions := make(map[string]int)
+	compSentVotes := make(map[string]map[string]int) // 竞品情感跨采样投票（与自家多数投票同口径）
 	var allOtherBrands []string // 竞品沉淀：跨采样收集"回答中出现的其他品牌"
 	sourceSet := make(map[string]bool) // P5-01：跨采样合并来源（去重）
 	var allAnswers []string
@@ -93,6 +97,12 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 			if analysis.Position > 0 {
 				positionSum += analysis.Position
 			}
+			if analysis.Position == 1 {
+				firstPick++ // 首选：该次回答中最先推荐的就是你
+			}
+		}
+		if analysis.Degraded {
+			degradedSamples++
 		}
 		if analysis.Sentiment == "positive" {
 			sentimentPos++
@@ -101,6 +111,13 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		}
 		for comp, cnt := range analysis.CompetitorMentions {
 			competitorMentions[comp] += cnt
+		}
+		// 竞品情感聚合：跨采样投票（多数观点代表整体倾向，与自家口径一致）
+		for comp, sent := range analysis.CompetitorSentiments {
+			if compSentVotes[comp] == nil {
+				compSentVotes[comp] = make(map[string]int)
+			}
+			compSentVotes[comp][entity.NormalizeSentiment(sent)]++
 		}
 		// 竞品沉淀：收集回答中自然出现的其他品牌（跨采样去重见 dedupeOtherBrands）
 		allOtherBrands = append(allOtherBrands, analysis.OtherBrands...)
@@ -143,14 +160,25 @@ func (p *DirectProbe) Probe(ctx context.Context, in port.ProbeInput) (port.Probe
 		AvgPosition:          avgPos,
 		Sentiment:            sentiment,
 		Competitors:          competitorMentions,
+		CompetitorSentiments: voteCompetitorSentiments(compSentVotes),
 		OtherBrands:          dedupeOtherBrands(allOtherBrands),
 		RawSample:            rawSample,
 		SourceCount:          totalSamples,
 		BrandAppearanceCount: mentionCount,
-		Confidence:           computeProbeConfidence(rawSample, totalSamples),
+		Confidence:           probeConfidenceDegraded(computeProbeConfidence(rawSample, totalSamples), degradedSamples),
 		Sources:              sources,
 		SelfSourceCount:      countSelfSources(sources, in.SelfBaseDomain),
+		FirstPickCount:       firstPick,
+		SemanticDegraded:     degradedSamples > 0,
 	}, nil
+}
+
+// probeConfidenceDegraded 解析降级时置信度打折（语义维度缺失，结果可信度下降）。
+func probeConfidenceDegraded(confidence float64, degradedSamples int) float64 {
+	if degradedSamples > 0 {
+		return confidence * 0.7
+	}
+	return confidence
 }
 
 // computeProbeConfidence 按信息量计算置信度（真实直测：回答长度 + 采样成功率）。

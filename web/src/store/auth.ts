@@ -13,7 +13,9 @@ interface AuthState {
   username: string | null
   role: UserRole | null
   tenantId: string | null
-  setAuth: (token: string, username: string, role: UserRole, tenantId: string) => void
+  mustChangePassword: boolean // 仍在使用默认口令（F1-5：admin/admin123）——管理端常驻提醒
+  setAuth: (token: string, username: string, role: UserRole, tenantId: string, mustChangePassword?: boolean) => void
+  setMustChangePassword: (v: boolean) => void
   clearAuth: () => void
 }
 
@@ -24,8 +26,10 @@ export const useAuthStore = create<AuthState>()(
       username: null,
       role: null,
       tenantId: null,
-      setAuth: (token, username, role, tenantId) => set({ token, username, role, tenantId }),
-      clearAuth: () => set({ token: null, username: null, role: null, tenantId: null }),
+      mustChangePassword: false,
+      setAuth: (token, username, role, tenantId, mustChangePassword = false) => set({ token, username, role, tenantId, mustChangePassword }),
+      setMustChangePassword: (v) => set({ mustChangePassword: v }),
+      clearAuth: () => set({ token: null, username: null, role: null, tenantId: null, mustChangePassword: false }),
     }),
     { name: 'webreaper-auth' }, // localStorage key
   ),

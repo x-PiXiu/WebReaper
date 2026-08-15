@@ -30,6 +30,9 @@ func (f *fakeResultRepo) LatestByTenant(ctx context.Context, tenantID string) ([
 func (f *fakeResultRepo) Trend(ctx context.Context, tenantID, brandID string, limit int) ([]entity.MonitoringResult, error) {
 	return f.results, nil
 }
+func (f *fakeResultRepo) ListRecent(ctx context.Context, limit int) ([]entity.MonitoringResult, error) {
+	return f.results, nil
+}
 func (f *fakeResultRepo) Count(ctx context.Context) (int, error) { return len(f.results), nil }
 
 // fakeSearcher 可编程周边搜索器（成功/未配置/失败三态）。

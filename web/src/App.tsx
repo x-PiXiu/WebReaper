@@ -8,6 +8,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 
 const Login = lazy(() => import('./pages/Login'))
+const NotFound = lazy(() => import('./pages/NotFound'))
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
 const Chat = lazy(() => import('./pages/admin/Chat'))
 const AgentConfigs = lazy(() => import('./pages/admin/AgentConfigs'))
@@ -18,12 +19,12 @@ const Keywords = lazy(() => import('./pages/merchant/Keywords'))
 const Distribution = lazy(() => import('./pages/merchant/Distribution'))
 const CreationWorkbench = lazy(() => import('./pages/merchant/Creation'))
 const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
-const Visibility = lazy(() => import('./pages/merchant/Visibility'))
-const IndexingReport = lazy(() => import('./pages/merchant/IndexingReport'))
+const VisibilityHub = lazy(() => import('./pages/merchant/visibility/index'))
 const Nearby = lazy(() => import('./pages/merchant/Nearby'))
 const Notifications = lazy(() => import('./pages/merchant/Notifications'))
 const AdminUsers = lazy(() => import('./pages/admin/Users'))
 const Indexing = lazy(() => import('./pages/admin/Indexing'))
+const Knowledge = lazy(() => import('./pages/admin/Knowledge'))
 const AdminBrands = lazy(() => import('./pages/admin/Brands'))
 const AdminContents = lazy(() => import('./pages/admin/Contents'))
 const AdminSettings = lazy(() => import('./pages/admin/Settings'))
@@ -51,7 +52,7 @@ function LazyPage({ children }: { children: React.ReactNode }) {
 }
 
 function homePath(role: string | null | undefined) {
-  return role === 'admin' ? '/admin' : '/m'
+  return role === 'admin' ? '/admin' : '/m/dashboard'
 }
 
 export default function App() {
@@ -61,12 +62,14 @@ export default function App() {
         <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
 
         <Route element={<ProtectedRoute><MerchantLayout /></ProtectedRoute>}>
-          <Route path="/m" element={<LazyPage><MerchantHome /></LazyPage>} />
+          {/* 工作台语义化路径：/m/dashboard（/m 保留重定向，兼容旧链接/书签） */}
+          <Route path="/m" element={<Navigate to="/m/dashboard" replace />} />
+          <Route path="/m/dashboard" element={<LazyPage><MerchantHome /></LazyPage>} />
           <Route path="/m/brands" element={<LazyPage><Brands /></LazyPage>} />
           <Route path="/m/keywords" element={<LazyPage><Keywords /></LazyPage>} />
-          <Route path="/m/visibility" element={<LazyPage><Visibility /></LazyPage>} />
-          <Route path="/m/monitor" element={<Navigate to="/m/indexing-report" replace />} />
-          <Route path="/m/indexing-report" element={<LazyPage><IndexingReport /></LazyPage>} />
+          <Route path="/m/indexing-report" element={<LazyPage><VisibilityHub /></LazyPage>} />
+          {/* 旧路由兼容：可见度报表已并入 AI 可见度（页面删除，链接重定向） */}
+          <Route path="/m/visibility" element={<Navigate to="/m/indexing-report" replace />} />
           <Route path="/m/nearby" element={<LazyPage><Nearby /></LazyPage>} />
           <Route path="/m/content" element={<LazyPage><Content /></LazyPage>} />
           <Route path="/m/creation" element={<LazyPage><CreationWorkbench /></LazyPage>} />
@@ -84,6 +87,7 @@ export default function App() {
           <Route path="/admin/settings" element={<LazyPage><AdminSettings /></LazyPage>} />
           <Route path="/admin/agent-configs" element={<LazyPage><AgentConfigs /></LazyPage>} />
           <Route path="/admin/indexing" element={<LazyPage><Indexing /></LazyPage>} />
+          <Route path="/admin/knowledge" element={<LazyPage><Knowledge /></LazyPage>} />
           <Route path="/admin/generation-specs" element={<LazyPage><GenerationSpecs /></LazyPage>} />
           <Route path="/admin/providers" element={<LazyPage><Providers /></LazyPage>} />
           <Route path="/admin/prompt-templates" element={<LazyPage><AdminPromptTemplates /></LazyPage>} />
@@ -92,7 +96,7 @@ export default function App() {
         </Route>
 
         <Route path="/" element={<RootRedirect />} />
-        <Route path="*" element={<RootRedirect />} />
+        <Route path="*" element={<LazyPage><NotFound /></LazyPage>} />
       </Routes>
     </BrowserRouter>
   )

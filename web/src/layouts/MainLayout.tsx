@@ -1,12 +1,14 @@
 import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input, Badge, Popover, List, Empty } from 'antd'
 import { SearchOutlined, BellOutlined } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
+import { useBrandStore } from '../store/brand'
 import { clearQueryCache } from '../queryClient'
 import { businessApi } from '../api/business'
+import { useNotificationList, useUnreadCount, useMarkNotificationRead } from '../hooks/useNotifications'
 
 const { Header, Sider, Content } = Layout
 
@@ -58,11 +60,13 @@ export function AppShell({
   brandName = '智擎AI',
   brandIcon = 'G',
   noPaddingKeys = [],
+  banner,
 }: {
   menuItems: NavItem[]
   brandName?: string
   brandIcon?: string
   noPaddingKeys?: string[] // 这些路由对应的页面不要外层 padding（如 Chat 自带布局）
+  banner?: React.ReactNode // 内容区顶部横幅插槽（F1-5：admin 默认口令提醒等全局告示）
 }) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -72,11 +76,12 @@ export function AppShell({
   // 角色切换入口：admin 在用户界面时显示「管理后台」，在管理后台时显示「返回用户界面」
   const inAdmin = location.pathname.startsWith('/admin')
   const showRoleSwitch = role === 'admin'
-  const roleSwitchTarget = inAdmin ? '/m' : '/admin'
+  const roleSwitchTarget = inAdmin ? '/m/dashboard' : '/admin'
 
   const handleLogout = () => {
     clearAuth()
     clearQueryCache() // 清数据缓存——防止下一账号看到上一账号的缓存数据
+    useBrandStore.getState().setCurrentBrand(null) // 品牌上下文同样不跨账号残留
     navigate('/login', { replace: true })
   }
 
@@ -286,6 +291,7 @@ export function AppShell({
         }}>
           <div className="wr-aurora-bg" style={{ minHeight: '100%', borderRadius: 0 }}>
             <div className="wr-fade-in">
+              {banner}
               <Outlet />
             </div>
             <div style={{
@@ -306,13 +312,9 @@ export function AppShell({
   )
 }
 
-// MainLayout 保留为默认导出（兼容旧路由引用，现由商户端/管理端布局取代）。
-export default function MainLayout() {
-  return <AppShell menuItems={[]} />
-}
-
 // NotificationBell 顶栏通知铃铛：未读数角标 + 通知列表 + 已读。
 // 主动唤醒入口（提及率下降/竞品反超/自动复测完成/排期发布完成）。
+// 数据走 hooks/useNotifications（与工作台/通知中心共享缓存，已读联动失效）。
 const NOTIFY_TYPE_LABEL: Record<string, string> = {
   mention_drop: '⚠️ 提及率下降',
   competitor_overtake: '⚔️ 竞品反超',
@@ -322,29 +324,13 @@ const NOTIFY_TYPE_LABEL: Record<string, string> = {
 }
 
 function NotificationBell() {
-  const queryClient = useQueryClient()
-  // 未读数（30s 轮询）
-  const { data: unread } = useQuery({
-    queryKey: ['notify-unread'],
-    queryFn: () => businessApi.notificationUnreadCount(),
-    refetchInterval: 30_000,
-  })
-  const { data: items = [] } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: () => businessApi.listNotifications(),
-  })
+  const navigate = useNavigate()
+  const { data: unread } = useUnreadCount()
+  const { data: items = [] } = useNotificationList()
+  const markRead = useMarkNotificationRead()
 
-  const markAll = async () => {
-    await businessApi.markNotificationRead()
-    queryClient.invalidateQueries({ queryKey: ['notify-unread'] })
-    queryClient.invalidateQueries({ queryKey: ['notifications'] })
-  }
-
-  const markOne = async (id: string) => {
-    await businessApi.markNotificationRead(id)
-    queryClient.invalidateQueries({ queryKey: ['notify-unread'] })
-    queryClient.invalidateQueries({ queryKey: ['notifications'] })
-  }
+  const markAll = () => markRead.mutate(undefined)
+  const markOne = (id: string) => markRead.mutate(id)
 
   const content = (
     <div style={{ width: 340 }}>
@@ -363,7 +349,7 @@ function NotificationBell() {
           style={{ maxHeight: 360, overflow: 'auto' }}
           renderItem={(n) => (
             <List.Item
-              onClick={() => { if (!n.read) markOne(n.id); if (n.link) window.location.href = n.link }}
+              onClick={() => { if (!n.read) markOne(n.id); if (n.link) navigate(n.link) }}
               style={{
                 cursor: 'pointer', padding: '10px 12px', borderRadius: 8,
                 background: n.read ? 'transparent' : 'var(--wr-primary-bg)',

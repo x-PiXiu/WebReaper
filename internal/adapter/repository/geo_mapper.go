@@ -10,7 +10,7 @@ func brandToPO(e entity.Brand) BrandPO {
 	return BrandPO{
 		ID: e.ID, TenantID: e.TenantID, Name: e.Name, Positioning: e.Positioning,
 		CoreSelling: toJSON(e.CoreSelling), Competitors: toJSON(e.Competitors),
-		BizType: e.BizType, WebsiteURL: e.WebsiteURL, CreatedAt: e.CreatedAt,
+		BizType: e.BizType, Industry: e.Industry, WebsiteURL: e.WebsiteURL, CreatedAt: e.CreatedAt,
 	}
 }
 
@@ -18,7 +18,7 @@ func brandFromPO(p BrandPO) entity.Brand {
 	return entity.Brand{
 		ID: p.ID, TenantID: p.TenantID, Name: p.Name, Positioning: p.Positioning,
 		CoreSelling: toStringSlice(p.CoreSelling), Competitors: toStringSlice(p.Competitors),
-		BizType: p.BizType, WebsiteURL: p.WebsiteURL, CreatedAt: p.CreatedAt,
+		BizType: p.BizType, Industry: p.Industry, WebsiteURL: p.WebsiteURL, CreatedAt: p.CreatedAt,
 	}
 }
 
@@ -58,10 +58,12 @@ func monitoringResultToPO(e entity.MonitoringResult) MonitoringResultPO {
 		EngineName: e.EngineName, SampleCount: e.SampleCount, MentionCount: e.MentionCount,
 		MentionRate: e.MentionRate, AvgPosition: e.AvgPosition, Sentiment: e.Sentiment,
 		Competitors: toJSON(e.Competitors), CompetitorRates: toFloatMap(e.CompetitorRates),
+		CompetitorSentiments: toStrMap(e.CompetitorSentiments),
 		CandidateCompetitors: toJSON(e.CandidateCompetitors),
 		Confidence: e.Confidence, ProbedAt: e.ProbedAt,
 		RawSample: e.RawSample,
 		Sources: toJSON(e.Sources), SelfSourceCount: e.SelfSourceCount,
+		FirstPickCount: e.FirstPickCount, SemanticDegraded: e.SemanticDegraded,
 	}
 }
 
@@ -71,10 +73,12 @@ func monitoringResultFromPO(p MonitoringResultPO) entity.MonitoringResult {
 		EngineName: p.EngineName, SampleCount: p.SampleCount, MentionCount: p.MentionCount,
 		MentionRate: p.MentionRate, AvgPosition: p.AvgPosition, Sentiment: p.Sentiment,
 		Competitors: toStringSlice(p.Competitors), CompetitorRates: toFloatMapFromJSON(p.CompetitorRates),
+		CompetitorSentiments: toStrMapFromJSON(p.CompetitorSentiments),
 		CandidateCompetitors: toStringSlice(p.CandidateCompetitors),
 		Confidence: p.Confidence, ProbedAt: p.ProbedAt,
 		RawSample: p.RawSample,
 		Sources: toStringSlice(p.Sources), SelfSourceCount: p.SelfSourceCount,
+		FirstPickCount: p.FirstPickCount, SemanticDegraded: p.SemanticDegraded,
 	}
 }
 

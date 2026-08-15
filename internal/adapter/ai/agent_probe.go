@@ -52,7 +52,10 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 	mentionCount := 0
 	positionSum := 0
 	sentimentPos, sentimentNeg := 0, 0
+	firstPick := 0                                       // 被提及且位次=1 的采样数（首选率分子）
+	degradedSamples := 0                                 // 解析降级采样数（字符串匹配兜底）
 	competitorMentions := make(map[string]int)
+	compSentVotes := make(map[string]map[string]int)     // 竞品情感跨采样投票（与自家多数投票同口径）
 	var allOtherBrands []string // 竞品沉淀：跨采样收集"回答中出现的其他品牌"
 	sourceSet := make(map[string]bool) // P5-01：跨采样合并来源（去重）
 	var allAnswers []string
@@ -122,6 +125,12 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 			if analysis.Position > 0 {
 				positionSum += analysis.Position
 			}
+			if analysis.Position == 1 {
+				firstPick++ // 首选：该次回答中最先推荐的就是你
+			}
+		}
+		if analysis.Degraded {
+			degradedSamples++
 		}
 		if analysis.Sentiment == "positive" {
 			sentimentPos++
@@ -130,6 +139,13 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		}
 		for comp, cnt := range analysis.CompetitorMentions {
 			competitorMentions[comp] += cnt
+		}
+		// 竞品情感聚合：跨采样投票（多数观点代表整体倾向，与自家口径一致）
+		for comp, sent := range analysis.CompetitorSentiments {
+			if compSentVotes[comp] == nil {
+				compSentVotes[comp] = make(map[string]int)
+			}
+			compSentVotes[comp][entity.NormalizeSentiment(sent)]++
 		}
 		// 竞品沉淀：收集回答中自然出现的其他品牌（跨采样去重见 dedupeOtherBrands）
 		allOtherBrands = append(allOtherBrands, analysis.OtherBrands...)
@@ -159,9 +175,13 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		rawSample = strings.Join(allAnswers, "\n\n---\n\n")
 		rawSample = truncateForGeo(rawSample, 2000)
 	}
-	// 置信度：基于回答长度+采样成功+搜索源数（而非固定 sampleCount/5）
+	// 置信度：基于回答长度+采样成功+搜索源数（而非固定 sampleCount/5）；
+	// 出现解析降级时打折——语义维度（情感/位次）缺失，结果可信度下降
 	answerLen := len([]rune(rawSample))
 	confidence := entity.ComputeConfidenceEx(answerLen, totalSamples, totalSamples)
+	if degradedSamples > 0 {
+		confidence *= 0.7
+	}
 	// P5-01：来源列表（去重保序）+ 自营站引用计数（归因）
 	sources := make([]string, 0, len(sourceSet))
 	for s := range sourceSet {
@@ -175,13 +195,16 @@ func (p *AgentProbe) Probe(ctx context.Context, in port.ProbeInput) (port.ProbeR
 		AvgPosition:          avgPos,
 		Sentiment:            sentiment,
 		Competitors:          competitorMentions,
+		CompetitorSentiments: voteCompetitorSentiments(compSentVotes),
 		OtherBrands:          dedupeOtherBrands(allOtherBrands),
 		RawSample:            rawSample,
 		SourceCount:          totalSamples,
 		BrandAppearanceCount: mentionCount,
-		Confidence:           confidence, // 基于信息量的置信度
+		Confidence:           confidence, // 基于信息量的置信度（降级打折）
 		Sources:              sources,
 		SelfSourceCount:      countSelfSources(sources, in.SelfBaseDomain),
+		FirstPickCount:       firstPick,
+		SemanticDegraded:     degradedSamples > 0,
 	}, nil
 }
 
@@ -226,6 +249,7 @@ sources：文中明确提到的来源——链接（http/https）、网站名、
 	if err != nil {
 		ma := fallbackStringMatch(answer, brandName, aliases, competitors)
 		ma.Sources = extractURLs(answer)
+		ma.Degraded = true // 解析 LLM 失败 → 字符串匹配兜底，语义维度缺失
 		return ma
 	}
 
@@ -276,6 +300,7 @@ func matchBrandFromList(resp, brandName string, aliases, competitors []string) m
 		// JSON 解析失败，降级到字符串匹配
 		ma := fallbackStringMatch(resp, brandName, aliases, competitors)
 		ma.Sources = extractURLs(resp)
+		ma.Degraded = true // LLM 返回非 JSON → 兜底，语义维度缺失
 		return ma
 	}
 
@@ -328,6 +353,13 @@ func matchBrandFromList(resp, brandName string, aliases, competitors []string) m
 			compLower := strings.ToLower(comp)
 			if strings.Contains(entryName, compLower) || strings.Contains(compLower, entryName) {
 				ma.CompetitorMentions[comp]++
+				// 竞品情感：LLM 已返回该条目 sentiment，原样记录（无则缺省，展示端按中性处理）
+				if entry.Sentiment != "" {
+					if ma.CompetitorSentiments == nil {
+						ma.CompetitorSentiments = make(map[string]string)
+					}
+					ma.CompetitorSentiments[comp] = strings.ToLower(entry.Sentiment)
+				}
 				matched = true
 			}
 		}
@@ -369,9 +401,13 @@ type mentionAnalysis struct {
 	Position              int
 	Sentiment             string
 	CompetitorMentions    map[string]int
+	CompetitorSentiments  map[string]string // 竞品名 → 情感（该次回答中对竞品的评价倾向）
 	OtherBrands           []string // 回答中出现的其他品牌（非自身、非已配置竞品）——竞品沉淀
 	SourceAppearanceCount int // 品牌在检索源里出现的文章数
-	Sources               []string // P5-01：回答中提到的来源（链接/网站名，去重）
+	Sources               []string // P5-01：回答中提到的来源（链接/平台名，去重）
+	// Degraded 本次解析走了字符串匹配兜底（解析 LLM 失败/JSON 损坏）——
+	// 情感/位次缺失，probe 聚合时据此置 SemanticDegraded（对商户可见，不再静默失真）。
+	Degraded bool
 }
 
 // extractURLs 从文本正则提取 http/https 链接（去重，保序）——P5-01 兜底。
@@ -423,6 +459,31 @@ func countSelfSources(sources []string, selfBaseDomain string) int {
 		}
 	}
 	return count
+}
+
+// voteCompetitorSentiments 竞品情感跨采样多数投票（与自家情感的投票口径一致——
+// 修复原"取最近一次"与自家多数投票的口径不一致：单次采样观点不能代表整体倾向）。
+// 输入：竞品名 → {positive/neutral/negative: 票数}。平票/无票不写入（展示端按中性处理）。
+func voteCompetitorSentiments(votes map[string]map[string]int) map[string]string {
+	out := make(map[string]string, len(votes))
+	for comp, sv := range votes {
+		if s := majoritySentiment(sv); s != "" {
+			out[comp] = s
+		}
+	}
+	return out
+}
+
+// majoritySentiment 三值多数投票：得票严格多于其他两项者胜出；平票返回 ""（视为中性）。
+func majoritySentiment(votes map[string]int) string {
+	pos, neg, neu := votes["positive"], votes["negative"], votes["neutral"]
+	if pos > neg && pos > neu {
+		return "positive"
+	}
+	if neg > pos && neg > neu {
+		return "negative"
+	}
+	return ""
 }
 
 // extractJSONBlock 从字符串中提取第一个 {...} JSON 块（括号配平，处理嵌套）。

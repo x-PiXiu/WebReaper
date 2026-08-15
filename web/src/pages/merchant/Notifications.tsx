@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { Typography, Card, Tag, Empty, Button, Space, List, message } from 'antd'
+import { Typography, Card, Tag, Empty, Button, Space, List } from 'antd'
 import { CheckCircleOutlined, ArrowRightOutlined } from '@ant-design/icons'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { businessApi } from '../../api/business'
+import { useNotificationList, useMarkNotificationRead } from '../../hooks/useNotifications'
 
 const { Text } = Typography
 
@@ -19,26 +18,13 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
 
 export default function Notifications() {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const [filter, setFilter] = useState<string>('') // 空=全部 / unread=仅未读
 
-  const { data: notifications = [] } = useQuery({
-    queryKey: ['merchant-notifications-all'],
-    queryFn: () => businessApi.listNotifications(),
-  })
+  // 与铃铛/工作台共享缓存（hooks/useNotifications）——已读状态三端联动
+  const { data: notifications = [] } = useNotificationList()
+  const markRead = useMarkNotificationRead()
 
-  const markReadMutation = useMutation({
-    mutationFn: (id: string) => businessApi.markNotificationRead(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['merchant-notifications-all'] }),
-  })
-
-  const markAllRead = async () => {
-    try {
-      await businessApi.markNotificationRead('')
-      message.success('已全部标记为已读')
-      queryClient.invalidateQueries({ queryKey: ['merchant-notifications-all'] })
-    } catch {}
-  }
+  const markAllRead = () => markRead.mutate(undefined)
 
   const filtered = filter === 'unread' ? notifications.filter((n: any) => !n.read) : notifications
   const unreadCount = notifications.filter((n: any) => !n.read).length
@@ -81,7 +67,7 @@ export default function Notifications() {
                     borderBottom: '1px solid var(--wr-border)',
                   }}
                   onClick={() => {
-                    if (!n.read) markReadMutation.mutate(n.id)
+                    if (!n.read) markRead.mutate(n.id)
                     if (n.link) navigate(n.link)
                   }}
                 >

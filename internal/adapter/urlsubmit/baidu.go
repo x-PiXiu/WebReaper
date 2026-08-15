@@ -1,4 +1,4 @@
-// Package urlsubmit 提供"收录提交"的渠道实现（百度 API 推送 + 多通道组合）。
+// Package urlsubmit 提供"收录提交"的渠道实现（百度 API 推送 + Bing URL Submission + 多通道组合）。
 //
 // 整洁架构定位：本包是 adapter 层的"框架与驱动"——各搜索引擎的推送协议
 // （HTTP 细节、分片、响应解析）全部封在这里，用例层只依赖 port.URLSubmitter。

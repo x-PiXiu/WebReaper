@@ -65,3 +65,19 @@ export function rateLabel(rate: number): string {
   if (rate >= 0.2) return '偶尔'
   return '缺席'
 }
+
+/** GEO 内容评分 → 颜色（沿用项目 token，双主题自适应）。 */
+export function scoreColor(s: number): string {
+  if (s >= 80) return 'var(--wr-success)'
+  if (s >= 65) return 'var(--wr-accent)'
+  if (s >= 50) return 'var(--wr-warning)'
+  return 'var(--wr-danger)'
+}
+
+/** GEO 内容评分 → 等级文案。 */
+export function scoreLevel(s: number): string {
+  if (s >= 80) return 'A 优秀'
+  if (s >= 65) return 'B 良好'
+  if (s >= 50) return 'C 及格'
+  return 'D 待优化'
+}

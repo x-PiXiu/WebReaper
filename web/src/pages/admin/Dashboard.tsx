@@ -1,9 +1,11 @@
-import { Row, Col, Typography, Spin } from 'antd'
-import { DollarOutlined, CrownOutlined, RiseOutlined } from '@ant-design/icons'
+import { Row, Col, Typography, Spin, Card, Tag, Space, Empty, Progress } from 'antd'
+import { DollarOutlined, CrownOutlined, RiseOutlined, AppstoreOutlined, FileTextOutlined, GlobalOutlined, TrophyOutlined, SmileOutlined, LinkOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/auth'
 import { businessApi } from '../../api/business'
+import type { IndustryOverviewView } from '../../types/api'
 
 const { Text } = Typography
 
@@ -64,6 +66,70 @@ export default function Dashboard() {
   })
   const yuan = (cents: number) => `¥${(cents / 100).toFixed(0)}`
 
+  // 平台 GEO 健康：行业分布 + 内容状态分布（admin 旁路聚合）
+  const { data: brands = [] } = useQuery({
+    queryKey: ['admin-brands'],
+    queryFn: () => businessApi.adminListBrands().catch(() => []),
+  })
+  const { data: contents = [] } = useQuery({
+    queryKey: ['admin-contents'],
+    queryFn: () => businessApi.adminListContents().catch(() => []),
+  })
+
+  const industryDist = useMemo(() => {
+    const map = new Map<string, number>()
+    brands.forEach((b: { industry?: string; biz_type?: string }) => {
+      // F1-4 口径修正：本图按"业务类型"分（与下方行业榜的 industry 字段是两个维度，避免同页两套"行业"口径互相矛盾）
+      const key = b.biz_type === 'online' ? '线上业务' : '本地生意'
+      map.set(key, (map.get(key) || 0) + 1)
+    })
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8)
+  }, [brands])
+
+  // F1-4 治理卡数据：行业字段未填的品牌数（影响行业能见度榜——全落"未分类"）
+  const industryMissing = useMemo(
+    () => brands.filter((b: { industry?: string }) => !(b.industry || '').trim()).length,
+    [brands],
+  )
+
+  // F4 告警面：沉睡商户（从未监测或 >30 天未活跃）+ 草稿积压——运营最该跟进的信号
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: () => businessApi.listUsers().catch(() => []),
+    staleTime: 60_000,
+  })
+  const sleepyMerchants = useMemo(
+    () => allUsers.filter((u: { role: string; last_active?: string }) => {
+      if (u.role !== 'merchant') return false
+      if (!u.last_active) return true
+      return Date.now() - new Date(u.last_active).getTime() > 30 * 86400000
+    }).length,
+    [allUsers],
+  )
+  const draftBacklog = useMemo(
+    () => contents.filter((c: { status?: string }) => c.status === 'draft').length,
+    [contents],
+  )
+
+  const statusDist = useMemo(() => {
+    const map = new Map<string, number>()
+    contents.forEach((c: { status?: string }) => {
+      const key = c.status === 'published' ? '已发布' : c.status === 'draft' ? '草稿' : (c.status || '其他')
+      map.set(key, (map.get(key) || 0) + 1)
+    })
+    const total = Math.max(1, contents.length)
+    const published = map.get('已发布') || 0
+    return { dist: Array.from(map.entries()), publishRate: Math.round((published / total) * 100) }
+  }, [contents])
+
+  // 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜；
+  // 数据源：监测结果情感字段 + 品牌行业字段，后端一次聚合）
+  const { data: industry = null } = useQuery<IndustryOverviewView | null>({
+    queryKey: ['admin-industry-overview'],
+    queryFn: () => businessApi.getIndustryOverview().catch(() => null),
+    staleTime: 5 * 60_000,
+  })
+
   return (
     <div className="wr-page-content">
       {/* 标题 */}
@@ -121,6 +187,176 @@ export default function Dashboard() {
           <StatCard label="发布任务" value={stats?.publish_jobs ?? 0} sublabel="多平台分发" gradient="linear-gradient(180deg,#f97316,#ea580c)" onClick={() => navigate('/admin/brands')} />
         </Col>
       </Row>
+
+      {/* 平台 GEO 健康看板：行业分布 + 内容资产状态（跨商户聚合） */}
+      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8, paddingLeft: 4 }}>平台 GEO 健康</Text>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
+            <Space style={{ marginBottom: 12 }}>
+              <AppstoreOutlined style={{ color: 'var(--wr-primary)' }} />
+              <Text strong style={{ fontSize: 14 }}>品牌业务类型分布</Text>
+              <Tag style={{ margin: 0 }}>{brands.length} 个品牌</Tag>
+            </Space>
+            {industryDist.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无品牌" />
+            ) : (
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                {industryDist.map(([name, n]) => (
+                  <div key={name}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 13 }}>{name}</Text>
+                      <Text strong style={{ fontSize: 13 }}>{n}</Text>
+                    </div>
+                    <Progress percent={Math.round((n / Math.max(1, brands.length)) * 100)} size="small" showInfo={false} strokeColor="var(--wr-accent)" />
+                  </div>
+                ))}
+              </Space>
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} lg={12}>
+          <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
+            <Space style={{ marginBottom: 12 }}>
+              <FileTextOutlined style={{ color: 'var(--wr-success)' }} />
+              <Text strong style={{ fontSize: 14 }}>内容资产状态</Text>
+              <Tag color="success" style={{ margin: 0 }}>发布率 {statusDist.publishRate}%</Tag>
+            </Space>
+            {contents.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无内容" />
+            ) : (
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                {statusDist.dist.map(([name, n]) => (
+                  <div key={name}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 13 }}>{name}</Text>
+                      <Text strong style={{ fontSize: 13 }}>{n}</Text>
+                    </div>
+                    <Progress percent={Math.round((n / contents.length) * 100)} size="small" showInfo={false}
+                      strokeColor={name === '已发布' ? 'var(--wr-success)' : name === '草稿' ? 'var(--wr-warning)' : 'var(--wr-text-muted)'} />
+                  </div>
+                ))}
+                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                  <GlobalOutlined style={{ marginRight: 4 }} />发布率 = 已发布内容 ÷ 全部内容——发布率越高，AI 可引用的信源越充足
+                </Text>
+              </Space>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* F4 需要关注（运营告警面：数据治理 + 沉睡商户 + 草稿积压——只读信号，点击直达对应页） */}
+      {(industryMissing > 0 || sleepyMerchants > 0 || draftBacklog > 0) && (
+        <Card className="wr-glass-card" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16, borderColor: 'rgba(245,158,11,0.35)' }}>
+          <Space wrap size={16}>
+            <Text strong style={{ fontSize: 14 }}>⚠️ 需要关注</Text>
+            {industryMissing > 0 && (
+              <Text style={{ fontSize: 13 }}>{industryMissing} 个品牌未填行业
+                <Text type="secondary" style={{ fontSize: 11 }}>（行业看板全落"未分类"）</Text>
+              </Text>
+            )}
+            {sleepyMerchants > 0 && (
+              <a style={{ fontSize: 13 }} onClick={() => navigate('/admin/users')}>
+                {sleepyMerchants} 个商户 30 天未活跃<Text type="secondary" style={{ fontSize: 11 }}>（流失风险，去跟进 →）</Text>
+              </a>
+            )}
+            {draftBacklog > 0 && (
+              <a style={{ fontSize: 13 }} onClick={() => navigate('/admin/contents')}>
+                {draftBacklog} 篇内容停留草稿<Text type="secondary" style={{ fontSize: 11 }}>（未进公开站=不可被引用 →）</Text>
+              </a>
+            )}
+          </Space>
+        </Card>
+      )}
+
+      {/* 行业全景看板（v3 P2：跨商户聚合——对齐 Geowise 行业全景，行业报告/销售素材的数据源） */}
+      {industry && (industry.industries.length > 0 || industry.reputation.length > 0 || industry.top_sources.length > 0) && (
+        <>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', margin: '24px 0 8px', paddingLeft: 4 }}>行业全景（跨商户聚合）</Text>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={8}>
+              <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
+                <Space style={{ marginBottom: 12 }}>
+                  <TrophyOutlined style={{ color: 'var(--wr-warning)' }} />
+                  <Text strong style={{ fontSize: 14 }}>行业能见度榜</Text>
+                  <Tag style={{ margin: 0 }}>按平均提及率</Tag>
+                </Space>
+                {industry.industries.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无监测数据" />
+                ) : (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {industry.industries.slice(0, 8).map((i) => (
+                      <div key={i.industry}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                          <Text style={{ fontSize: 13 }}>
+                            {i.industry} <Text type="secondary" style={{ fontSize: 11 }}>{i.brand_count} 品牌</Text>
+                            {i.industry === '未分类' && industryMissing > 0 && (
+                              <Tag color="warning" style={{ margin: '0 0 0 6px', fontSize: 10 }}>品牌未填行业——去引导商户补填</Tag>
+                            )}
+                          </Text>
+                          <Text strong style={{ fontSize: 13 }}>{i.avg_rate.toFixed(0)}%</Text>
+                        </div>
+                        <Progress percent={Math.round(i.avg_rate)} size="small" showInfo={false} strokeColor="var(--wr-accent)" />
+                      </div>
+                    ))}
+                  </Space>
+                )}
+              </Card>
+            </Col>
+            <Col xs={24} lg={8}>
+              <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
+                <Space style={{ marginBottom: 12 }}>
+                  <SmileOutlined style={{ color: 'var(--wr-success)' }} />
+                  <Text strong style={{ fontSize: 14 }}>品牌美誉度榜</Text>
+                  <Tag style={{ margin: 0 }}>AI 口碑正面占比</Tag>
+                </Space>
+                {industry.reputation.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无情感数据（需 ≥2 条采样）" />
+                ) : (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {industry.reputation.map((r, idx) => (
+                      <div key={r.brand_name} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 13 }}>
+                          <Text strong style={{ color: idx < 3 ? 'var(--wr-warning)' : 'inherit', marginRight: 6 }}>{idx + 1}</Text>
+                          {r.brand_name} <Text type="secondary" style={{ fontSize: 11 }}>{r.industry}</Text>
+                        </Text>
+                        <Text strong style={{ fontSize: 13, color: r.positive_rate >= 60 ? 'var(--wr-success)' : 'var(--wr-text-secondary)' }}>
+                          {r.positive_rate}%
+                          <Text type="secondary" style={{ fontSize: 11, fontWeight: 400, marginLeft: 4 }}>{r.sample_count} 采样</Text>
+                        </Text>
+                      </div>
+                    ))}
+                  </Space>
+                )}
+              </Card>
+            </Col>
+            <Col xs={24} lg={8}>
+              <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
+                <Space style={{ marginBottom: 12 }}>
+                  <LinkOutlined style={{ color: 'var(--wr-primary)' }} />
+                  <Text strong style={{ fontSize: 14 }}>信源域名榜</Text>
+                  <Tag style={{ margin: 0 }}>AI 引用的来源</Tag>
+                </Space>
+                {industry.top_sources.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无引用来源" />
+                ) : (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {industry.top_sources.map((s, idx) => (
+                      <div key={s.domain} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 13 }} ellipsis>
+                          <Text type="secondary" style={{ marginRight: 6 }}>{idx + 1}</Text>
+                          {s.domain}
+                        </Text>
+                        <Text strong style={{ fontSize: 13 }}>{s.count} 次</Text>
+                      </div>
+                    ))}
+                  </Space>
+                )}
+              </Card>
+            </Col>
+          </Row>
+        </>
+      )}
     </div>
   )
 }

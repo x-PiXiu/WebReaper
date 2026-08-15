@@ -1,31 +1,40 @@
-import { useState, useEffect } from 'react'
-import { Card, Typography, Row, Col, Spin, Tag, Button, Switch, Space, message, Progress, Tooltip, List, Select, InputNumber } from 'antd'
-import { RocketOutlined, ArrowRightOutlined, RadarChartOutlined, BellOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
-import { LazyLine as Line, LazyPie as Pie } from '../../components/charts/LazyCharts'
+import { useState } from 'react'
+import { Card, Typography, Row, Col, Tag, Button, Space, Progress, Tooltip, List } from 'antd'
+import { RocketOutlined, ArrowRightOutlined, BellOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import PageLoading from '../../components/PageLoading'
+import AutoMonitorControl from '../../components/AutoMonitorControl'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import { deltaView, latestMonitor, rateColor, rateLabel } from '../../utils/geo'
+import { deltaView, latestMonitor, rateColor, rateLabel, mentionDelta } from '../../utils/geo'
+import { computeHealth, computeHealthPrev, competitorStats, healthLevel } from '../../utils/geoHealth'
+import { useHealthReport } from '../../hooks/useHealthReport'
+import HealthScorePanel from '../../components/HealthScorePanel'
+import { useBrandOverviews } from '../../hooks/useBrandOverviews'
+import { useNotificationList } from '../../hooks/useNotifications'
+import { useBrandStore } from '../../store/brand'
 import type { Brand } from '../../types/api'
 
 const { Title, Text } = Typography
 
-// 渐进式 Onboarding 步骤（基于实际数据判断 done/pending，非硬编码）
-// 从 overviews + brands 推导，无需额外查询
-function useOnboardingSteps(brands: any[], ovData: any[]) {
+// 渐进式 Onboarding 步骤（基于实际数据判断 done/pending，非硬编码）。
+// 口径与零品牌引导卡完全一致：创建品牌 → 添加关键词 → 发起监测 → 生成内容。
+// （"配置竞品"已并入品牌创建流程，不再单列一步）
+function useOnboardingSteps(brands: any[], ovData: any[], contentCount: number) {
   const hasBrands = brands.length > 0
-  const hasCompetitors = brands.some((b: any) => (b.competitors?.length || 0) > 0)
   const hasKeywords = ovData.some((o: any) => (o.keyword_count || 0) > 0)
   const hasMonitor = ovData.some((o: any) => (o.trend?.length || 0) > 0)
-  const allDone = hasBrands && hasCompetitors && hasKeywords && hasMonitor
-  const doneCount = [hasBrands, hasCompetitors, hasKeywords, hasMonitor].filter(Boolean).length
-  return { hasBrands, hasCompetitors, hasKeywords, hasMonitor, allDone, doneCount }
+  const hasContent = contentCount > 0
+  const allDone = hasBrands && hasKeywords && hasMonitor && hasContent
+  const doneCount = [hasBrands, hasKeywords, hasMonitor, hasContent].filter(Boolean).length
+  return { hasBrands, hasKeywords, hasMonitor, hasContent, allDone, doneCount }
 }
 
 // 数据驾驶舱：品牌可见度总览（Linear 风大屏感）。
 // 数据源：brands + 各品牌 overview（租户级已有接口组合，无新后端依赖）。
 export default function MerchantHome() {
   const navigate = useNavigate()
+  const setCurrentBrand = useBrandStore((s) => s.setCurrentBrand)
   // Onboarding dismiss 状态必须在所有条件 return 之前（React Hooks 规则）
   const [onboardingDismissed, setOnboardingDismissed] = useState(
     typeof window !== 'undefined' && localStorage.getItem('wr-onboarding-dismissed') === '1'
@@ -35,23 +44,11 @@ export default function MerchantHome() {
     queryFn: () => businessApi.listBrands(),
   })
 
-  const overviews = useQuery({
-    queryKey: ['geo-overviews', brands.map((b: Brand) => b.id).join(',')],
-    queryFn: async () => {
-      const results = await Promise.all(
-        brands.map((b: Brand) => businessApi.getBrandOverview(b.id, b.name).catch(() => null))
-      )
-      return results.filter(Boolean)
-    },
-    enabled: brands.length > 0,
-  })
+  const overviews = useBrandOverviews(brands)
 
   // 待办：未读通知（提及率变化/自动复测/排期发布等主动唤醒信号）
-  const { data: notifRes } = useQuery({
-    queryKey: ['merchant-notifications'],
-    queryFn: () => businessApi.listNotifications(),
-    staleTime: 30_000,
-  })
+  // 与铃铛/通知中心共享缓存（hooks/useNotifications）
+  const { data: notifRes } = useNotificationList()
   const unreadNotifs = (notifRes || []).filter((n: any) => !n.read).slice(0, 3)
 
   // 配额用量（套餐余量——让商户每次进来感知"我还剩多少额度"）
@@ -78,6 +75,12 @@ export default function MerchantHome() {
     queryFn: () => businessApi.listPublishJobs().catch(() => []),
     staleTime: 60_000,
   })
+  // 监测结果（驾驶舱竞品对标/情感位次——与 AI 可见度页共享缓存）
+  const { data: monitorResults = [] } = useQuery({
+    queryKey: ['geo-monitor-results'],
+    queryFn: () => businessApi.getAllMonitorResults().catch(() => []),
+    staleTime: 60_000,
+  })
 
   const articleCount = allContents.length
   const draftContentCount = allContents.filter((c: { status?: string }) => c.status === 'draft').length
@@ -87,14 +90,37 @@ export default function MerchantHome() {
   ).length + draftContentCount
 
   const ovData = (overviews.data || []) as any[]
-  const steps = useOnboardingSteps(brands, ovData)
+  const steps = useOnboardingSteps(brands, ovData, articleCount)
+
+  // 驾驶舱：后端健康报告（单一事实源：总分/五指数/环比/竞品差距一次出全量口径）；
+  // 接口不可用时降级本地合成（geoHealth 兜底——灰度兼容旧后端）
+  const { report } = useHealthReport()
+  const health = report
+    ? {
+        total: report.total,
+        mentionCoverage: report.indicators.mention_coverage,
+        sentimentScore: report.indicators.sentiment_score,
+        firstPickRate: report.indicators.first_pick_rate,
+        contentAsset: report.indicators.content_asset,
+        sourceIntegrity: report.indicators.source_integrity,
+      }
+    : computeHealth(ovData, allContents, articleCount - draftContentCount)
+  const prevTotal = report
+    ? (report.has_prev ? report.prev_total : null)
+    : computeHealthPrev(ovData, allContents, articleCount - draftContentCount)
+  const healthDelta = prevTotal === null ? undefined
+    : `${health.total - prevTotal >= 0 ? '+' : ''}${(health.total - prevTotal).toFixed(1)}`
+  const compStats = competitorStats(monitorResults) // 兜底口径（报告不可用时）
+  const competitorGap = report
+    ? (report.competitor.size > 0
+        ? `${report.competitor.gap_pct >= 0 ? '领先' : '落后'} ${Math.abs(report.competitor.gap_pct).toFixed(1)}%`
+        : undefined)
+    : (compStats.size > 0
+        ? `${compStats.gapPct >= 0 ? '领先' : '落后'} ${Math.abs(compStats.gapPct).toFixed(1)}%`
+        : undefined)
 
   if (isLoading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
-        <Spin size="large" />
-      </div>
-    )
+    return <PageLoading tip="工作台加载中..." />
   }
 
   if (brands.length === 0) {
@@ -145,7 +171,7 @@ export default function MerchantHome() {
           </div>
 
           <div style={{ textAlign: 'center' }}>
-            <Button type="primary" size="large" onClick={() => navigate('/m/brands')}>
+            <Button type="primary" size="large" onClick={() => navigate('/m/brands', { state: { openCreate: true } })}>
               创建第一个品牌，开始
             </Button>
           </div>
@@ -163,30 +189,14 @@ export default function MerchantHome() {
   const totalKeywords = ovData.reduce((s: number, o: any) => s + (o.keyword_count || 0), 0)
 
   // 整体变化对比：各品牌最新 vs 上一次提及率的平均变化（delta）
-  const brandDeltas = ovData.map((o: any) => {
-    const trend = (o.trend || []).filter((t: any) => t.mention_rate !== undefined)
-    if (trend.length < 2) return null
-    const latest = trend[trend.length - 1].mention_rate
-    const prev = trend[trend.length - 2].mention_rate
-    return Math.round((latest - prev) * 1000) / 10
-  }).filter((d: number | null) => d !== null) as number[]
+  // 口径统一：复用 mentionDelta（内部按 probed_at 排序）——不依赖 trend 返回顺序
+  const brandDeltas = ovData
+    .map((o: any) => mentionDelta((o.trend || []).filter((t: any) => t.mention_rate !== undefined)))
+    .filter((d: number | null) => d !== null) as number[]
   const overallDelta = brandDeltas.length > 0
     ? brandDeltas.reduce((s: number, d: number) => s + d, 0) / brandDeltas.length
     : null
   const overallDeltaView = deltaView(overallDelta)
-
-  // 提及率分布（环形图）
-  const distData = [
-    { type: '强势 (≥80%)', value: ovData.filter((o: any) => (o.avg_mention_rate || 0) >= 0.8).length },
-    { type: '稳定 (50-80%)', value: ovData.filter((o: any) => (o.avg_mention_rate || 0) >= 0.5 && (o.avg_mention_rate || 0) < 0.8).length },
-    { type: '偶尔 (20-50%)', value: ovData.filter((o: any) => (o.avg_mention_rate || 0) >= 0.2 && (o.avg_mention_rate || 0) < 0.5).length },
-    { type: '缺席 (<20%)', value: ovData.filter((o: any) => (o.avg_mention_rate || 0) < 0.2).length },
-  ].filter((d) => d.value > 0)
-
-  const chartTheme = {
-    color: 'var(--wr-text-primary)',
-    axis: { common: { labelFill: 'var(--wr-text-muted)', lineStroke: 'var(--wr-border)' } },
-  }
 
   return (
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
@@ -211,9 +221,9 @@ export default function MerchantHome() {
                 <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                   {[
                     { done: steps.hasBrands, label: '创建品牌', path: '/m/brands' },
-                    { done: steps.hasCompetitors, label: '配置竞品', path: '/m/brands' },
                     { done: steps.hasKeywords, label: '添加关键词', path: '/m/keywords' },
                     { done: steps.hasMonitor, label: '发起监测', path: '/m/indexing-report' },
+                    { done: steps.hasContent, label: '生成内容', path: '/m/content' },
                   ].map((s, i) => (
                     <Button
                       key={i}
@@ -239,6 +249,21 @@ export default function MerchantHome() {
           </Card>
         )}
 
+        {/* 驾驶舱：GEO 健康总分 + 五指数 + 竞品差距（老板 10 秒看懂） */}
+        <HealthScorePanel
+          total={health.total}
+          indicators={[
+            { label: '提及覆盖', key: 'coverage', value: health.mentionCoverage, hint: '品牌被 AI 提到的广度（平均提及率）', path: '/m/keywords' },
+            { label: '情感指数', key: 'sentiment', value: health.sentimentScore, hint: 'AI 回答中的正面倾向（正/负采样聚合）', path: '/m/indexing-report' },
+            { label: '首选提及', key: 'firstPick', value: health.firstPickRate, hint: '品牌在 AI 回答里排第 1 位被推荐的比例（需 ≥3 次采样，不足显示"—"积累中）', path: '/m/indexing-report' },
+            { label: '内容资产', key: 'asset', value: health.contentAsset, hint: '已发布内容规模（可被 AI 引用的弹药）', path: '/m/content' },
+            { label: '信源完整', key: 'source', value: health.sourceIntegrity, hint: 'AI 实际引用你公开站的比例（归因）', path: '/m/content' },
+          ]}
+          competitorGap={competitorGap}
+          deltaText={healthDelta}
+          onNavigate={navigate}
+        />
+
         {/* 工作台汇总卡：对齐侧栏内容模块 */}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }} className="wr-stagger">
           <Col xs={12} sm={8} lg={4}>
@@ -250,13 +275,13 @@ export default function MerchantHome() {
           <Col xs={12} sm={8} lg={4}>
             <div className="wr-metric-card" onClick={() => navigate('/m/brands')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/brands')}>
               <div className="wr-metric-value">{brands.length}</div>
-              <div className="wr-metric-label">品牌知识</div>
+              <div className="wr-metric-label">品牌</div>
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4}>
             <div className="wr-metric-card" onClick={() => navigate('/m/content')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/content')}>
               <div className="wr-metric-value">{articleCount}</div>
-              <div className="wr-metric-label">生成文章</div>
+              <div className="wr-metric-label">内容</div>
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4}>
@@ -272,7 +297,7 @@ export default function MerchantHome() {
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4}>
-            <div className="wr-metric-card" onClick={() => navigate('/m/visibility')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/visibility')}>
+            <div className="wr-metric-card" onClick={() => navigate('/m/indexing-report')} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/m/indexing-report')}>
               <div className="wr-metric-value" style={{ color: rateColor(totalAvg) }}>
                 {(totalAvg * 100).toFixed(1)}<span style={{ fontSize: 16, fontWeight: 600 }}>%</span>
               </div>
@@ -284,12 +309,8 @@ export default function MerchantHome() {
           </Col>
         </Row>
 
-        {/* 自动盯盘控制（商户端显眼入口：状态/开关/说明/套餐提示）*/}
-        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          <Col span={24}>
-            <AutoMonitorCard />
-          </Col>
-        </Row>
+        {/* 自动盯盘状态行（极简感知；完整配置在 AI 可见度矩阵页） */}
+        <AutoMonitorControl compact />
 
         {/* 待办 + 配额用量横条（每次进来第一眼看到的运营信号）*/}
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
@@ -357,77 +378,7 @@ export default function MerchantHome() {
           </Col>
         </Row>
 
-        {/* 提及率趋势 + 分布 */}
-        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          <Col xs={24} lg={16}>
-            <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <Title level={5} style={{ color: 'var(--wr-text-secondary)', fontWeight: 600, marginBottom: 0, fontSize: 14 }}>
-                  提及率趋势
-                </Title>
-                {/* 自动盯盘状态（商户端感知：趋势自动生长）*/}
-                <AutoMonitorBadge />
-              </div>
-              {(() => {
-                const trendData: any[] = []
-                ovData.forEach((o: any, i: number) => {
-                  const brandName = brands[i]?.name || `品牌${i + 1}`
-                  ;(o.trend || []).forEach((t: any) => {
-                    if (t.mention_rate !== undefined && t.probed_at) {
-                      const d = new Date(t.probed_at)
-                      // x 轴用"月-日 时:分"而非日期：同一天多次监测（手动+自动盯盘）点不重叠
-                      trendData.push({
-                        date: `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
-                        ts: d.getTime(),
-                        rate: Math.round((t.mention_rate || 0) * 1000) / 10,
-                        brand: brandName,
-                      })
-                    }
-                  })
-                })
-                if (trendData.length === 0) {
-                  return <div style={{ textAlign: 'center', padding: '60px 0' }}><Text type="secondary">暂无监测数据——前往「平台收录报表」发起任务</Text></div>
-                }
-                // 按时间排序（Trend 已升序，双保险）
-                trendData.sort((a: any, b: any) => a.ts - b.ts)
-                return (
-                  <Line
-                    data={trendData}
-                    xField="date" yField="rate"
-                    seriesField="brand"
-                    smooth
-                    height={260}
-                    color={['#7c6cff', '#22d3ee', '#4ade80', '#fbbf24', '#fb7185']}
-                    point={{ size: 3, shape: 'circle' }}
-                    yAxis={{ label: { formatter: (v: string) => v + '%' } }}
-                    tooltip={{ formatter: (d: any) => ({ name: d.brand, value: d.rate + '%' }) }}
-                    xAxis={{ label: { autoRotate: true, style: { fontSize: 10 } } }}
-                  />
-                )
-              })()}
-            </Card>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Card className="wr-glass-card" styles={{ body: { padding: 20 } }}>
-              <Title level={5} style={{ color: 'var(--wr-text-secondary)', fontWeight: 600, marginBottom: 16, fontSize: 14 }}>
-                提及率分布
-              </Title>
-              {distData.length > 0 ? (
-                <Pie
-                  data={distData}
-                  angleField="value" colorField="type"
-                  height={260}
-                  radius={0.85} innerRadius={0.6}
-                  color={['#4ade80', '#22d3ee', '#fbbf24', '#fb7185']}
-                  label={{ text: 'type', position: 'outside', fill: 'var(--wr-text-secondary)', fontSize: 11 }}
-                  theme={chartTheme as any}
-                />
-              ) : <div style={{ textAlign: 'center', paddingTop: 80 }}><Text type="secondary">暂无数据</Text></div>}
-            </Card>
-          </Col>
-        </Row>
-
-        {/* 品牌可见度卡片 */}
+        {/* 品牌可见度卡片（趋势/分布的深度分析在「AI 可见度」页——含按天/按周时间维度） */}
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Title level={5} style={{ color: 'var(--wr-text-secondary)', fontWeight: 600, marginBottom: 0, fontSize: 14 }}>
             品牌 AI 可见度
@@ -441,16 +392,29 @@ export default function MerchantHome() {
             const ov = ovData.find((o: any) => o.brand_id === b.id)
             const rate = ov?.avg_mention_rate || 0
             const color = rateColor(rate)
-            // 该品牌最新 vs 上一次提及率变化
+            // 该品牌最新 vs 上一次提及率变化（复用共享纯函数，不依赖 trend 返回顺序）
             const trend = (ov?.trend || []).filter((t: any) => t.mention_rate !== undefined)
-            const delta = deltaView(trend.length >= 2
-              ? Math.round((trend[trend.length - 1].mention_rate - trend[trend.length - 2].mention_rate) * 1000) / 10
-              : null)
+            const delta = deltaView(mentionDelta(trend))
             // 最近一次监测的采样次数（置信度传达）
             const lastSample = latestMonitor(trend as any)?.sample_count || 0
+            // 单品牌健康分徽章（驾驶舱思想下沉到品牌卡——统一走后端报告口径，
+            // 报告不可用时降级本地合成）
+            const brandContents = allContents.filter((c: { brand_id: string }) => c.brand_id === b.id)
+            const brandPub = brandContents.filter((c: { status?: string }) => c.status === 'published').length
+            const bh = report?.brands.find((rb) => rb.brand_id === b.id)?.total
+              ?? computeHealth(ov ? [ov] : [], brandContents, brandPub).total
+            const bhLv = healthLevel(bh)
             return (
               <Col xs={24} sm={12} lg={8} key={b.id}>
-                <div className="wr-glass-card" style={{ padding: 22, height: '100%', cursor: 'pointer' }} onClick={() => navigate('/m/brands')}>
+                {/* 品牌卡深链：写入全局品牌上下文再跳转——品牌 Hub 自动预选该品牌（驾驶舱直达思想） */}
+                <div
+                  className="wr-glass-card"
+                  style={{ padding: 22, height: '100%', cursor: 'pointer' }}
+                  onClick={() => { setCurrentBrand(b.id); navigate('/m/brands') }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && (setCurrentBrand(b.id), navigate('/m/brands'))}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
                     <div>
                       <Text strong style={{ fontSize: 16, letterSpacing: '-0.01em' }}>{b.name}</Text>
@@ -460,9 +424,20 @@ export default function MerchantHome() {
                         </Text>
                       )}
                     </div>
-                    <span className="wr-rate-badge" style={{ background: `${color}1a`, color, borderColor: `${color}33` }}>
-                      {rateLabel(rate)}
-                    </span>
+                    <Space size={4} align="start">
+                      <span className="wr-rate-badge" style={{ background: `${color}1a`, color, borderColor: `${color}33` }}>
+                        {rateLabel(rate)}
+                      </span>
+                      <Tooltip title={`GEO 健康分 ${bh}（${bhLv.label}）`}>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                          background: `${bhLv.color}1a`, color: bhLv.color, border: `1px solid ${bhLv.color}33`,
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {bh}
+                        </span>
+                      </Tooltip>
+                    </Space>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginBottom: 16 }}>
@@ -498,7 +473,7 @@ export default function MerchantHome() {
                       style={{ fontSize: 12, color: 'var(--wr-primary)' }}
                       onClick={(e) => { e.stopPropagation(); navigate('/m/indexing-report') }}
                     >
-                      查看平台收录 →
+                      查看 AI 提及 →
                     </Button>
                   </div>
                 </div>
@@ -508,188 +483,5 @@ export default function MerchantHome() {
         </Row>
       </div>
     </div>
-  )
-}
-
-// AutoMonitorCard 自动盯盘控制卡片（商户端显眼入口）：
-// 状态 + 开关 + 高级设置（频率/采样/通知阈值——用户清楚"开启后发生什么"）。
-// 数据同 AutoMonitorBadge（tenant-auto-monitor）——开关与配置一次保存。
-function AutoMonitorCard() {
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const { data, isLoading } = useQuery({
-    queryKey: ['tenant-auto-monitor'],
-    queryFn: () => businessApi.getTenantAutoMonitor(),
-  })
-  const { data: usage } = useQuery({
-    queryKey: ['my-usage'],
-    queryFn: () => businessApi.getMyUsage().catch(() => null),
-    staleTime: 60_000,
-  })
-  // 本地表单状态（默认值来自服务端配置；未加载完成用默认）
-  const cfg = data?.config || { frequency: 'daily', sample_size: 5, notify_drop_threshold: 20, notify_overtake: true }
-  const [frequency, setFrequency] = useState<string>('daily')
-  const [sampleSize, setSampleSize] = useState<number>(5)
-  const [dropThreshold, setDropThreshold] = useState<number>(20)
-  const [notifyOvertake, setNotifyOvertake] = useState<boolean>(true)
-  const [loadedCfg, setLoadedCfg] = useState(false)
-  useEffect(() => {
-    if (!data?.config || loadedCfg) return
-    setLoadedCfg(true)
-    setFrequency(data.config.frequency || 'daily')
-    setSampleSize(data.config.sample_size || 5)
-    setDropThreshold(data.config.notify_drop_threshold || 20)
-    setNotifyOvertake(data.config.notify_overtake !== false)
-  }, [data?.config, loadedCfg])
-  const saveMutation = useMutation({
-    mutationFn: ({ enabled, cfg }: { enabled: boolean; cfg?: any }) =>
-      businessApi.setTenantAutoMonitor({ enabled, config: cfg }),
-    onSuccess: () => {
-      message.success('自动盯盘设置已保存（按配置每日自动监测，趋势自动生长）')
-      queryClient.invalidateQueries({ queryKey: ['tenant-auto-monitor'] })
-    },
-  })
-
-  const frequencyLabel: Record<string, string> = { daily: '每天 1 次', half_day: '每 12 小时', weekly: '每周 1 次' }
-  const hasFeature = (usage?.plan?.features || []).includes('auto-monitor')
-  const active = data?.platform_enabled && data?.tenant_enabled
-  return (
-    <Card className="wr-glass-card" styles={{ body: { padding: 16 } }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <Space size={6}>
-          <RadarChartOutlined style={{ color: 'var(--wr-primary)' }} />
-          <Text strong style={{ fontSize: 14 }}>自动盯盘</Text>
-          <Tag color={active ? 'success' : data?.platform_enabled ? 'warning' : 'default'} style={{ fontSize: 11, margin: 0 }}>
-            {active ? '运行中' : data?.platform_enabled ? '已暂停' : '平台未开启'}
-          </Tag>
-        </Space>
-        <Space size={8}>
-          <Button size="small" type="link" onClick={() => setShowAdvanced(!showAdvanced)}>
-            {showAdvanced ? '收起设置 ↑' : '高级设置 ⚙'}
-          </Button>
-          {hasFeature ? (
-            <Switch
-              checked={!!data?.tenant_enabled}
-              disabled={!data?.platform_enabled}
-              loading={isLoading || saveMutation.isPending}
-              onChange={(v) => saveMutation.mutate({ enabled: v })}
-              checkedChildren="开启" unCheckedChildren="关闭"
-            />
-          ) : (
-            <Button size="small" type="link" onClick={() => navigate('/m/my-plan')}>升级解锁 →</Button>
-          )}
-        </Space>
-      </div>
-      <Text type="secondary" style={{ fontSize: 12, display: 'block', lineHeight: 1.7 }}>
-        开启后系统按你设置的节奏自动监测全部关键词——趋势自动生长，无需手动点监测；
-        提及率下降或竞品反超时按阈值自动通知（见待办提醒）。
-        {showAdvanced && data?.platform_enabled && ` 当前：${frequencyLabel[cfg.frequency]} · 每关键词 ${cfg.sample_size} 次采样。`}
-      </Text>
-      {!data?.platform_enabled && (
-        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8, color: 'var(--wr-text-muted)' }}>
-          平台总开关未开启（管理员在平台设置中控制）
-        </Text>
-      )}
-
-      {/* 高级设置（用户清楚"开启后发生什么"）*/}
-      {showAdvanced && hasFeature && (
-        <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, background: 'var(--wr-bg-elevated)' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-            <div>
-              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>监测频率</Text>
-              <Select
-                size="small" style={{ width: '100%' }} value={frequency}
-                onChange={setFrequency}
-                options={[
-                  { value: 'daily', label: '每天 1 次（省额度）' },
-                  { value: 'half_day', label: '每 12 小时（更灵敏）' },
-                  { value: 'weekly', label: '每周 1 次（最省）' },
-                ]}
-              />
-            </div>
-            <div>
-              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>每关键词采样次数</Text>
-              <Select
-                size="small" style={{ width: '100%' }} value={sampleSize}
-                onChange={setSampleSize}
-                options={[
-                  { value: 3, label: '3 次（快测，省 token）' },
-                  { value: 5, label: '5 次（推荐，更准）' },
-                  { value: 10, label: '10 次（最准，烧 token）' },
-                ]}
-              />
-            </div>
-            <div>
-              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>提及率下降通知阈值</Text>
-              <InputNumber
-                size="small" min={5} max={80} style={{ width: '100%' }} value={dropThreshold}
-                onChange={(v) => setDropThreshold(v || 20)} addonAfter="%"
-              />
-            </div>
-            <div>
-              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>竞品反超通知</Text>
-              <Switch size="small" checked={notifyOvertake} onChange={setNotifyOvertake} checkedChildren="开" unCheckedChildren="关" />
-              <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2 }}>竞品提及率超过你时提醒</Text>
-            </div>
-          </div>
-          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
-            <Button size="small" type="primary" loading={saveMutation.isPending}
-              onClick={() => saveMutation.mutate({
-                enabled: !!data?.tenant_enabled,
-                cfg: { frequency, sample_size: sampleSize, engine_name: '', notify_drop_threshold: dropThreshold, notify_overtake: notifyOvertake },
-              })}>
-              保存盯盘设置
-            </Button>
-          </div>
-        </div>
-      )}
-    </Card>
-  )
-}
-
-// AutoMonitorBadge 自动盯盘状态徽标（商户端感知：趋势自动生长）。
-// 两级开关：平台总闸（管理员控制，只读）+ 租户开关（商户可自控）。
-function AutoMonitorBadge() {
-  const queryClient = useQueryClient()
-  const { data, isLoading } = useQuery({
-    queryKey: ['tenant-auto-monitor'],
-    queryFn: () => businessApi.getTenantAutoMonitor(),
-  })
-
-  const toggleMutation = useMutation({
-    mutationFn: (enabled: boolean) => businessApi.setTenantAutoMonitor({ enabled }),
-    onSuccess: () => {
-      message.success('自动盯盘已' + (data?.tenant_enabled ? '关闭' : '开启') + '（每日自动监测，趋势自动生长）')
-      queryClient.invalidateQueries({ queryKey: ['tenant-auto-monitor'] })
-    },
-  })
-
-  const active = data?.platform_enabled && data?.tenant_enabled
-  return (
-    <Space size={6}>
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: '3px 10px', borderRadius: 20, fontSize: 11.5, fontWeight: 600,
-        background: active ? 'rgba(74,222,128,0.12)' : 'var(--wr-bg-elevated)',
-        color: active ? 'var(--wr-success)' : 'var(--wr-text-muted)',
-        border: `1px solid ${active ? 'rgba(74,222,128,0.3)' : 'var(--wr-border)'}`,
-      }}>
-        <span style={{
-          width: 6, height: 6, borderRadius: '50%',
-          background: active ? 'var(--wr-success)' : 'var(--wr-text-muted)',
-          animation: active ? 'wr-pulse 2s infinite' : 'none',
-        }} />
-        {active ? '自动盯盘已开启 · 趋势自动生长' : data?.platform_enabled ? '自动盯盘已暂停' : '平台自动盯盘未开启'}
-      </span>
-      {data?.platform_enabled && (
-        <Switch
-          size="small"
-          checked={data?.tenant_enabled}
-          loading={isLoading || toggleMutation.isPending}
-          onChange={(v) => toggleMutation.mutate(v)}
-        />
-      )}
-    </Space>
   )
 }

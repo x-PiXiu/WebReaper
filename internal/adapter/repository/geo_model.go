@@ -18,8 +18,9 @@ type BrandPO struct {
 	Positioning  string         `gorm:"type:text"`
 	CoreSelling  datatypes.JSON `gorm:"type:json"`
 	Competitors  datatypes.JSON `gorm:"type:json"`
-	BizType      string         `gorm:"size:16;default:local"`  // local/online（业务分流）
-	WebsiteURL   string         `gorm:"size:256"`               // 官网地址（online 品牌 NAP）
+	BizType      string         `gorm:"size:16;default:local"` // local/online（业务分流）
+	Industry     string         `gorm:"size:64;default:''"`    // 行业（知识库采集/检索过滤维度）
+	WebsiteURL   string         `gorm:"size:256"`              // 官网地址（online 品牌 NAP）
 	CreatedAt    time.Time
 }
 
@@ -77,6 +78,9 @@ type MonitoringResultPO struct {
 	// CompetitorRates 竞品提及率 JSON（{name: rate}）——探测时统计、落库时归一化，
 	// 前端对比条"我 X% vs 竞品 Y%"的数据源
 	CompetitorRates datatypes.JSON `gorm:"type:json"`
+	// CompetitorSentiments 竞品情感 JSON（{name: positive|neutral|negative}）——
+	// 对标视图"竞品被提到且被推荐/被批评"的语义维度（迁移 044）
+	CompetitorSentiments datatypes.JSON `gorm:"type:json"`
 	// CandidateCompetitors 竞品沉淀候选 JSON（[]string）——AI 回答中自然出现的
 	// 其他品牌（非自身、非已配置竞品），「从监测结果推荐」的蒸馏数据源（迁移 036）
 	CandidateCompetitors datatypes.JSON `gorm:"type:json"`
@@ -85,6 +89,8 @@ type MonitoringResultPO struct {
 	RawSample    string         `gorm:"type:text"`
 	Sources      datatypes.JSON `gorm:"type:json"` // 引用来源（链接/平台名，去重；P5-01）
 	SelfSourceCount int         `gorm:"default:0"` // 自营公开站被引用次数（P5-01 归因）
+	FirstPickCount   int        `gorm:"default:0"` // 被提及且位次=1 的采样数（首选率分子；迁移 045）
+	SemanticDegraded bool       `gorm:"default:false"` // 采样中出现过解析降级（迁移 045）
 }
 
 func (MonitoringResultPO) TableName() string { return "geo_monitoring_results" }

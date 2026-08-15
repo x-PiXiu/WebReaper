@@ -272,3 +272,46 @@ var _ port.KeywordSource = (*WebSource)(nil)
 
 // 确保 entity 包被引用（Keyword 相关）
 var _ = entity.Keyword{}
+
+// ---- 提问词挖掘策略（P2：用户会向 AI 提什么问题）----
+
+// QuestionSource 从品牌/主题生成"用户会向 AI 提问的问题集"。
+// 对齐 GEO 四步走第 2 步"问题库构建"：AI 搜索时代的内容生产应先有
+// 问题库（信息型/比较型/推荐型），再为每个问题准备标准答案。
+// 产出可直接加入词库（问题形态的关键词）或作为内容生成的选题。
+type QuestionSource struct {
+	*keywordDistiller
+}
+
+func NewQuestionSource(ai port.AIGenerator) *QuestionSource {
+	return &QuestionSource{keywordDistiller: &keywordDistiller{aiGen: ai}}
+}
+func (s *QuestionSource) SourceName() string { return "questions" }
+func (s *QuestionSource) Distill(ctx context.Context, in port.KeywordSourceInput) ([]string, error) {
+	var b strings.Builder
+	if in.BrandID != "" {
+		b.WriteString("主题/品牌：")
+		b.WriteString(in.BrandID)
+		b.WriteString("\n")
+	}
+	if in.Text != "" {
+		b.WriteString("背景描述：")
+		b.WriteString(truncateForGeo(in.Text, 1500))
+		b.WriteString("\n")
+	}
+	if len(in.Seeds) > 0 {
+		b.WriteString("种子问题/词：")
+		b.WriteString(strings.Join(in.Seeds, "、"))
+		b.WriteString("\n")
+	}
+	if b.Len() == 0 {
+		return nil, fmt.Errorf("请输入品牌、主题或种子词之一")
+	}
+	prompt := "你是 GEO 提问词挖掘助手。用户会向 AI 搜索引擎（豆包/DeepSeek/Kimi 等）咨询这类产品/服务。" +
+		"请生成 20 个用户最可能向 AI 提出的真实问题，覆盖三类：" +
+		"① 信息型（是什么/怎么做）② 比较型（A 和 B 哪个好）③ 推荐型（哪家好/求推荐）。" +
+		"每个问题一行、简洁口语化、贴合真实搜索语气，不要编号外的解释文字。"
+	return s.distillWithLLM(ctx, prompt, b.String(), in.LLMConfig)
+}
+
+var _ port.KeywordSource = (*QuestionSource)(nil)

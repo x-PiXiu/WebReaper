@@ -44,6 +44,7 @@ type Config struct {
 	Baidu     BaiduConfig
 	AMap      AMapConfig // 高德地图（本地生活 GEO：地理编码 + 周边 POI 搜索）
 	Storage   StorageConfig
+	Embedding EmbeddingConfig // 向量嵌入（知识库素材向量化；缺省复用 LLM 配置）
 }
 
 // TelemetryConfig 链路追踪配置（OpenTelemetry）。
@@ -306,6 +307,12 @@ func Load() Config {
 		AMap: AMapConfig{
 			APIKey:     os.Getenv("AMAP_API_KEY"),
 			APIVersion: getenvDefault("AMAP_API_VERSION", "v5"), // v5 推荐；v3 兼容保留
+		},
+		// 向量嵌入：EMBEDDING_* 显式配置优先，缺省复用 LLM 配置（OpenAI 兼容 /embeddings）
+		Embedding: EmbeddingConfig{
+			Model:   getenvDefault("EMBEDDING_MODEL", getenvDefault("LLM_MODEL", "MiniMax-M2.5")),
+			BaseURL: getenvDefault("EMBEDDING_BASE_URL", getenvDefault("LLM_BASE_URL", "https://api.minimaxi.com/v1")),
+			APIKey:  getenvDefault("EMBEDDING_API_KEY", os.Getenv("LLM_API_KEY")),
 		},
 		JWT: JWTConfig{
 			Secret:     os.Getenv("JWT_SECRET"),

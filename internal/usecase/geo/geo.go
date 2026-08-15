@@ -70,6 +70,74 @@ type BrandInput struct {
 	Competitors []string
 	BizType     string // local/online（空=local）
 	WebsiteURL  string // 官网地址（online 品牌 NAP）
+	Industry    string // 行业（F1-4：知识库检索/行业看板的过滤维度——此前链路断裂被静默丢弃）
+}
+
+// validateBrandInput 用例层校验（F1-1/F3-3：前端拦截是体验，这里是底线）。
+// ① online 品牌官网必填（防绕过前端直调 API）；② 乱码/控制字符拒绝；③ 长度上限。
+func validateBrandInput(in BrandInput, effectiveBizType string) error {
+	if effectiveBizType == "online" && strings.TrimSpace(in.WebsiteURL) == "" {
+		return fmt.Errorf("线上品牌必填官网地址（官网是 AI 引用你的核心信源）")
+	}
+	if s := strings.TrimSpace(in.WebsiteURL); s != "" && !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+		return fmt.Errorf("官网地址必须以 http:// 或 https:// 开头")
+	}
+	if len([]rune(strings.TrimSpace(in.Name))) > 50 {
+		return fmt.Errorf("品牌名过长（≤50 字）")
+	}
+	if len([]rune(in.Positioning)) > 200 {
+		return fmt.Errorf("品牌定位过长（≤200 字）")
+	}
+	if len([]rune(in.Industry)) > 20 {
+		return fmt.Errorf("行业名过长（≤20 字）")
+	}
+	for _, field := range []string{in.Name, in.Positioning, in.WebsiteURL, in.Industry} {
+		if hasIllegalChars(field) {
+			return fmt.Errorf("输入包含非法字符（乱码/控制字符），请检查后重试")
+		}
+	}
+	for _, list := range [][]string{in.CoreSelling, in.Competitors} {
+		for _, item := range list {
+			if len([]rune(item)) > 30 {
+				return fmt.Errorf("卖点/竞品单项过长（≤30 字）：%s", item)
+			}
+			if hasIllegalChars(item) {
+				return fmt.Errorf("输入包含非法字符（乱码/控制字符），请检查后重试")
+			}
+		}
+	}
+	return nil
+}
+
+// hasIllegalChars 检测乱码替换符与控制字符（F3-3：历史曾因此入库乱码定位字段）。
+func hasIllegalChars(s string) bool {
+	return strings.ContainsAny(s, "\uFFFD") || strings.ContainsFunc(s, func(r rune) bool {
+		return r < 0x09 || (r > 0x0D && r < 0x20)
+	})
+}
+
+// sanitizeBrandText 净化文本字段（trim；不做截断——长度由校验拦截）。
+func sanitizeBrandText(s string) string {
+	return strings.TrimSpace(s)
+}
+
+// sanitizeBrandSlice 净化列表字段：trim、去空、单项截断到 maxLen、限制条数。
+func sanitizeBrandSlice(items []string, maxLen int, maxCount int) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		it = strings.TrimSpace(it)
+		if it == "" {
+			continue
+		}
+		if r := []rune(it); len(r) > maxLen {
+			it = string(r[:maxLen])
+		}
+		out = append(out, it)
+		if len(out) >= maxCount {
+			break
+		}
+	}
+	return out
 }
 
 // Create 创建品牌。
@@ -77,16 +145,21 @@ func (uc *BrandUseCase) Create(ctx context.Context, tenantID string, in BrandInp
 	if tenantID == "" {
 		return entity.Brand{}, fmt.Errorf("tenant_id 不能为空")
 	}
+	// 用例层校验（F1-1 双保险：防绕过前端直调 API）+ 输入净化（F3-3：拒绝乱码/控制字符）
+	if err := validateBrandInput(in, in.BizType); err != nil {
+		return entity.Brand{}, err
+	}
 	now := time.Now()
 	b := entity.Brand{
 		ID:          fmt.Sprintf("brand-%d", now.UnixNano()),
 		TenantID:    tenantID,
-		Name:        in.Name,
-		Positioning: in.Positioning,
-		CoreSelling: in.CoreSelling,
-		Competitors: in.Competitors,
+		Name:        sanitizeBrandText(in.Name),
+		Positioning: sanitizeBrandText(in.Positioning),
+		CoreSelling: sanitizeBrandSlice(in.CoreSelling, 30, 8),
+		Competitors: sanitizeBrandSlice(in.Competitors, 30, 16),
 		BizType:     in.BizType,
-		WebsiteURL: in.WebsiteURL,
+		WebsiteURL:  sanitizeBrandText(in.WebsiteURL),
+		Industry:    sanitizeBrandText(in.Industry),
 		CreatedAt:   now,
 	}
 	if !b.IsValid() {
@@ -142,22 +215,32 @@ func (uc *BrandUseCase) Update(ctx context.Context, tenantID, brandID string, in
 		return entity.Brand{}, fmt.Errorf("品牌不存在: %w", err)
 	}
 	if in.Name != "" {
-		old.Name = in.Name
+		old.Name = sanitizeBrandText(in.Name)
 	}
 	if in.Positioning != "" {
-		old.Positioning = in.Positioning
+		old.Positioning = sanitizeBrandText(in.Positioning)
 	}
 	if in.CoreSelling != nil {
-		old.CoreSelling = in.CoreSelling
+		old.CoreSelling = sanitizeBrandSlice(in.CoreSelling, 30, 8)
 	}
 	if in.Competitors != nil {
-		old.Competitors = in.Competitors
+		old.Competitors = sanitizeBrandSlice(in.Competitors, 30, 16)
 	}
 	if in.BizType != "" {
 		old.BizType = in.BizType
 	}
 	if in.WebsiteURL != "" {
-		old.WebsiteURL = in.WebsiteURL
+		old.WebsiteURL = sanitizeBrandText(in.WebsiteURL)
+	}
+	if in.Industry != "" {
+		old.Industry = sanitizeBrandText(in.Industry)
+	}
+	// 用例层校验（F1-1：按合并后的有效业务类型校验——切到 online 且无官网时拦截）
+	if err := validateBrandInput(BrandInput{
+		Name: old.Name, Positioning: old.Positioning, CoreSelling: old.CoreSelling,
+		Competitors: old.Competitors, WebsiteURL: old.WebsiteURL, Industry: old.Industry,
+	}, old.BizType); err != nil {
+		return entity.Brand{}, err
 	}
 	if !old.IsValid() {
 		return entity.Brand{}, fmt.Errorf("品牌无效：name 不能为空")

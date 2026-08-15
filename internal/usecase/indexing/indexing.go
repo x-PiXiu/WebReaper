@@ -17,8 +17,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -32,6 +30,7 @@ type IndexingUseCase struct {
 	logRepo      port.IndexingLogRepository
 	contentRepo  port.OptimizedContentRepository // 补提交时枚举已发布内容
 	submitter    port.URLSubmitter               // 当前启用的提交器（MultiSubmitter 组合）
+	probe        port.URLProbe                   // 可选：密钥文件可达性探测（未注入=VerifyKey 返回未启用）
 	publicBaseURL string                         // 公开站根地址（拼提交 URL）
 }
 
@@ -46,6 +45,13 @@ func NewIndexingUseCase(
 	return &IndexingUseCase{
 		settingRepo: settingRepo, logRepo: logRepo, contentRepo: contentRepo,
 		submitter: submitter, publicBaseURL: publicBaseURL,
+	}
+}
+
+// SetURLProbe 注入 URL 探测器（可选；管理后台"验证密钥"功能用）。
+func (uc *IndexingUseCase) SetURLProbe(p port.URLProbe) {
+	if p != nil {
+		uc.probe = p
 	}
 }
 
@@ -115,22 +121,22 @@ func (uc *IndexingUseCase) VerifyKey(ctx context.Context) (map[string]any, error
 	if uc.publicBaseURL == "" {
 		return nil, fmt.Errorf("公开站根地址未配置（PUBLIC_BASE_URL）")
 	}
+	if uc.probe == nil {
+		return nil, fmt.Errorf("URL 探测器未注入（SetURLProbe）")
+	}
 	keyURL := strings.TrimRight(uc.publicBaseURL, "/") + "/" + cfg.IndexNowKey + ".txt"
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get(keyURL)
+	statusCode, body, err := uc.probe.ProbeGET(ctx, keyURL, 256)
 	if err != nil {
 		return map[string]any{
 			"url": keyURL, "reachable": false, "content_match": false, "error": err.Error(),
 		}, nil
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-	reachable := resp.StatusCode == http.StatusOK
+	reachable := statusCode == 200
 	contentMatch := reachable && strings.TrimSpace(string(body)) == cfg.IndexNowKey
 	return map[string]any{
 		"url": keyURL, "reachable": reachable, "content_match": contentMatch,
-		"status_code": resp.StatusCode, "error": "",
+		"status_code": statusCode, "error": "",
 	}, nil
 }
 

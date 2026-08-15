@@ -29,6 +29,7 @@ type BillingUseCase struct {
 	usageStats port.UsageStatsQueryer // 用量统计（可选；X-01 成本分析用）
 	perMTokenCents int                // 每百万 tokens 参考成本（分；0=不估算金额，只报 token）
 	llmCfgRepo port.LLMConfigRepository // P1-1：按引擎单价成本分析（可选；未注入时用全局参考价兜底）
+	closureWriter port.PaymentClosureWriter // 可选：支付闭环原子写入（未注入=两段写降级）
 }
 
 func NewBillingUseCase(plan port.PlanRepository, sub port.SubscriptionRepository, order port.OrderRepository) *BillingUseCase {
@@ -39,6 +40,14 @@ func NewBillingUseCase(plan port.PlanRepository, sub port.SubscriptionRepository
 func (uc *BillingUseCase) SetPaymentGateway(g port.PaymentGateway) {
 	if g != nil {
 		uc.payment = g
+	}
+}
+
+// SetPaymentClosureWriter 注入支付闭环原子写入器（可选；未注入=两段写降级）。
+// 生产（GORM/MySQL）必注：保证 ConfirmPayment 的订单+订阅原子落库。
+func (uc *BillingUseCase) SetPaymentClosureWriter(w port.PaymentClosureWriter) {
+	if w != nil {
+		uc.closureWriter = w
 	}
 }
 
@@ -305,10 +314,6 @@ func (uc *BillingUseCase) ConfirmPayment(ctx context.Context, orderID string) (e
 	}
 
 	now := time.Now()
-	// ① 订单 → paid
-	if err := uc.orderRepo.UpdateStatus(ctx, order.ID, entity.OrderStatusPaid, order.PaymentID, now); err != nil {
-		return entity.Subscription{}, err
-	}
 	// ② 开通/续期订阅（覆盖式：同租户已有订阅则续期）
 	periodStart := now
 	periodEnd := periodStart.AddDate(0, 1, 0) // +1 月
@@ -326,6 +331,18 @@ func (uc *BillingUseCase) ConfirmPayment(ctx context.Context, orderID string) (e
 	if existing, err := uc.subRepo.FindByTenant(ctx, order.TenantID); err == nil {
 		sub.ID = existing.ID
 		sub.CreatedAt = existing.CreatedAt
+	}
+	// ①+② 原子路径：注入了 PaymentClosureWriter 时订单置 paid 与订阅保存同一事务落库，
+	// 消除"已支付订单但无订阅"的中间态（回调重试也不再依赖人工对账）。
+	if uc.closureWriter != nil {
+		if err := uc.closureWriter.MarkPaidAndActivate(ctx, order.ID, order.PaymentID, now, sub); err != nil {
+			return entity.Subscription{}, err
+		}
+		return sub, nil
+	}
+	// 降级路径（无 DB / mock）：保持两段写，行为与此前一致
+	if err := uc.orderRepo.UpdateStatus(ctx, order.ID, entity.OrderStatusPaid, order.PaymentID, now); err != nil {
+		return entity.Subscription{}, err
 	}
 	if err := uc.subRepo.Save(ctx, sub); err != nil {
 		return entity.Subscription{}, err

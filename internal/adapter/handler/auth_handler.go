@@ -1,20 +1,46 @@
 package handler
 
 import (
+	"fmt"
+
 	"github.com/gin-gonic/gin"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/auth"
 )
 
-// AuthHandler 是认证用例的 HTTP 适配器（注册/登录）。
+// AuthHandler 是认证用例的 HTTP 适配器（注册/登录/改密）。
 type AuthHandler struct {
 	register *auth.RegisterUseCase
 	login    *auth.LoginUseCase
+	changePw *auth.ChangePasswordUseCase
 }
 
-func NewAuthHandler(register *auth.RegisterUseCase, login *auth.LoginUseCase) *AuthHandler {
-	return &AuthHandler{register: register, login: login}
+func NewAuthHandler(register *auth.RegisterUseCase, login *auth.LoginUseCase, changePw *auth.ChangePasswordUseCase) *AuthHandler {
+	return &AuthHandler{register: register, login: login, changePw: changePw}
+}
+
+// HandleChangePassword PUT /api/v1/auth/password —— 修改当前登录用户密码（F1-5）。
+// JWT 中间件已注入 user_id；旧密码验证在用例层（防会话被借用后改密）。
+func (h *AuthHandler) HandleChangePassword(c *gin.Context) {
+	if h.changePw == nil {
+		fail(c, fmt.Errorf("改密用例未初始化"))
+		return
+	}
+	var req struct {
+		OldPassword string `json:"old_password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	uid, _ := c.Get("user_id")
+	if err := h.changePw.Execute(c.Request.Context(), uid.(string), req.OldPassword, req.NewPassword); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"changed": true})
 }
 
 // RegisterRequest POST /api/v1/auth/register

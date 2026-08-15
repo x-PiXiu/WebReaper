@@ -54,6 +54,10 @@ export default function AdminBrands() {
       render: (list: string[]) => <Space wrap size={4}>{(list || []).slice(0, 3).map((c, i) => <Tag key={i} style={{ fontSize: 11, margin: 0 }}>{c}</Tag>)}</Space>,
     },
     {
+      title: '行业', dataIndex: 'industry', key: 'industry', width: 100,
+      render: (i: string) => i ? <Tag color="geekblue" style={{ fontSize: 11, margin: 0 }}>{i}</Tag> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+    },
+    {
       title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 130,
       render: (t: string) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.slice(0, 10)}</Text>,
     },

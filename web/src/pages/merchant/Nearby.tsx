@@ -3,6 +3,7 @@ import { Typography, Button, Modal, Form, Input, Select, Space, message, Popconf
 import { PlusOutlined, EnvironmentOutlined, ReloadOutlined, DeleteOutlined, TrophyOutlined, CompassOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
+import { useBrandContext } from '../../hooks/useBrands'
 import type { Brand, StoreLocation } from '../../types/api'
 
 const { Text } = Typography
@@ -38,7 +39,8 @@ function geoStatusTag(s: StoreLocation) {
 //   + 附近同行双榜：现实世界地图榜（距离/评分）与 AI 世界竞品榜（提及率）对照。
 export default function Nearby() {
   const queryClient = useQueryClient()
-  const [brandId, setBrandId] = useState<string>()
+  // 全局品牌上下文（与内容生成/分发/监测页共享，跨页不丢）
+  const { brands, brandId, setCurrentBrand } = useBrandContext()
   const [types, setTypes] = useState<string>('') // P1 POI 类型扫描（如 050000 餐饮）
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<StoreLocation | null>(null)
@@ -66,11 +68,6 @@ export default function Nearby() {
   }
   const [form] = Form.useForm()
 
-  const { data: brands = [] } = useQuery({
-    queryKey: ['geo-brands'],
-    queryFn: () => businessApi.listBrands(),
-  })
-
   const selectedBrand = brands.find((b: Brand) => b.id === brandId)
 
   const { data: stores = [], isLoading: storesLoading } = useQuery({
@@ -93,7 +90,7 @@ export default function Nearby() {
       queryClient.setQueryData(['geo-nearby', brandId, types], view)
       message.success('AI 榜已更新：AI 真实搜索了附近同行')
     },
-    onError: (e: Error) => message.error('AI 榜探查失败：' + e.message),
+    onError: () => { /* 拦截器已提示 */ },
   })
 
   const createMut = useMutation({
@@ -104,7 +101,7 @@ export default function Nearby() {
       form.resetFields()
       queryClient.invalidateQueries({ queryKey: ['geo-stores', brandId] })
     },
-    onError: (e: Error) => message.error('创建失败：' + e.message),
+    onError: () => { /* 拦截器已提示 */ },
   })
 
   const updateMut = useMutation({
@@ -116,7 +113,7 @@ export default function Nearby() {
       queryClient.invalidateQueries({ queryKey: ['geo-stores', brandId] })
       refetchRanking()
     },
-    onError: (e: Error) => message.error('更新失败：' + e.message),
+    onError: () => { /* 拦截器已提示 */ },
   })
 
   const deleteMut = useMutation({
@@ -180,7 +177,7 @@ export default function Nearby() {
                 style={{ width: 240 }}
                 placeholder="选择品牌"
                 value={brandId}
-                onChange={setBrandId}
+                onChange={setCurrentBrand}
                 options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
               />
               {selectedBrand && (
@@ -204,7 +201,7 @@ export default function Nearby() {
               <Empty description="线上业务品牌无需门店与附近同行管理">
                 <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
                   线上业务的 GEO 核心是行业关键词监测 + 内容优化——<br />
-                  请前往「平台收录报表」发起任务，在「品牌知识库」用「从监测结果推荐」获取竞品。
+                  请前往「AI 提及监测」发起任务，在「品牌管理」用「从监测结果推荐」获取竞品。
                 </Text>
               </Empty>
             </Card>
@@ -342,6 +339,12 @@ export default function Nearby() {
                         {ranking.own_rate >= 0 && (
                           <Text style={{ fontSize: 12, marginLeft: 8 }}>
                             我的提及率 <b style={{ color: 'var(--wr-accent)' }}>{(ranking.own_rate * 100).toFixed(0)}%</b>
+                            {/* 位置锚点（P0-8-1）：未上榜时给出榜首对比，用户知道差距在哪 */}
+                            {!ranking.ai_ranking.some((c: { is_own?: boolean }) => c.is_own) && ranking.ai_ranking.length > 0 && (
+                              <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                                · 榜首 <b style={{ color: 'var(--wr-danger)' }}>{ranking.ai_ranking[0].name}</b>（{(ranking.ai_ranking[0].rate * 100).toFixed(0)}%）
+                              </Text>
+                            )}
                           </Text>
                         )}
                       </div>

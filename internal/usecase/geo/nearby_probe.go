@@ -303,3 +303,8 @@ func dedupePOIs(pois []port.POIStore) []port.POIStore {
 	}
 	return out
 }
+
+// Latest 取该品牌最近一次 AI 榜探查缓存（F4：品牌卡徽章等轻量展示——不重跑、不烧配额）。
+func (uc *AIRankProbeUseCase) Latest(ctx context.Context, tenantID, brandID string) (entity.AIRankProbeResult, error) {
+	return uc.probeRepo.Latest(ctx, tenantID, brandID)
+}

@@ -1,17 +1,19 @@
 import { useMemo, useState, type Key } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   Button, Card, Col, Input, Progress, Row, Space, Table, Tag, Typography, message, Empty, Tooltip, Select, Modal, Form,
 } from 'antd'
 import {
   CheckCircleOutlined, CloseCircleOutlined, CloudSyncOutlined, ReloadOutlined,
-  SearchOutlined, ExportOutlined, BarChartOutlined, PlusOutlined,
+  SearchOutlined, ExportOutlined, BarChartOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { LazyPie, LazyColumn } from '../../components/charts/LazyCharts'
-import { businessApi } from '../../api/business'
-import type { Brand, Keyword, MonitoringResult, LLMConfig } from '../../types/api'
-import MonitorDetailPanel from './keywords/MonitorDetailPanel'
+import AutoMonitorControl from '../../../components/AutoMonitorControl'
+import { LazyPie, LazyColumn } from '../../../components/charts/LazyCharts'
+import { businessApi } from '../../../api/business'
+import { mapWithConcurrency, settleSummary } from '../../../utils/async'
+import { csvRow } from '../../../utils/csv'
+import type { Keyword, MonitoringResult, EngineOption } from '../../../types/api'
+import MonitorDetailPanel from '../keywords/MonitorDetailPanel'
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -34,9 +36,19 @@ function engineLabel(name: string) {
   return ENGINE_LABEL[key] || name || '默认引擎'
 }
 
+/** 情感 → 展示（矩阵单元格色点） */
+function sentimentMeta(s?: string) {
+  if (s === 'positive') return { color: 'var(--wr-success)', label: '正面' }
+  if (s === 'negative') return { color: 'var(--wr-danger)', label: '负面' }
+  return { color: 'var(--wr-text-muted)', label: '中性' }
+}
+
 type KwEngineCell = {
   rate: number
   mentioned: boolean
+  sentiment?: string
+  position?: number
+  sampleCount?: number
   probed_at: string
 }
 
@@ -51,53 +63,38 @@ type KwRow = {
 }
 
 /**
- * 平台收录报表（含监测执行）
- * 报表矩阵 + 在此发起单词/批量监测，展开可看监测明细。
- * 口径：提及率 > 0 视为该平台「已收录」。
+ * 监测矩阵 Tab：关键词×引擎矩阵（提及✓/情感色点/位次）+ 监测执行 + 图表 + 导出。
+ * 口径：提及率 > 0 视为该平台「已提及」；情感与位次来自最近一次采样。
  */
-export default function IndexingReport() {
-  const navigate = useNavigate()
+export default function MatrixTab({
+  keywords,
+  monitorResults,
+  engines,
+  brandMap,
+  loading,
+}: {
+  keywords: Keyword[]
+  monitorResults: MonitoringResult[]
+  engines: EngineOption[]
+  brandMap: Map<string, string>
+  loading: boolean
+}) {
   const queryClient = useQueryClient()
   const [keywordQuery, setKeywordQuery] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([])
   const [selectedEngines, setSelectedEngines] = useState<string[]>([])
   const [monitoringKwId, setMonitoringKwId] = useState<string | null>(null)
   const [monitoringBatch, setMonitoringBatch] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
   const [addKwOpen, setAddKwOpen] = useState(false)
   const [addingKw, setAddingKw] = useState(false)
   const [addKwForm] = Form.useForm()
   const [detailRow, setDetailRow] = useState<KwRow | null>(null)
 
-  const { data: brands = [] } = useQuery({
-    queryKey: ['geo-brands'],
-    queryFn: () => businessApi.listBrands(),
-  })
-  const brandMap = useMemo(
-    () => new Map(brands.map((b: Brand) => [b.id, b.name])),
-    [brands],
-  )
-
-  const { data: llmConfigs = [] } = useQuery({
-    queryKey: ['llm-configs'],
-    queryFn: () => businessApi.listLLMConfigs(),
-  })
-
-  const { data: keywords = [], isLoading: kwLoading } = useQuery({
-    queryKey: ['geo-all-keywords'],
-    queryFn: () => businessApi.listAllKeywords(),
-  })
-
-  const { data: monitorResults = [], isLoading: monLoading, dataUpdatedAt } = useQuery({
-    queryKey: ['geo-monitor-results'],
-    queryFn: () => businessApi.getAllMonitorResults(),
-  })
-
   const { data: autoMon } = useQuery({
     queryKey: ['tenant-auto-monitor'],
     queryFn: () => businessApi.getTenantAutoMonitor().catch(() => null),
   })
-
-  const loading = kwLoading || monLoading
 
   const monitorByKeyword = useMemo(() => {
     const map = new Map<string, MonitoringResult[]>()
@@ -142,6 +139,9 @@ export default function IndexingReport() {
           engines[eng] = {
             rate: hit.mention_rate || 0,
             mentioned,
+            sentiment: hit.sentiment,
+            position: hit.avg_position || 0,
+            sampleCount: hit.sample_count || 0,
             probed_at: hit.probed_at,
           }
           if (mentioned) collected++
@@ -166,6 +166,14 @@ export default function IndexingReport() {
     })
   }, [keywords, engineNames, latestByKwEngine, brandMap])
 
+  const latestProbedAt = useMemo(() => {
+    let t = ''
+    for (const r of monitorResults) {
+      if (!t || new Date(r.probed_at) > new Date(t)) t = r.probed_at
+    }
+    return t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '—'
+  }, [monitorResults])
+
   const filteredRows = useMemo(() => {
     const q = keywordQuery.trim().toLowerCase()
     if (!q) return rows
@@ -179,6 +187,26 @@ export default function IndexingReport() {
   const collectedCells = rows.reduce((s, r) => s + r.collected, 0)
   const overallRate = collectedCells / totalCells
   const keywordsWithAny = rows.filter((r) => r.collected > 0).length
+
+  // F2-1 引擎列瘦身：只展示"当前关键词有监测数据"的引擎——纯空列（"—"）折叠，
+  // 新租户不再面对一屏空格子；被折叠的引擎数以提示 Tag 露出。
+  const { displayEngines, hiddenEngineCount } = useMemo(() => {
+    const withData = engineNames.filter((eng) =>
+      rows.some((r) => r.engines[eng] && (r.engines[eng] as KwEngineCell).probed_at),
+    )
+    return {
+      displayEngines: withData.length > 0 ? withData : engineNames.slice(0, 1),
+      hiddenEngineCount: engineNames.length - (withData.length > 0 ? withData.length : 1),
+    }
+  }, [engineNames, rows])
+
+  // F2-1 上手卡：数据覆盖率低时给明确下一步（"先监测 1 个词看效果"），
+  // 不让老板面对空矩阵自己找按钮。取权重最高且无数据的关键词一键监测。
+  const firstTargetRow = useMemo(
+    () => [...rows].sort((a, b) => b.weight - a.weight).find((r) => !r.lastProbed) || null,
+    [rows],
+  )
+  const showOnboarding = rows.length > 0 && overallRate < 0.3 && !!firstTargetRow
 
   const pieData = useMemo(() => {
     return engineNames.map((eng) => {
@@ -204,15 +232,12 @@ export default function IndexingReport() {
     })
   }, [engineNames, rows, keywords.length])
 
-  const updatedAtText = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleString('zh-CN', { hour12: false })
-    : '—'
-
   const invalidateMonitor = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['geo-monitor-results'] }),
       queryClient.invalidateQueries({ queryKey: ['geo-overviews'] }),
       queryClient.invalidateQueries({ queryKey: ['geo-all-keywords'] }),
+      queryClient.invalidateQueries({ queryKey: ['geo-health-report'] }), // 健康分随监测结果联动
     ])
   }
 
@@ -229,11 +254,9 @@ export default function IndexingReport() {
     setMonitoringKwId(keywordId)
     try {
       await runMonitorOne(keywordId)
-      message.success('监测完成，收录状态已更新')
+      message.success('监测完成，提及状态已更新')
       await invalidateMonitor()
-    } catch (e) {
-      message.error('监测失败：' + ((e as Error)?.message || ''))
-    } finally {
+    } catch { /* 拦截器已提示 */ } finally {
       setMonitoringKwId(null)
     }
   }
@@ -250,17 +273,18 @@ export default function IndexingReport() {
     }
 
     setMonitoringBatch(true)
-    let success = 0
-    for (const id of targets) {
-      setMonitoringKwId(String(id))
-      try {
-        await runMonitorOne(String(id))
-        success++
-      } catch { /* continue */ }
-    }
+    // 受控并发（v3 P2：并发度 3——此前逐词串行几十分钟级等待；全并发会瞬间打满 LLM 配额）
+    const settled = await mapWithConcurrency(
+      targets.map(String),
+      (id) => runMonitorOne(id),
+      3,
+      (done, total) => setBatchProgress({ done, total }),
+    )
+    const { ok, failed } = settleSummary(settled)
     setMonitoringKwId(null)
+    setBatchProgress(null)
     setMonitoringBatch(false)
-    message.success(`批量监测完成：${success}/${targets.length} 成功`)
+    message.success(`批量监测完成：${ok}/${targets.length} 成功${failed > 0 ? `（${failed} 个失败，可单独重测）` : ''}`)
     await invalidateMonitor()
   }
 
@@ -293,7 +317,7 @@ export default function IndexingReport() {
       await queryClient.invalidateQueries({ queryKey: ['geo-all-keywords'] })
     } catch (e) {
       if ((e as { errorFields?: unknown })?.errorFields) return
-      message.error('添加失败：' + ((e as Error)?.message || ''))
+      /* 业务错误拦截器已提示 */
     } finally {
       setAddingKw(false)
     }
@@ -307,24 +331,53 @@ export default function IndexingReport() {
       message.warning('没有可导出的数据')
       return
     }
-    const header = ['关键词', '品牌', '权重', '已收录数', ...engineNames.map(engineLabel), '最近探测']
-    const lines = source.map((r) => [
+    const header = ['关键词', '品牌', '权重', '已提及以上', ...engineNames.map(engineLabel), '最近探测']
+    const lines = source.map((r) => csvRow([
       r.keyword.term,
       r.brandName,
       String(r.weight),
       String(r.collected),
       ...engineNames.map((eng) => (r.engines[eng]?.mentioned ? '是' : '否')),
       r.lastProbed ? new Date(r.lastProbed).toLocaleString('zh-CN') : '',
-    ].join(','))
+    ]))
     const bom = '\uFEFF'
-    const blob = new Blob([bom + [header.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' })
+    const blob = new Blob([bom + [csvRow(header), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `平台收录报表_${Date.now()}.csv`
+    a.download = `AI提及监测_${Date.now()}.csv`
     a.click()
     URL.revokeObjectURL(url)
     message.success(`已导出 ${source.length} 条`)
+  }
+
+  // 单元格：提及 ✓ + 情感色点 + 位次数字；低采样（<3 次）灰显警示
+  const renderCell = (cell?: KwEngineCell) => {
+    if (!cell?.probed_at) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+    const lowSample = (cell.sampleCount || 0) > 0 && (cell.sampleCount || 0) < 3
+    if (!cell.mentioned) {
+      return (
+        <Tooltip title={lowSample ? `已监测但未提及（仅采样 ${cell.sampleCount} 次，置信度低）` : '已监测但未提及'}>
+          <CloseCircleOutlined style={{ color: 'var(--wr-text-muted)', fontSize: 15, opacity: lowSample ? 0.45 : 1 }} />
+        </Tooltip>
+      )
+    }
+    const sm = sentimentMeta(cell.sentiment)
+    return (
+      <Space size={6} style={{ opacity: lowSample ? 0.55 : 1 }}>
+        <Tooltip title={`提及率 ${(cell.rate * 100).toFixed(0)}% · ${sm.label}${lowSample ? ` · 仅采样 ${cell.sampleCount} 次（低置信度，建议复测）` : ''}`}>
+          <CheckCircleOutlined style={{ color: 'var(--wr-success)', fontSize: 15 }} />
+        </Tooltip>
+        <Tooltip title={`情感：${sm.label}`}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: sm.color, display: 'inline-block' }} />
+        </Tooltip>
+        {(cell.position || 0) > 0 && (
+          <Tooltip title={`回答位次 #${cell.position}（1=最先推荐）`}>
+            <Tag style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 5px' }}>#{cell.position}</Tag>
+          </Tooltip>
+        )}
+      </Space>
+    )
   }
 
   const columns = [
@@ -349,7 +402,7 @@ export default function IndexingReport() {
       sorter: (a: KwRow, b: KwRow) => a.weight - b.weight,
     },
     {
-      title: '已收录',
+      title: '已提及',
       dataIndex: 'collected',
       key: 'collected',
       width: 88,
@@ -358,26 +411,12 @@ export default function IndexingReport() {
       ),
       sorter: (a: KwRow, b: KwRow) => a.collected - b.collected,
     },
-    ...engineNames.map((eng) => ({
+    ...displayEngines.map((eng) => ({
       title: engineLabel(eng),
       key: eng,
-      width: 100,
+      width: 130,
       align: 'center' as const,
-      render: (_: unknown, row: KwRow) => {
-        const cell = row.engines[eng]
-        if (!cell?.probed_at) {
-          return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
-        }
-        return cell.mentioned ? (
-          <Tooltip title={`提及率 ${(cell.rate * 100).toFixed(0)}%`}>
-            <CheckCircleOutlined style={{ color: 'var(--wr-success)', fontSize: 16 }} />
-          </Tooltip>
-        ) : (
-          <Tooltip title="已监测但未提及">
-            <CloseCircleOutlined style={{ color: 'var(--wr-text-muted)', fontSize: 16 }} />
-          </Tooltip>
-        )
-      },
+      render: (_: unknown, row: KwRow) => renderCell(row.engines[eng]),
     })),
     {
       title: '最近探测',
@@ -412,96 +451,14 @@ export default function IndexingReport() {
   ]
 
   return (
-    <div className="wr-page-content wr-index-report" style={{ paddingTop: 4 }}>
-      <div className="wr-page-header" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <h1>平台收录报表</h1>
-          <p>统计各 AI 平台收录覆盖 · 在此发起监测并查看明细</p>
-        </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddKwOpen(true)}>
-          添加关键词
-        </Button>
-      </div>
-
-      <Modal
-        title="添加关键词"
-        open={addKwOpen}
-        onCancel={() => { setAddKwOpen(false); addKwForm.resetFields() }}
-        onOk={handleAddKeywords}
-        confirmLoading={addingKw}
-        okText="添加"
-        destroyOnClose
-        width={480}
-      >
-        <Form form={addKwForm} layout="vertical" requiredMark={false} style={{ marginTop: 8 }}>
-          <Form.Item name="brand_id" label="所属品牌" rules={[{ required: true, message: '请选择品牌' }]}>
-            <Select
-              placeholder="选择品牌"
-              options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
-            />
-          </Form.Item>
-          <Form.Item name="intent" label="意图" initialValue="informational">
-            <Select
-              options={[
-                { value: 'informational', label: '信息型' },
-                { value: 'transactional', label: '交易型' },
-                { value: 'local', label: '本地型' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            name="terms"
-            label="关键词"
-            rules={[{ required: true, message: '请输入关键词' }]}
-            extra="多个词用逗号或换行分隔"
-          >
-            <TextArea rows={4} placeholder={'例如：\nagent 开发框架\n源码解析'} />
-          </Form.Item>
-        </Form>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          需要 AI 蒸馏生成？
-          <Button type="link" size="small" style={{ padding: '0 4px' }} onClick={() => { setAddKwOpen(false); navigate('/m/keywords') }}>
-            打开关键词工程
-          </Button>
-        </Text>
-      </Modal>
-
-      <Modal
-        title={detailRow ? `监测详情 · ${detailRow.keyword.term}` : '监测详情'}
-        open={!!detailRow}
-        onCancel={() => setDetailRow(null)}
-        footer={
-          <Space>
-            <Button onClick={() => setDetailRow(null)}>关闭</Button>
-            {detailRow && (
-              <Button
-                type="primary"
-                loading={monitoringKwId === detailRow.key}
-                onClick={() => handleMonitorKeyword(detailRow.key)}
-              >
-                重新监测
-              </Button>
-            )}
-          </Space>
-        }
-        width={820}
-        destroyOnClose
-        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
-      >
-        {detailRow && (
-          <MonitorDetailPanel
-            results={monitorByKeyword.get(detailRow.key) || []}
-            brandName={detailRow.brandName === '—' ? '' : detailRow.brandName}
-          />
-        )}
-      </Modal>
-
+    <div>
+      {/* 横幅大屏 */}
       <div className="wr-index-banner">
         <div className="wr-index-banner-inner">
           <div className="wr-index-banner-copy">
-            <Title level={4} style={{ margin: 0, color: '#1a1a2e' }}>平台收录数据报表</Title>
+            <Title level={4} style={{ margin: 0, color: '#1a1a2e' }}>AI 提及监测报表</Title>
             <Text style={{ color: '#5a5a72', fontSize: 13 }}>
-              按 AI 平台统计关键词收录占比，沉淀可运营的关键词收录资产
+              按 AI 平台统计关键词提及占比 · 情感与位次来自最近一次采样
             </Text>
           </div>
           <div className="wr-index-banner-gauge">
@@ -532,17 +489,17 @@ export default function IndexingReport() {
           </Col>
           <Col xs={12} md={6}>
             <div className="wr-index-stat-chip">
-              <span className="wr-index-stat-label">综合收录率</span>
+              <span className="wr-index-stat-label">综合提及率</span>
               <span className="wr-index-stat-value" style={{ color: '#5b4fe0' }}>
                 {(overallRate * 100).toFixed(1)}%
               </span>
-              <span className="wr-index-stat-sub">{collectedCells}/{totalCells} 格 · {keywordsWithAny} 词有收录</span>
+              <span className="wr-index-stat-sub">{collectedCells}/{totalCells} 格 · {keywordsWithAny} 词被提及</span>
             </div>
           </Col>
           <Col xs={12} md={6}>
             <div className="wr-index-stat-chip">
               <span className="wr-index-stat-label">更新时间</span>
-              <span className="wr-index-stat-value" style={{ fontSize: 14 }}>{updatedAtText}</span>
+              <span className="wr-index-stat-value" style={{ fontSize: 14 }}>{latestProbedAt}</span>
             </div>
           </Col>
         </Row>
@@ -557,7 +514,7 @@ export default function IndexingReport() {
               allowClear
               value={selectedEngines}
               onChange={(v) => setSelectedEngines(v || [])}
-              options={llmConfigs.map((l: LLMConfig) => ({ value: l.name, label: `${l.name}（${l.model}）` }))}
+              options={engines.map((e: EngineOption) => ({ value: e.name, label: `${e.name}（${e.model}）` }))}
             />
             <Button
               type="primary"
@@ -566,27 +523,60 @@ export default function IndexingReport() {
               onClick={() => handleMonitorBatch()}
               disabled={keywords.length === 0}
             >
-              {monitoringBatch ? '监测中...' : '立即更新（监测全部）'}
+              {monitoringBatch
+                ? (batchProgress ? `监测中 ${batchProgress.done}/${batchProgress.total}...` : '监测中...')
+                : '立即更新（监测全部）'}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>
               刷新报表
             </Button>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              口径：监测提及率 &gt; 0 计为该 AI 平台已收录
+              图例：<Tooltip title="✓ = AI 在回答里提到了你（灰 ✓ = 采样不足 3 次，结果不稳）"><span>✓ AI 提到了你</span></Tooltip>
+              {' · '}
+              <Tooltip title="绿点 = AI 夸你 / 灰点 = 中性提及 / 红点 = AI 批评你"><span>色点 = AI 对你的态度</span></Tooltip>
+              {' · '}
+              <Tooltip title="#1 = AI 第一个推荐你；#N 数字越小越靠前"><span>#N = AI 第几个推荐你</span></Tooltip>
+              {hiddenEngineCount > 0 && (
+                <Tooltip title="这些引擎对当前关键词还没有监测数据，列已折叠——发起监测后自动展开">
+                  <Tag style={{ margin: '0 0 0 8px', fontSize: 11 }}>＋{hiddenEngineCount} 个引擎待监测</Tag>
+                </Tooltip>
+              )}
             </Text>
           </Space>
         </div>
       </div>
 
+      {/* F2-1 上手卡：覆盖率低时给明确下一步——不让老板面对空矩阵自己找按钮 */}
+      {showOnboarding && firstTargetRow && (
+        <Card className="wr-glass-card" styles={{ body: { padding: 16 } }} style={{ marginBottom: 12, borderColor: 'rgba(124,108,255,0.3)' }}>
+          <Space wrap>
+            <Text strong style={{ fontSize: 14 }}>🚀 先监测 1 个词，看 AI 怎么评价你</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              一次监测约 30 秒——立刻能看到「{firstTargetRow.keyword.term}」在各 AI 的提及与态度
+            </Text>
+            <Button
+              type="primary" size="small" icon={<CloudSyncOutlined />}
+              loading={monitoringKwId === firstTargetRow.key}
+              onClick={() => handleMonitorKeyword(firstTargetRow.key)}
+            >
+              立即监测「{firstTargetRow.keyword.term.length > 12 ? firstTargetRow.keyword.term.slice(0, 12) + '…' : firstTargetRow.keyword.term}」
+            </Button>
+          </Space>
+        </Card>
+      )}
+
+      {/* 自动盯盘配置（监测执行方式归监测页——此前在工作台占据大块表单） */}
+      <AutoMonitorControl />
+
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} lg={12}>
           <Card
             className="wr-glass-card"
-            title={<Space><BarChartOutlined />各大 AI 平台收录占比</Space>}
+            title={<Space><BarChartOutlined />各大 AI 平台提及占比</Space>}
             styles={{ body: { padding: 20, minHeight: 300 } }}
           >
             {pieData.length === 0 ? (
-              <Empty description="暂无收录数据——请在上方发起监测" style={{ padding: 48 }} />
+              <Empty description="暂无提及数据——请在上方发起监测" style={{ padding: 48 }} />
             ) : (
               <LazyPie
                 data={pieData}
@@ -605,7 +595,7 @@ export default function IndexingReport() {
         <Col xs={24} lg={12}>
           <Card
             className="wr-glass-card"
-            title={<Space><BarChartOutlined />各平台收录率对比</Space>}
+            title={<Space><BarChartOutlined />各平台提及率对比</Space>}
             styles={{ body: { padding: 20, minHeight: 300 } }}
           >
             {barData.every((d) => d.rate === 0) ? (
@@ -638,7 +628,7 @@ export default function IndexingReport() {
 
       <Card
         className="wr-glass-card"
-        title="关键词收录资产列表"
+        title="关键词提及资产列表"
         styles={{ body: { padding: 16 } }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -658,9 +648,11 @@ export default function IndexingReport() {
               disabled={filteredRows.length === 0}
               onClick={() => handleMonitorBatch(selectedRowKeys.length ? selectedRowKeys : undefined)}
             >
-              {selectedRowKeys.length
-                ? `监测选中(${selectedRowKeys.length})`
-                : '批量监测'}
+              {monitoringBatch
+                ? (batchProgress ? `监测中 ${batchProgress.done}/${batchProgress.total}` : '监测中...')
+                : selectedRowKeys.length
+                  ? `监测选中(${selectedRowKeys.length})`
+                  : '批量监测'}
             </Button>
             <Button icon={<ExportOutlined />} onClick={handleExport}>
               {selectedRowKeys.length ? `导出选中(${selectedRowKeys.length})` : '导出全部'}
@@ -673,7 +665,7 @@ export default function IndexingReport() {
           rowKey="key"
           loading={loading}
           size="middle"
-          scroll={{ x: 900 + engineNames.length * 100 }}
+          scroll={{ x: 900 + engineNames.length * 130 }}
           rowSelection={{
             selectedRowKeys,
             onChange: setSelectedRowKeys,
@@ -684,6 +676,75 @@ export default function IndexingReport() {
           locale={{ emptyText: <Empty description="暂无关键词资产" /> }}
         />
       </Card>
+
+      {/* 添加关键词弹窗 */}
+      <Modal
+        title="添加关键词"
+        open={addKwOpen}
+        onCancel={() => { setAddKwOpen(false); addKwForm.resetFields() }}
+        onOk={handleAddKeywords}
+        confirmLoading={addingKw}
+        okText="添加"
+        destroyOnClose
+        width={480}
+      >
+        <Form form={addKwForm} layout="vertical" requiredMark={false} style={{ marginTop: 8 }}>
+          <Form.Item name="brand_id" label="所属品牌" rules={[{ required: true, message: '请选择品牌' }]}>
+            <Select
+              placeholder="选择品牌"
+              options={Array.from(brandMap.entries()).map(([id, name]) => ({ value: id, label: name }))}
+            />
+          </Form.Item>
+          <Form.Item name="intent" label="意图" initialValue="informational">
+            <Select
+              options={[
+                { value: 'informational', label: '信息型' },
+                { value: 'transactional', label: '交易型' },
+                { value: 'local', label: '本地型' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="terms"
+            label="关键词"
+            rules={[{ required: true, message: '请输入关键词' }]}
+            extra="多个词用逗号或换行分隔"
+          >
+            <TextArea rows={4} placeholder={'例如：\nagent 开发框架\n源码解析'} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 监测详情抽屉（趋势/引擎对比/采样原文） */}
+      <Modal
+        title={detailRow ? `监测详情 · ${detailRow.keyword.term}` : '监测详情'}
+        open={!!detailRow}
+        onCancel={() => setDetailRow(null)}
+        footer={
+          <Space>
+            <Button onClick={() => setDetailRow(null)}>关闭</Button>
+            {detailRow && (
+              <Button
+                type="primary"
+                loading={monitoringKwId === detailRow.key}
+                onClick={() => handleMonitorKeyword(detailRow.key)}
+              >
+                重新监测
+              </Button>
+            )}
+          </Space>
+        }
+        width={820}
+        destroyOnClose
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
+      >
+        {detailRow && (
+          <MonitorDetailPanel
+            results={monitorByKeyword.get(detailRow.key) || []}
+            brandName={detailRow.brandName === '—' ? '' : detailRow.brandName}
+          />
+        )}
+      </Modal>
     </div>
   )
 }

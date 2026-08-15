@@ -34,3 +34,4 @@ coverage.txt
 # 测试截图（临时验证证据，不入库）
 gui-test-screenshots/
 data/media/
+web/tsconfig.tsbuildinfo

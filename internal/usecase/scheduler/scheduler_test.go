@@ -130,3 +130,77 @@ func TestSchedulerErrorDoesNotStopTask(t *testing.T) {
 		t.Fatalf("任务应至少执行 1 次，实际 %d", count.Load())
 	}
 }
+
+// dynamicTask 间隔可变的测试任务（模拟管理后台动态改采集间隔）。
+type dynamicTask struct {
+	mu       sync.Mutex
+	interval time.Duration
+	count    *atomic.Int64
+}
+
+func (t *dynamicTask) Name() string { return "dynamic-task" }
+func (t *dynamicTask) Interval() time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.interval
+}
+func (t *dynamicTask) Execute(context.Context) error {
+	t.count.Add(1)
+	return nil
+}
+func (t *dynamicTask) setInterval(d time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.interval = d
+}
+
+// TestSchedulerDynamicInterval 动态间隔：运行中改短间隔，ticker 应刷新（执行频率提升）。
+func TestSchedulerDynamicInterval(t *testing.T) {
+	task := &dynamicTask{interval: 60 * time.Millisecond, count: &atomic.Int64{}}
+	s := New(nil, port.NopLogger{})
+	_ = s.Register(task)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+
+	time.Sleep(250 * time.Millisecond) // 60ms 间隔 → 约 4 次
+	before := task.count.Load()
+	if before < 2 {
+		t.Fatalf("初始间隔应执行多次: %d", before)
+	}
+
+	task.setInterval(5 * time.Millisecond) // 改短 12 倍——ticker 应刷新
+	time.Sleep(200 * time.Millisecond)
+	after := task.count.Load()
+
+	cancel()
+	s.Stop()
+
+	if after <= before {
+		t.Errorf("动态间隔应生效（改短后执行次数应增加）: before=%d after=%d", before, after)
+	}
+}
+
+// TestSchedulerDynamicInterval_Extend 改长间隔后执行放缓（刷新方向正确）。
+func TestSchedulerDynamicInterval_Extend(t *testing.T) {
+	task := &dynamicTask{interval: 10 * time.Millisecond, count: &atomic.Int64{}}
+	s := New(nil, port.NopLogger{})
+	_ = s.Register(task)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Start(ctx)
+
+	time.Sleep(120 * time.Millisecond) // 10ms 间隔 → 高频
+	before := task.count.Load()
+
+	task.setInterval(200 * time.Millisecond) // 改长——后续周期放缓
+	time.Sleep(120 * time.Millisecond)
+	after := task.count.Load()
+
+	cancel()
+	s.Stop()
+
+	if after <= before {
+		t.Errorf("改长间隔后短时间内执行次数应基本不变（刷新生效）: before=%d after=%d", before, after)
+	}
+}

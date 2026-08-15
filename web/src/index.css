@@ -1234,3 +1234,19 @@ pre code.hljs {
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(16, 18, 28, 0.06);
 }
+
+/* ---- 品牌管理 master-detail 移动端断点（v3 P2）----
+   窄屏（≤900px）上下堆叠：左列表不再固定 340px 挤压右工作区。
+   !important 用于覆盖组件内联 width/flexShrink。 */
+@media (max-width: 900px) {
+  .wr-brands-layout {
+    flex-direction: column;
+    min-height: auto !important;
+  }
+  .wr-brands-layout > .wr-brands-list {
+    width: 100% !important;
+    flex-shrink: 1 !important;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+}

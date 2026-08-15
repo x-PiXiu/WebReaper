@@ -43,3 +43,15 @@ type OrderRepository interface {
 	// UpdateStatus 更新订单状态与支付信息（回调确认用）。
 	UpdateStatus(ctx context.Context, id, status, paymentID string, paidAt time.Time) error
 }
+
+// PaymentClosureWriter 支付闭环原子写入器。
+//
+// 业务约束（用例层声明，适配层实现）：ConfirmPayment 的两步写——
+// 订单置为已支付 + 订阅开通/续期——必须原子完成，否则会出现
+// "已扣款但未开通"的中间态。接口归用例所有（依赖倒置），
+// 适配器决定事务机制（GORM 本地事务；未来跨库时换 Saga 实现，用例零改动）。
+// 未注入时用例降级为两段写（无 DB / mock 场景，行为与此前一致）。
+type PaymentClosureWriter interface {
+	// MarkPaidAndActivate 同一事务内：订单 → paid（记 paymentID/paidAt）+ 保存订阅。
+	MarkPaidAndActivate(ctx context.Context, orderID, paymentID string, paidAt time.Time, sub entity.Subscription) error
+}

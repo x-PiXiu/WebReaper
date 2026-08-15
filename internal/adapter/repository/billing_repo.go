@@ -10,6 +10,7 @@ import (
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/port"
 )
 
 // ---- Plan 仓储 ----
@@ -146,6 +147,36 @@ func (r *GormOrderRepository) UpdateStatus(ctx context.Context, id, status, paym
 		updates["paid_at"] = paidAt
 	}
 	return r.db.WithContext(ctx).Model(&OrderPO{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// ---- 支付闭环原子写入 ----
+
+// GormPaymentClosureWriter 订单置 paid + 订阅保存在同一 DB 事务内完成，
+// 消除"已支付订单但无订阅"的中间态（billing 用例 ConfirmPayment 依赖此保证）。
+type GormPaymentClosureWriter struct {
+	db *gorm.DB
+}
+
+func NewGormPaymentClosureWriter(db *gorm.DB) *GormPaymentClosureWriter {
+	return &GormPaymentClosureWriter{db: db}
+}
+
+var _ port.PaymentClosureWriter = (*GormPaymentClosureWriter)(nil)
+
+func (r *GormPaymentClosureWriter) MarkPaidAndActivate(ctx context.Context, orderID, paymentID string, paidAt time.Time, sub entity.Subscription) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{"status": entity.OrderStatusPaid}
+		if paymentID != "" {
+			updates["payment_id"] = paymentID
+		}
+		if !paidAt.IsZero() {
+			updates["paid_at"] = paidAt
+		}
+		if err := tx.Model(&OrderPO{}).Where("id = ?", orderID).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Save(subscriptionToPO(sub)).Error
+	})
 }
 
 // ---- 转换 ----

@@ -17,5 +17,6 @@ type SystemSetting struct {
 
 // 配置键常量
 const (
-	SettingKeyCrawlPolicy = "crawl_policy" // 爬虫限流策略（JSON 序列化的 CrawlPolicy）
+	SettingKeyCrawlPolicy    = "crawl_policy"        // 爬虫限流策略（JSON 序列化的 CrawlPolicy）
+	SettingKeyKnowledgeCrawl = "kb_crawl_industries" // 行业采集配置（JSON：[]IndustryCrawlConfig）
 )

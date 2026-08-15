@@ -66,6 +66,22 @@ func toFloatMapFromJSON(j datatypes.JSON) map[string]float64 {
 	return m
 }
 
+// toStrMap map[string]string → JSON（竞品情感等字符串映射）。
+func toStrMap(m map[string]string) datatypes.JSON {
+	if len(m) == 0 {
+		return datatypes.JSON([]byte("{}"))
+	}
+	b, _ := json.Marshal(m)
+	return datatypes.JSON(b)
+}
+
+// toStrMapFromJSON JSON → map[string]string。
+func toStrMapFromJSON(j datatypes.JSON) map[string]string {
+	m := map[string]string{}
+	_ = json.Unmarshal(j, &m)
+	return m
+}
+
 func metadataToJSON(m map[string]string) datatypes.JSON {
 	if len(m) == 0 {
 		return datatypes.JSON([]byte("{}"))

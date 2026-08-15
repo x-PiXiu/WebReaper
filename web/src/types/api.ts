@@ -16,6 +16,7 @@ export interface LoginResponse {
   role: 'admin' | 'merchant'
   tenant_id: string
   username: string
+  must_change_password?: boolean // 仍在用默认口令（F1-5）——管理端常驻提醒改密
 }
 export interface RegisterResponse { user_id: string; role: string; tenant_id: string }
 
@@ -35,7 +36,7 @@ export interface AgentConfig {
   max_iterations?: number
 }
 
-// ---- LLM 配置（独立聚合根，多厂商多模型）----
+// ---- LLM 配置（独立聚合根，多厂商多模型；admin 视图，含密钥）----
 export interface LLMConfig {
   name: string       // 唯一标识，如 "default"、"minimax-m2"
   provider: string   // 厂商标签：minimax/openai/zhipu/deepseek
@@ -43,6 +44,13 @@ export interface LLMConfig {
   base_url: string   // 如 https://api.minimaxi.com/v1
   model: string      // 如 MiniMax-M2.5
   cost_per_mtok: number // 每百万 tokens 参考成本（分；成本分析按引擎细分）
+}
+
+// ---- 引擎名单（商户端可见——仅展示字段，不含厂商密钥）----
+export interface EngineOption {
+  name: string
+  provider: string
+  model: string
 }
 
 // ---- 聊天会话（后端持久化，按用户隔离）----
@@ -131,8 +139,48 @@ export interface Brand {
   core_selling: string[]
   competitors: string[]
   biz_type?: string  // local（本地生意，默认）/ online（线上业务）
+  industry?: string  // 行业（如 餐饮/美业/线上服务）——知识库素材检索的过滤维度
   website_url?: string  // 官网地址（online 品牌 NAP）
   created_at: string
+}
+
+// ---- 平台知识库（Docs/Plans/04：按行业采集素材 + 向量检索溯源）----
+export interface KnowledgeEmbeddingConfig {
+  model: string        // 嵌入模型（如 embedding-3）
+  base_url: string     // OpenAI 兼容端点（如 https://open.bigmodel.cn/api/paas/v4）
+  api_key: string
+  dimensions: number   // 向量维度（0=模型默认；智谱 embedding-3 默认 2048，可设 256-2048）
+  vector_db: string    // mysql（默认）/ milvus
+  milvus_host: string
+  milvus_port: string
+  milvus_collection: string
+  updated_at: string
+}
+
+export interface IndustryCrawlConfig {
+  industry: string
+  keywords: string[]   // 采集关键词组（每组一轮搜索）
+  per_round: number    // 每轮每关键词入库上限
+}
+
+export interface KnowledgeMaterialView {
+  id: string
+  industry: string
+  title: string
+  source_url: string
+  summary: string
+  crawl_keyword: string
+  status: string
+  has_vector: boolean
+  created_at: string
+}
+
+export interface KnowledgeStats {
+  total_materials: number
+}
+
+export interface KnowledgeCrawlInterval {
+  interval_minutes: number // 采集间隔（分钟，30-1440；默认 360=6h）
 }
 
 // 竞品推荐候选（附近同行 POI 按评分/距离排序）
@@ -239,11 +287,56 @@ export interface MonitoringResult {
   sentiment: string          // positive/neutral/negative
   competitors: string[]
   competitor_rates: Record<string, number> // 竞品提及率（对比坐标系）
+  competitor_sentiments: Record<string, string> // 竞品情感（positive/neutral/negative——对标视图语义维度）
   confidence: number
   probed_at: string
   raw_sample: string
-  sources: string[]          // 引用来源（链接/平台名，P5-01 归因）
-  self_source_count: number  // 自营公开站被引用次数（>0 = 内容真的被 AI 引用）
+  sources?: string[]         // 引用来源（链接/平台名，P5-01 归因）——旧数据可能缺失，消费端 || [] 兜底
+  self_source_count?: number // 自营公开站被引用次数（>0 = 内容真的被 AI 引用）——旧数据可能缺失，按 0 兜底
+  first_pick_count?: number  // 被提及且位次=1 的采样数（首选率分子）——旧数据缺失按 0
+  semantic_degraded?: boolean // 采样中出现过解析降级（情感/位次可能失真）——旧数据缺失按 false
+}
+
+// ---- GEO：健康报告（后端聚合单一事实源；前端 geoHealth 为降级兜底）----
+export interface HealthIndicatorView {
+  mention_coverage: number
+  sentiment_score: number
+  first_pick_rate: number
+  content_asset: number
+  source_integrity: number
+}
+
+export interface CompetitorThreatView {
+  name: string
+  avg_rate: number  // 0-100
+  sentiment: string // positive/negative/''（中性）
+}
+
+export interface HealthReportView {
+  total: number
+  indicators: HealthIndicatorView
+  prev_total: number | null
+  has_prev: boolean
+  competitor: {
+    self_avg: number // 0-1
+    comp_avg: number // 0-1
+    gap_pct: number  // 百分点（+领先/-落后）
+    size: number
+    threats: CompetitorThreatView[] // 按提及率降序
+  }
+  brands: Array<{
+    brand_id: string
+    brand_name: string
+    total: number          // 与总分同口径（三处展示位统一）
+    avg_mention_rate: number // 0-1
+  }>
+}
+
+// ---- 行业全景看板（admin：跨商户聚合，v3 P2）----
+export interface IndustryOverviewView {
+  industries: Array<{ industry: string; avg_rate: number; brand_count: number }> // 按平均提及率降序
+  reputation: Array<{ brand_name: string; industry: string; positive_rate: number; sample_count: number }> // 按正面占比降序
+  top_sources: Array<{ domain: string; count: number }> // 按被引次数降序
 }
 
 // ---- GEO：行动建议（P5-05）----
@@ -329,6 +422,16 @@ export interface UserView {
   username: string
   role: string
   tenant_id: string
+  brand_count?: number  // F3-1 运营聚合：该租户品牌数
+  last_active?: string  // 最近一次监测时间（空=从未使用——沉睡商户信号）
+}
+
+// ---- GEO：AI 榜缓存条目（F4 品牌卡徽章——只读缓存不烧配额）----
+export interface AIRankItemView {
+  name: string
+  rate: number
+  mentioned: boolean
+  avg_pos: number
 }
 
 

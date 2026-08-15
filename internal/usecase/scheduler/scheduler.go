@@ -89,9 +89,16 @@ func (s *Scheduler) Stop() {
 }
 
 // run 单个任务驱动循环：ticker 触发 → 防重入 → 分布式锁 → 执行 → 恢复。
+// 动态间隔（2026-08-14）：每个周期执行后重新读取 task.Interval()——任务可从
+// 运行时配置（如 system_settings）读周期，管理后台改间隔免重启。现有任务
+// Interval() 是常量，刷新后不变，行为与旧版完全一致（向后兼容）。
 func (s *Scheduler) run(ctx context.Context, task port.ScheduledTask) {
 	defer s.wg.Done()
-	ticker := time.NewTicker(task.Interval())
+	interval := task.Interval()
+	if interval <= 0 {
+		interval = time.Hour // 防御：非法间隔兜底（Register 已校验，此处双保险）
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	running := false
@@ -108,6 +115,11 @@ func (s *Scheduler) run(ctx context.Context, task port.ScheduledTask) {
 			running = true
 			s.executeOnce(ctx, task)
 			running = false
+			// 动态间隔：周期结束刷新 ticker（任务可改配置调整周期，免重启）
+			if d := task.Interval(); d > 0 && d != interval {
+				interval = d
+				ticker.Reset(interval)
+			}
 		}
 	}
 }

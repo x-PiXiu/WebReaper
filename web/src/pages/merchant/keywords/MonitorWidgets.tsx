@@ -2,11 +2,11 @@ import { Typography } from 'antd'
 
 const { Text } = Typography
 
-/** 情感元信息（emoji + 语义色）。 */
-export function sentimentMeta(s: string): { label: string; emoji: string; color: string } {
-  if (s === 'positive') return { label: '正面', emoji: '😊', color: 'var(--wr-success)' }
-  if (s === 'negative') return { label: '负面', emoji: '😞', color: 'var(--wr-danger)' }
-  return { label: '中性', emoji: '😐', color: 'var(--wr-text-muted)' }
+/** 情感元信息（语义色 + 文案——高端呈现，不使用表情符号）。 */
+export function sentimentMeta(s: string): { label: string; color: string } {
+  if (s === 'positive') return { label: '正面', color: 'var(--wr-success)' }
+  if (s === 'negative') return { label: '负面', color: 'var(--wr-danger)' }
+  return { label: '中性', color: 'var(--wr-text-muted)' }
 }
 
 /** 统计小格：label + 大数字 + 可选 sub。 */

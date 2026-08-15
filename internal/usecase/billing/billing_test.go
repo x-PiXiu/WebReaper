@@ -96,7 +96,70 @@ func TestAssignPlanManual(t *testing.T) {
 	}
 }
 
+// 支付闭环原子路径：注入 PaymentClosureWriter 后，订单置 paid + 订阅保存
+// 应经由原子写入器一次完成（不再两段写）。
+func TestConfirmPaymentAtomicPath(t *testing.T) {
+	planRepo := newMockPlanRepo()
+	_ = planRepo.Save(context.Background(), entity.Plan{ID: "plan-pro", Name: "专业版", Level: "pro", PriceCents: 29900, Status: entity.PlanStatusActive, Quotas: map[string]int{}})
+	subRepo := newMockSubRepo()
+	orderRepo := newMockOrderRepo()
+	cw := &mockClosureWriter{
+		orders: map[string]entity.Order{},
+		subs:   map[string]entity.Subscription{},
+	}
+	uc := NewBillingUseCase(planRepo, subRepo, orderRepo)
+	uc.SetPaymentClosureWriter(cw)
+
+	result, err := uc.CreateOrder(context.Background(), CreateOrderInput{TenantID: "t1", PlanID: "plan-pro"})
+	if err != nil {
+		t.Fatalf("下单失败: %v", err)
+	}
+
+	sub, err := uc.ConfirmPayment(context.Background(), result.Order.ID)
+	if err != nil {
+		t.Fatalf("确认支付失败: %v", err)
+	}
+
+	if cw.calls != 1 {
+		t.Fatalf("原子写入器应被调用 1 次，得到 %d", cw.calls)
+	}
+	// 原子路径下两段写不应发生：订单仓储仍为 pending，订阅仓储无记录
+	order, _ := orderRepo.FindByID(context.Background(), result.Order.ID)
+	if order.Status != entity.OrderStatusPending {
+		t.Fatalf("原子路径不应再走 orderRepo.UpdateStatus，订单应为 pending，得到 %s", order.Status)
+	}
+	if len(subRepo.subs) != 0 {
+		t.Fatal("原子路径不应再走 subRepo.Save")
+	}
+	// 原子写入器内的落库结果
+	if cw.orders[result.Order.ID].Status != entity.OrderStatusPaid {
+		t.Fatalf("原子写入器内订单应为 paid")
+	}
+	if cw.subs["t1"].ID != sub.ID || cw.subs["t1"].Status != entity.SubscriptionStatusActive {
+		t.Fatalf("原子写入器内订阅异常: %+v", cw.subs["t1"])
+	}
+}
+
 // ---- 内存 mock ----
+
+// mockClosureWriter 记录原子写入调用（模拟 GORM 事务内的两表写入）。
+type mockClosureWriter struct {
+	calls  int
+	orders map[string]entity.Order
+	subs   map[string]entity.Subscription
+}
+
+func (m *mockClosureWriter) MarkPaidAndActivate(_ context.Context, orderID, paymentID string, paidAt time.Time, sub entity.Subscription) error {
+	m.calls++
+	o := m.orders[orderID]
+	o.ID = orderID
+	o.Status = entity.OrderStatusPaid
+	o.PaymentID = paymentID
+	o.PaidAt = paidAt
+	m.orders[orderID] = o
+	m.subs[sub.TenantID] = sub
+	return nil
+}
 
 type mockPlanRepo struct{ plans map[string]entity.Plan }
 

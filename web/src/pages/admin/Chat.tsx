@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Input, Button, Spin, Typography, Select, Space, Tag, Popover, Switch, message as antdMessage } from 'antd'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { Input, Button, Spin, Typography, Select, Space, Tag, Popover, Switch, Modal, message as antdMessage } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useLocation } from 'react-router-dom'
 import LazyChatMarkdown from '../../components/markdown/LazyChatMarkdown'
 import { getToken, useAuthStore } from '../../store/auth'
 import { businessApi } from '../../api/business'
-import type { ChatMessage, AgentConfig, LLMConfig, ToolView } from '../../types/api'
+import type { ChatMessage, AgentConfig, EngineOption, ToolView } from '../../types/api'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -257,8 +258,8 @@ export default function Chat() {
 
   const { data: agentConfigs = [] } = useQuery({ queryKey: ['agent-configs'], queryFn: () => businessApi.listAgentConfigs() })
   const { data: tools = [] } = useQuery({ queryKey: ['tools'], queryFn: () => businessApi.listTools() })
-  // LLM 配置列表：供聊天界面动态切换模型（覆盖 Agent 的默认 LLM）
-  const { data: llmConfigs = [] } = useQuery({ queryKey: ['llm-configs'], queryFn: () => businessApi.listLLMConfigs() })
+  // 引擎名单：聊天界面动态切换模型（覆盖 Agent 默认）——仅 name/provider/model，不含厂商密钥
+  const { data: llmConfigs = [] } = useQuery({ queryKey: ['geo-engines'], queryFn: () => businessApi.listEngines() })
   const currentAgent = agentConfigs.find((a: AgentConfig) => a.name === selectedAgent)
 
   // 拉取会话列表（后端持久化，按当前用户隔离）
@@ -334,9 +335,42 @@ export default function Chat() {
     setConversations(prev => prev.map(c => c.id === convId ? { ...c, messages: updater(c.messages) } : c))
   }
 
-  const send = async () => {
-    if (!input.trim() || streaming) return
-    const userMsg: RichMessage = { id: `u${Date.now()}`, role: 'user', content: input }
+  // GEO 助手：商户端注入品牌数据摘要（榜豆式——让 AI 能解读你的 GEO 状态）
+  const location = useLocation()
+  const isMerchantChat = location.pathname.startsWith('/m')
+  const { data: geoBrands = [] } = useQuery({
+    queryKey: ['geo-brands'],
+    queryFn: () => businessApi.listBrands().catch(() => []),
+    enabled: isMerchantChat,
+  })
+  const { data: geoMonitor = [] } = useQuery({
+    queryKey: ['geo-monitor-results'],
+    queryFn: () => businessApi.getAllMonitorResults().catch(() => []),
+    enabled: isMerchantChat,
+  })
+  const geoSummary = useMemo(() => {
+    if (!isMerchantChat || geoBrands.length === 0) return ''
+    const parts: string[] = []
+    geoBrands.forEach((b: any) => {
+      const list = geoMonitor.filter((r: any) => r.brand_id === b.id)
+      const latest = [...list].sort((a: any, c: any) => new Date(c.probed_at).getTime() - new Date(a.probed_at).getTime())[0]
+      if (!latest) return
+      const senti = latest.sentiment === 'positive' ? '正面' : latest.sentiment === 'negative' ? '负面' : '中性'
+      parts.push(`${b.name}：提及率 ${Math.round((latest.mention_rate || 0) * 100)}%、情感${senti}${latest.avg_position ? `、位次#${latest.avg_position}` : ''}${latest.self_source_count ? `、被引用${latest.self_source_count}次` : ''}`)
+    })
+    if (parts.length === 0) return ''
+    return `【GEO 数据摘要·仅供参考】\n${parts.join('\n')}`
+  }, [isMerchantChat, geoBrands, geoMonitor])
+
+  const GEO_QUICK_QUESTIONS = [
+    { label: '📊 我的品牌最近表现如何？', q: '根据上面的 GEO 数据摘要，我的品牌最近在 AI 搜索中的表现如何？有什么亮点和问题？' },
+    { label: '⚔️ 哪个竞品威胁最大？', q: '根据上面的 GEO 数据摘要，哪个竞品对我的威胁最大？我应该怎么应对？' },
+    { label: '🎯 下一步该做什么？', q: '根据上面的 GEO 数据摘要，给我 3 条具体可执行的下一步优化建议。' },
+  ]
+
+  const doSend = async (text: string) => {
+    if (!text.trim() || streaming) return
+    const userMsg: RichMessage = { id: `u${Date.now()}`, role: 'user', content: text }
     const aMsg: RichMessage = { id: `a${Date.now()}`, role: 'assistant', content: '', tools: [] }
 
     // 创建或更新会话
@@ -347,7 +381,7 @@ export default function Chat() {
       isNewConv = true
       const newConv: Conversation = {
         id: convId,
-        title: input.slice(0, 30),
+        title: text.slice(0, 30),
         agentName: selectedAgent,
         messages: [userMsg, aMsg],
         createdAt: Date.now(),
@@ -538,7 +572,13 @@ export default function Chat() {
 
   // 回车发送，shift+回车换行
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(input) }
+  }
+
+  // GEO 快捷问：摘要+问题一起发送（榜豆式——AI 有上下文才能解读）
+  const askGeo = (q: string) => {
+    if (streaming) return
+    doSend(geoSummary ? `${geoSummary}\n\n${q}` : q)
   }
 
   const deleteConv = async (id: string) => {
@@ -547,6 +587,18 @@ export default function Chat() {
     if (currentConvId === id) setCurrentConvId(null)
     try { await businessApi.deleteConversation(id) } catch {}
     queryClient.invalidateQueries({ queryKey: ['conversations'] })
+  }
+
+  // 会话重命名（P2-9-11：标题为首句截断，用户可手动修正）
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
+  const openRename = (id: string, title: string) => setRenameTarget({ id, title })
+  const doRename = async () => {
+    if (!renameTarget || !renameTarget.title.trim()) return
+    try {
+      await businessApi.renameConversation(renameTarget.id, renameTarget.title.trim())
+      setConversations(prev => prev.map(c => c.id === renameTarget.id ? { ...c, title: renameTarget.title.trim() } : c))
+      setRenameTarget(null)
+    } catch { /* 拦截器已提示 */ }
   }
 
   return (
@@ -569,12 +621,14 @@ export default function Chat() {
               <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--wr-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title}</div>
               <div style={{ fontSize: 12, color: 'var(--wr-text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2, gap: 6 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.agentName || '默认'}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                  <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }} title={new Date(c.updatedAt || c.createdAt).toLocaleString()}>
-                    {c.updatedAt ? formatConvTime(c.updatedAt) : ''}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums' }} title={new Date(c.updatedAt || c.createdAt).toLocaleString()}>
+                      {c.updatedAt ? formatConvTime(c.updatedAt) : ''}
+                    </span>
+                    {/* 重命名（P2-9-11：标题为首句截断，用户可手动修正） */}
+                    <span onClick={(e) => { e.stopPropagation(); openRename(c.id, c.title) }} style={{ cursor: 'pointer', opacity: 0.5 }} title="重命名">✎</span>
+                    <span onClick={(e) => { e.stopPropagation(); deleteConv(c.id) }} style={{ cursor: 'pointer', opacity: 0.5 }}>×</span>
                   </span>
-                  <span onClick={(e) => { e.stopPropagation(); deleteConv(c.id) }} style={{ cursor: 'pointer', opacity: 0.5 }}>×</span>
-                </span>
               </div>
             </div>
           ))}
@@ -595,7 +649,7 @@ export default function Chat() {
               allowClear
               value={selectedLLM}
               onChange={setSelectedLLM}
-              options={llmConfigs.map((l: LLMConfig) => ({ value: l.name, label: `${l.model}${l.provider ? ' · ' + l.provider : ''}` }))}
+              options={llmConfigs.map((l: EngineOption) => ({ value: l.name, label: `${l.model}${l.provider ? ' · ' + l.provider : ''}` }))}
               title={selectedLLM ? `当前强制使用 ${selectedLLM}（覆盖 Agent 默认）` : '留空则使用所选 Agent 配置的默认模型'}
             />
             <Popover
@@ -680,16 +734,52 @@ export default function Chat() {
 
         {/* 输入区 */}
         <div style={{ flexShrink: 0, padding: '8px 24px', borderTop: '1px solid var(--wr-border)' }}>
+          {/* GEO 快捷问（商户端）：注入实时数据摘要，让 AI 解读你的品牌状态 */}
+          {isMerchantChat && (
+            <div style={{ maxWidth: 1080, margin: '0 auto 8px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>GEO 助手：</Text>
+              {GEO_QUICK_QUESTIONS.map((item) => (
+                <Button
+                  key={item.label}
+                  size="small"
+                  disabled={streaming || !geoSummary}
+                  title={geoSummary ? undefined : '暂无监测数据——先去 AI 可见度发起监测'}
+                  onClick={() => askGeo(item.q)}
+                  style={{ fontSize: 12 }}
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 12, maxWidth: 1080, margin: '0 auto' }}>
             <TextArea value={input} onChange={e => setInput(e.target.value)} placeholder="回车发送，Shift+回车换行..." autoSize={{ minRows: 1, maxRows: 4 }} onKeyDown={handleKeyDown} style={{ borderRadius: 12 }} disabled={streaming} />
             {streaming ? (
               <Button danger onClick={stopGeneration} style={{ height: 'auto', borderRadius: 12, minWidth: 56 }}>停止</Button>
             ) : (
-              <Button type="primary" onClick={send} style={{ height: 'auto', borderRadius: 12, minWidth: 56 }}>发送</Button>
+              <Button type="primary" onClick={() => doSend(input)} style={{ height: 'auto', borderRadius: 12, minWidth: 56 }}>发送</Button>
             )}
           </div>
         </div>
       </div>
+
+      {/* 会话重命名弹窗 */}
+      <Modal
+        title="重命名会话"
+        open={!!renameTarget}
+        onCancel={() => setRenameTarget(null)}
+        onOk={doRename}
+        okText="保存"
+        width={400}
+      >
+        <Input
+          value={renameTarget?.title || ''}
+          onChange={(e) => setRenameTarget(prev => prev ? { ...prev, title: e.target.value } : prev)}
+          placeholder="输入会话标题"
+          maxLength={60}
+          style={{ marginTop: 8 }}
+        />
+      </Modal>
     </div>
   )
 }

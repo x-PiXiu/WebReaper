@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -17,18 +17,38 @@ export const businessApi = {
   deleteAgentConfig: (name: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/agents/${name}`),
 
-  // ---- LLM 配置 ----
+  // ---- LLM 配置（admin——完整视图含厂商密钥；商户端引擎选择用 listEngines）----
   listLLMConfigs: () =>
-    apiClient.get<unknown, LLMConfig[]>('/api/v1/llm-configs'),
+    apiClient.get<unknown, LLMConfig[]>('/api/v1/admin/llm-configs'),
 
   createLLMConfig: (data: LLMConfig) =>
-    apiClient.post<unknown, LLMConfig>('/api/v1/llm-configs', data),
+    apiClient.post<unknown, LLMConfig>('/api/v1/admin/llm-configs', data),
 
   updateLLMConfig: (name: string, data: Partial<LLMConfig>) =>
-    apiClient.put<unknown, LLMConfig>(`/api/v1/llm-configs/${name}`, data),
+    apiClient.put<unknown, LLMConfig>(`/api/v1/admin/llm-configs/${name}`, data),
 
   deleteLLMConfig: (name: string) =>
-    apiClient.delete<unknown, unknown>(`/api/v1/llm-configs/${name}`),
+    apiClient.delete<unknown, unknown>(`/api/v1/admin/llm-configs/${name}`),
+
+  // ---- 引擎名单（商户/聊天通用——仅 name/provider/model，不含厂商密钥）----
+  listEngines: () =>
+    apiClient.get<unknown, EngineOption[]>('/api/v1/geo/engines'),
+
+  // ---- GEO 健康报告（后端聚合单一事实源：总分/五指数/环比/竞品对标/品牌级分值）----
+  getHealthReport: () =>
+    apiClient.get<unknown, HealthReportView>('/api/v1/geo/health-report'),
+
+  // ---- 行业全景看板（admin：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）----
+  getIndustryOverview: () =>
+    apiClient.get<unknown, IndustryOverviewView>('/api/v1/admin/geo/industry-overview'),
+
+  // ---- AI 榜缓存（F4 品牌卡徽章：只读最近一次探查，无缓存 available=false）----
+  getAIRank: (brandId: string) =>
+    apiClient.get<unknown, { available: boolean; probed_at?: string; items?: AIRankItemView[] }>(`/api/v1/geo/brands/${brandId}/ai-rank`),
+
+  // ---- 认证：修改当前登录用户密码（F1-5 默认口令治理）----
+  changePassword: (data: { old_password: string; new_password: string }) =>
+    apiClient.put<unknown, { changed: boolean }>('/api/v1/auth/password', data),
 
   // ---- 聊天会话（后端持久化，按用户隔离）----
   listConversations: () =>
@@ -46,6 +66,10 @@ export const businessApi = {
   deleteConversation: (convId: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/conversations/${convId}`),
 
+  // 会话重命名（标题是首句截断时用户可手动修正——P2-9-11）
+  renameConversation: (convId: string, title: string) =>
+    apiClient.put<unknown, unknown>(`/api/v1/conversations/${convId}`, { title }),
+
   // ---- 全局工具列表 ----
   listTools: () =>
     apiClient.get<unknown, ToolView[]>('/api/v1/tools'),
@@ -62,10 +86,10 @@ export const businessApi = {
   listBrands: () =>
     apiClient.get<unknown, Brand[]>('/api/v1/geo/brands'),
 
-  createBrand: (data: { name: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; website_url?: string }) =>
+  createBrand: (data: { name: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; industry?: string; website_url?: string }) =>
     apiClient.post<unknown, Brand>('/api/v1/geo/brands', data),
 
-  updateBrand: (id: string, data: { name?: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; website_url?: string }) =>
+  updateBrand: (id: string, data: { name?: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; industry?: string; website_url?: string }) =>
     apiClient.put<unknown, Brand>(`/api/v1/geo/brands/${id}`, data),
 
   deleteBrand: (id: string) =>
@@ -123,9 +147,9 @@ export const businessApi = {
   addKeyword: (brandId: string, data: { term: string; intent?: string }) =>
     apiClient.post<unknown, Keyword>(`/api/v1/geo/brands/${brandId}/keywords`, data),
 
-  // 关键词蒸馏（五种来源：brand/text/seed/file/web）
+  // 关键词蒸馏（六种来源：brand/text/seed/file/web/questions）
   distillKeywords: (data: {
-    source: 'brand' | 'text' | 'seed' | 'file' | 'web'
+    source: 'brand' | 'text' | 'seed' | 'file' | 'web' | 'questions'
     brand_id?: string
     text?: string
     seeds?: string[]
@@ -166,7 +190,7 @@ export const businessApi = {
     apiClient.get<unknown, OptimizedContent[]>(`/api/v1/geo/brands/${brandId}/contents`),
 
   // 从零生成内容（根据品牌信息+关键词，AI原创一篇 GEO 文章；支持单/多关键词组合）
-  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean; format?: string }) =>
+  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean; format?: string; citation_toggles?: string[] }) =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/generate`, data),
 
   // 内容状态流转：draft ↔ published（published 后公开站可访问，AI 引擎可爬取）
@@ -225,6 +249,31 @@ export const businessApi = {
   // 验证 key 文件可公开访问（搜索引擎视角）
   verifyIndexingKey: () =>
     apiClient.get<unknown, { url: string; reachable: boolean; content_match: boolean; status_code: number; error: string }>('/api/v1/admin/indexing/verify-key'),
+
+  // ---- 平台知识库（管理后台：向量配置/行业采集/素材管理/向量重建）----
+  getKnowledgeEmbeddingConfig: () =>
+    apiClient.get<unknown, KnowledgeEmbeddingConfig>('/api/v1/admin/knowledge/embedding-config'),
+  updateKnowledgeEmbeddingConfig: (data: Partial<KnowledgeEmbeddingConfig>) =>
+    apiClient.put<unknown, { ok: boolean; note: string }>('/api/v1/admin/knowledge/embedding-config', data),
+  getKnowledgeCrawlConfig: () =>
+    apiClient.get<unknown, IndustryCrawlConfig[]>('/api/v1/admin/knowledge/crawl-config'),
+  updateKnowledgeCrawlConfig: (data: IndustryCrawlConfig[]) =>
+    apiClient.put<unknown, { ok: boolean }>('/api/v1/admin/knowledge/crawl-config', data),
+  getKnowledgeStats: () =>
+    apiClient.get<unknown, KnowledgeStats>('/api/v1/admin/knowledge/stats'),
+  listKnowledgeMaterials: (params?: { industry?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, KnowledgeMaterialView[]>('/api/v1/admin/knowledge/materials', { params }),
+  deleteKnowledgeMaterial: (id: string) =>
+    apiClient.delete<unknown, { ok: boolean }>(`/api/v1/admin/knowledge/materials/${id}`),
+  // 重建素材向量（换 embedding 模型后存量向量失效——重建恢复检索正确性）
+  reindexKnowledgeMaterials: (params?: { industry?: string; only_missing?: boolean }) =>
+    apiClient.post<unknown, { processed: number; updated: number; failed: number; note: string }>(
+      '/api/v1/admin/knowledge/reindex', null, { params }),
+  // 采集间隔（分钟，30-1440；下个周期生效免重启）
+  getKnowledgeCrawlInterval: () =>
+    apiClient.get<unknown, KnowledgeCrawlInterval>('/api/v1/admin/knowledge/crawl-interval'),
+  updateKnowledgeCrawlInterval: (interval_minutes: number) =>
+    apiClient.put<unknown, { ok: boolean; note: string }>('/api/v1/admin/knowledge/crawl-interval', { interval_minutes }),
 
   // ---- 用户管理（管理端）----
   listUsers: () =>

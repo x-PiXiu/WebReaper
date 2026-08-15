@@ -1,5 +1,6 @@
 import { Typography, Card, Row, Col, Tag, Button, Progress, Space, Table, message, Modal, Empty, Statistic } from 'antd'
 import { CrownOutlined, CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import PageLoading from '../../components/PageLoading'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -41,7 +42,7 @@ export default function MyPlan() {
             message.success({ content: '支付成功，套餐已开通', key: 'pay' })
             queryClient.invalidateQueries({ queryKey: ['my-usage'] })
             queryClient.invalidateQueries({ queryKey: ['my-orders'] })
-          }).catch(() => message.error({ content: '确认失败', key: 'pay' }))
+          }).catch(() => message.error({ content: '支付确认未完成，请稍后在订单列表重试', key: 'pay', duration: 4 }))
         }, 1200)
       } else {
         message.success('订单已创建（线下模式，等待管理员开通）')
@@ -49,13 +50,13 @@ export default function MyPlan() {
       }
       setBuyModal(null)
     },
-    onError: () => message.error('下单失败'),
+    onError: () => { /* 拦截器已提示失败原因 */ },
   })
 
   if (usageLoading || plansLoading) {
     return (
       <div className="wr-page-content" style={{ paddingTop: 8 }}>
-        <Card loading className="wr-glass-card" style={{ minHeight: 200 }} />
+        <PageLoading tip="套餐信息加载中..." />
       </div>
     )
   }

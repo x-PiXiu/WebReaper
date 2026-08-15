@@ -1,28 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Popconfirm, Switch } from 'antd'
+import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Switch } from 'antd'
 import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
+import { scoreColor, scoreLevel } from '../../utils/geo'
+import { citabilityOf } from '../../utils/citability'
+import { useBrandContext } from '../../hooks/useBrands'
+import PublishToSiteButton from '../../components/PublishToSiteButton'
+import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
 import type { Brand, Keyword, OptimizedContent } from '../../types/api'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
-
-// 评分 → 颜色（沿用项目 token，双主题自适应）
-function scoreColor(s: number): string {
-  if (s >= 80) return 'var(--wr-success)'
-  if (s >= 65) return 'var(--wr-accent)'
-  if (s >= 50) return 'var(--wr-warning)'
-  return 'var(--wr-danger)'
-}
-// 评分 → 等级文案
-function scoreLevel(s: number): string {
-  if (s >= 80) return 'A 优秀'
-  if (s >= 65) return 'B 良好'
-  if (s >= 50) return 'C 及格'
-  return 'D 待优化'
-}
 
 // GEO 5 维度配置（标签 + 取值 key）
 const DIMENSIONS: { label: string; key: keyof OptimizedContent['score'] }[] = [
@@ -50,29 +40,29 @@ const FORMAT_OPTIONS = [
   { value: 'script', label: '🎬 视频口播脚本' },
   { value: 'faq', label: '❓ FAQ 问答集' },
   { value: 'comparison', label: '⚖️ 对比评测' },
+  { value: 'citation', label: '🔗 高引用结构（AI 易摘录/引用）' },
 ]
 
 export default function Content() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const [selectedBrand, setSelectedBrand] = useState<string | undefined>()
+  // 全局品牌上下文：与关键词/分发/监测页共享，跨页不丢
+  const { brands, brandId: selectedBrand, setCurrentBrand } = useBrandContext()
   const [originalText, setOriginalText] = useState('')
   const [optimizing, setOptimizing] = useState(false)
   const [result, setResult] = useState<OptimizedContent | null>(null)
   const [genKeywords, setGenKeywords] = useState<string[]>([])
   const [targetEngine, setTargetEngine] = useState<string>('') // 目标 AI 引擎偏好
   const [format, setFormat] = useState<string>('') // 内容格式（P1-5：文章/点评/小红书/脚本/FAQ/评测）
+  const [citationToggles, setCitationToggles] = useState<string[]>([]) // 可引用结构开关（v3 P2：与格式正交，可组合）
   const [useDiagnose, setUseDiagnose] = useState(false) // P5-03 诊断→优化闭环开关
   const [generating, setGenerating] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [resubmitting, setResubmitting] = useState<string | null>(null) // 收录补提交 loading
+  const [preview, setPreview] = useState<OptimizedContent | null>(null) // 全文预览（历史卡片点击）
+  const [fullWidth, setFullWidth] = useState(false) // 结果面板全宽模式（长文阅读）
 
-  const { data: brands = [] } = useQuery({
-    queryKey: ['geo-brands'],
-    queryFn: () => businessApi.listBrands(),
-  })
-  const { data: keywords = [] } = useQuery({
-    queryKey: ['geo-keywords', selectedBrand],
+  const { data: keywords = [] } = useQuery({    queryKey: ['geo-keywords', selectedBrand],
     queryFn: () => businessApi.listKeywords(selectedBrand!),
     enabled: !!selectedBrand,
   })
@@ -131,6 +121,7 @@ export default function Content() {
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
         target_engine: targetEngine || undefined,
         format: format || undefined,
+        citation_toggles: citationToggles.length > 0 ? citationToggles : undefined, // 可引用结构开关（v3 P2）
         use_diagnose: useDiagnose, // P5-03 诊断→优化闭环：先诊断再对症下药
       })
       setResult(res)
@@ -143,9 +134,7 @@ export default function Content() {
         message.warning(dups[0], 6)
       }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
-    } catch (e) {
-      message.error('生成失败：' + ((e as Error)?.message || ''))
-    } finally {
+    } catch { /* 拦截器已提示 */ } finally {
       setGenerating(false)
     }
   }
@@ -169,9 +158,7 @@ export default function Content() {
       }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
       if (result?.id === c.id) setResult({ ...result, status })
-    } catch (e) {
-      message.error('状态变更失败：' + ((e as Error)?.message || ''))
-    }
+    } catch { /* 拦截器已提示 */ }
   }
 
   const score = result?.score
@@ -193,9 +180,7 @@ export default function Content() {
       })
       setOriginalText(res.optimized_text || '')
       message.success('素材已生成，你可以编辑后点击优化')
-    } catch (e) {
-      message.error('生成素材失败：' + ((e as Error)?.message || ''))
-    } finally {
+    } catch { /* 拦截器已提示 */ } finally {
       setDrafting(false)
     }
   }
@@ -219,7 +204,7 @@ export default function Content() {
         <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
           <div>
             <h1>内容生成</h1>
-            <p>文章/短内容 GEO 优化与生成；多媒体创作从右侧进入</p>
+            <p>文章 / 短内容 GEO 优化与生成</p>
           </div>
           <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/creation')}>
             多媒体创作
@@ -235,7 +220,7 @@ export default function Content() {
                 style={{ maxWidth: 320, minWidth: 200, flex: 1 }}
                 placeholder="选择要创作/优化的品牌"
                 value={selectedBrand}
-                onChange={(v) => { setSelectedBrand(v); setGenKeywords([]) }}
+                onChange={(v) => { setCurrentBrand(v); setGenKeywords([]) }}
                 options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
               />
             </div>
@@ -248,10 +233,10 @@ export default function Content() {
           </div>
         </Card>
 
-        {/* ③ 主工作区：左输入 / 右结果 */}
+        {/* ③ 主工作区：左输入 / 右结果；全宽模式=上下分栏（输入在上保留编辑，长文阅读不拥挤） */}
         <Row gutter={16}>
-          {/* 左：输入面板 */}
-          <Col xs={24} lg={12}>
+          {/* 输入面板（全宽时占整行，置顶保留编辑能力——反模式修复 P0-4-1） */}
+          <Col xs={24} lg={fullWidth ? 24 : 12}>
             <Card styles={{ body: { padding: 24 } }}>
               <div className="wr-stagger">
                 {/* 关键词选择 */}
@@ -303,6 +288,27 @@ export default function Content() {
                     options={FORMAT_OPTIONS}
                     allowClear
                     placeholder="选择内容格式（默认 SEO 文章）"
+                  />
+                </div>
+
+                {/* 可引用结构开关（v3 P2：四开关可组合，与格式正交——任何格式都能加"AI 易摘录"结构） */}
+                <div style={{ marginTop: 12 }}>
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                    🔗 可引用结构（AI 易摘录/引用，与格式叠加）
+                  </Text>
+                  <Select
+                    mode="multiple"
+                    style={{ width: '100%' }}
+                    value={citationToggles}
+                    onChange={setCitationToggles}
+                    options={[
+                      { value: 'conclusion-first', label: '结论前置' },
+                      { value: 'standalone-paragraphs', label: '观点独立成段' },
+                      { value: 'data-cited', label: '数据标注来源' },
+                      { value: 'subheadings', label: '小标题分段' },
+                    ]}
+                    placeholder="选填：开启后生成内容带引用友好结构"
+                    maxTagCount={2}
                   />
                 </div>
 
@@ -415,10 +421,18 @@ export default function Content() {
             </Card>
           </Col>
 
-          {/* 右：结果面板（GEO 评分仪表盘）*/}
-          <Col xs={24} lg={12}>
-            <Card title="优化结果" styles={{ body: { padding: 24 } }} style={{ minHeight: '100%' }}>
-              {busy ? (
+          {/* 右：结果面板（GEO 评分仪表盘；全宽模式占满整行在输入下方）*/}
+          <Col xs={24} lg={fullWidth ? 24 : 12}>
+            <Card
+              title="优化结果"
+              extra={
+                <Button size="small" type="text" onClick={() => setFullWidth(!fullWidth)}>
+                  {fullWidth ? '分栏模式' : '全宽阅读'}
+                </Button>
+              }
+              styles={{ body: { padding: 24 } }}
+              style={{ minHeight: '100%' }}
+            >              {busy ? (
                 <div style={{ textAlign: 'center', padding: '60px 20px' }}>
                   <Spin size="large" />
                   <Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0 }}>
@@ -444,6 +458,33 @@ export default function Content() {
                       </Row>
                     </div>
                   )}
+
+                  {/* 可引用度提示（v3 P2：结构信号检测——引导开启引用友好开关） */}
+                  {(() => {
+                    const cit = citabilityOf(result.optimized_text || result.original_text || '')
+                    return (
+                      <div style={{ marginBottom: 20, padding: '12px 16px', borderRadius: 12, background: 'var(--wr-bg-elevated)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <Tooltip title="对齐 GEO 可引用素材结构：结论前置 / 小标题分段 / 数据标注来源——三个可机读信号的启发式检测（非精确评分）">
+                            <Text strong style={{ fontSize: 13 }}>🔗 可引用度</Text>
+                          </Tooltip>
+                          <Tag color={cit.score >= 67 ? 'success' : cit.score >= 34 ? 'warning' : 'default'} style={{ margin: 0 }}>
+                            {cit.score}%（{3 - cit.hints.length}/3 结构信号）
+                          </Tag>
+                        </div>
+                        <Space size={6} wrap style={{ marginBottom: cit.hints.length > 0 ? 8 : 0 }}>
+                          <Tag style={{ margin: 0, fontSize: 11 }} color={cit.conclusionFirst ? 'success' : 'default'}>{cit.conclusionFirst ? '✓' : '✗'} 结论前置</Tag>
+                          <Tag style={{ margin: 0, fontSize: 11 }} color={cit.hasSubheadings ? 'success' : 'default'}>{cit.hasSubheadings ? '✓' : '✗'} 小标题分段</Tag>
+                          <Tag style={{ margin: 0, fontSize: 11 }} color={cit.dataCited ? 'success' : 'default'}>{cit.dataCited ? '✓' : '✗'} 数据标注来源</Tag>
+                        </Space>
+                        {cit.hints.length > 0 && (
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                            提升提示：{cit.hints.join('；')}——可在左侧开启「可引用结构」开关重新生成
+                          </Text>
+                        )}
+                      </div>
+                    )
+                  })()}
 
                   {/* 前后对比反馈（仅优化模式：后端返回 score_before + recommendations） */}
                   {result.score_before && (
@@ -508,14 +549,14 @@ export default function Content() {
                     {result.optimized_text}
                   </Paragraph>
 
-                  {/* B: 去「分发中心」发布到社交平台（预选该内容+品牌） */}
+                  {/* B: 去「社媒分发」发布到社交平台（预选该内容+品牌） */}
                   <div style={{ marginTop: 16 }}>
                     <Button
                       type="primary"
                       icon={<ExportOutlined />}
-                      onClick={() => navigate(`/m/distribution?contentId=${result.id}${selectedBrand ? `&brandId=${selectedBrand}` : ''}`)}
+                      onClick={() => navigate(`/m/distribution?contentId=${result.id}`)}
                     >
-                      去分发中心发布到知乎/小红书
+                      去社媒分发（知乎 / 小红书）
                     </Button>
                   </div>
 
@@ -536,23 +577,10 @@ export default function Content() {
                       ) : (
                         <>
                           <Text type="secondary" style={{ fontSize: 12 }}>草稿——发布后 AI 引擎可爬取此内容</Text>
-                          {(result.score?.total ?? 0) > 0 && (result.score?.total ?? 0) < 30 ? (
-                            <Tooltip title={`GEO 评分 ${result.score?.total?.toFixed(0)} 过低（需 ≥30），请优化后再发布`}>
-                              <Button size="small" disabled style={{ fontSize: 12 }}>
-                                评分过低，无法发布
-                              </Button>
-                            </Tooltip>
-                          ) : (result.score?.total ?? 0) > 0 && (result.score?.total ?? 0) < 50 ? (
-                            <Popconfirm title={`评分 ${result.score?.total?.toFixed(0)} 偏低，确定发布？`} onConfirm={() => handleSetStatus(result, 'published')}>
-                              <Button size="small" style={{ fontSize: 12, background: 'var(--wr-warning)', borderColor: 'var(--wr-warning)', color: '#fff' }}>
-                                发布到公开站
-                              </Button>
-                            </Popconfirm>
-                          ) : (
-                            <Button size="small" type="primary" style={{ fontSize: 12 }} onClick={() => handleSetStatus(result, 'published')}>
-                              发布到公开站
-                            </Button>
-                          )}
+                          <PublishToSiteButton
+                            score={result.score?.total}
+                            onPublish={() => handleSetStatus(result, 'published')}
+                          />
                         </>
                       )}
                     </div>
@@ -611,7 +639,13 @@ export default function Content() {
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         {new Date(c.created_at).toLocaleString()}
                       </Text>
-                      <Text strong ellipsis style={{ fontSize: 13 }}>
+                      {/* 点击标题看全文（抽屉）——2 行摘要读不了长文章 */}
+                      <Text
+                        strong
+                        ellipsis
+                        style={{ fontSize: 13, cursor: 'pointer', color: 'var(--wr-primary)' }}
+                        onClick={() => setPreview(c)}
+                      >
                         {c.title || '(无标题)'}
                       </Text>
                       <Paragraph
@@ -633,9 +667,7 @@ export default function Content() {
                                   await businessApi.resubmitIndex(selectedBrand!, c.id)
                                   message.success('已重新提交收录通知（搜索引擎抓取约需 1-2 周）')
                                   queryClient.invalidateQueries({ queryKey: ['geo-contents'] })
-                                } catch (e) {
-                                  message.error('提交失败：' + ((e as Error)?.message || ''))
-                                } finally { setResubmitting(null) }
+                                } catch { /* 拦截器已提示 */ } finally { setResubmitting(null) }
                               }}>
                               补提交收录
                             </Button>
@@ -643,14 +675,11 @@ export default function Content() {
                               下线
                             </Button>
                           </>
-                        ) : (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 30 ? (
-                          <Tooltip title={`评分 ${c.score?.total?.toFixed(0)} 过低，无法发布`}>
-                            <Button size="small" disabled style={{ fontSize: 12 }}>发布</Button>
-                          </Tooltip>
                         ) : (
-                          <Button size="small" type="primary" ghost style={{ fontSize: 12, borderColor: (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 50 ? 'var(--wr-warning)' : undefined, color: (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 50 ? 'var(--wr-warning)' : undefined }} onClick={() => handleSetStatus(c, 'published')}>
-                            发布到公开站
-                          </Button>
+                          <PublishToSiteButton
+                            score={c.score?.total}
+                            onPublish={() => handleSetStatus(c, 'published')}
+                          />
                         )}
                       </div>
                     </Card>
@@ -660,6 +689,9 @@ export default function Content() {
             </Row>
           </Card>
         )}
+
+        {/* 历史内容全文预览（与 admin 内容管理共用组件） */}
+        <ContentPreviewDrawer content={preview} onClose={() => setPreview(null)} />
       </div>
     </div>
   )

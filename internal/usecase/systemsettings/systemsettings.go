@@ -9,15 +9,24 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
+
+// HeadedSyncer 浏览器可见性运行时同步器。
+//
+// 业务约束：管理后台改完开关后 RPA 立即按新值执行（无需重启）。
+// 用例只关心"写完即生效"——"全局内存在哪、谁读它"是驱动层细节，
+// 由 main 在装配时注入（依赖倒置），用例不再 import config。
+type HeadedSyncer interface {
+	SyncBrowserHeaded(headed bool)
+}
 
 // SystemSettingsUseCase 平台系统设置用例（平台总闸 + 租户个性化开关）。
 type SystemSettingsUseCase struct {
 	settingRepo      port.SystemSettingRepository
 	tenantSettingRepo port.TenantSettingRepository // 租户级设置（可为 nil：租户开关降级为始终开启）
+	headedSyncer     HeadedSyncer                  // 可选：浏览器可见性即时生效（未注入=仅落库）
 }
 
 func NewSystemSettingsUseCase(settingRepo port.SystemSettingRepository) *SystemSettingsUseCase {
@@ -66,13 +75,22 @@ func (uc *SystemSettingsUseCase) GetBrowserHeaded(ctx context.Context) (bool, er
 	return s.Value == "true", nil
 }
 
-// SetBrowserHeaded 写浏览器可见性开关 + 同步内存（即时生效——下次 RPA 操作用新值）。
+// SetHeadedSyncer 注入浏览器可见性运行时同步器（可选；未注入=仅落库，重启后生效）。
+func (uc *SystemSettingsUseCase) SetHeadedSyncer(s HeadedSyncer) {
+	if s != nil {
+		uc.headedSyncer = s
+	}
+}
+
+// SetBrowserHeaded 写浏览器可见性开关 + 同步运行时（即时生效——下次 RPA 操作用新值）。
 func (uc *SystemSettingsUseCase) SetBrowserHeaded(ctx context.Context, headed bool) error {
 	value := "false"
 	if headed {
 		value = "true"
 	}
-	config.SetBrowserHeaded(headed) // 同步全局内存（allocOpts 即时读新值）
+	if uc.headedSyncer != nil {
+		uc.headedSyncer.SyncBrowserHeaded(headed)
+	}
 	return uc.settingRepo.Save(ctx, entity.SystemSetting{
 		Key:   entity.SettingKeyBrowserHeaded,
 		Value: value,

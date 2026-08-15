@@ -58,6 +58,8 @@ type MonitoringResultRepository interface {
 	LatestByTenant(ctx context.Context, tenantID string) ([]entity.MonitoringResult, error)
 	// Trend 取某品牌的提及率趋势（时间序列）。
 	Trend(ctx context.Context, tenantID, brandID string, limit int) ([]entity.MonitoringResult, error)
+	// ListRecent 全平台最近监测结果（admin 旁路——行业全景看板聚合用，跨租户）。
+	ListRecent(ctx context.Context, limit int) ([]entity.MonitoringResult, error)
 	// Count 统计监测结果总数（平台总览用，admin 看全局）。
 	Count(ctx context.Context) (int, error)
 }

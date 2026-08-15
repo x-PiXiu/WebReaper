@@ -46,9 +46,9 @@ export default function Login() {
     setLoading(true)
     try {
       const res = await authApi.login(values)
-      setAuth(res.token, res.username || values.username, res.role, res.tenant_id)
+      setAuth(res.token, res.username || values.username, res.role, res.tenant_id, !!res.must_change_password)
       message.success('登录成功')
-      navigate(res.role === 'admin' ? '/admin' : '/m', { replace: true })
+      navigate(res.role === 'admin' ? '/admin' : '/m/dashboard', { replace: true })
     } catch {
     } finally {
       setLoading(false)

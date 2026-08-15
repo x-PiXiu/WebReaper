@@ -1,8 +1,10 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Select, Empty, Drawer, Tabs, Row, Col } from 'antd'
+import { Typography, Table, Tag, Space, Button, message, Popconfirm, Select, Empty, Tabs, Row, Col } from 'antd'
 import { DeleteOutlined, EyeOutlined, SwapOutlined, FileTextOutlined, GlobalOutlined, EditOutlined, InboxOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
+import { scoreColor } from '../../utils/geo'
+import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
 import type { Brand, OptimizedContent } from '../../types/api'
 
 const { Text } = Typography
@@ -18,13 +20,6 @@ const indexMeta: Record<string, { color: string; label: string }> = {
   indexed: { color: 'success', label: '已收录' },
   pending: { color: 'warning', label: '待收录' },
   error: { color: 'error', label: '查询失败' },
-}
-
-function scoreColor(s: number): string {
-  if (s >= 80) return 'var(--wr-success)'
-  if (s >= 65) return 'var(--wr-accent)'
-  if (s >= 50) return 'var(--wr-warning)'
-  return 'var(--wr-danger)'
 }
 
 // 内容统一管理（管理后台）：全平台优化内容一览。
@@ -220,24 +215,8 @@ export default function AdminContents() {
         />
       </div>
 
-      {/* 预览抽屉 */}
-      <Drawer title={preview?.title || '内容预览'} width={720} open={!!preview} onClose={() => setPreview(null)}>
-        {preview?.status === 'published' ? (
-          <iframe
-            src={`/public/articles/${preview.id}`}
-            style={{ width: '100%', height: '100%', minHeight: 480, border: '1px solid var(--wr-border)', borderRadius: 10, background: '#fff' }}
-          />
-        ) : (
-          <div style={{ padding: 40, textAlign: 'center' }}>
-            <Text type="secondary">该内容未发布，公开页不可见。可先「发布」再预览。</Text>
-            <div style={{ marginTop: 20 }}>
-              <pre style={{ maxHeight: 400, overflow: 'auto', textAlign: 'left', fontSize: 12 }}>
-                {preview?.optimized_text}
-              </pre>
-            </div>
-          </div>
-        )}
-      </Drawer>
+      {/* 预览抽屉（与商户端共用组件——详情展示跨角色一致） */}
+      <ContentPreviewDrawer content={preview} onClose={() => setPreview(null)} />
     </div>
   )
 }

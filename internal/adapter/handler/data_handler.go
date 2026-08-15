@@ -92,6 +92,8 @@ func agentConfigToView(cfg entity.AgentConfig) gin.H {
 
 // ---- LLM 配置（薄 handler：DTO 转换 + 调用 llmCfgUC）----
 
+// llmConfigToView 完整厂商配置视图（含 api_key）——仅 admin 路由可达。
+// 商户端引擎选择走 handleListEngineNames（两个用例、两个 Output Model）。
 func llmConfigToView(cfg entity.LLMConfig) gin.H {
 	return gin.H{
 		"name":           cfg.Name,
@@ -101,6 +103,26 @@ func llmConfigToView(cfg entity.LLMConfig) gin.H {
 		"model":          cfg.Model,
 		"cost_per_mtok":  cfg.CostPerMTok,
 	}
+}
+
+// handleListEngineNames GET /api/v1/geo/engines —— 引擎名单（商户端速查/矩阵执行选择用）。
+// 仅暴露 name/provider/model（展示必需，均非敏感）；厂商密钥不进入商户可达视图。
+func (r *Router) handleListEngineNames(c *gin.Context) {
+	configs, err := r.llmCfgUC.List(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	type engineOptionView struct {
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	views := make([]engineOptionView, 0, len(configs))
+	for _, cfg := range configs {
+		views = append(views, engineOptionView{Name: cfg.Name, Provider: cfg.Provider, Model: cfg.Model})
+	}
+	success(c, views)
 }
 
 func (r *Router) handleListLLMConfigs(c *gin.Context) {

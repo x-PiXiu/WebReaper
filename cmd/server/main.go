@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	milvusclient "github.com/milvus-io/milvus-sdk-go/v2/client"
 
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
@@ -21,6 +24,7 @@ import (
 	"webreaper/internal/adapter/crypto"
 	geoadapter "webreaper/internal/adapter/geo"
 	"webreaper/internal/adapter/handler"
+	kbretriever "webreaper/internal/adapter/knowledge"
 	"webreaper/internal/adapter/lock"
 	zaplogger "webreaper/internal/adapter/logger"
 	"webreaper/internal/adapter/mock"
@@ -32,6 +36,7 @@ import (
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
+	"webreaper/internal/adapter/urlprobe"
 	"webreaper/internal/adapter/storage"
 	"webreaper/internal/adapter/telemetry"
 	"webreaper/internal/adapter/urlsubmit"
@@ -45,6 +50,7 @@ import (
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/indexing"
+	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/notification"
 	"webreaper/internal/usecase/port"
@@ -190,6 +196,8 @@ func main() {
 	// 路由器（零参数——所有依赖通过 SetXxx 可选注入，端点按注入条件注册）
 	router := handler.NewRouter()
 	router.SetAuth(registerUC, loginUC, tokenParser)
+	// 改密端点（F1-5：默认弱口令 admin/admin123 治理——配合前端常驻提醒）
+	router.SetAuthChangePassword(auth.NewChangePasswordUseCase(userRepo, hasher))
 	router.SetAI(aiGenerator)
 	router.SetAgentConfig(agentCfgUC)
 	router.SetLLMConfig(llmCfgUC)
@@ -241,6 +249,18 @@ func main() {
 		}
 
 		cachedSubmitter := urlsubmit.NewCachedProvider(loadIndexingConfig, cfg.Server.PublicBaseURL)
+		// Bing URL Submission API 兜底渠道：IndexNow 之外再向 Bing 主动提交，
+		// 与后台"URL 提交"共享 100 条/天配额（GetUrlSubmissionQuota 实测）。
+		// 复用 BING_API_KEY / BING_SITE_URL（同一账号 key，与收录验证共用）——env 装配，重启生效；
+		// 未配置则仅走 IndexNow/百度（组合模式：任一分发失败不影响其他渠道）。
+		var submitter port.URLSubmitter = cachedSubmitter
+		if cfg.Server.BingAPIKey != "" && cfg.Server.BingSiteURL != "" {
+			if bingSub, subErr := urlsubmit.NewBingSubmitter(cfg.Server.BingAPIKey, cfg.Server.BingSiteURL); subErr == nil {
+				submitter = urlsubmit.NewMultiSubmitter(cachedSubmitter, bingSub)
+			} else {
+				log.Warn("Bing URL Submission 渠道构建失败（已跳过）: " + subErr.Error())
+			}
+		}
 		// key 文件端点读运行时配置（管理后台改 key 后即时生效）
 		publicHandler.SetIndexNowKeyProvider(func(ctx context.Context) string {
 			c, _ := loadIndexingConfig(ctx)
@@ -249,14 +269,16 @@ func main() {
 
 		// 收录管理用例（管理后台：配置读写/提交日志/手动补提交）
 		indexingLogRepo := repository.NewGormIndexingLogRepository(geoRepos.db)
-		indexingUC = indexing.NewIndexingUseCase(settingRepo, indexingLogRepo, geoRepos.content, cachedSubmitter, cfg.Server.PublicBaseURL)
+		indexingUC = indexing.NewIndexingUseCase(settingRepo, indexingLogRepo, geoRepos.content, submitter, cfg.Server.PublicBaseURL)
+		indexingUC.SetURLProbe(urlprobe.New()) // 密钥文件可达性探测（HTTP 细节在适配器）
 		router.SetIndexing(indexingUC)
 		// 发布/补提交等"自动触发"的收录提交套审计日志装饰器——
 		// 成功/失败都进"提交日志"页（此前只有手动补提交有日志，发布提交无从排查）
-		indexNowSubmitter = urlsubmit.NewLoggingSubmitter(cachedSubmitter, indexingLogRepo)
+		indexNowSubmitter = urlsubmit.NewLoggingSubmitter(submitter, indexingLogRepo)
 	}
 	var geoMonitorUCRef *geo.MonitorUseCase
 	var geoContentUCRef *geo.ContentUseCase
+	var knowledgeUCRef *knowledge.KnowledgeUseCase // 知识库采集用例（可选；任务注册用）
 	var geoDistillUCRef *geo.KeywordDistillUseCase
 	var geoNearbyUCRef *geo.NearbyUseCase     // X-01：附近同行配额注入用
 	var geoDiagnoseUCRef *geo.DiagnoseUseCase // X-01：诊断配额注入用
@@ -305,6 +327,44 @@ func main() {
 		geoContentUC.SetRuleScorer(geo.NewRuleScorer())
 		// RAG 增强：原创生成前检索"品牌+关键词"真实信息注入 prompt（"不编造数据"变能力）
 		geoContentUC.SetRAGRetriever(ai.NewWebContentRetriever(webFetcher))
+		// 平台知识库（Docs/Plans/04）：按行业持续采集素材（带来源）→ 生成前向量检索素材注入 prompt。
+		// 知识库优先于实时全网检索——素材带来源 URL，引用可溯源；检索无命中时自动回退在线 RAG。
+		// 向量嵌入/向量库运行时配置（管理后台可改，30s 生效免重启）：
+		//   system_settings[kb_embedding_config] 优先，EMBEDDING_* env 兜底。
+		loadEmbeddingConfig := func(ctx context.Context) (entity.EmbeddingRuntimeConfig, error) {
+			if s, sErr := settingRepo.Get(ctx, entity.SettingKeyEmbeddingConfig); sErr == nil {
+				var c entity.EmbeddingRuntimeConfig
+				if json.Unmarshal([]byte(s.Value), &c) == nil && c.IsConfigured() {
+					return c, nil
+				}
+			}
+			return entity.EmbeddingRuntimeConfig{
+				Model: cfg.Embedding.Model, BaseURL: cfg.Embedding.BaseURL, APIKey: cfg.Embedding.APIKey,
+				VectorDB: entity.VectorDBMySQL,
+			}, nil
+		}
+		kbEmbedder := ai.NewCachedEmbedder(port.EmbeddingConfigLoaderFunc(loadEmbeddingConfig)) // 改模型 30s 生效（TTL 重建）
+		kbVecStore := kbretriever.NewMySQLVectorStore(geoRepos.db)
+		// Milvus 工厂（vector_db=milvus 时按运行时配置连接；连接失败明确报错，不静默降级）
+		milvusFactory := func(ctx context.Context, cfg entity.EmbeddingRuntimeConfig) (port.VectorStore, error) {
+			addr := net.JoinHostPort(cfg.MilvusHost, cfg.MilvusPort)
+			cli, err := milvusclient.NewClient(ctx, milvusclient.Config{Address: addr})
+			if err != nil {
+				return nil, fmt.Errorf("milvus 连接失败（%s）: %w", addr, err)
+			}
+			return kbretriever.NewMilvusVectorStore(kbretriever.NewMilvusSDKClient(cli), cfg.MilvusCollection), nil
+		}
+		kbVecProvider := kbretriever.NewVectorStoreProvider(port.EmbeddingConfigLoaderFunc(loadEmbeddingConfig), kbVecStore, milvusFactory) // 改向量库 30s 生效
+		kbRepo := repository.NewGormKnowledgeMaterialRepository(geoRepos.db, kbVecProvider)
+		knowledgeUCRef = knowledge.NewKnowledgeUseCase(kbRepo, settingRepo,
+			crawler.NewRateLimitCrawler(crawler.NewSearchCrawler(), crawlPolicy),
+			crawler.NewRateLimitCrawler(crawler.NewStaticCrawler(), crawlPolicy),
+			kbEmbedder, log)
+		kbRetrieverInst := kbretriever.NewKnowledgeRetriever(kbRepo, kbEmbedder)
+		knowledgeUCRef.SetRetriever(kbRetrieverInst) // 管理后台"检索验证"（与生成注入同一实例）
+		geoContentUC.SetKnowledgeRetriever(kbRetrieverInst)
+		router.SetKnowledge(knowledgeUCRef) // 管理后台：向量配置/行业采集配置/素材统计
+		log.Info("平台知识库已装配（采集任务 + 生成检索注入 + 管理后台动态配置）")
 		geoContentUC.SetLogger(log)
 		// 提示词模板仓库：内容生成/优化系统提示词可管理、可热更新（seed 内置默认模板）
 		promptTemplateRepo := repository.NewGormPromptTemplateRepository(geoRepos.db)
@@ -349,6 +409,10 @@ func main() {
 		router.SetAdvice(geo.NewAdviceUseCase(geoRepos.brand, geoRepos.store, geoRepos.result, geoRepos.content))
 		// 内容引用统计（P5-02：每篇被 AI 引用几次——评分校准数据源）
 		router.SetCitation(geo.NewCitationUseCase(geoRepos.result))
+		// 健康报告聚合（v3 归位：总分/五指数/竞品对标的后端单一事实源，替代前端 geoHealth 各自合成）
+		router.SetGEOHealth(geo.NewHealthUseCase(geoRepos.brand, geoRepos.result, geoRepos.content))
+		// 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）
+		router.SetGEOIndustry(geo.NewIndustryUseCase(geoRepos.brand, geoRepos.result))
 
 		// 收录通知（IndexNow）：发布为 published 时自动通知搜索引擎
 		if indexNowSubmitter != nil {
@@ -369,6 +433,7 @@ func main() {
 			ai.NewSeedSource(aiGenerator),                                    // 种子词拓展
 			ai.NewFileSource(aiGenerator),                                    // 文件内容
 			ai.NewWebSource(aiGenerator, webFetcher),                         // 网络爬取
+			ai.NewQuestionSource(aiGenerator),                              // 提问词挖掘（问题库）
 		)
 		geoDistillUCRef = geoDistillUC
 		router.SetKeywordDistill(geoDistillUC)
@@ -448,6 +513,8 @@ func main() {
 		}
 		billingUC := billing.NewBillingUseCase(planRepo, subRepo, orderRepo)
 		billingUC.SetSettingRepo(settingRepo)
+		// 支付闭环原子化：订单置 paid + 订阅开通同一事务（消除"已付款未开通"中间态）
+		billingUC.SetPaymentClosureWriter(repository.NewGormPaymentClosureWriter(geoRepos.db))
 
 		// 支付网关策略选择：根据 system_settings 的 payment_config 决定用 mock 还是 zpay
 		// 未配置或配置不完整 → mock（开发演示）；配置完整 → zpay（真实收款）
@@ -499,9 +566,17 @@ func main() {
 	}
 
 	// 平台系统设置（运行时开关：自动盯盘等）——管理后台可切换，调度器即时生效
-	tenantSettingRepo := repository.NewGormTenantSettingRepository(geoRepos.db)
+	// 无 DB（mock 降级启动）时不注入租户级设置仓储：租户开关降级为始终开启，
+	// 平台级总闸仍经 settingRepo（内存 mock）生效——与 initRepositories 的降级口径一致。
+	var tenantSettingRepo port.TenantSettingRepository
 	settingsUC := systemsettings.NewSystemSettingsUseCase(settingRepo)
-	settingsUC.SetTenantSettingRepo(tenantSettingRepo)
+	if geoRepos != nil {
+		tenantSettingRepo = repository.NewGormTenantSettingRepository(geoRepos.db)
+		settingsUC.SetTenantSettingRepo(tenantSettingRepo)
+	}
+	// 浏览器可见性即时生效：用例只声明"写完即生效"约束，
+	// 全局内存同步是驱动细节——由 main 注入（用例不 import config）
+	settingsUC.SetHeadedSyncer(runtimeHeadedSyncer{})
 	// 初始化浏览器可见性（从 DB 读管理后台上次设置，默认 headless）
 	if headed, hErr := settingsUC.GetBrowserHeaded(context.Background()); hErr == nil {
 		config.SetBrowserHeaded(headed)
@@ -510,9 +585,13 @@ func main() {
 	}
 	router.SetSystemSettings(settingsUC)
 
-	// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）
-	notifyUC := notification.NewNotifyUseCase(repository.NewGormNotificationRepository(geoRepos.db))
-	router.SetNotifications(notifyUC)
+	// 站内通知（主动唤醒：提及率变化/自动复测/排期发布）——依赖 DB，无 DB 时不注册
+	// （下游定时任务对 nil notifier 均有判空保护）
+	var notifyUC *notification.NotifyUseCase
+	if geoRepos != nil {
+		notifyUC = notification.NewNotifyUseCase(repository.NewGormNotificationRepository(geoRepos.db))
+		router.SetNotifications(notifyUC)
+	}
 
 	// 管理端装配（用户管理，仅 admin）
 	router.SetAdmin(userRepo)
@@ -568,6 +647,11 @@ func main() {
 			indexTask.SetNotifier(notifyUC) // 内容被收录时站内通知商户（付费说服力事件）
 		}
 		_ = taskScheduler.Register(indexTask)
+		// 知识库采集：按行业配置持续爬取素材入库（每 6h；未配置行业则空转）
+		if knowledgeUCRef != nil {
+			_ = taskScheduler.Register(scheduledtask.NewKnowledgeCrawlTask(knowledgeUCRef, log))
+			log.Info("知识库采集任务已注册（knowledge-crawl，每 6 小时）")
+		}
 	}
 
 	// ③ 统一生成任务（Vidu 全量接入：视频 5+图片/音频/数字人——Docs/Plans/03 计划文档）
@@ -727,6 +811,12 @@ func seedPromptTemplates(repo *repository.GormPromptTemplateRepository) error {
 	}
 	return nil
 }
+
+// runtimeHeadedSyncer 把浏览器可见性同步到运行时全局内存（RPA allocOpts 即时读新值）。
+// systemsettings.HeadedSyncer 的装配实现——main 是唯一允许同时知道"用例"与"config 细节"的地方。
+type runtimeHeadedSyncer struct{}
+
+func (runtimeHeadedSyncer) SyncBrowserHeaded(headed bool) { config.SetBrowserHeaded(headed) }
 
 // initGEORpositories 初始化 GEO 仓储（需要数据库；未配置 DB 时返回 nil，GEO 功能降级禁用）。
 func initGEORpositories(dbCfg config.DBConfig) *geoRepos {

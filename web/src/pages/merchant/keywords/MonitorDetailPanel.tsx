@@ -1,4 +1,4 @@
-import { Collapse, Typography } from 'antd'
+import { Collapse, Tooltip, Typography } from 'antd'
 import { LazyLine as Line } from '../../../components/charts/LazyCharts'
 import LazyMonitorMarkdown from '../../../components/markdown/LazyMonitorMarkdown'
 import { markLastPoint, rateColor } from '../../../utils/geo'
@@ -120,7 +120,12 @@ export default function MonitorDetailPanel({
                     {g.count > 1 && (
                       <span style={{ fontSize: 11, color: 'var(--wr-text-muted)', background: 'rgba(124,108,255,0.12)', padding: '2px 9px', borderRadius: 10 }}>共监测 {g.count} 次</span>
                     )}
-                    <span style={{ fontSize: 12, fontWeight: 600, color: sm.color }}>{sm.emoji} {sm.label}</span>
+                    {r.semantic_degraded && (
+                      <Tooltip title="部分采样解析降级（字符串匹配兜底）——情感/位次可能不准确，建议稍后重测">
+                        <span style={{ fontSize: 11, color: 'var(--wr-warning)', background: 'rgba(245,158,11,0.12)', padding: '2px 9px', borderRadius: 10 }}>解析降级</span>
+                      </Tooltip>
+                    )}
+                    <span style={{ fontSize: 12, fontWeight: 600, color: sm.color, background: `${sm.color}14`, padding: '2px 8px', borderRadius: 8 }}>{sm.label}</span>
                     <span style={{ marginLeft: 'auto', fontSize: 18, fontWeight: 800, color: rateColor(r.mention_rate) }}>{ratePct}%</span>
                   </div>
                 ),
@@ -129,6 +134,11 @@ export default function MonitorDetailPanel({
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginBottom: 12 }}>
                       <StatBlock label="提及率" value={`${ratePct}%`} color={rateColor(r.mention_rate)} sub={`${r.mention_count}/${r.sample_count} 次提到`} />
                       <StatBlock label="AI 排名" value={position} />
+                      <StatBlock
+                        label="首选率"
+                        value={`${Math.round(((r.first_pick_count || 0) / Math.max(1, r.sample_count)) * 100)}%`}
+                        sub={`${r.first_pick_count || 0}/${r.sample_count} 次第一`}
+                      />
                       <StatBlock label="置信度" value={`${Math.round((r.confidence || 0) * 100)}%`} />
                       <StatBlock label="竞品提及" value={`${compRates.length} 家`} sub={compRates[0] ? `最多：${compRates[0][0]}` : '暂无'} />
                     </div>

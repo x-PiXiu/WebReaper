@@ -331,6 +331,23 @@ func (r *GormMonitoringResultRepository) Trend(ctx context.Context, tenantID, br
 	return out, nil
 }
 
+// ListRecent 全平台最近监测结果（admin 旁路——行业全景看板聚合用，跨租户）。
+// 按时间倒序限量返回，Go 层按品牌/行业聚合。
+func (r *GormMonitoringResultRepository) ListRecent(ctx context.Context, limit int) ([]entity.MonitoringResult, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var pos []MonitoringResultPO
+	if err := r.db.WithContext(ctx).Order("probed_at DESC").Limit(limit).Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.MonitoringResult, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, monitoringResultFromPO(p))
+	}
+	return out, nil
+}
+
 func (r *GormMonitoringResultRepository) Count(ctx context.Context) (int, error) {
 	var n int64
 	if err := r.db.WithContext(ctx).Model(&MonitoringResultPO{}).Count(&n).Error; err != nil {

@@ -14,7 +14,9 @@ const CHANNEL_NAMES: Record<string, string> = {
   all: '全渠道（补提交）',
 }
 
-// 收录管理：渠道配置 · 密钥自动生成与验证 · 提交审计 · 手动补提交。
+// 提交渠道（IndexNow/百度）：密钥自动生成与验证 · 渠道配置 · 提交审计 · 手动补提交。
+// 术语：商户端「收录」指内容被引擎收录/关键词被 AI 提及；此处是提交渠道配置——
+// 与商户端概念解耦，避免一词三义。
 // IndexNow 协议要点（官方 FAQ）：密钥=网站所有权证明，由站长生成 GUID 并托管 {key}.txt——
 // 本平台代为生成并自动托管 key 文件（/public/indexnow-key.txt），管理员只需一键生成 + 验证。
 export default function Indexing() {
@@ -125,7 +127,7 @@ export default function Indexing() {
   return (
     <div className="wr-page-content">
       <div className="wr-page-header">
-        <h1>收录管理</h1>
+        <h1>提交渠道</h1>
         <p>搜索引擎收录通知：密钥自动托管 · 渠道配置 · 提交审计 · 手动补提交</p>
       </div>
 

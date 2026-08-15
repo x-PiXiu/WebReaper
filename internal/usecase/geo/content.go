@@ -34,6 +34,7 @@ type ContentUseCase struct {
 	publicBaseURL string                      // 公开站根地址（拼收录 URL 用）
 	logger        port.Logger                 // 日志（标题兜底等告警用）
 	ragRetriever  port.ContentRAGRetriever    // RAG 检索（可选；nil=纯 LLM 推断）
+	knowledgeRetriever port.KnowledgeRetriever // 知识库检索（可选；优先于 ragRetriever——本地素材带来源）
 	templateRepo  port.PromptTemplateRepository // 提示词模板（可选；nil=内置默认）
 	quotaGate     port.QuotaStore             // 配额检查门（可选；nil=不检查）
 	storeRepo     port.StoreLocationRepository // 门店档案（可选；nil=不注入 NAP 信号）
@@ -153,6 +154,15 @@ func (uc *ContentUseCase) SetRAGRetriever(r port.ContentRAGRetriever) {
 	}
 }
 
+// SetKnowledgeRetriever 注入知识库素材检索器（可选；优先于 ragRetriever）。
+// 注入后生成前先查平台知识库（按品牌行业 + 关键词，素材带来源 URL）——
+// 本地素材优先于实时全网检索：省钱、稳定、引用可溯源。
+func (uc *ContentUseCase) SetKnowledgeRetriever(r port.KnowledgeRetriever) {
+	if r != nil {
+		uc.knowledgeRetriever = r
+	}
+}
+
 // SetStoreRepo 注入门店档案仓储（可选；本地生活改造 P0）。
 // 注入后生成/优化内容时自动附加门店 NAP（地址/营业时间/电话）段落——
 // 让文章携带本地信任信号，AI 回答"附近/本地"问题时更可能引用。
@@ -226,6 +236,82 @@ func (uc *ContentUseCase) buildStoreNAP(ctx context.Context, brandID string) str
 		lines = append(lines, "- 人均消费档位："+store.PriceLevel)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// brandIndustry 取品牌显式行业（知识库检索的过滤维度；未注入仓储/查询失败返回空 = 全行业检索）。
+// 品牌行业字段为空时不推断——全行业检索召回更全（素材库初期尤其如此）。
+func (uc *ContentUseCase) brandIndustry(ctx context.Context, in GenerateInput) string {
+	if uc.brandRepo == nil || in.BrandID == "" {
+		return ""
+	}
+	b, err := uc.brandRepo.FindByID(ctx, in.TenantID, in.BrandID)
+	if err != nil {
+		return ""
+	}
+	return b.Industry
+}
+
+// buildReferencePrompt 生成参考资料段落（生成前检索注入）。
+//
+// 检索策略（"本地优先，不牺牲召回"）：
+//   - 知识库命中 ≥1 条 → 素材引用（带来源可溯源）；命中不足 num 时在线补齐差额
+//   - 知识库无命中/检索失败 → 回退实时全网检索（旧行为，行为与改造前一致）
+//   - 都不可用 → 空串（纯 LLM 推断）
+func (uc *ContentUseCase) buildReferencePrompt(ctx context.Context, in GenerateInput, ragQuery string) string {
+	const want = 3
+	if uc.knowledgeRetriever != nil {
+		industry := uc.brandIndustry(ctx, in)
+		ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+		refs, rErr := uc.knowledgeRetriever.Retrieve(ctx2, industry, ragQuery, want)
+		cancel()
+		if rErr == nil && len(refs) > 0 {
+			prompt := buildMaterialPrompt(refs)
+			// 命中不足：在线补齐差额（不牺牲召回；补齐量由接口 num 精确控制）
+			if len(refs) < want && uc.ragRetriever != nil {
+				ctx3, cancel3 := context.WithTimeout(ctx, 15*time.Second)
+				ref, rErr2 := uc.ragRetriever.RetrieveContent(ctx3, ragQuery, want-len(refs))
+				cancel3()
+				if rErr2 == nil && ref != "" {
+					prompt += fmt.Sprintf(`
+
+补充参考资料（来自全网真实检索，可引用其中事实/观点，但需与品牌信息一致）：
+%s
+`, ref)
+				}
+			}
+			return prompt
+		}
+	}
+	if uc.ragRetriever != nil {
+		ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+		ref, rErr := uc.ragRetriever.RetrieveContent(ctx2, ragQuery, want)
+		cancel()
+		if rErr == nil && ref != "" {
+			return fmt.Sprintf(`
+
+参考资料（来自全网真实检索，可引用其中事实/观点，但需与品牌信息一致）：
+%s
+`, ref)
+		}
+	}
+	return ""
+}
+
+// buildMaterialPrompt 把知识库素材引用格式化为 prompt 段落（带来源标注——引用可溯源）。
+func buildMaterialPrompt(refs []entity.MaterialRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n参考资料（来自平台知识库，可引用其中事实/数据，引用时请保留来源标注）：\n")
+	for i, ref := range refs {
+		title := ref.Title
+		if title == "" {
+			title = ref.SourceURL
+		}
+		fmt.Fprintf(&sb, "[%d] %s｜来源：%s\n%s\n", i+1, title, ref.SourceURL, ref.Summary)
+	}
+	return sb.String()
 }
 
 // buildOnlineNAP 取 online 品牌的官网 URL 并格式化为 prompt 段落（online 品牌的"NAP"）。
@@ -709,6 +795,9 @@ type GenerateInput struct {
 	LLMConfigName string
 	TargetEngine  string // 目标 AI 引擎偏好（chatgpt/perplexity/kimi/doubao；空=通用）
 	Format        string // 内容格式（article/review/xiaohongshu/script/faq/comparison；空=article）
+	// CitationToggles 可引用结构开关（v3 P2：结论前置/独立成段/数据标注/小标题，可组合）。
+	// 与 Format 正交——任何格式都可以叠加"AI 易摘录"的结构要求。
+	CitationToggles []string
 	// UseDiagnose 是否按诊断建议生成（诊断→优化闭环 P5-03）。
 	// true 时先生成一次诊断报告，把改进建议注入 prompt——"先诊断再对症下药"。
 	// 诊断烧 token，仅在用户主动勾选时开启。
@@ -764,14 +853,14 @@ func validateGeneratedContent(text, title, format string) []string {
 	}
 	runes := len([]rune(strings.TrimSpace(text)))
 	minLen := 150
-	if format == "" || format == "article" || format == "comparison" {
+	if format == "" || format == "article" || format == "comparison" || format == "citation" {
 		minLen = 400
 	}
 	if runes < minLen {
 		problems = append(problems, fmt.Sprintf("正文过短（%d 字，需 ≥%d 字）", runes, minLen))
 	}
 	// 深度格式必须有分节小标题（AI 生成的"墙式文本"结构缺失）
-	if (format == "" || format == "article" || format == "comparison") &&
+	if (format == "" || format == "article" || format == "comparison" || format == "citation") &&
 		!strings.Contains(text, "##") && !strings.Contains(text, "###") {
 		problems = append(problems, "缺少小标题分节（建议用 ## 或 ### 组织段落）")
 	}
@@ -796,6 +885,10 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 	isMulti := len(in.Keywords) > 1
 
 	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentGenerate, defaultGeneratePrompt, in.TargetEngine, in.Format)
+	// 可引用结构开关（v3 P2）：与格式正交叠加——注入到格式指令之后、基础 prompt 之前
+	if extra := entity.BuildCitationStructureInstruction(in.CitationToggles); extra != "" {
+		systemPrompt = "【可引用结构要求（AI 引擎摘录友好）】\n" + extra + "\n" + systemPrompt
+	}
 
 	modeHint := "围绕这个关键词创作一篇文章"
 	if isMulti {
@@ -823,25 +916,17 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 		userPrompt += "\n\n注意：上一版生成未通过质量校验，请针对以下问题修正后重新输出完整文章：\n" + in.RetryHint
 	}
 
-		// RAG 增强：生成前检索"品牌 + 关键词"真实信息注入 prompt（可选，失败降级为纯 LLM）。
-		// "不编造数据"从口号变能力——LLM 引用真实检索资料创作，权威性维度显著提升。
-		if uc.ragRetriever != nil {
-			ragQuery := keywordDesc
-			if in.BrandInfo != "" {
-				// 取品牌名（BrandInfo 首行通常是品牌描述）
-				ragQuery = strings.SplitN(in.BrandInfo, "\n", 2)[0] + " " + keywordDesc
-			}
-			ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
-			ref, rErr := uc.ragRetriever.RetrieveContent(ctx2, ragQuery, 3)
-			cancel()
-			if rErr == nil && ref != "" {
-				userPrompt += fmt.Sprintf(`
-
-参考资料（来自全网真实检索，可引用其中事实/观点，但需与品牌信息一致）：
-%s
-`, ref)
-			}
-		}
+	// 生成前检索"品牌 + 关键词"真实信息注入 prompt（可选，失败降级为纯 LLM）。
+	// "不编造数据"从口号变能力——LLM 引用真实资料创作，权威性维度显著提升。
+	// 检索优先级：知识库（本地素材带来源，可溯源）→ 实时全网（在线兜底，不牺牲召回）。
+	ragQuery := keywordDesc
+	if in.BrandInfo != "" {
+		// 取品牌名（BrandInfo 首行通常是品牌描述）
+		ragQuery = strings.SplitN(in.BrandInfo, "\n", 2)[0] + " " + keywordDesc
+	}
+	if ref := uc.buildReferencePrompt(ctx, in, ragQuery); ref != "" {
+		userPrompt += ref
+	}
 
 	messages := []port.ChatMessage{
 		{Role: "system", Content: systemPrompt},

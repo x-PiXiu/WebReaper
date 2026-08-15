@@ -3,6 +3,7 @@ package geo
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"webreaper/internal/usecase/port"
 )
@@ -79,4 +80,46 @@ func dedup(items []string) []string {
 		}
 	}
 	return out
+}
+
+// ClassifyQuestionIntent 问题词意图分类（F3-2：确定性规则——不烧 token、可单测、
+// 与蒸馏 LLM 解耦）。返回 informational / comparative / recommendational。
+// 规则按中文问法特征：比较型（A 和 B / vs / 还是 / 区别）；推荐型（哪家好 / 求推荐 / 排行）。
+func ClassifyQuestionIntent(term string) string {
+	t := []rune(term)
+	hasVs := func(pairs [][2]string) bool {
+		for _, p := range pairs {
+			if strings.Contains(term, p[0]) && strings.Contains(term, p[1]) {
+				return true
+			}
+		}
+		return false
+	}
+	_ = t
+	if hasVs([][2]string{{"和", "哪个"}, {"和", "哪家"}, {"和", "怎么选"}, {"vs", "vs"}, {"VS", ""}}) ||
+		strings.Contains(term, "还是") || strings.Contains(term, "区别") || strings.Contains(term, "对比") {
+		return "comparative"
+	}
+	if strings.Contains(term, "哪家") || strings.Contains(term, "哪个好") || strings.Contains(term, "推荐") ||
+		strings.Contains(term, "排行") || strings.Contains(term, "top") || strings.Contains(term, "前十") {
+		return "recommendational"
+	}
+	return "informational"
+}
+
+// DistillWithIntents 蒸馏并附带意图标注（F3-2：questions 源每个问题词标注
+// 信息型/比较型/推荐型——前端结果列表展示标签，入库透传真实意图）。
+func (uc *KeywordDistillUseCase) DistillWithIntents(ctx context.Context, source string, in port.KeywordSourceInput) ([]string, map[string]string, error) {
+	kws, err := uc.Distill(ctx, source, in)
+	if err != nil {
+		return nil, nil, err
+	}
+	if source != "questions" {
+		return kws, nil, nil
+	}
+	intents := make(map[string]string, len(kws))
+	for _, k := range kws {
+		intents[k] = ClassifyQuestionIntent(k)
+	}
+	return kws, intents, nil
 }

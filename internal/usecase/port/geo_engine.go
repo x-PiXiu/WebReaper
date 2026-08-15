@@ -86,6 +86,9 @@ type ProbeResult struct {
 	AvgPosition  int     // 平均排名
 	Sentiment    string  // positive/neutral/negative
 	Competitors  map[string]int // 竞品名 → 被提及次数
+	// CompetitorSentiments 竞品名 → 情感（该次探测中对竞品的评价倾向）。
+	// 竞品情感并排：自家 sentiment 之外的第二语义维度——"竞品被提到且被推荐/被批评"。
+	CompetitorSentiments map[string]string
 	// OtherBrands AI 回答中自然出现的其他品牌（非品牌自身、非已配置竞品，去重）。
 	// 竞品沉淀数据源：LLM 客观列出回答中所有品牌，已配置竞品计入 Competitors，
 	// 其余名字进这里——用例层据此沉淀"新竞品候选"（「从监测结果推荐」）。
@@ -95,11 +98,17 @@ type ProbeResult struct {
 	BrandAppearanceCount int // 品牌在检索源里出现的文章数
 	Confidence   float64 // 置信度（由 Probe 实现按信息量计算，不再固定 sampleCount/5）
 	// Sources 回答中提到的来源（链接/平台名，去重；P5-01 引用来源追踪）。
-	// 归因：AI"提到你"≠"引用你的内容"——有了来源才能回答"我的文章被引用了几次"。
+	// 归因：AI"提到你"≠"引用了你的内容"——有了来源才能回答"我的文章被引用了几次"。
 	Sources []string
 	// SelfSourceCount 来源中包含自营公开站域名的次数（P5-01）。
 	// >0 意味着 AI 回答实际引用了我们发布的内容——这是内容 GEO 的直接效果证据。
 	SelfSourceCount int
+	// FirstPickCount 被提及且位次=1 的采样数——"首选率"（FirstPickCount/SampleCount）
+	// 的分子：AI 回答里第一个推荐你的概率（"从被收录到被首选引用"的进阶指标）。
+	FirstPickCount int
+	// SemanticDegraded 采样中出现过解析降级（解析 LLM 失败/JSON 损坏 → 字符串匹配兜底）。
+	// 降级时情感/位次缺失——标记对商户可见，不再静默失真。
+	SemanticDegraded bool
 }
 
 // AIEngineProbe 是 AI 引擎监测适配器的接口（边界）。

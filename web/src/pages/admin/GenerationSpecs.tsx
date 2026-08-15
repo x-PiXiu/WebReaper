@@ -212,7 +212,7 @@ export default function GenerationSpecs() {
           </Space>
           {adding && (
             <Text type="warning" style={{ fontSize: 12 }}>
-              新增模型后前端"创作工作台"模型下拉与后端参数校验自动生效——端点的提交/组装逻辑无需改动（与模型名无关）。
+              新增模型后前端「多媒体创作」模型下拉与后端参数校验自动生效——端点的提交/组装逻辑无需改动（与模型名无关）。
             </Text>
           )}
         </Form>

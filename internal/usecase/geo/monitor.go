@@ -114,6 +114,55 @@ type MonitorInput struct {
 	SampleSize int    // 采样次数（默认 5）
 }
 
+// newMonitoringResult 监测快照的唯一组装点（Monitor/MonitorKeyword/MonitorMultiEngine 三路径共用）。
+// 整洁架构收敛点：探测语义字段（情感/位次/信源/竞品）只在此处搬运一次——
+// 新增字段只改这里 + 视图 struct + 前端类型，杜绝"改一处漏两处"
+//（全量 Monitor 路径曾漏存 Sources/SelfSourceCount，导致信源归因链路断裂）。
+func newMonitoringResult(id, tenantID, brandID, keywordID, engineName string, p port.ProbeResult) entity.MonitoringResult {
+	mentioned, rates := competitorRatesFromProbe(p)
+	compSents := make(map[string]string, len(p.CompetitorSentiments))
+	for name, s := range p.CompetitorSentiments {
+		compSents[name] = entity.NormalizeSentiment(s) // 竞品情感与自家同口径归一
+	}
+	return entity.MonitoringResult{
+		ID:                   id,
+		TenantID:             tenantID,
+		BrandID:              brandID,
+		KeywordID:            keywordID,
+		EngineName:           engineName,
+		SampleCount:          p.SampleCount,
+		MentionCount:         p.MentionCount,
+		MentionRate:          p.MentionRate,
+		AvgPosition:          p.AvgPosition,
+		Sentiment:            entity.NormalizeSentiment(p.Sentiment),
+		Competitors:          mentioned,
+		CompetitorRates:      rates,
+		CompetitorSentiments: compSents,
+		// 竞品沉淀：回答中自然出现的其他品牌 → 候选（「从监测结果推荐」数据源）
+		CandidateCompetitors: p.OtherBrands,
+		Confidence:           p.Confidence,
+		ProbedAt:             time.Now(),
+		RawSample:            p.RawSample,
+		Sources:              p.Sources,         // 引用来源（归因 P5-01）
+		SelfSourceCount:      p.SelfSourceCount, // 自营站被引用次数
+		FirstPickCount:       p.FirstPickCount,   // 首选率分子（被提及且位次=1）
+		SemanticDegraded:     p.SemanticDegraded, // 解析降级标记（情感/位次可能失真）
+	}
+}
+
+// competitorRatesFromProbe 竞品提及次数 → 归一化提及率（三路径同口径：次数/采样数）。
+func competitorRatesFromProbe(p port.ProbeResult) ([]string, map[string]float64) {
+	var mentioned []string
+	rates := make(map[string]float64)
+	if p.SampleCount > 0 {
+		for name, cnt := range p.Competitors {
+			mentioned = append(mentioned, name)
+			rates[name] = float64(cnt) / float64(p.SampleCount)
+		}
+	}
+	return mentioned, rates
+}
+
 // Monitor 执行监测：取关键词 → 逐个问 AI → 解析提及 → 存快照。
 // 返回本次监测产生的全部结果。
 func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entity.MonitoringResult, error) {
@@ -167,35 +216,10 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 			continue
 		}
 
-		// 竞品列表（被提及的）+ 竞品提及率（对比坐标系：付费说服力核心）
-		var mentionedCompetitors []string
-		competitorRates := make(map[string]float64)
-		if probeResult.SampleCount > 0 {
-			for name, cnt := range probeResult.Competitors {
-				mentionedCompetitors = append(mentionedCompetitors, name)
-				competitorRates[name] = float64(cnt) / float64(probeResult.SampleCount)
-			}
-		}
-
-		result := entity.MonitoringResult{
-			ID:              fmt.Sprintf("mr-%d-%d", time.Now().UnixNano(), len(results)),
-			TenantID:        in.TenantID,
-			BrandID:         in.BrandID,
-			KeywordID:       kw.ID,
-			EngineName:      in.EngineName,
-			SampleCount:     probeResult.SampleCount,
-			MentionCount:    probeResult.MentionCount,
-			MentionRate:     probeResult.MentionRate,
-			AvgPosition:     probeResult.AvgPosition,
-			Sentiment:       probeResult.Sentiment,
-			Competitors:     mentionedCompetitors,
-			CompetitorRates: competitorRates,
-			// 竞品沉淀：回答中自然出现的其他品牌 → 候选（「从监测结果推荐」数据源）
-			CandidateCompetitors: probeResult.OtherBrands,
-			Confidence:      probeResult.Confidence,
-			ProbedAt:        time.Now(),
-			RawSample:       probeResult.RawSample,
-		}
+		result := newMonitoringResult(
+			fmt.Sprintf("mr-%d-%d", time.Now().UnixNano(), len(results)),
+			in.TenantID, in.BrandID, kw.ID, in.EngineName, probeResult,
+		)
 		if err := uc.resultRepo.Save(ctx, result); err != nil {
 			return nil, fmt.Errorf("监测结果保存失败（%s/%s）: %w", kw.Term, in.EngineName, err)
 		}
@@ -280,35 +304,10 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 		return entity.MonitoringResult{}, pErr
 	}
 
-	var mentionedCompetitors []string
-	competitorRates := make(map[string]float64)
-	if probeResult.SampleCount > 0 {
-		for name, cnt := range probeResult.Competitors {
-			mentionedCompetitors = append(mentionedCompetitors, name)
-			competitorRates[name] = float64(cnt) / float64(probeResult.SampleCount)
-		}
-	}
-	result := entity.MonitoringResult{
-		ID:              fmt.Sprintf("mr-%d", time.Now().UnixNano()),
-		TenantID:        in.TenantID,
-		BrandID:         brand.ID,
-		KeywordID:       kw.ID,
-		EngineName:      in.EngineName,
-		SampleCount:     probeResult.SampleCount,
-		MentionCount:    probeResult.MentionCount,
-		MentionRate:     probeResult.MentionRate,
-		AvgPosition:     probeResult.AvgPosition,
-		Sentiment:       probeResult.Sentiment,
-		Competitors:     mentionedCompetitors,
-		CompetitorRates: competitorRates,
-		// 竞品沉淀：回答中自然出现的其他品牌 → 候选（「从监测结果推荐」数据源）
-		CandidateCompetitors: probeResult.OtherBrands,
-		Confidence:      probeResult.Confidence,
-		ProbedAt:        time.Now(),
-		RawSample:       probeResult.RawSample,
-		Sources:         probeResult.Sources,          // 引用来源（归因 P5-01）
-		SelfSourceCount: probeResult.SelfSourceCount,  // 自营站被引用次数
-	}
+	result := newMonitoringResult(
+		fmt.Sprintf("mr-%d", time.Now().UnixNano()),
+		in.TenantID, brand.ID, kw.ID, in.EngineName, probeResult,
+	)
 	if err := uc.resultRepo.Save(ctx, result); err != nil {
 		return entity.MonitoringResult{}, fmt.Errorf("监测结果保存失败: %w", err)
 	}
@@ -361,36 +360,10 @@ func (uc *MonitorUseCase) MonitorMultiEngine(ctx context.Context, tenantID, keyw
 		if pErr != nil {
 			continue // 单个引擎失败不中断
 		}
-		// 竞品列表 + 竞品提及率（修复 BUG：原实现只填 mentionedCompetitors 没算 rates）
-		var mentionedCompetitors []string
-		competitorRates := make(map[string]float64)
-		if probeResult.SampleCount > 0 {
-			for name, cnt := range probeResult.Competitors {
-				mentionedCompetitors = append(mentionedCompetitors, name)
-				competitorRates[name] = float64(cnt) / float64(probeResult.SampleCount)
-			}
-		}
-		result := entity.MonitoringResult{
-			ID:              fmt.Sprintf("mr-%d-%s", time.Now().UnixNano(), engineName),
-			TenantID:        tenantID,
-			BrandID:         brand.ID,
-			KeywordID:       kw.ID,
-			EngineName:      engineName,
-			SampleCount:     probeResult.SampleCount,
-			MentionCount:    probeResult.MentionCount,
-			MentionRate:     probeResult.MentionRate,
-			AvgPosition:     probeResult.AvgPosition,
-			Sentiment:       probeResult.Sentiment,
-			Competitors:     mentionedCompetitors,
-			CompetitorRates: competitorRates,
-			// 竞品沉淀：回答中自然出现的其他品牌 → 候选（「从监测结果推荐」数据源）
-			CandidateCompetitors: probeResult.OtherBrands,
-			Confidence:      probeResult.Confidence,
-			ProbedAt:        time.Now(),
-			RawSample:       probeResult.RawSample,
-			Sources:         probeResult.Sources,
-			SelfSourceCount: probeResult.SelfSourceCount,
-		}
+		result := newMonitoringResult(
+			fmt.Sprintf("mr-%d-%s", time.Now().UnixNano(), engineName),
+			tenantID, brand.ID, kw.ID, engineName, probeResult,
+		)
 		if err := uc.resultRepo.Save(ctx, result); err != nil {
 			return nil, fmt.Errorf("监测结果保存失败（%s/%s）: %w", kw.Term, engineName, err)
 		}
