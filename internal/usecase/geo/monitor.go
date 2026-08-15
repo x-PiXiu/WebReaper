@@ -30,6 +30,40 @@ type MonitorUseCase struct {
 	// 注入后监测前按品牌/卖点/竞品/地址 LLM 生成问法池，多引擎分片隔离防缓存；
 	// 未注入/生成失败 → probe 内部模板问法兜底（零失败风险）。
 	questionGen port.ProbeQuestionGenerator
+	// cache 写后主动失效（R2：监测/内容写入 → 清 health-report / monitor-results 缓存；
+	// nil=无缓存(未配 Redis)时跳过。key 命名收在本包——所有聚合读侧共用）
+	cache port.CacheStore
+}
+
+// ---- 缓存 key 常量（写路径失效用；读侧在 Health/Monitor 各自消费）----
+
+// HealthReportCacheKey 租户健康报告缓存 key（Health 读侧 GetOrCompute / Monitor 写侧 Del）。
+func HealthReportCacheKey(tenantID string) string { return "health-report:" + tenantID }
+
+// MonitorResultsCacheKey 租户监测结果列表缓存 key（矩阵/总览/引用 Tab 共用）。
+func MonitorResultsCacheKey(tenantID string) string { return "monitor-results:" + tenantID }
+
+// IndustryOverviewCacheKey 行业全景缓存 key（全局唯一——admin 跨租户聚合）。
+const IndustryOverviewCacheKey = "industry-overview"
+
+// SetCache 注入缓存（可选；写后主动失效——监测结果落库时清缓存，
+// 消除 60s TTL 窗口内的陈旧读。nil=未配 Redis 跳过）。
+func (uc *MonitorUseCase) SetCache(c port.CacheStore) {
+	if c != nil {
+		uc.cache = c
+	}
+}
+
+// invalidateAfterWrite 写后失效：监测/内容数据变了 → 健康报告/监测列表/行业榜全部过期。
+func (uc *MonitorUseCase) invalidateAfterWrite(ctx context.Context, tenantID string) {
+	if uc.cache == nil {
+		return
+	}
+	_ = uc.cache.Del(ctx,
+		HealthReportCacheKey(tenantID),
+		MonitorResultsCacheKey(tenantID),
+		IndustryOverviewCacheKey, // 监测结果影响行业榜（提及率/情感）
+	)
 }
 
 func NewMonitorUseCase(br port.BrandRepository, kr port.KeywordRepository, rr port.MonitoringResultRepository, probe port.AIEngineProbe) *MonitorUseCase {
@@ -225,6 +259,7 @@ func (uc *MonitorUseCase) Monitor(ctx context.Context, in MonitorInput) ([]entit
 		}
 		results = append(results, result)
 	}
+	uc.invalidateAfterWrite(ctx, in.TenantID) // R2 写后失效
 	return results, nil
 }
 
@@ -311,6 +346,7 @@ func (uc *MonitorUseCase) MonitorKeyword(ctx context.Context, in MonitorKeywordI
 	if err := uc.resultRepo.Save(ctx, result); err != nil {
 		return entity.MonitoringResult{}, fmt.Errorf("监测结果保存失败: %w", err)
 	}
+	uc.invalidateAfterWrite(ctx, in.TenantID) // R2 写后失效
 	return result, nil
 }
 
@@ -369,6 +405,7 @@ func (uc *MonitorUseCase) MonitorMultiEngine(ctx context.Context, tenantID, keyw
 		}
 		results = append(results, result)
 	}
+	uc.invalidateAfterWrite(ctx, tenantID) // R2 写后失效
 	return results, nil
 }
 

@@ -145,6 +145,25 @@ func (r *GormGenerationTaskRepository) ListActive(ctx context.Context, limit int
 	return out, nil
 }
 
+// ListFailed 自动重试用：failed 任务按 updated_at 升序（最久未动者优先；
+// 可重试分类/退避窗口由用例层判定——仓储只做数据访问）。
+func (r *GormGenerationTaskRepository) ListFailed(ctx context.Context, limit int) ([]entity.GenerationTask, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	var pos []GenerationTaskPO
+	if err := r.db.WithContext(ctx).
+		Where("state = ?", entity.TaskStateFailed).
+		Order("updated_at ASC").Limit(limit).Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.GenerationTask, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, generationTaskFromPO(p))
+	}
+	return out, nil
+}
+
 // DeleteTerminalOlderThan 清理早于 before 的终态任务（P3 任务清理策略——避免 generation_tasks 无限增长）。
 // 仅删终态（success/failed/cancelled），活跃任务不动。
 func (r *GormGenerationTaskRepository) DeleteTerminalOlderThan(ctx context.Context, before time.Time) (int64, error) {

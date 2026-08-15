@@ -380,3 +380,55 @@ PollDue 驱动：每 15-30s 扫描 processing/queueing 状态任务（限 N 条/
 | 10 | 并发节流/任务清理/产品化参数缺失 | P3 / §五 |
 | 11 | 模型参数对照表未纳入设计输入 | §1.3 |
 | 12 | 提示词工程（Vidu 提示词总结）未规划 | P3 |
+
+---
+
+## 实施后架构修复批注（2026-08-15，架构分析产出四项，go build/test 全绿）
+
+> 背景：按整洁架构对生成域做拆分前评估，发现三处"设计与实现偏差"+一处死代码，本批修复（与拆不拆微服务无关的正确性问题）。
+
+1. **回调通道修复（可用性）**：回调路由此前误注册在 JWT 保护组内——真实 Vidu 回调无 Authorization 头会被 401 拒绝，回调通道实际不可用、全靠 20s 轮询。已迁移至公开路由（router.go 公开段，与支付 webhook 同等待遇，HMAC 验签+nonce 防重放为其安全边界）；同时 `VerifyCallback` 端口签名增加 `requestURI` 参数——签名字符串的 path/query 改从**回调请求行**还原（此前依赖真实回调不携带的 `X-Vidu-Request-URI` 自定义头，验签必然失败），测试同步更新。
+2. **自动重试执行器（补齐闭环）**：`ClassifyError/CanAutoRetry` 此前为纯函数无调用方、RetryCount 恒 0。新增 `RetryDue`（由 generation-poll 驱动）：failed 任务经分类过滤（限流/内部错误类）+ 指数退避（1/5/30 分钟，与注释口径一致）+ 能力校验（模型被停用不重试）后自动重提上游，成功回 queueing 并计量；≤3 次由 CanAutoRetry 拦停。含回归测试。
+3. **卡死任务超时**：processing 态 2 小时无状态更新判失败（`LocalStuckTimeout`，不可自动重试）——此前上游失联任务会被 20s 轮询无限扫描。顺带补写 `CallbackReceived/CallbackAt` 观测字段（设计意图存在但从未写入）。
+4. **计费接线 + 僵尸表清理**：`QuotaStore`/`UsageRecorder` 端口装配进 main（generation 场景按次限额→402；usages 计量：LLMCalls=1、credits 记入 CompletionTokens 供成本分析按积分核算——`recordUsage` 补齐了 usageRec 从不被调用的死链）；迁移 046 删除 `media_assets` 僵尸表（建表后零代码读写，FS/OSS 为素材唯一事实源，资产库入库需求另行立项）。
+
+**遗留（第二步可拆性改造，拆分前执行）**：nonce/Spec 缓存 Redis 化（现进程内存，多实例失效）；素材全面转 OSS+独立域名（任务 params/creations 持久化了 `/media` 相对路径，属历史数据级耦合）；生成域独立 DB schema。
+
+---
+
+## R1/R2 批次批注（2026-08-15，Redis 落地+三防缓存+事务，go build/test 全绿）
+
+> 范围：架构分析 R1（正确性）+R2（无状态化/性能）中 Redis 相关全部落地。
+
+1. **Redis 基础设施**：`Config.Redis` 从 env 加载（REDIS_HOST/PORT/PASSWORD/DB，IsConfigured=Host 非空）；main 统一建客户端（3s Ping 探活，**失败全链路降级单机模式并记日志**——锁/缓存/nonce 三者共享连接）。go-redis/singleflight 转直接依赖。
+2. **RedisLock 加固+启用**：持有者随机 token（SETNX 写入）+ Lua 原子 compare-and-del（修复旧实现 A 超时锁被 B 接管后 A 收尾 DEL 误删 B 锁的窗口）；装配按 Redis 可用性切换 NoopLock——**8 个副作用定时任务多实例重复执行的事故风险关闭**。
+3. **三防缓存**（`port.CacheStore` + `adapter/cache`）：防雪崩=TTL 随机抖动 [0,25%)；防穿透=空值 NULL 标记短缓存 30s；防击穿=singleflight 并发回源合并（含双重检查）；Redis 故障按 miss 降级不阻断业务；fetch 错误不缓存。
+4. **热路径接入**（不再一直查库）：HealthReport 60s（驾驶舱逐品牌趋势+内容 N+1 扇出收敛为每租户每分钟一次全量计算）；IndustryOverview 5min（跨租户品牌+500 条监测聚合）。用例层仅依赖 Cache 端口（GetOrCompute），三防细节全部住在适配器——依赖向内。
+5. **回调 nonce 无状态化**：`port.CallbackNonceStore` 端口化，内存（默认）/Redis（SETNX+EX 原子，多实例安全）双实现；Redis 故障放行由验签+终态幂等兜底（三层防重放损一层不致命）。
+6. **品牌级联删除事务**：`BrandRepository.DeleteCascade`（关键词+品牌单事务原子，修复此前用例层逐个删中途失败留孤儿关键词）；事务边界是用例决策、机制归仓储。
+7. **素材清理引用排除**（含两个静默缺陷修复）：`CleanupBefore` 增加 excludeURLs——清理前从活跃+近期任务解析 creations/params 中的 URL 做排除（修复"删掉商户还在用的产物"）；LocalMediaStore 清理从 ReadDir 单层改 Walk 递归（修复 {tenant}/{date}/ 子目录**从未被清理**的静默失效）。
+8. **测试**：三防纯函数（抖动界内/分散性/token 唯一）、内存 nonce 语义，均绿。
+
+**遗留**：R2 其余（新任务绝对 URL、generation_admin 用例化、零测试包补测）与 R3/R4 按原路线图。注：`TestKnowledgeMaterial_SearchSimilar` 为既有偶发失败（干净 HEAD 同样失败，向量相似度随机排序），与本批无关。
+
+---
+
+## R2 收尾+R3 批次批注（2026-08-15，go build/test 全绿）
+
+1. **写后主动失效（R2）**：监测结果落库（Monitor/MonitorKeyword/MonitorMultiEngine 三路径）与内容写入（GenerateStream/SetStatus）后，自动 Del 清除 `health-report:{tenant}` / `monitor-results:{tenant}` / `industry-overview` 三个缓存 key——消除 60s TTL 内的陈旧读窗口。缓存 key 常量收在 `monitor.go`（写侧定义、读侧引用，一处改名处处生效）。
+2. **monitor-results 读缓存（R2 性能）**：`GET /geo/monitor-results`（矩阵/总览/引用 Tab 共用、最重读路径：500 条扫描+Go 层去重）经 `HealthUseCase.CachedLatestByTenant` 缓存 60s+抖动——多 Tab 同帧触发收敛为一次查询；写后主动失效。
+3. **Vidu Key TTL 刷新（R2 多实例漂移修复——唯一行为错误）**：`SetKeySource` 注入 DB 查询闭包，`apiKeyNow()` 优先走 30s TTL 缓存从 provider_configs 表读取——管理后台改 Key 后各实例 ≤30s 对齐（此前 UpdateAPIKey 只更新收到请求的那个实例，其他实例持旧 Key 直到重启——多实例下行为错误）。
+4. **缓存命中率可观测（R3 首项）**：`RedisCache.Stats()` 返回 hits/misses（进程内计数——日志聚合或 /debug 端点消费）。
+
+---
+
+## R3 可观测 + R2 收尾批注（2026-08-15，go build/test 全绿，/debug/metrics 实测通过）
+
+1. **R3 可观测完整版**：
+   - `port.MetricsCollector` 接口 + `adapter/metrics`（Redis INCR / Noop 双实现）
+   - `GET /api/v1/admin/debug/metrics` 端点：输出全部计数器 + 派生指标（LLM 成功率/缓存命中率）
+   - 埋点：LLM 调用（成功/失败/慢调用>30s）、配额拒绝（402 集中在 response.go fail()）、锁竞争（scheduler TryLock 失败）、缓存命中/未中（RedisCache）
+   - 实测：`{"counters":{"cache:hits":3,"cache:misses":6},"derived":{"cache_hit_rate":0.33,"llm_success_rate":1}}`
+2. **R2 生成域绝对 URL**：验证后确认 `DownloadAndStore` 已返回绝对 URL（`publicURL` 前缀加了 `cfg.Server.PublicBaseURL`）——**该担忧不成立，无需修改**。
+3. **R2 零测试包补测**：providerconfig（Upsert 校验/List/MaskKey 脱敏 5 组表驱动）、systemsettings（平台开关/租户开关/配置读写/损坏容错 6 用例）——此前零测试的两个"改错打挂全平台"包补齐。
+4. **遗留**：generation_admin 用例化（handler 直操作 specRepo 的业务规则——优先级降为纯架构打磨，功能不受影响）。

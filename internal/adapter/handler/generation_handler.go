@@ -146,13 +146,13 @@ func (h *GenerationHandler) HandleCallback(c *gin.Context, provider port.Generat
 	}
 	// ① nonce 防重放
 	nonce := c.GetHeader("x-request-nonce")
-	if nonce == "" || !h.uc.CheckCallbackNonce(nonce) {
+	if nonce == "" || !h.uc.CheckCallbackNonce(c.Request.Context(), nonce) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "重复或缺失的 nonce"})
 		return
 	}
-	// ② 验签
+	// ② 验签（requestURI 从请求行还原——签名字符串基于 callback_url 的 path/query）
 	body, _ := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
-	if err := provider.VerifyCallback(c.Request.Context(), c.Request.Header, body); err != nil {
+	if err := provider.VerifyCallback(c.Request.Context(), c.Request.Header, body, c.Request.URL.RequestURI()); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "签名校验失败"})
 		return
 	}

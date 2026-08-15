@@ -155,7 +155,8 @@ func (s *OSSMediaStore) DownloadAndStore(ctx context.Context, tenantID, sourceUR
 }
 
 // CleanupBefore 清理早于 before 的资产（按 LastModified 过滤 + 批量删除）。
-func (s *OSSMediaStore) CleanupBefore(ctx context.Context, before time.Time) (int, error) {
+// R1：excludeURLs 命中的对象跳过（仍被任务引用的产物不删）。
+func (s *OSSMediaStore) CleanupBefore(ctx context.Context, before time.Time, excludeURLs map[string]bool) (int, error) {
 	// 列出 creation 目录所有对象
 	result, err := s.bucket.ListObjects(oss.Prefix(ossProjectPrefix+"/creation/"), oss.MaxKeys(1000))
 	if err != nil {
@@ -163,9 +164,13 @@ func (s *OSSMediaStore) CleanupBefore(ctx context.Context, before time.Time) (in
 	}
 	var toDelete []string
 	for _, obj := range result.Objects {
-		if obj.LastModified.Before(before) {
-			toDelete = append(toDelete, obj.Key)
+		if !obj.LastModified.Before(before) {
+			continue
 		}
+		if excludeURLs != nil && excludeURLs[s.publicURL(obj.Key)] {
+			continue // 仍被引用——保留
+		}
+		toDelete = append(toDelete, obj.Key)
 	}
 	if len(toDelete) == 0 {
 		return 0, nil

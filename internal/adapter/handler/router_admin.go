@@ -74,6 +74,8 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			if geoHandler.industryUC != nil {
 				adminGroup.GET("/geo/industry-overview", geoHandler.HandleAdminIndustryOverview)
 			}
+			// R3 运营指标（LLM 成功率/缓存命中率/配额拒绝/锁竞争——admin 专用）
+			adminGroup.GET("/debug/metrics", r.HandleDebugMetrics)
 		}
 		// Tavily 搜索 API 配置（需 toolRegistry）
 		if r.toolRegistry != nil {

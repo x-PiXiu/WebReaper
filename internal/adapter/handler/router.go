@@ -63,6 +63,7 @@ type Router struct {
 	geoCitationUC *geo.CitationUseCase       // 内容引用统计用例（可选，P5-02）
 	geoHealthUC   *geo.HealthUseCase         // 健康报告聚合用例（可选，v3 归位：单一事实源）
 	geoIndustryUC *geo.IndustryUseCase       // 行业全景聚合用例（可选，v3 P2：admin 看板）
+	metrics       port.MetricsCollector      // 运营指标采集（可选，R3；nil=不采集）
 	inputTipper   port.InputTipper           // 地址联想（可选，P1；未注入→空列表降级）
 	// 结构化数据用例（JSON-LD/llms.txt）——通过 SetStructured 注入，可选
 	structuredUC *structured.StructuredDataUseCase
@@ -170,6 +171,11 @@ func (r *Router) SetGEOHealth(uc *geo.HealthUseCase) {
 // SetGEOIndustry 注入行业全景聚合用例（可选；未注入则行业看板端点不注册）。
 func (r *Router) SetGEOIndustry(uc *geo.IndustryUseCase) {
 	r.geoIndustryUC = uc
+}
+
+// SetMetrics 注入运营指标采集器（可选，R3；未注入则 /debug/metrics 返回空）。
+func (r *Router) SetMetrics(m port.MetricsCollector) {
+	r.metrics = m
 }
 
 // SetAdmin 注入用户管理能力（可选；未注入则管理端用户端点不注册）。
@@ -347,6 +353,16 @@ func (r *Router) Engine() *gin.Engine {
 	if r.billingUC != nil {
 		root.GET("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
 		root.POST("/api/v1/billing/webhook/:gateway", r.HandlePaymentCallback)
+	}
+
+	// Vidu 生成回调（公开——服务商回调无 JWT，靠 HMAC 验签+nonce 防重放保护；
+	// 修复：此前误注册在 JWT 保护组内，真实回调无 Authorization 头会被 401 拒绝，
+	// 回调通道实际不可用、全靠 20s 轮询兜底）
+	if r.generationUC != nil && r.generationProvider != nil {
+		gh := NewGenerationHandler(r.generationUC)
+		root.POST("/api/v1/generation/callback", func(c *gin.Context) {
+			gh.HandleCallback(c, r.generationProvider)
+		})
 	}
 
 	// 业务路由（受 JWT 中间件保护）

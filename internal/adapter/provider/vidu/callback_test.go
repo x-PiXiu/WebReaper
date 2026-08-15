@@ -22,7 +22,6 @@ func signedCallbackHeaders(secret, uri, query, date string) http.Header {
 	h.Set("X-HMAC-SIGNED-HEADERS", "Date;x-request-nonce")
 	h.Set("Date", date)
 	h.Set("x-request-nonce", nonce)
-	h.Set("X-Vidu-Request-URI", uri+"?"+query)
 	return h
 }
 
@@ -30,7 +29,7 @@ func TestVerifyCallbackValid(t *testing.T) {
 	secret := "test-secret-key"
 	date := time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")
 	h := signedCallbackHeaders(secret, "/api/v1/generation/callback", "name=james", date)
-	if err := verifyCallbackSignature(secret, h, []byte(`{"state":"success"}`)); err != nil {
+	if err := verifyCallbackSignature(secret, h, []byte(`{"state":"success"}`), "/api/v1/generation/callback?name=james"); err != nil {
 		t.Fatalf("合法签名应通过: %v", err)
 	}
 }
@@ -40,7 +39,7 @@ func TestVerifyCallbackBadSignature(t *testing.T) {
 	date := time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")
 	h := signedCallbackHeaders(secret, "/api/v1/generation/callback", "name=james", date)
 	h.Set("X-HMAC-SIGNATURE", "tampered-signature")
-	if err := verifyCallbackSignature(secret, h, nil); err == nil {
+	if err := verifyCallbackSignature(secret, h, nil, "/api/v1/generation/callback?name=james"); err == nil {
 		t.Fatal("篡改签名应拒绝")
 	}
 }
@@ -50,7 +49,7 @@ func TestVerifyCallbackStaleDate(t *testing.T) {
 	// 10 分钟前的 Date（超 ±5 分钟窗口）
 	date := time.Now().UTC().Add(-10 * time.Minute).Format("Mon, 02 Jan 2006 15:04:05 GMT")
 	h := signedCallbackHeaders(secret, "/api/v1/generation/callback", "", date)
-	if err := verifyCallbackSignature(secret, h, nil); err == nil {
+	if err := verifyCallbackSignature(secret, h, nil, "/api/v1/generation/callback?name=james"); err == nil {
 		t.Fatal("过期 Date 应拒绝（重放防护）")
 	}
 }
@@ -60,7 +59,7 @@ func TestVerifyCallbackMissingNonce(t *testing.T) {
 	date := time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")
 	h := signedCallbackHeaders(secret, "/api/v1/generation/callback", "", date)
 	h.Del("x-request-nonce")
-	if err := verifyCallbackSignature(secret, h, nil); err == nil {
+	if err := verifyCallbackSignature(secret, h, nil, "/api/v1/generation/callback?name=james"); err == nil {
 		t.Fatal("缺 nonce 应拒绝")
 	}
 }

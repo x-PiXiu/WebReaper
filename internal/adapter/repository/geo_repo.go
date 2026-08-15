@@ -82,6 +82,25 @@ func (r *GormBrandRepository) Delete(ctx context.Context, tenantID, id string) e
 	return q.Where("id = ?", id).Delete(&BrandPO{}).Error
 }
 
+// DeleteCascade 级联删除（R1 事务：品牌+其下关键词原子删除——此前用例层逐个删
+// 关键词再删品牌，中途失败留下孤儿关键词）。事务边界是用例的决策、机制归仓储。
+func (r *GormBrandRepository) DeleteCascade(ctx context.Context, tenantID, brandID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		kq := tx.Where("brand_id = ?", brandID)
+		if tenantID != "" {
+			kq = kq.Where("tenant_id = ?", tenantID)
+		}
+		if err := kq.Delete(&KeywordPO{}).Error; err != nil {
+			return err
+		}
+		bq := tx.Where("id = ?", brandID)
+		if tenantID != "" {
+			bq = bq.Where("tenant_id = ?", tenantID)
+		}
+		return bq.Delete(&BrandPO{}).Error
+	})
+}
+
 func (r *GormBrandRepository) Count(ctx context.Context) (int, error) {
 	var n int64
 	if err := r.db.WithContext(ctx).Model(&BrandPO{}).Count(&n).Error; err != nil {

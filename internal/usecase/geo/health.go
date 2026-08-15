@@ -2,6 +2,7 @@ package geo
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"sort"
 	"time"
@@ -24,10 +25,53 @@ type HealthUseCase struct {
 	brandRepo   port.BrandRepository
 	resultRepo  port.MonitoringResultRepository
 	contentRepo port.OptimizedContentRepository
+	// cache 可选读缓存（R2 性能：驾驶舱每次进入的 逐品牌趋势+内容扇出 全量打库——
+	// 缓存 60s+抖动，写操作后主动失效；nil=直查）。三防（抖动/空值/singleflight）在适配器。
+	cache port.CacheStore
 }
 
 func NewHealthUseCase(br port.BrandRepository, rr port.MonitoringResultRepository, cr port.OptimizedContentRepository) *HealthUseCase {
 	return &HealthUseCase{brandRepo: br, resultRepo: rr, contentRepo: cr}
+}
+
+// SetCache 注入读缓存（可选；Redis 实现）。
+func (uc *HealthUseCase) SetCache(c port.CacheStore) {
+	if c != nil {
+		uc.cache = c
+	}
+}
+
+// healthCacheTTL 缓存基准 TTL（适配器加抖动防雪崩；前端 staleTime 同为 60s——
+// 服务端缓存把 N+1 扇出收敛为每租户每分钟最多一次全量计算）。
+const healthCacheTTL = 60 * time.Second
+
+// monitorResultsCacheTTL 监测结果列表缓存 TTL（矩阵/总览/引用 Tab 共用——
+// 500 条扫描+Go 层去重是最重读路径；写后主动失效消除陈旧窗口）。
+const monitorResultsCacheTTL = 60 * time.Second
+
+// CachedLatestByTenant 带缓存的监测结果列表（矩阵页/总览/引用 Tab 的共享读侧）。
+// R2 性能：LatestByTenant 每次全量扫描 500 条 + Go 层 (keyword,engine) 去重——
+// 多 Tab 同帧触发时收敛为一次查询。写侧（Monitor 用例）主动 Del 失效。
+func (uc *HealthUseCase) CachedLatestByTenant(ctx context.Context, tenantID string) ([]entity.MonitoringResult, error) {
+	if uc.cache == nil {
+		return uc.resultRepo.LatestByTenant(ctx, tenantID)
+	}
+	cached, err := uc.cache.GetOrCompute(ctx, MonitorResultsCacheKey(tenantID), monitorResultsCacheTTL, func(ctx context.Context) (string, error) {
+		rs, err := uc.resultRepo.LatestByTenant(ctx, tenantID)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(rs)
+		return string(b), nil
+	})
+	if err != nil || cached == "" {
+		return uc.resultRepo.LatestByTenant(ctx, tenantID)
+	}
+	var rs []entity.MonitoringResult
+	if json.Unmarshal([]byte(cached), &rs) != nil {
+		return uc.resultRepo.LatestByTenant(ctx, tenantID)
+	}
+	return rs, nil
 }
 
 // 健康分权重（与行业驾驶舱口径一致：提及覆盖为主、语义维度次之、资产/信源补足）。
@@ -81,8 +125,30 @@ type HealthReport struct {
 	Brands     []BrandHealth
 }
 
-// Report 产出租户健康报告（一次聚合，多页消费）。
+// Report 产出租户健康报告（一次聚合，多页消费）。带可选读缓存。
 func (uc *HealthUseCase) Report(ctx context.Context, tenantID string) (HealthReport, error) {
+	if uc.cache != nil {
+		cached, err := uc.cache.GetOrCompute(ctx, "health-report:"+tenantID, healthCacheTTL, func(ctx context.Context) (string, error) {
+			r, err := uc.compute(ctx, tenantID)
+			if err != nil {
+				return "", err
+			}
+			b, _ := json.Marshal(r)
+			return string(b), nil
+		})
+		if err == nil && cached != "" {
+			var r HealthReport
+			if json.Unmarshal([]byte(cached), &r) == nil {
+				return r, nil
+			}
+		}
+		// 缓存未命中/损坏/计算错误 → 直查（GetOrCompute 出错时已透传 fetch 错误，此处兜底重算）
+	}
+	return uc.compute(ctx, tenantID)
+}
+
+// compute 真实聚合（缓存 miss 时执行）。
+func (uc *HealthUseCase) compute(ctx context.Context, tenantID string) (HealthReport, error) {
 	brands, err := uc.brandRepo.ListByTenant(ctx, tenantID)
 	if err != nil {
 		return HealthReport{}, err

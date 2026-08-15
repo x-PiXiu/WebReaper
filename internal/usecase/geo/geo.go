@@ -183,27 +183,14 @@ func (uc *BrandUseCase) ListAll(ctx context.Context) ([]entity.Brand, error) {
 }
 
 // AdminDelete 全平台品牌删除（admin 旁路——管理后台绝对控制，不做租户校验）。
-// 级联清理其下关键词。
+// 级联清理其下关键词（R1：单事务原子删除，不再逐个删留孤儿风险）。
 func (uc *BrandUseCase) AdminDelete(ctx context.Context, brandID string) error {
-	kws, err := uc.keywordRepo.ListByBrand(ctx, "", brandID)
-	if err == nil {
-		for _, kw := range kws {
-			_ = uc.keywordRepo.Delete(ctx, "", kw.ID)
-		}
-	}
-	return uc.brandRepo.Delete(ctx, "", brandID)
+	return uc.brandRepo.DeleteCascade(ctx, "", brandID)
 }
 
-// Delete 删除品牌（同时清理其下关键词）。
+// Delete 删除品牌（同时清理其下关键词——事务级联，见 DeleteCascade）。
 func (uc *BrandUseCase) Delete(ctx context.Context, tenantID, brandID string) error {
-	// 先删关键词（简化：逐个删；生产可批量）
-	kws, err := uc.keywordRepo.ListByBrand(ctx, tenantID, brandID)
-	if err == nil {
-		for _, kw := range kws {
-			_ = uc.keywordRepo.Delete(ctx, tenantID, kw.ID)
-		}
-	}
-	return uc.brandRepo.Delete(ctx, tenantID, brandID)
+	return uc.brandRepo.DeleteCascade(ctx, tenantID, brandID)
 }
 
 // Update 修改品牌信息（名称/定位/卖点/竞品/业务类型）。

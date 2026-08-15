@@ -146,6 +146,8 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 }
 
 // registerGenerationRoutes 统一生成任务（Vidu 全量接入：视频/图片/音频/数字人）。
+// Vidu 回调入口已迁移至公开路由（router.go 公开段，与支付 webhook 同等待遇）——
+// 服务商回调无 JWT，HMAC 验签+nonce 防重放是它的安全边界。
 func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	if r.generationUC == nil {
 		return
@@ -156,10 +158,6 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	api.GET("/generation/tasks", gh.HandleList)
 	api.GET("/generation/types", gh.HandleTypes)
 	api.POST("/generation/tasks/:id/cancel", gh.HandleCancel)
-	// Vidu 回调入口（无需商户 token——验签保护；provider 闭包注入）
-	api.POST("/generation/callback", func(c *gin.Context) {
-		gh.HandleCallback(c, r.generationProvider)
-	})
 }
 
 // registerMediaRoutes 素材库（上传 + 列表 + 删除——用户图片/音频 → 本地 → URL 供 Vidu 引用）。

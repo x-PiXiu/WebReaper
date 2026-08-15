@@ -60,6 +60,27 @@ type TrpcAgentGenerator struct {
 	memory       port.ConversationMemory // 会话历史（重启后从 DB 恢复上下文）；nil 则不 seed 历史
 	logger       port.Logger             // 日志（注入给 toolAdapter 替代 fmt.Printf）
 	usage        port.UsageRecorder      // LLM 用量计量（可选注入，nil=不记录）——经济系统基础
+	metrics      port.MetricsCollector   // R3 运营指标（可选；nil=不采集）
+}
+
+// SetMetrics 注入指标采集器（可选，R3——LLM 调用成功率埋点）。
+func (g *TrpcAgentGenerator) SetMetrics(m port.MetricsCollector) {
+	g.metrics = m
+}
+
+// trackLLMCall LLM 调用埋点（成功/失败/慢调用）。
+func (g *TrpcAgentGenerator) trackLLMCall(err error, elapsed time.Duration) {
+	if g.metrics == nil {
+		return
+	}
+	ctx := context.Background()
+	_ = g.metrics.Incr(ctx, port.MetricLLMCalls)
+	if err != nil {
+		_ = g.metrics.Incr(ctx, port.MetricLLMErrors)
+	}
+	if elapsed > 30*time.Second {
+		_ = g.metrics.Incr(ctx, port.MetricLLMSlow)
+	}
 }
 
 // 编译期断言：实现 port.AIGenerator。
@@ -185,9 +206,11 @@ func (g *TrpcAgentGenerator) ChatStream(ctx context.Context, conversationID stri
 //     框架 Request.ExtraFields 已预留字段（model/request.go），但当前版本无
 //     per-request 入口；降级为提示词层禁令（在 system prompt 追加），
 //     待框架暴露 RequestOption 后一行接入请求参数层（纵深防御第二层）。
-func (g *TrpcAgentGenerator) ChatStreamWithOptions(ctx context.Context, in port.ChatStreamInput) (string, error) {
+func (g *TrpcAgentGenerator) ChatStreamWithOptions(ctx context.Context, in port.ChatStreamInput) (result string, retErr error) {
 	ctx, span := telemetry.StartSpan(ctx, "ai.chat_stream")
 	defer span.End()
+	start := time.Now()
+	defer func() { g.trackLLMCall(retErr, time.Since(start)) }() // R3 埋点
 
 	if len(in.Messages) == 0 {
 		return "", fmt.Errorf("no messages")

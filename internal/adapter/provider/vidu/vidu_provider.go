@@ -27,29 +27,72 @@ type ViduProvider struct {
 	mu     sync.RWMutex // 保护 apiKey（管理后台热更新）
 	apiKey string
 	client *http.Client
+	// R2 修复多实例 Key 漂移：管理后台改 Key 只更新收到请求的那个实例的内存——
+	// 其他实例持旧 Key 直到重启。keySource 存在时 apiKeyNow 优先从 DB 读取
+	//（30s TTL 缓存），UpdateAPIKey 仅作为同实例即时生效的旁路。
+	keySource    func(ctx context.Context) (string, error)
+	keyCache     string        // 最近从 keySource 读到的 Key
+	keyCacheAt   time.Time     // 上次读取时间（TTL 内不重读）
+	keyCacheTTL  time.Duration // 默认 30s
 }
 
 // NewViduProvider 创建 Vidu 协议层适配器。
 func NewViduProvider(apiKey string) *ViduProvider {
 	return &ViduProvider{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 60 * time.Second},
+		apiKey:      apiKey,
+		client:      &http.Client{Timeout: 60 * time.Second},
+		keyCacheTTL: 30 * time.Second,
 	}
 }
 
-// UpdateAPIKey 运行时更新 API Key（管理后台保存后热生效，无需重启）。
+// SetKeySource 注入 Key 数据源（R2：管理后台改 Key 后各实例 ≤30s 对齐——
+// main 装配时传入 providerconfig 仓储查询闭包）。
+func (p *ViduProvider) SetKeySource(fn func(ctx context.Context) (string, error)) {
+	p.keySource = fn
+}
+
+// UpdateAPIKey 运行时更新 API Key（同实例即时生效）。
 // 实现 port.ConfigurableProvider——main 装配后由 admin handler 调用。
+// 多实例对齐靠 keySource TTL 刷新（其他实例 ≤30s 从 DB 拉到新值）。
 func (p *ViduProvider) UpdateAPIKey(key string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.apiKey = key
+	// 同步更新缓存，避免 keySource 下轮读到旧值
+	p.keyCache = key
+	p.keyCacheAt = time.Now()
 }
 
-// apiKeyNow 并发安全的 Key 读取。
+// apiKeyNow 并发安全的 Key 读取。优先走 keySource（DB+TTL——多实例最终一致），
+// 降级到内存值（未注入 keySource 或 DB 读取失败时兜底）。
 func (p *ViduProvider) apiKeyNow() string {
+	// 快路径：keySource 存在且缓存未过期 → 直接用（无锁）
+	if p.keySource != nil && time.Since(p.keyCacheAt) < p.keyCacheTTL {
+		p.mu.RLock()
+		k := p.keyCache
+		p.mu.RUnlock()
+		if k != "" {
+			return k
+		}
+	}
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.apiKey
+	localKey := p.apiKey
+	p.mu.RUnlock()
+	if localKey != "" {
+		return localKey
+	}
+	// 慢路径：走 keySource 从 DB 读（带 TTL 写回缓存）
+	if p.keySource != nil {
+		k, err := p.keySource(context.Background())
+		if err == nil && k != "" {
+			p.mu.Lock()
+			p.keyCache = k
+			p.keyCacheAt = time.Now()
+			p.mu.Unlock()
+			return k
+		}
+	}
+	return localKey
 }
 
 func (p *ViduProvider) Name() string { return "vidu" }
@@ -172,8 +215,8 @@ func (p *ViduProvider) QueryCredits(ctx context.Context) (int, error) {
 }
 
 // VerifyCallback 回调验签（HMAC-SHA256 复合签名字符串；验签实现见 callback.go）。
-func (p *ViduProvider) VerifyCallback(ctx context.Context, header http.Header, body []byte) error {
-	return verifyCallbackSignature(p.apiKeyNow(), header, body)
+func (p *ViduProvider) VerifyCallback(ctx context.Context, header http.Header, body []byte, requestURI string) error {
+	return verifyCallbackSignature(p.apiKeyNow(), header, body, requestURI)
 }
 
 // TranslateError 错误码 → 产品级消息（可读 + 语义化）。

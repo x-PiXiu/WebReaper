@@ -35,6 +35,7 @@ func IsBrowserHeaded() bool { return browserHeaded.Load() }
 type Config struct {
 	Server    ServerConfig
 	DB        DBConfig
+	Redis     RedisConfig
 	LLM       LLMConfig
 	JWT       JWTConfig
 	Publish   PublishConfig
@@ -194,13 +195,16 @@ func (c MilvusConfig) Addr() string {
 	return c.Host + ":" + port
 }
 
-// RedisConfig Redis 配置（本轮预留）。
+// RedisConfig Redis 配置（分布式锁/缓存/回调 nonce——Host 为空=未启用，全链路降级单机模式）。
 type RedisConfig struct {
 	Host     string
 	Port     string
 	Password string
 	DB       int
 }
+
+// IsConfigured Redis 是否已配置（Host 非空即尝试连接；连接失败由 main 降级并记日志）。
+func (c RedisConfig) IsConfigured() bool { return c.Host != "" }
 
 // StorageConfig 文件存储配置（双模式：local 本地 / oss 阿里云 OSS）。
 // STORAGE_TYPE=local（默认，本地开发）→ LocalMediaStore（./data/media）
@@ -289,6 +293,12 @@ func Load() Config {
 			Password: os.Getenv("DB_PASSWORD"),
 			Name:     getenvDefault("DB_NAME", "agentcore"),
 			SSLMode:  getenvDefault("DB_SSLMODE", "disable"),
+		},
+		Redis: RedisConfig{
+			Host:     getenvDefault("REDIS_HOST", ""),
+			Port:     getenvDefault("REDIS_PORT", "6379"),
+			Password: os.Getenv("REDIS_PASSWORD"),
+			DB:       getenvInt("REDIS_DB", 0),
 		},
 		LLM: LLMConfig{
 			Provider:           getenvDefault("LLM_PROVIDER", "minimax"),

@@ -40,6 +40,25 @@ type ContentUseCase struct {
 	storeRepo     port.StoreLocationRepository // 门店档案（可选；nil=不注入 NAP 信号）
 	brandRepo     port.BrandRepository         // 品牌仓储（可选；BizType 分流——online 跳过线下 NAP）
 	diagnoseUC    *DiagnoseUseCase            // GEO 诊断（可选；诊断→优化闭环 P5-03）
+	cache         port.CacheStore             // 写后主动失效（可选；nil=跳过）——内容变化影响健康分(内容资产)与行业榜
+}
+
+// SetCache 注入缓存（R2 写后失效：内容生成/发布/删除 → 清健康报告缓存——内容资产指数变化）。
+func (uc *ContentUseCase) SetCache(c port.CacheStore) {
+	if c != nil {
+		uc.cache = c
+	}
+}
+
+// invalidateAfterWrite 内容写入 → 健康报告缓存过期（内容资产指数+行业榜数据变化）。
+func (uc *ContentUseCase) invalidateAfterWrite(ctx context.Context, tenantID string) {
+	if uc.cache == nil {
+		return
+	}
+	_ = uc.cache.Del(ctx,
+		HealthReportCacheKey(tenantID),
+		IndustryOverviewCacheKey,
+	)
 }
 
 // 内置默认提示词模板（模板仓库无记录时的兜底，与 seed 内容一致）。
@@ -645,6 +664,7 @@ func (uc *ContentUseCase) AdminSetStatus(ctx context.Context, contentID, status 
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
 	}
+	uc.invalidateAfterWrite(ctx, oc.TenantID) // R2 写后失效（admin 路径与商户路径同口径）
 	// 发布副作用：通知搜索引擎收录（与商户端 SetStatus 同口径）
 	if status == "published" && uc.urlSubmitter != nil && uc.publicBaseURL != "" {
 		publicURL := strings.TrimRight(uc.publicBaseURL, "/") + "/public/articles/" + oc.ID
@@ -750,6 +770,7 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
 	}
+	uc.invalidateAfterWrite(ctx, tenantID) // R2 写后失效（发布/草稿切换→内容资产指数变化）
 
 	// 发布副作用：通知搜索引擎收录（IndexNow，尽力而为——失败不影响发布）。
 	// B1 质量护栏：低分内容（< WarnPublishScore）只上线不自动提交收录——
@@ -982,5 +1003,6 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
 		return entity.OptimizedContent{}, fmt.Errorf("save content: %w", err)
 	}
+	uc.invalidateAfterWrite(ctx, in.TenantID) // R2 写后失效（内容资产变化→健康分/行业榜）
 	return oc, nil
 }

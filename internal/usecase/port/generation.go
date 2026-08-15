@@ -23,7 +23,10 @@ type GenerationProvider interface {
 	// Cancel 取消任务。
 	Cancel(ctx context.Context, taskID string) error
 	// VerifyCallback 回调验签（HMAC-SHA256 复合串 + Date 新鲜度 + nonce 防重放）。
-	VerifyCallback(ctx context.Context, header http.Header, body []byte) error
+	// requestURI 为回调请求自身的 RequestURI（path+query）——签名字符串基于创建任务时
+	// 配置的 callback_url，而回调正是发到该 URL，故用请求行还原（修复：此前依赖
+	// X-Vidu-Request-URI 自定义头，真实 Vidu 回调不携带该头，验签必然失败）。
+	VerifyCallback(ctx context.Context, header http.Header, body []byte, requestURI string) error
 	// QueryCredits 查询剩余积分（对账/创建前余额校验）。
 	QueryCredits(ctx context.Context) (int, error)
 	// TranslateError 错误码 → 产品级消息（可读 + 可重试分类）。
@@ -81,6 +84,9 @@ type GenerationTaskRepository interface {
 	List(ctx context.Context, tenantID string, limit int) ([]entity.GenerationTask, error)
 	// ListActive 轮询用：全部租户未终态任务（阶段 1 单机扫描）。
 	ListActive(ctx context.Context, limit int) ([]entity.GenerationTask, error)
+	// ListFailed 自动重试用：全部租户 failed 任务（按 updated_at 升序——
+	// 最久未动者优先；是否可重试由用例层 ClassifyError 判定，仓储不掺业务）。
+	ListFailed(ctx context.Context, limit int) ([]entity.GenerationTask, error)
 	// DeleteTerminalOlderThan 清理早于 before 的终态任务（P3 任务清理）。
 	DeleteTerminalOlderThan(ctx context.Context, before time.Time) (int64, error)
 }
@@ -107,8 +113,9 @@ type MediaAssetStore interface {
 	Delete(ctx context.Context, tenantID, assetID string) error
 	// DownloadAndStore 下载外部 URL 到本地存储并返回永久 URL（转存用——Vidu 24h 产物永久化）。
 	DownloadAndStore(ctx context.Context, tenantID, sourceURL string, meta map[string]string) (string, error)
-	// CleanupBefore 清理过期资产（定时任务）。
-	CleanupBefore(ctx context.Context, before time.Time) (int, error)
+	// CleanupBefore 清理过期资产（定时任务）。excludeURLs 为仍被任务引用的资产
+	// 公网 URL 集合（R1：防止删掉商户还在用的产物——引用关系来自任务 creations/params）。
+	CleanupBefore(ctx context.Context, before time.Time, excludeURLs map[string]bool) (int, error)
 }
 
 // ProviderConfigRepository 厂商配置仓储（管理后台按厂商管理）。
@@ -125,4 +132,10 @@ type ProviderConfigRepository interface {
 type ConfigurableProvider interface {
 	// UpdateAPIKey 更新 API Key（原子生效，后续请求使用新 Key）。
 	UpdateAPIKey(key string)
+}
+
+// CallbackNonceStore 回调 nonce 防重放存储（R2 无状态化：单机内存实现多实例失效——
+// Redis 实现 SETNX+EX 原子判重）。 Seen 首次见到 nonce 返回 true（可处理）；重复/已过期返回 false。
+type CallbackNonceStore interface {
+	Seen(ctx context.Context, nonce string) bool
 }

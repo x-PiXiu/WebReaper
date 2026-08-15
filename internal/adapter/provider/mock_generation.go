@@ -70,7 +70,7 @@ func (m *MockGenerationProvider) Cancel(ctx context.Context, taskID string) erro
 	return nil
 }
 
-func (m *MockGenerationProvider) VerifyCallback(ctx context.Context, header http.Header, body []byte) error {
+func (m *MockGenerationProvider) VerifyCallback(ctx context.Context, header http.Header, body []byte, requestURI string) error {
 	return nil // mock 无验签
 }
 

@@ -12,12 +12,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	milvusclient "github.com/milvus-io/milvus-sdk-go/v2/client"
 
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
+	"webreaper/internal/adapter/cache"
+	"webreaper/internal/adapter/metrics"
 	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/bing"
 	"webreaper/internal/adapter/crawler"
@@ -198,6 +201,52 @@ func main() {
 	router.SetAuth(registerUC, loginUC, tokenParser)
 	// 改密端点（F1-5：默认弱口令 admin/admin123 治理——配合前端常驻提醒）
 	router.SetAuthChangePassword(auth.NewChangePasswordUseCase(userRepo, hasher))
+
+	// R1/R2 Redis 基础设施（声明先于一切消费方）：分布式锁/三防缓存/回调 nonce 共享一个连接。
+	// REDIS_HOST 配置即启用；连接失败全链路降级单机模式（NoopLock/内存 nonce/无缓存）并记日志。
+	// 背景：8 个有副作用的定时任务（自动盯盘烧 LLM/定时发布 RPA/生成轮询…）在多实例下
+	// 重复执行是事故级风险——RedisLock 是水平扩容的第一道前置。
+	taskLock := port.TaskLock(lock.NewNoopLock())
+	var redisClient *redis.Client
+	var cacheStore port.CacheStore
+	if cfg.Redis.IsConfigured() {
+		rc := redis.NewClient(&redis.Options{
+			Addr:     cfg.Redis.Host + ":" + cfg.Redis.Port,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if pErr := rc.Ping(pingCtx).Err(); pErr != nil {
+			log.Warn("Redis 连接失败，全链路降级单机模式（NoopLock/内存 nonce/无缓存）",
+				port.String("addr", cfg.Redis.Host+":"+cfg.Redis.Port), port.Err(pErr))
+			_ = rc.Close()
+		} else {
+			redisClient = rc
+			taskLock = lock.NewRedisLock(rc)
+			cacheStore = cache.NewRedisCache(rc)
+			log.Info("Redis 已连接：分布式锁/三防缓存/回调 nonce 已启用",
+				port.String("addr", cfg.Redis.Host+":"+cfg.Redis.Port))
+		}
+		pingCancel()
+	}
+
+	// R3 运营指标采集器（Redis INCR——多实例共享；未配 Redis 用 Noop 零开销）
+	var metricsCollector port.MetricsCollector = metrics.NewNoopMetrics()
+	if redisClient != nil {
+		metricsCollector = metrics.NewRedisMetrics(redisClient)
+		router.SetMetrics(metricsCollector)
+		// 缓存命中率埋点（RedisCache → MetricsCollector）
+		if rc, ok := cacheStore.(*cache.RedisCache); ok {
+			rc.SetMetrics(metricsCollector)
+		}
+		// 配额拒绝埋点（response.go fail() 集中点）
+		handler.SetQuotaMetric(metricsCollector)
+		// LLM 调用成功率/慢调用/错误率埋点
+		if tg, ok := aiGenerator.(*ai.TrpcAgentGenerator); ok {
+			tg.SetMetrics(metricsCollector)
+		}
+	}
+
 	router.SetAI(aiGenerator)
 	router.SetAgentConfig(agentCfgUC)
 	router.SetLLMConfig(llmCfgUC)
@@ -318,11 +367,19 @@ func main() {
 		geoMonitorUC.SetSelfBaseDomain(cfg.Server.PublicBaseURL)
 		// 本地监测问法（P0 补全）：有门店时问"望京附近有什么川菜馆"——测本地生意
 		geoMonitorUC.SetStoreRepo(geoRepos.store)
+		// R2 写后失效：监测/内容写入 → 清 health-report / monitor-results / industry-overview 缓存
+		if cacheStore != nil {
+			geoMonitorUC.SetCache(cacheStore)
+		}
 		geoMonitorUCRef = geoMonitorUC
 		geoRankUC := geo.NewRankUseCase(geoRepos.result)
 		geoRankUC.SetKeywordRepo(geoRepos.keyword) // Overview 的品牌关键词数（仪表盘排行）
 		geoContentUC := geo.NewContentUseCase(aiGenerator, geoScorer, geoRepos.content)
 		geoContentUCRef = geoContentUC
+		// R2 写后失效：内容生成/发布/删除 → 清 health-report / industry-overview 缓存
+		if cacheStore != nil {
+			geoContentUC.SetCache(cacheStore)
+		}
 		// 免费规则评分器：优化前后对比用（不烧 token、可单测）
 		geoContentUC.SetRuleScorer(geo.NewRuleScorer())
 		// RAG 增强：原创生成前检索"品牌+关键词"真实信息注入 prompt（"不编造数据"变能力）
@@ -410,9 +467,17 @@ func main() {
 		// 内容引用统计（P5-02：每篇被 AI 引用几次——评分校准数据源）
 		router.SetCitation(geo.NewCitationUseCase(geoRepos.result))
 		// 健康报告聚合（v3 归位：总分/五指数/竞品对标的后端单一事实源，替代前端 geoHealth 各自合成）
-		router.SetGEOHealth(geo.NewHealthUseCase(geoRepos.brand, geoRepos.result, geoRepos.content))
+		geoHealthUC := geo.NewHealthUseCase(geoRepos.brand, geoRepos.result, geoRepos.content)
+		geoIndustryUC := geo.NewIndustryUseCase(geoRepos.brand, geoRepos.result)
+		if cacheStore != nil {
+			// R2 性能：驾驶舱 N+1 扇出收敛为 60s 缓存、跨租户行业聚合 5min 缓存
+			//（TTL 抖动防雪崩/singleflight 防击穿/空值标记防穿透——见 adapter/cache）
+			geoHealthUC.SetCache(cacheStore)
+			geoIndustryUC.SetCache(cacheStore)
+		}
+		router.SetGEOHealth(geoHealthUC)
 		// 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）
-		router.SetGEOIndustry(geo.NewIndustryUseCase(geoRepos.brand, geoRepos.result))
+		router.SetGEOIndustry(geoIndustryUC)
 
 		// 收录通知（IndexNow）：发布为 published 时自动通知搜索引擎
 		if indexNowSubmitter != nil {
@@ -598,9 +663,9 @@ func main() {
 
 	// 通用定时任务调度器（统一驱动：防重入/分布式锁/panic 恢复/错误日志）。
 	// 新增定时功能 = 实现 port.ScheduledTask + Register 一行，避免"一功能一套 ticker"。
-	// 分布式演进：多实例部署时把 NoopLock 换成 lock.RedisLock，业务零改动。
+	// 锁实现见顶部 Redis 装配（RedisLock/NoopLock 按可用性切换，业务零改动）。
 	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
-	taskScheduler := scheduler.New(lock.NewNoopLock(), log)
+	taskScheduler := scheduler.New(taskLock, log)
 
 	// ① 账号健康度定时检查：每 10 分钟检查所有账号的 cookie 过期状态
 	//（原裸 goroutine + ticker 改造为注册任务——统一调度语义）
@@ -669,8 +734,18 @@ func main() {
 		}
 		var genProvider port.GenerationProvider = provider.NewMockGenerationProvider()
 		if viduAPIKey != "" {
-			genProvider = vidu.NewViduProvider(viduAPIKey)
-			log.Info("统一生成已接入 Vidu（真实 API）")
+			vp := vidu.NewViduProvider(viduAPIKey)
+			// R2 修复多实例 Key 漂移：管理后台改 Key 后各实例 ≤30s 从 DB 对齐
+			//（此前 UpdateAPIKey 只更新收到请求的那个实例——其他实例持旧 Key 直到重启）
+			vp.SetKeySource(func(ctx context.Context) (string, error) {
+				cfgRow, err := providerCfgRepo.Get(ctx, "vidu")
+				if err != nil || cfgRow.APIKey == "" {
+					return "", err
+				}
+				return cfgRow.APIKey, nil
+			})
+			genProvider = vp
+			log.Info("统一生成已接入 Vidu（真实 API + Key TTL 刷新防多实例漂移）")
 		} else {
 			log.Info("统一生成运行在 mock 模式（未配置 VIDU_API_KEY）")
 		}
@@ -683,6 +758,20 @@ func main() {
 			log.Warn("seed 生成规格默认值失败", port.Err(seedErr))
 		}
 		genUC := generation.NewGenerationUseCase(genProvider, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
+		// 生成域计费接线（F-fix：quotaGate/usageRec 端口此前声明未装配——
+		// generation 场景按次限额（超限 402）+ usages 计量（成本分析/配额核对数据源）。
+		// Gate/Recorder 均为无状态计算，与 billing 块各持实例无副作用）
+		genUsageRec := repository.NewGormUsageRecorder(geoRepos.db)
+		genUC.SetUsageRecorder(genUsageRec)
+		genUC.SetQuotaGate(quota.NewGate(
+			repository.NewGormPlanRepository(geoRepos.db),
+			repository.NewGormSubscriptionRepository(geoRepos.db),
+			genUsageRec,
+		))
+		// R2：回调 nonce 判重 Redis 化（多实例安全；未配置 Redis 保持内存实现）
+		if redisClient != nil {
+			genUC.SetNonceStore(cache.NewRedisNonceStore(redisClient))
+		}
 		// 媒体资产存储——双模式切换（STORAGE_TYPE 环境变量控制）
 		// local（默认/本地开发）：LocalMediaStore（./data/media + /media 静态托管）
 		// oss（云端部署）：OSSMediaStore（阿里云 OSS，素材+产物持久化到云端）

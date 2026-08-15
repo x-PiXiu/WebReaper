@@ -40,5 +40,10 @@ func (t *GenerationPollTask) Execute(ctx context.Context) error {
 	if n > 0 && t.logger != nil {
 		t.logger.Info("生成任务轮询完成", port.Int("updated", n))
 	}
+	// 自动重试执行器（F-fix：ClassifyError/CanAutoRetry 此前无调用方——
+	// 限流/内部错误类失败按 1/5/30 分钟退避自动重提，≤3 次）
+	if r, rErr := t.uc.RetryDue(ctx, 20); rErr == nil && r > 0 && t.logger != nil {
+		t.logger.Info("生成任务自动重试已重提", port.Int("retried", r))
+	}
 	return nil
 }

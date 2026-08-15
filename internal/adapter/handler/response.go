@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/port"
 )
 
 // envelope 是统一响应信封。
@@ -34,7 +35,19 @@ func success(c *gin.Context, data any) {
 // 映射规则见 statusForError。
 func fail(c *gin.Context, err error) {
 	status, code := statusForError(err)
+	// R3 可观测：配额拒绝（402）集中埋点——运营最关心的付费转化信号
+	if status == http.StatusPaymentRequired && quotaMetric != nil {
+		_ = quotaMetric.Incr(c.Request.Context(), port.MetricQuotaRejected)
+	}
 	c.JSON(status, envelope{Code: code, Msg: err.Error()})
+}
+
+// quotaMetric 配额拒绝指标采集器（main 装配时注入；nil=不采集）。
+var quotaMetric port.MetricsCollector
+
+// SetQuotaMetric 注入配额拒绝指标采集器（main 装配时调用）。
+func SetQuotaMetric(m port.MetricsCollector) {
+	quotaMetric = m
 }
 
 // statusForError 把 pkg 中的业务错误映射到 HTTP 状态码 + 业务码。

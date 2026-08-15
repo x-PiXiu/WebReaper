@@ -38,6 +38,10 @@ func (f *fakeBrandRepo) FindPublishedByID(ctx context.Context, id string) (entit
 	return b, nil
 }
 func (f *fakeBrandRepo) ListByTenant(ctx context.Context, tenantID string) ([]entity.Brand, error) { return nil, nil }
+func (f *fakeBrandRepo) DeleteCascade(ctx context.Context, tenantID, brandID string) error {
+	return f.Delete(ctx, tenantID, brandID)
+}
+
 func (f *fakeBrandRepo) Delete(ctx context.Context, tenantID, id string) error                     { delete(f.brands, id); return nil }
 func (f *fakeBrandRepo) Count(ctx context.Context) (int, error)                                   { return len(f.brands), nil }
 func (f *fakeBrandRepo) ListAll(ctx context.Context) ([]entity.Brand, error)                      { return nil, nil }

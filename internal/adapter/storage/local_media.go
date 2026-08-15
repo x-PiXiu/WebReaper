@@ -212,27 +212,32 @@ func (s *LocalMediaStore) DownloadAndStore(ctx context.Context, tenantID, source
 	return s.publicURL(filepath.ToSlash(relPath)), nil
 }
 
-// CleanupBefore 清理过期文件（定时任务；简化：删除 data 目录下早于 before 的文件）。
-func (s *LocalMediaStore) CleanupBefore(ctx context.Context, before time.Time) (int, error) {
-	entries, err := os.ReadDir(s.dir)
-	if err != nil {
-		return 0, err
-	}
+// CleanupBefore 清理过期文件（定时任务）。R1 修复两处：
+//   - 引用排除：excludeURLs 命中的文件跳过（仍被任务引用的产物不删）
+//   - 目录遍历：改为 Walk 递归（此前 ReadDir 只扫第一层，{tenant}/{date}/ 子目录
+//     里的文件从未被清理——与 SaveFile 的存储结构不匹配，属静默失效）
+func (s *LocalMediaStore) CleanupBefore(ctx context.Context, before time.Time, excludeURLs map[string]bool) (int, error) {
 	n := 0
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
+	_ = filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
 		}
-		info, err := e.Info()
-		if err != nil {
-			continue
+		if !info.ModTime().Before(before) {
+			return nil
 		}
-		if info.ModTime().Before(before) {
-			if os.Remove(filepath.Join(s.dir, e.Name())) == nil {
-				n++
-			}
+		rel, rErr := filepath.Rel(s.dir, path)
+		if rErr != nil {
+			return nil
 		}
-	}
+		id := filepath.ToSlash(rel)
+		if excludeURLs != nil && excludeURLs[s.publicURL(id)] {
+			return nil // 仍被引用——保留
+		}
+		if os.Remove(path) == nil {
+			n++
+		}
+		return nil
+	})
 	return n, nil
 }
 

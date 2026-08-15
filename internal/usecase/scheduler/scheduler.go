@@ -20,12 +20,13 @@ import (
 
 // Scheduler 通用定时任务调度器（注册表 + 每任务独立 goroutine 驱动）。
 type Scheduler struct {
-	mu     sync.Mutex
-	tasks  map[string]port.ScheduledTask
-	lock   port.TaskLock // 分布式锁（nil = 单机直跑）
-	logger port.Logger
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	mu      sync.Mutex
+	tasks   map[string]port.ScheduledTask
+	lock    port.TaskLock       // 分布式锁（nil = 单机直跑）
+	logger  port.Logger
+	metrics port.MetricsCollector // R3 可观测（可选；锁竞争/任务执行次数）
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 // New 创建调度器。
@@ -138,7 +139,10 @@ func (s *Scheduler) executeOnce(ctx context.Context, task port.ScheduledTask) {
 			return
 		}
 		if !ok {
-			// 其他实例正在执行本任务——跳过（分布式互斥）
+			// R3 可观测：锁竞争（其他实例正在执行——多实例部署常态）
+			if s.metrics != nil {
+				_ = s.metrics.Incr(ctx, port.MetricLockContention)
+			}
 			return
 		}
 		defer func() { _ = s.lock.Unlock(context.Background(), lockKey) }()

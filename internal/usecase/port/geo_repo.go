@@ -18,6 +18,8 @@ type BrandRepository interface {
 	FindPublishedByID(ctx context.Context, id string) (entity.Brand, error)
 	ListByTenant(ctx context.Context, tenantID string) ([]entity.Brand, error)
 	Delete(ctx context.Context, tenantID, id string) error
+	// DeleteCascade 级联删除品牌+其下关键词（单事务原子——R1：中途失败不留孤儿关键词）。
+	DeleteCascade(ctx context.Context, tenantID, brandID string) error
 	// Count 统计品牌总数（平台总览用，admin 看全局）。
 	Count(ctx context.Context) (int, error)
 	// ListAll 全平台品牌列表（admin 旁路——仅管理后台全局管理端点调用，

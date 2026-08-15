@@ -2,10 +2,12 @@ package geo
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -19,10 +21,18 @@ import (
 type IndustryUseCase struct {
 	brandRepo  port.BrandRepository
 	resultRepo port.MonitoringResultRepository
+	cache      port.CacheStore // 可选读缓存（R2 性能——nil=直查）
 }
 
 func NewIndustryUseCase(br port.BrandRepository, rr port.MonitoringResultRepository) *IndustryUseCase {
 	return &IndustryUseCase{brandRepo: br, resultRepo: rr}
+}
+
+// SetCache 注入读缓存（可选；Redis 实现）。
+func (uc *IndustryUseCase) SetCache(c port.CacheStore) {
+	if c != nil {
+		uc.cache = c
+	}
 }
 
 // IndustryVisibility 行业能见度榜条目。
@@ -53,8 +63,30 @@ type IndustryOverview struct {
 	TopSources []SourceRank         // 按被引次数降序（top 10）
 }
 
-// Overview 产出行业全景（admin 旁路：跨租户聚合）。
+// Overview 产出行业全景（admin 旁路：跨租户聚合）。带可选读缓存
+//（R2 性能：全平台品牌+500 条监测的跨租户聚合每次全量打库——5 分钟缓存+抖动足够新）。
 func (uc *IndustryUseCase) Overview(ctx context.Context) (IndustryOverview, error) {
+	if uc.cache != nil {
+		cached, err := uc.cache.GetOrCompute(ctx, "industry-overview", 5*time.Minute, func(ctx context.Context) (string, error) {
+			r, err := uc.compute(ctx)
+			if err != nil {
+				return "", err
+			}
+			b, _ := json.Marshal(r)
+			return string(b), nil
+		})
+		if err == nil && cached != "" {
+			var r IndustryOverview
+			if json.Unmarshal([]byte(cached), &r) == nil {
+				return r, nil
+			}
+		}
+	}
+	return uc.compute(ctx)
+}
+
+// compute 真实聚合（缓存 miss 时执行）。
+func (uc *IndustryUseCase) compute(ctx context.Context) (IndustryOverview, error) {
 	brands, err := uc.brandRepo.ListAll(ctx)
 	if err != nil {
 		return IndustryOverview{}, err

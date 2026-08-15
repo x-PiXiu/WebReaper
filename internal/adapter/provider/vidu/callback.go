@@ -20,7 +20,7 @@ import (
 //
 // 防重放三层：① Date 新鲜度（±5 分钟）② x-request-nonce 去重 ③ 签名比对。
 // nonce 去重表由调用方注入（单机内存 TTL；多实例 Redis Set）。
-func verifyCallbackSignature(secretKey string, h http.Header, body []byte) error {
+func verifyCallbackSignature(secretKey string, h http.Header, body []byte, requestURI string) error {
 	sig := h.Get("X-HMAC-SIGNATURE")
 	if sig == "" {
 		return fmt.Errorf("回调缺少 X-HMAC-SIGNATURE")
@@ -56,11 +56,9 @@ func verifyCallbackSignature(secretKey string, h http.Header, body []byte) error
 		headers[name] = h.Get(name)
 	}
 
-	// 签名字符串基于"创建任务时配置的 callback_url"——服务端无法从回调请求
-	// 得知完整 callback_url，但 URI+query 可从请求行还原（Method + RequestURI）。
-	// 注意：Vidu 文档示例中 signingString 用的是 callback_url 解析出的 path/query，
-	// 与回调请求自身一致（回调就是发到这个 URL）。此处用请求自身还原。
-	signingString := buildSigningString(http.MethodPost, h, signedHeaders, headers)
+	// 签名字符串基于"创建任务时配置的 callback_url"——回调正是发到该 URL，
+	// 故 path/query 用回调请求自身的 RequestURI 还原（由 handler 传入）。
+	signingString := buildSigningString(http.MethodPost, requestURI, h, signedHeaders, headers)
 	expected := base64.StdEncoding.EncodeToString(hmacSHA256([]byte(secretKey), []byte(signingString)))
 	if !hmac.Equal([]byte(expected), []byte(sig)) {
 		return fmt.Errorf("回调签名校验失败")
@@ -69,15 +67,13 @@ func verifyCallbackSignature(secretKey string, h http.Header, body []byte) error
 }
 
 // buildSigningString 构造签名字符串（六段拼接，末尾换行——格式高度敏感）。
-func buildSigningString(method string, h http.Header, signedHeaders []string, headers map[string]string) string {
-	// URI/query：从请求行还原（回调请求即 callback_url）
-	rawURI := h.Get("X-Vidu-Request-URI")
+func buildSigningString(method, requestURI string, h http.Header, signedHeaders []string, headers map[string]string) string {
+	// URI/query：从回调请求自身的 RequestURI 还原（修复：不再依赖 X-Vidu-Request-URI 自定义头——
+	// 真实 Vidu 回调不携带该头，旧实现验签必然失败）
 	uri, query := "/", ""
-	if rawURI != "" {
-		if u, err := url.Parse(rawURI); err == nil {
-			uri = u.Path
-			query = u.RawQuery
-		}
+	if u, err := url.Parse(requestURI); err == nil {
+		uri = u.Path
+		query = u.RawQuery
 	}
 	date := h.Get("Date")
 

@@ -363,8 +363,9 @@ func (h *GEOHandler) HandleMonitor(c *gin.Context) {
 
 // HandleAllMonitorResults GET /api/v1/geo/monitor-results
 // 取租户下所有关键词的最新监测结果（不依赖品牌筛选，关键词一览页默认用这个）。
+// R2：经 HealthUseCase 缓存读侧（60s TTL + 写后主动失效——见 MonitorUseCase.invalidateAfterWrite）。
 func (h *GEOHandler) HandleAllMonitorResults(c *gin.Context) {
-	results, err := h.monitorUC.GetLatestByTenant(c.Request.Context(), middleware.CurrentTenantID(c))
+	results, err := h.healthUC.CachedLatestByTenant(c.Request.Context(), middleware.CurrentTenantID(c))
 	if err != nil {
 		fail(c, err)
 		return
