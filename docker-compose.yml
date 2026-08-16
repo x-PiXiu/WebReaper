@@ -32,7 +32,7 @@ services:
       DB_NAME: webreaper
       # Redis（分布式锁/三防缓存/回调 nonce/运营指标——留空自动降级单机）
       REDIS_HOST: ${REDIS_HOST:-localhost}
-      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PORT: ${REDIS_PORT:-16379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
       # LLM（内容生成/AI 监测用）
