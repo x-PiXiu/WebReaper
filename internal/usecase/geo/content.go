@@ -210,13 +210,14 @@ func (uc *ContentUseCase) SetDiagnoseUC(d *DiagnoseUseCase) {
 // buildDiagnoseHints 运行一次诊断并取改进建议（P5-03）。
 // 诊断本身烧 token（RAG + LLM 建议），仅在用户主动勾选时调用；
 // 失败降级为空（不阻断生成——诊断是增强项）。
+// 走 DiagnoseInternal：不重复扣 diagnose 配额，用量计入本调用的 content-gen 场景。
 func (uc *ContentUseCase) buildDiagnoseHints(ctx context.Context, tenantID, brandID, keyword string) []string {
 	if uc.diagnoseUC == nil {
 		return nil
 	}
 	ctx2, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	report, err := uc.diagnoseUC.Diagnose(ctx2, DiagnoseInput{TenantID: tenantID, BrandID: brandID})
+	report, err := uc.diagnoseUC.DiagnoseInternal(ctx2, DiagnoseInput{TenantID: tenantID, BrandID: brandID})
 	if err != nil || len(report.Suggestions) == 0 {
 		return nil
 	}
@@ -722,6 +723,16 @@ func (uc *ContentUseCase) checkDuplicateTitles(ctx context.Context, tenantID, br
 	return warnings
 }
 
+// PublishOutcome 发布结果元数据——修复"发布成功但永不收录"黑洞：
+// 此前低分内容（30-50）发布后不自动提交收录且只记服务端日志，
+// 用户视角"发布成功了"但 AI 永远搜不到，且无任何解释。
+type PublishOutcome struct {
+	// IndexSubmitted 是否已自动通知搜索引擎收录（IndexNow）
+	IndexSubmitted bool
+	// Warnings 需要用户知道的提示（低分未提交收录 / 收录服务未配置）
+	Warnings []string
+}
+
 // SetStatus 内容状态流转（draft → published 发布到公开站 / published → draft 下线）。
 //
 // 状态语义：
@@ -730,25 +741,27 @@ func (uc *ContentUseCase) checkDuplicateTitles(ctx context.Context, tenantID, br
 //   - approved：保留给未来审核流（当前不可直接设置）
 //
 // 通过 FindByID 做租户校验——只能流转自己租户的内容。
-func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, status string) (entity.OptimizedContent, error) {
+// 返回 PublishOutcome：发布副作用（收录提交与否、警告）随结果下发，前端据实提示。
+func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, status string) (entity.OptimizedContent, PublishOutcome, error) {
+	outcome := PublishOutcome{}
 	switch status {
 	case "draft", "published":
 	default:
-		return entity.OptimizedContent{}, fmt.Errorf("不支持的状态: %q（仅支持 draft/published）", status)
+		return entity.OptimizedContent{}, PublishOutcome{}, fmt.Errorf("不支持的状态: %q（仅支持 draft/published）", status)
 	}
 
 	oc, err := uc.contentRepo.FindByID(ctx, tenantID, contentID)
 	if err != nil {
-		return entity.OptimizedContent{}, err
+		return entity.OptimizedContent{}, PublishOutcome{}, err
 	}
 	if oc.Status == status {
-		return oc, nil // 幂等：已是目标状态直接返回
+		return oc, PublishOutcome{}, nil // 幂等：已是目标状态直接返回
 	}
 
 	// 发布质量门槛：低于 MinPublishScore 拒绝发布（保护公开站整体权重）
 	// Score.Total == 0 跳过（兼容无评分的历史数据）
 	if status == "published" && oc.Score.Total > 0 && oc.Score.Total < entity.MinPublishScore {
-		return entity.OptimizedContent{}, fmt.Errorf(
+		return entity.OptimizedContent{}, PublishOutcome{}, fmt.Errorf(
 			"%w: GEO 评分 %.0f 过低（需 ≥%.0f 才能发布），请优化内容质量后再试",
 			pkg.ErrInvalidArgument, oc.Score.Total, entity.MinPublishScore,
 		)
@@ -768,7 +781,7 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 		oc.IndexedAt = time.Time{}
 	}
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
-		return entity.OptimizedContent{}, fmt.Errorf("save status: %w", err)
+		return entity.OptimizedContent{}, PublishOutcome{}, fmt.Errorf("save status: %w", err)
 	}
 	uc.invalidateAfterWrite(ctx, tenantID) // R2 写后失效（发布/草稿切换→内容资产指数变化）
 
@@ -776,12 +789,23 @@ func (uc *ContentUseCase) SetStatus(ctx context.Context, tenantID, contentID, st
 	// B1 质量护栏：低分内容（< WarnPublishScore）只上线不自动提交收录——
 	// 提交低质内容浪费 IndexNow 配额并拉低站点头信任（Bing 对站点整体信任
 	// 下降 = 全站爬取频率下降）；评分 0 的历史数据正常提交（无评分可判）。
-	if status == "published" && uc.urlSubmitter != nil && uc.publicBaseURL != "" &&
-		(oc.Score.Total == 0 || oc.Score.Total >= entity.WarnPublishScore) {
-		publicURL := strings.TrimRight(uc.publicBaseURL, "/") + "/public/articles/" + oc.ID
-		_ = uc.urlSubmitter.SubmitURLs(ctx, []string{publicURL})
+	// 结果与原因写入 outcome.Warnings 随响应下发——不再只进日志（用户黑洞修复）。
+	if status == "published" {
+		switch {
+		case uc.urlSubmitter == nil || uc.publicBaseURL == "":
+			outcome.Warnings = append(outcome.Warnings,
+				"收录服务未配置——内容已上线，但暂无法通知搜索引擎收录（可联系平台管理员）")
+		case oc.Score.Total > 0 && oc.Score.Total < entity.WarnPublishScore:
+			outcome.Warnings = append(outcome.Warnings, fmt.Sprintf(
+				"评分 %.0f 分一般——已发布，但未自动提交收录（低质内容会拉低全站收录信任）。建议优化后点「补提交收录」",
+				oc.Score.Total))
+		default:
+			publicURL := strings.TrimRight(uc.publicBaseURL, "/") + "/public/articles/" + oc.ID
+			_ = uc.urlSubmitter.SubmitURLs(ctx, []string{publicURL})
+			outcome.IndexSubmitted = true
+		}
 	}
-	return oc, nil
+	return oc, outcome, nil
 }
 
 // ResubmitIndex 商户端自助补提交收录（IndexNow）——重新通知搜索引擎抓取指定已发布内容。

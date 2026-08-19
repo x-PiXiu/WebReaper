@@ -45,6 +45,7 @@ type DiagnoseInput struct {
 }
 
 // Diagnose 执行诊断：聚合监测结果 → 分析问题 → 生成改进建议。
+// 独立诊断端点（/geo/brands/:id/diagnose）入口——扣 diagnose 配额。
 func (uc *DiagnoseUseCase) Diagnose(ctx context.Context, in DiagnoseInput) (entity.DiagnoseReport, error) {
 	// 配额检查（X-01：diagnose 场景；超限 402）
 	if uc.quotaGate != nil {
@@ -55,7 +56,19 @@ func (uc *DiagnoseUseCase) Diagnose(ctx context.Context, in DiagnoseInput) (enti
 	// 用量计量上下文（X-01）：诊断内部的 LLM 调用（llmSuggestions）落 usages 表，
 	// 场景=diagnose——配额计数与成本统计同源。
 	ctx = port.WithUsageContext(ctx, in.TenantID, "diagnose")
+	return uc.diagnoseCore(ctx, in)
+}
 
+// DiagnoseInternal 供其他用例内部调用的诊断（如内容生成"按诊断建议生成"）。
+// 不扣 diagnose 配额、用量归入调用方场景（content-gen）——修复双扣：
+// 此前内容生成勾选诊断会同时消耗 diagnose + content-gen 两个配额，
+// 与 SetQuotaGate 注释"按诊断建议生成走 content-gen 配额"的声明矛盾。
+func (uc *DiagnoseUseCase) DiagnoseInternal(ctx context.Context, in DiagnoseInput) (entity.DiagnoseReport, error) {
+	return uc.diagnoseCore(ctx, in)
+}
+
+// diagnoseCore 诊断主体（配额/计量由入口方法负责）。
+func (uc *DiagnoseUseCase) diagnoseCore(ctx context.Context, in DiagnoseInput) (entity.DiagnoseReport, error) {
 	brand, err := uc.brandRepo.FindByID(ctx, in.TenantID, in.BrandID)
 	if err != nil {
 		return entity.DiagnoseReport{}, fmt.Errorf("品牌不存在: %w", err)

@@ -159,6 +159,8 @@ type monitoringResultView struct {
 	SelfSourceCount      int       `json:"self_source_count"` // 自营公开站被引用次数（>0 = 内容真的被 AI 引用）
 	FirstPickCount       int       `json:"first_pick_count"`  // 被提及且位次=1 的采样数（首选率分子；迁移 045）
 	SemanticDegraded     bool      `json:"semantic_degraded"` // 采样中出现过解析降级（情感/位次可能失真）
+	// MentionLabel 提及率可读等级（服务端领域规则下发——此前前端被迫重写同一映射，口径漂移）
+	MentionLabel string `json:"mention_label"`
 }
 
 func monitoringResultToView(r entity.MonitoringResult) monitoringResultView {
@@ -184,6 +186,7 @@ func monitoringResultToView(r entity.MonitoringResult) monitoringResultView {
 		SelfSourceCount:      r.SelfSourceCount,
 		FirstPickCount:       r.FirstPickCount,
 		SemanticDegraded:     r.SemanticDegraded,
+		MentionLabel:         r.MentionRateLabel(),
 	}
 }
 
@@ -203,6 +206,8 @@ func geoScoreToView(s entity.GEOScore) gin.H {
 		"structure":   s.Structure,
 		"uniqueness":  s.Uniqueness,
 		"recency":     s.Recency,
+		// 等级（A/B/C/D）服务端领域规则下发——此前 Level() 只活在代码里，前端无从展示
+		"level": s.Level(),
 	}
 }
 
@@ -217,9 +222,12 @@ func optimizedContentToView(c entity.OptimizedContent) gin.H {
 		"optimized_text": c.OptimizedText,
 		"version":        c.Version,
 		"score":          geoScoreToView(c.Score),
-		"status":         c.Status,
-		"index_status":   c.IndexStatus,
-		"created_at":     c.CreatedAt,
+		// 评分来源标记（P1）：落库分数 = LLM 深度评审；前端据此区分"深度评审"与
+		// 优化前的"规则快筛"（score_before），两套量纲不再混排无标记
+		"score_type":   "llm",
+		"status":       c.Status,
+		"index_status": c.IndexStatus,
+		"created_at":   c.CreatedAt,
 	}
 }
 
@@ -601,6 +609,8 @@ func (h *GEOHandler) HandleOptimizeContent(c *gin.Context) {
 	// 优化结果视图：原字段向后兼容 + 新增前后对比反馈
 	view := optimizedContentToView(oc.Content)
 	view["score_before"] = geoScoreToView(oc.ScoreBefore)
+	// 优化前分数为免费规则快筛（非 LLM 深评）——来源标记随数据下发，量纲不混排
+	view["score_before_type"] = "rule"
 	view["recommendations"] = oc.Recommendations
 	success(c, view)
 }
@@ -617,6 +627,8 @@ func (h *GEOHandler) HandleListContents(c *gin.Context) {
 
 // HandleSetContentStatus POST /api/v1/geo/brands/:id/contents/:contentId/status
 // 内容状态流转：draft ↔ published（published 后公开站点可访问，AI 引擎可爬取）。
+// 响应在内容视图上附加 index_submitted / publish_warnings——发布是否已提交收录、
+// 低分未提交等警告随结果下发（修复"发布成功但永不收录"的用户黑洞）。
 func (h *GEOHandler) HandleSetContentStatus(c *gin.Context) {
 	contentID := c.Param("contentId")
 	var req struct {
@@ -626,12 +638,15 @@ func (h *GEOHandler) HandleSetContentStatus(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	oc, err := h.contentUC.SetStatus(c.Request.Context(), middleware.CurrentTenantID(c), contentID, req.Status)
+	oc, outcome, err := h.contentUC.SetStatus(c.Request.Context(), middleware.CurrentTenantID(c), contentID, req.Status)
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	success(c, optimizedContentToView(oc))
+	view := optimizedContentToView(oc)
+	view["index_submitted"] = outcome.IndexSubmitted
+	view["publish_warnings"] = outcome.Warnings
+	success(c, view)
 }
 
 // HandleDeleteContent DELETE /api/v1/geo/brands/:id/contents/:contentId

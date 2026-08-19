@@ -252,19 +252,16 @@ func (uc *NearbyUseCase) GetRanking(ctx context.Context, tenantID, brandID, type
 			}
 		}
 	}
-	// 自己的 AI 提及率（最近监测均值；独立于 AI 榜数据源——监测口径不变）
+	// 自己的 AI 提及率（最近监测均值；独立于 AI 榜数据源——监测口径不变）。
+	// 口径修复（P1）：此前只平均 MentionRate>0 的记录——0% 结果被剔除导致数值系统性
+	// 上偏，与监测/健康分的全量均值口径不一致。现纳入全部记录。
 	latest, rErr := uc.resultRepo.LatestByBrand(ctx, tenantID, brandID)
 	if rErr == nil && len(latest) > 0 {
-		rateSum, rateCnt := 0.0, 0
+		rateSum := 0.0
 		for _, r := range latest {
-			if r.MentionRate > 0 {
-				rateSum += r.MentionRate
-				rateCnt++
-			}
+			rateSum += r.MentionRate
 		}
-		if rateCnt > 0 {
-			view.OwnRate = rateSum / float64(rateCnt)
-		}
+		view.OwnRate = rateSum / float64(len(latest))
 	}
 	// 自己的品牌进入 AI 榜（v3）：作为高亮条目参与完整排序——老板要看到自己
 	// 在榜单里的真实排名（"我在第几"），而不只是一行提及率文字。

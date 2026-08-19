@@ -174,9 +174,9 @@ func (uc *HealthUseCase) compute(ctx context.Context, tenantID string) (HealthRe
 		tenantCounts.published += cc.published
 	}
 
-	// 各品牌趋势 + 最新一条（情感/首选/信源的聚合基——与原前端 geoHealth 口径一致）
+	// 各品牌趋势 + 每关键词最新一条（统一聚合基——见 summarizeBrandTrend 注释）
 	bts := make([]brandTrend, 0, len(brands))
-	var allLatest []*entity.MonitoringResult
+	var allKeyLatest []*entity.MonitoringResult
 	for _, b := range brands {
 		trend, tErr := uc.resultRepo.Trend(ctx, tenantID, b.ID, 30)
 		if tErr != nil {
@@ -184,8 +184,8 @@ func (uc *HealthUseCase) compute(ctx context.Context, tenantID string) (HealthRe
 		}
 		bt := summarizeBrandTrend(b.ID, b.Name, trend)
 		bts = append(bts, bt)
-		if bt.Latest != nil {
-			allLatest = append(allLatest, bt.Latest)
+		for i := range bt.KeyLatest {
+			allKeyLatest = append(allKeyLatest, &bt.KeyLatest[i])
 		}
 	}
 
@@ -198,7 +198,7 @@ func (uc *HealthUseCase) compute(ctx context.Context, tenantID string) (HealthRe
 		}
 		avgRate = s / float64(len(bts))
 	}
-	indicators := computeHealthIndicators(avgRate, allLatest, tenantCounts.total, tenantCounts.published)
+	indicators := computeHealthIndicators(avgRate, allKeyLatest, tenantCounts.total, tenantCounts.published)
 	report := HealthReport{
 		Total:      computeHealthTotal(indicators),
 		Indicators: indicators,
@@ -217,9 +217,9 @@ func (uc *HealthUseCase) compute(ctx context.Context, tenantID string) (HealthRe
 	// 品牌级健康分（含内容资产——口径与总分统一）
 	for _, bt := range bts {
 		cc := brandCounts[bt.BrandID]
-		var brandLatest []*entity.MonitoringResult
-		if bt.Latest != nil {
-			brandLatest = append(brandLatest, bt.Latest)
+		brandLatest := make([]*entity.MonitoringResult, 0, len(bt.KeyLatest))
+		for i := range bt.KeyLatest {
+			brandLatest = append(brandLatest, &bt.KeyLatest[i])
 		}
 		bi := computeHealthIndicators(bt.AvgRate, brandLatest, cc.total, cc.published)
 		report.Brands = append(report.Brands, BrandHealth{
@@ -237,22 +237,48 @@ type brandTrend struct {
 	BrandID string
 	Name    string
 	Trend   []entity.MonitoringResult
-	AvgRate float64              // 品牌平均提及率（trend 均值；无数据=0）
-	Latest  *entity.MonitoringResult // 最新一条（probed_at 最大）
+	// KeyLatest 每关键词（跨引擎）最新一条——健康分统一聚合基。
+	// 口径统一（P1）：此前覆盖指数用 Trend(30) 均值、情感/首选/信源用每品牌最新 1 条、
+	// 竞品用每关键词最新——三套并存导致单品牌多关键词时情感/首选只基于 1 条记录，
+	// 与采样降噪哲学矛盾。现全部统一为"每关键词最新"。
+	KeyLatest []entity.MonitoringResult
+	// AvgRate 品牌平均提及率（KeyLatest 均值；无数据=0）
+	AvgRate float64
+	// Latest 全品牌最新一条（时间戳用途，保留）
+	Latest *entity.MonitoringResult
 }
 
 // summarizeBrandTrend 趋势摘要（纯函数）。
 func summarizeBrandTrend(brandID, name string, trend []entity.MonitoringResult) brandTrend {
-	bt := brandTrend{BrandID: brandID, Name: name, Trend: trend}
+	bt := brandTrend{BrandID: brandID, Name: name, Trend: trend, KeyLatest: latestByKeywordTrend(trend)}
 	var sum float64
-	for _, r := range trend {
+	for _, r := range bt.KeyLatest {
 		sum += r.MentionRate
 	}
-	if len(trend) > 0 {
-		bt.AvgRate = sum / float64(len(trend))
+	if len(bt.KeyLatest) > 0 {
+		bt.AvgRate = sum / float64(len(bt.KeyLatest))
 	}
 	bt.Latest = latestOf(trend)
 	return bt
+}
+
+// latestByKeywordTrend 每关键词（跨引擎）取最新一条（统一聚合基的纯函数实现）。
+func latestByKeywordTrend(trend []entity.MonitoringResult) []entity.MonitoringResult {
+	best := make(map[string]entity.MonitoringResult)
+	order := make([]string, 0)
+	for _, r := range trend {
+		if cur, ok := best[r.KeywordID]; !ok {
+			best[r.KeywordID] = r
+			order = append(order, r.KeywordID)
+		} else if r.ProbedAt.After(cur.ProbedAt) {
+			best[r.KeywordID] = r
+		}
+	}
+	out := make([]entity.MonitoringResult, 0, len(order))
+	for _, k := range order {
+		out = append(out, best[k])
+	}
+	return out
 }
 
 // computeHealthIndicators 五指数合成（纯函数——表驱动测试）。
@@ -335,24 +361,33 @@ func computeHealthTotal(i HealthIndicators) float64 {
 	)
 }
 
-// prevHealthTotal 上一期总分：每品牌取 cutoff 前窗口内最新一条重算（无历史返回 nil）。
+// prevHealthTotal 上一期总分：每品牌取 cutoff 前窗口内每关键词最新一条重算（无历史返回 nil）。
+// 聚合基与当前口径一致（per-keyword latest——见 brandTrend.KeyLatest 注释）。
 func prevHealthTotal(bts []brandTrend, totalContents, publishedContents int, cutoff time.Time) *float64 {
 	var prevLatest []*entity.MonitoringResult
 	var avgSum float64
 	hasHistory := false
 	for _, bt := range bts {
-		var prevLatestOfBrand *entity.MonitoringResult
+		best := make(map[string]entity.MonitoringResult)
 		for i := range bt.Trend {
 			r := bt.Trend[i]
-			if !r.ProbedAt.After(cutoff) && (prevLatestOfBrand == nil || r.ProbedAt.After(prevLatestOfBrand.ProbedAt)) {
-				prevLatestOfBrand = &bt.Trend[i]
+			if !r.ProbedAt.After(cutoff) {
+				if cur, ok := best[r.KeywordID]; !ok || r.ProbedAt.After(cur.ProbedAt) {
+					best[r.KeywordID] = r
+				}
 			}
 		}
-		if prevLatestOfBrand != nil {
-			hasHistory = true
-			avgSum += prevLatestOfBrand.MentionRate
-			prevLatest = append(prevLatest, prevLatestOfBrand)
-		} // 无历史品牌按 0 计入平均分母（与当前口径一致）
+		if len(best) == 0 {
+			continue // 无历史品牌按 0 计入平均分母（与当前口径一致）
+		}
+		hasHistory = true
+		var brandSum float64
+		for _, r := range best {
+			brandSum += r.MentionRate
+			rr := r
+			prevLatest = append(prevLatest, &rr)
+		}
+		avgSum += brandSum / float64(len(best))
 	}
 	if !hasHistory {
 		return nil
