@@ -18,12 +18,12 @@ interface PromptTemplate {
 const FORMAT_LABELS: Record<string, string> = {
   'content-generate': '内容生成（系统提示词）',
   'content-optimize': '内容优化（系统提示词）',
-  'geo_format_article': '📄 SEO 文章格式',
-  'geo_format_review': '📝 点评文案格式',
-  'geo_format_xiaohongshu': '📕 小红书笔记格式',
-  'geo_format_script': '🎬 视频口播脚本格式',
-  'geo_format_faq': '❓ FAQ 问答格式',
-  'geo_format_comparison': '⚖️ 对比评测格式',
+  'geo_format_article': 'SEO 文章格式',
+  'geo_format_review': '点评文案格式',
+  'geo_format_xiaohongshu': '小红书笔记格式',
+  'geo_format_script': '视频口播脚本格式',
+  'geo_format_faq': 'FAQ 问答格式',
+  'geo_format_comparison': '对比评测格式',
 }
 
 // 提示词模板（GEO 内容引擎域）：内容生成/优化系统提示词 + 各格式输出指令——热更新即时生效。

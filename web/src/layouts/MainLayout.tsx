@@ -127,7 +127,7 @@ export function AppShell({
     ...keywords.slice(0, 30).map((k: { id: string; term: string }) => ({
       value: `关键词 · ${k.term}`,
       label: `关键词 · ${k.term}`,
-      target: '/m/keywords',
+      target: '/m/checkup?tab=records',
     })),
     ...publishJobs.slice(0, 20).map((j: { id: string; title: string; platform: string }) => ({
       value: `发布任务 · ${j.title || j.id}`,
@@ -316,11 +316,11 @@ export function AppShell({
 // 主动唤醒入口（提及率下降/竞品反超/自动复测完成/排期发布完成）。
 // 数据走 hooks/useNotifications（与工作台/通知中心共享缓存，已读联动失效）。
 const NOTIFY_TYPE_LABEL: Record<string, string> = {
-  mention_drop: '⚠️ 提及率下降',
-  competitor_overtake: '⚔️ 竞品反超',
-  recheck_done: '✅ 复测完成',
-  scheduled_publish: '📤 排期发布',
-  system: '🔔 系统',
+  mention_drop: '提及率下降',
+  competitor_overtake: '竞品反超',
+  recheck_done: '复测完成',
+  scheduled_publish: '排期发布',
+  system: '系统通知',
 }
 
 function NotificationBell() {

@@ -132,14 +132,10 @@ export default function Dashboard() {
 
   return (
     <div className="wr-page-content">
-      {/* 标题 */}
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: '-0.02em', color: 'var(--wr-text-primary)' }}>
-          平台总览{username ? ` · ${username}` : ''}
-        </h1>
-        <Text type="secondary" style={{ fontSize: 14 }}>
-          SaaS 运营核心指标 · GEO 内容引擎运行概况
-        </Text>
+      {/* 标题（统一 wr-page-header 规范——与商户端/其余 admin 页一致） */}
+      <div className="wr-page-header">
+        <h1>平台总览{username ? ` · ${username}` : ''}</h1>
+        <p>SaaS 运营核心指标 · GEO 内容引擎运行概况</p>
       </div>
 
       {statsLoading && <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}
@@ -164,7 +160,7 @@ export default function Dashboard() {
       <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8, paddingLeft: 4 }}>平台规模</Text>
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
-          <StatCard label="商户数" value={stats?.users ?? 0} sublabel="平台注册商户" gradient="linear-gradient(180deg,#6366f1,#4f46e5)" onClick={() => navigate('/admin/users')} />
+          <StatCard label="商户数" value={stats?.users ?? 0} sublabel="平台注册商户" gradient="linear-gradient(180deg,#7c6cff,#5b48e8)" onClick={() => navigate('/admin/users')} />
         </Col>
         <Col xs={12} md={6}>
           <StatCard label="品牌资产" value={stats?.brands ?? 0} sublabel="GEO 监测品牌" gradient="linear-gradient(180deg,#f59e0b,#d97706)" onClick={() => navigate('/admin/brands')} />
@@ -249,7 +245,7 @@ export default function Dashboard() {
       {(industryMissing > 0 || sleepyMerchants > 0 || draftBacklog > 0) && (
         <Card className="wr-glass-card" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16, borderColor: 'rgba(245,158,11,0.35)' }}>
           <Space wrap size={16}>
-            <Text strong style={{ fontSize: 14 }}>⚠️ 需要关注</Text>
+            <Text strong style={{ fontSize: 14 }}>需要关注</Text>
             {industryMissing > 0 && (
               <Text style={{ fontSize: 13 }}>{industryMissing} 个品牌未填行业
                 <Text type="secondary" style={{ fontSize: 11 }}>（行业看板全落"未分类"）</Text>

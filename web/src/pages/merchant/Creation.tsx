@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, message,
-  Table, Modal, Empty, Popconfirm, Tooltip, Alert, Badge, Segmented, Collapse,
+  Table, Modal, Empty, Popconfirm, Tooltip, Alert, Badge, Collapse, AutoComplete,
 } from 'antd'
 import {
   VideoCameraOutlined, PictureOutlined, AudioOutlined, RobotOutlined, AppstoreOutlined,
@@ -43,6 +43,11 @@ const CATEGORIES = [
   { key: 'digital_human', label: '数字人', icon: <RobotOutlined /> },
   { key: 'other', label: '其他', icon: <AppstoreOutlined /> },
 ]
+
+// 傻瓜化：12 种模式收敛为 3 个高频卡片 + "更多模式"折叠——
+// 90% 用户只用文生视频/图生视频/文生图，其余 9 种是专业功能，默认收起
+const QUICK_MODES = ['text2video', 'img2video', 'text2image']
+const MORE_MODES = Object.keys(SUBTYPE_META).filter((st) => !QUICK_MODES.includes(st))
 
 const STATE_META: Record<string, { color: string; label: string }> = {
   created: { color: 'default', label: '排队中' },
@@ -184,7 +189,7 @@ function parseTaskParams(r: GenerationTask): Record<string, any> {
 }
 
 // ---- 创作工作台（即梦式布局：左画布 + 右面板）----
-export default function CreationWorkbench() {
+export default function CreationWorkbench({ embedded }: { embedded?: boolean }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('create')
@@ -249,6 +254,29 @@ export default function CreationWorkbench() {
     const entry = modelEntries.find(e => e.model === m)
     setSubType(entry?.endpoints[0]?.sub_type || '')
   }
+
+  // 快速开始：点模式卡片 = 自动选好该模式的最佳模型（支持端点最多的），用户只管写提示词
+  const pickMode = (st: string) => {
+    const candidates = modelEntries.filter(e => e.endpoints.some(ep => ep.sub_type === st))
+    if (candidates.length === 0) return
+    const best = [...candidates].sort((a, b) => b.endpoints.length - a.endpoints.length)[0]
+    setCategory(endpointCategory(st))
+    setModel(best.model)
+    setSubType(st)
+    setParams({})
+    setCanvasIdx(0)
+  }
+
+  // 我的音色库：声音克隆成功的任务里用过的 voice_id 自动入库——不再要求用户记字符串
+  const clonedVoices = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of tasks) {
+      if (t.sub_type !== 'voice_clone' || t.state !== 'success') continue
+      const vid = parseTaskParams(t).voice_id
+      if (typeof vid === 'string' && vid) ids.add(vid)
+    }
+    return Array.from(ids)
+  }, [tasks])
 
   // 引用能力（该模式支持 @引用 的类型）
   const refKinds = useMemo(() => {
@@ -352,7 +380,7 @@ export default function CreationWorkbench() {
     }
     // 必填校验（服务端兜底）
     if (subType === 'tts' && !clean.text) { message.warning('请输入合成文本'); return }
-    if (subType === 'tts' && !(clean.voice_setting_voice_id as string)) { message.warning('请输入音色 ID'); return }
+    if (subType === 'tts' && !(clean.voice_setting_voice_id as string)) { message.warning('请先选择或输入一个音色'); return }
     if (subType === 'voice_clone' && !submitRefs.some(r => r.kind === 'audio') && !clean.audio_url) { message.warning('请引用音频素材（声音克隆的原料）'); return }
     if (subType === 'digital_human' && !submitRefs.some(r => r.kind === 'image') && !clean.image) { message.warning('请引用人像图片'); return }
     if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { message.warning('请至少添加一个音效事件'); return }
@@ -370,6 +398,33 @@ export default function CreationWorkbench() {
       off_peak: offPeak,
       watermark,
     })
+  }
+
+  // ---- 模式卡片（快速开始区：点卡片 = 选好模式 + 最佳模型）----
+  const modeCard = (st: string) => {
+    const meta = SUBTYPE_META[st]
+    const available = modelEntries.some(e => e.endpoints.some(ep => ep.sub_type === st))
+    const active = subType === st && !!model
+    const icon = CATEGORIES.find(c => c.key === meta.category)?.icon
+    return (
+      <div
+        key={st}
+        onClick={() => available && pickMode(st)}
+        style={{
+          padding: '12px 14px', borderRadius: 12,
+          cursor: available ? 'pointer' : 'not-allowed', opacity: available ? 1 : 0.45,
+          border: active ? '1.5px solid var(--wr-primary)' : '1px solid var(--wr-border)',
+          background: active ? 'var(--wr-primary-bg)' : 'var(--wr-bg-surface)',
+          display: 'flex', gap: 10, alignItems: 'center', transition: 'all 200ms cubic-bezier(0.2, 0, 0, 1)',
+        }}
+      >
+        <span style={{ fontSize: 22, color: 'var(--wr-primary)', flexShrink: 0 }}>{icon}</span>
+        <div style={{ minWidth: 0 }}>
+          <Text strong style={{ fontSize: 13.5 }}>{meta.label}</Text>
+          <Text type="secondary" style={{ display: 'block', fontSize: 11.5, lineHeight: 1.4 }}>{meta.desc}</Text>
+        </div>
+      </div>
+    )
   }
 
   // ---- 画布：当前模式所有成功产物（多结果缩略条——即梦式）----
@@ -481,9 +536,18 @@ export default function CreationWorkbench() {
       case 'voice_id':
         return (
           <div key="voice_id" style={{ marginBottom: 12 }}>
-            <Text strong style={{ fontSize: 13 }}>声音 ID</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>8-256 位，字母开头（复用音色）</Text>
-            <Input size="small" style={{ marginTop: 4, maxWidth: 300 }} value={get('voice_id')} onChange={e => set('voice_id', e.target.value)} placeholder="如 my-voice-001" />
+            <Text strong style={{ fontSize: 13 }}>音色</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+              {clonedVoices.length > 0 ? '从我的音色中选择，或输入新名称' : '给音色起个名（字母开头，如 my-voice-001），克隆后可反复用'}
+            </Text>
+            <AutoComplete
+              style={{ marginTop: 4, maxWidth: 300 }}
+              value={get('voice_id')}
+              onChange={(v) => set('voice_id', v)}
+              options={clonedVoices.map(v => ({ value: v, label: v }))}
+              filterOption={(input, option) => String(option?.value ?? '').toLowerCase().includes(String(input).toLowerCase())}
+              placeholder={clonedVoices.length > 0 ? '我的音色 / 新名称' : '如 my-voice-001'}
+            />
           </div>
         )
       case 'voice_settings':
@@ -731,14 +795,14 @@ export default function CreationWorkbench() {
           size="small" ghost
           items={[{
             key: 'adv',
-            label: <span><SettingOutlined style={{ marginRight: 6 }} />高级参数</span>,
+            label: <span><SettingOutlined style={{ marginRight: 6 }} />高级设置（默认已调好，一般不用改）</span>,
             children: <div>{fieldsFor(subType).map(k => renderField(k))}</div>,
           }]}
           style={{ marginBottom: 14 }}
         />
       )}
       {cap && fieldsFor(subType).length === 0 && subType === 'tts' && (
-        <Alert type="info" showIcon style={{ marginBottom: 14 }} message="语音合成：音色 ID 为必填（后续从声音克隆任务复用）" />
+        <Alert type="info" showIcon style={{ marginBottom: 14 }} message="语音合成：需要先选一个音色（可用「声音克隆」创建自己的音色，之后反复使用）" />
       )}
 
       {/* 提交区 */}
@@ -991,13 +1055,16 @@ export default function CreationWorkbench() {
   return (
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h1>多媒体创作</h1>
-            <p>视频 / 图片 / 音频生成——属于「内容生成」子能力</p>
+        {/* 嵌入内容中心时隐藏页头（父层已有标题与切换） */}
+        {!embedded && (
+          <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+            <div>
+              <h1>多媒体创作</h1>
+              <p>视频 / 图片 / 音频生成——属于「内容生成」子能力</p>
+            </div>
+            <Button type="link" onClick={() => navigate('/m/studio')}>← 返回内容生成</Button>
           </div>
-          <Button type="link" onClick={() => navigate('/m/content')}>← 返回内容生成</Button>
-        </div>
+        )}
 
         <Tabs
           activeKey={activeTab}
@@ -1008,11 +1075,25 @@ export default function CreationWorkbench() {
               label: <span><Space size={6}><ThunderboltOutlined />创作</Space></span>,
               children: (
                 <>
-                  {/* 分类 Tab（模型库过滤） */}
-                  <Segmented
-                    block value={category} onChange={(v) => { setCategory(v as string); setModel(''); setSubType(''); setParams({}) }}
-                    options={CATEGORIES.map(c => ({ value: c.key, label: <span><Space size={5}>{c.icon}{c.label}</Space></span> }))}
-                    style={{ marginBottom: 16 }}
+                  {/* 快速开始卡片（傻瓜化：一键选好模式+模型；替换原 5 分类 Segmented） */}
+                  <div style={{ marginBottom: 10 }}>
+                    <Text strong style={{ display: 'block', marginBottom: 8 }}>想创作什么？</Text>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+                      {QUICK_MODES.map((st) => modeCard(st))}
+                    </div>
+                  </div>
+                  {/* 专业模式收进折叠区（数字人/声音克隆/配音/音乐等） */}
+                  <Collapse
+                    ghost size="small" style={{ marginBottom: 16 }}
+                    items={[{
+                      key: 'more',
+                      label: <span style={{ fontSize: 13 }}>更多模式（配音 / 克隆音色 / 数字人 / 音乐 等 {MORE_MODES.length} 种进阶玩法）</span>,
+                      children: (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+                          {MORE_MODES.map((st) => modeCard(st))}
+                        </div>
+                      ),
+                    }]}
                   />
                   <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                     {canvasView}

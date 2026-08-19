@@ -16,9 +16,13 @@ const fontFamily = "'DM Sans', 'Noto Sans SC', -apple-system, 'Segoe UI', 'PingF
 const darkThemeConfig = {
   algorithm: antdTheme.darkAlgorithm,
   token: {
-    colorPrimary: '#6366f1',
-    colorInfo: '#6366f1',
-    colorSuccess: '#22d3ee',
+    // 主色与 index.css 的 --wr-primary 统一（此前 #6366f1 与 #7c6cff 两套紫并存）
+    colorPrimary: '#7c6cff',
+    colorInfo: '#7c6cff',
+    // 语义色对齐 CSS 变量（--wr-success/warning/danger）
+    colorSuccess: '#4ade80',
+    colorWarning: '#fbbf24',
+    colorError: '#fb7185',
     borderRadius: 10,
     borderRadiusLG: 14,
     fontFamily,
@@ -36,24 +40,25 @@ const darkThemeConfig = {
     Layout: { siderBg: '#0d0d14', headerBg: 'rgba(18,18,24,0.8)', headerHeight: 60, bodyBg: '#0a0a0f' },
     Menu: {
       darkItemBg: 'transparent', darkSubMenuItemBg: 'transparent',
-      darkItemSelectedBg: 'rgba(99,102,241,0.15)', darkItemHoverBg: 'rgba(255,255,255,0.04)',
-      darkItemColor: '#71717a', darkItemSelectedColor: '#818cf8',
+      darkItemSelectedBg: 'rgba(124,108,255,0.16)', darkItemHoverBg: 'rgba(255,255,255,0.04)',
+      darkItemColor: '#71717a', darkItemSelectedColor: '#a89bff',
       itemBorderRadius: 8, itemMarginInline: 8,
     },
     Card: { colorBgContainer: '#121218', headerBg: 'transparent' },
     Table: { headerBg: '#1a1a24', headerColor: '#a1a1aa', rowHoverBg: '#1a1a24', borderColor: 'rgba(255,255,255,0.06)' },
-    Button: { primaryShadow: '0 0 16px rgba(99,102,241,0.3)', fontWeight: 500 },
+    Button: { primaryShadow: '0 0 16px rgba(124,108,255,0.3)', fontWeight: 500 },
   },
 }
 
 const lightThemeConfig = {
   algorithm: antdTheme.defaultAlgorithm,
   token: {
-    colorPrimary: '#6366f1',
-    colorInfo: '#6366f1',
-    colorSuccess: '#10b981',
-    colorWarning: '#f59e0b',
-    colorError: '#ef4444',
+    // 主色与 index.css 亮色 --wr-primary 统一；语义色对齐 CSS 变量
+    colorPrimary: '#6e5df6',
+    colorInfo: '#6e5df6',
+    colorSuccess: '#16a34a',
+    colorWarning: '#d97706',
+    colorError: '#dc2626',
     borderRadius: 10,
     borderRadiusLG: 14,
     fontFamily,
@@ -71,8 +76,8 @@ const lightThemeConfig = {
     Layout: { siderBg: '#ffffff', headerBg: '#ffffff', headerHeight: 60, bodyBg: '#f6f7f9' },
     Menu: {
       itemBg: 'transparent', subMenuItemBg: 'transparent',
-      itemSelectedBg: 'rgba(99,102,241,0.08)', itemHoverBg: 'rgba(0,0,0,0.03)',
-      itemColor: '#71717a', itemSelectedColor: '#6366f1',
+      itemSelectedBg: 'rgba(110,93,246,0.08)', itemHoverBg: 'rgba(0,0,0,0.03)',
+      itemColor: '#71717a', itemSelectedColor: '#6e5df6',
       itemBorderRadius: 8, itemMarginInline: 8,
     },
     Card: { colorBgContainer: '#ffffff', headerBg: 'transparent' },

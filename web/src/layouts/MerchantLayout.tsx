@@ -1,8 +1,4 @@
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { AppShell, type NavItem } from './MainLayout'
-import { businessApi } from '../api/business'
-import type { Brand } from '../types/api'
 import {
   DashboardOutlined,
   AppstoreOutlined,
@@ -11,16 +7,15 @@ import {
   ExportOutlined,
   MessageOutlined,
   CrownOutlined,
-  EnvironmentOutlined,
   BellOutlined,
-  FundOutlined,
-  VideoCameraOutlined,
 } from '@ant-design/icons'
 
-// 商户端导航：按 GEO 闭环流程分组（对齐摘星五部曲：立身份→建资产→发全域→盯数据）。
-// 设计动机：此前 8 个功能页平行铺开，用户不知道"先做什么、后做什么"——
-// 按阶段组织后，菜单本身就是工作流：从上到下即执行顺序，每阶段 1-3 个页面。
-const baseMenu: NavItem[] = [
+// 商户端导航：四步主线（建档案 → 做体检 → 造内容 → 发出去）——
+// 菜单本身就是用户旅程：从上到下走完即见效，每步一个入口。
+// （原"附近同行/关键词工程/内容生成/多媒体创作/AI 可见度"五个功能页已收编进
+//   AI 体检与内容中心的子层；附近同行保留直链路由，菜单不再显示。
+//   本地/线上品牌差异在页面内呈现，菜单不再动态裁剪——减少菜单跳动。）
+const menu: NavItem[] = [
   {
     key: 'overview', label: '总览',
     children: [
@@ -28,30 +23,27 @@ const baseMenu: NavItem[] = [
     ],
   },
   {
-    key: 'identity', label: '① 立身份',
+    key: 'profile', label: '① 建档案',
     children: [
-      { key: '/m/brands', label: '品牌管理', icon: <AppstoreOutlined /> },
-      { key: '/m/nearby', label: '附近同行', icon: <EnvironmentOutlined /> },
+      { key: '/m/brands', label: '品牌档案', icon: <AppstoreOutlined /> },
     ],
   },
   {
-    key: 'asset', label: '② 建资产',
+    key: 'checkup', label: '② 做体检',
     children: [
-      { key: '/m/keywords', label: '关键词工程', icon: <SearchOutlined /> },
-      { key: '/m/content', label: '内容生成', icon: <EditOutlined /> },
-      { key: '/m/creation', label: '多媒体创作', icon: <VideoCameraOutlined /> },
+      { key: '/m/checkup', label: 'AI 体检', icon: <SearchOutlined /> },
     ],
   },
   {
-    key: 'distribute', label: '③ 发全域',
+    key: 'studio', label: '③ 造内容',
     children: [
-      { key: '/m/distribution', label: '社媒分发', icon: <ExportOutlined /> },
+      { key: '/m/studio', label: '内容中心', icon: <EditOutlined /> },
     ],
   },
   {
-    key: 'monitor', label: '④ 盯数据',
+    key: 'distribute', label: '④ 发出去',
     children: [
-      { key: '/m/indexing-report', label: 'AI 可见度', icon: <FundOutlined /> },
+      { key: '/m/distribution', label: '分发中心', icon: <ExportOutlined /> },
     ],
   },
   {
@@ -65,23 +57,7 @@ const baseMenu: NavItem[] = [
 ]
 
 export default function MerchantLayout() {
-  const { data: brands = [] } = useQuery({
-    queryKey: ['geo-brands'],
-    queryFn: () => businessApi.listBrands(),
-  })
-
-  const menu = useMemo(() => {
-    if (brands.length === 0) return baseMenu
-    const hasLocal = brands.some((b: Brand) => b.biz_type !== 'online')
-    if (hasLocal) return baseMenu
-    // 全部线上品牌：隐藏「附近同行」（门店/附近功能不适用）
-    return baseMenu.map(group => {
-      if (group.key === 'identity' && group.children) {
-        return { ...group, children: group.children.filter(item => item.key !== '/m/nearby') }
-      }
-      return group
-    })
-  }, [brands])
-
+  // noPaddingKeys 仅保留 Chat（自带全屏布局）——checkup/studio 恢复内容区外边距，
+  // 修复 Tab 与内容左右贴边（此前误入无外边距名单）
   return <AppShell menuItems={menu} brandName="智擎AI" brandIcon="智" noPaddingKeys={['/m/chat']} />
 }

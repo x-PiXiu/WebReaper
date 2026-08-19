@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { AgentConfig, LLMConfig, ToolView } from '../../types/api'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 export default function AgentConfigs() {
   const queryClient = useQueryClient()
@@ -220,11 +220,11 @@ export default function AgentConfigs() {
 
   return (
     <div>
-      {/* 标题区 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      {/* 标题区（统一 wr-page-header 规范） */}
+      <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
-          <Title level={4} style={{ margin: 0 }}>Agent 配置</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>管理 Agent、LLM 配置与工具启停；工具已全局可用，无需为 Agent 单独配置</Text>
+          <h1>Agent 配置</h1>
+          <p>管理 Agent、LLM 配置与工具启停；工具已全局可用，无需为 Agent 单独配置</p>
         </div>
         <Space>
           <Button onClick={openCreateLLM}>新建 LLM 配置</Button>

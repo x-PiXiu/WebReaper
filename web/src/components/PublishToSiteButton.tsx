@@ -17,7 +17,7 @@ export default function PublishToSiteButton({
   if (gate.blocked) {
     return (
       <Tooltip title={gate.hint}>
-        <Button size={size} disabled>发布到公开站</Button>
+        <Button size={size} disabled>发布（需先优化）</Button>
       </Tooltip>
     )
   }

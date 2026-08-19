@@ -196,6 +196,12 @@ export default function Knowledge() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* 标题区（统一 wr-page-header 规范） */}
+      <div className="wr-page-header">
+        <h1>知识库</h1>
+        <p>向量嵌入与向量库配置 · 行业采集 · 素材管理——生成内容时的参考资料来源</p>
+      </div>
+
       {/* ① 向量嵌入/向量库配置 */}
       <Card
         title={

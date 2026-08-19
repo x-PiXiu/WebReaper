@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Switch } from 'antd'
+import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Switch, Collapse, Segmented } from 'antd'
 import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -14,13 +14,13 @@ import type { Brand, Keyword, OptimizedContent } from '../../types/api'
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
 
-// GEO 5 维度配置（标签 + 取值 key）
-const DIMENSIONS: { label: string; key: keyof OptimizedContent['score'] }[] = [
-  { label: '权威性', key: 'authority' },
-  { label: '具体性', key: 'specificity' },
-  { label: '结构化', key: 'structure' },
-  { label: '独特性', key: 'uniqueness' },
-  { label: '时效性', key: 'recency' },
+// GEO 5 维度配置（标签 + 取值 key + 溯源说明——数据怎么来的，逐项人话）
+const DIMENSIONS: { label: string; key: keyof OptimizedContent['score']; tip: string }[] = [
+  { label: '权威性', key: 'authority', tip: '有没有数据、来源、专业依据——AI 更信任有据可查的内容' },
+  { label: '具体性', key: 'specificity', tip: '有没有具体数字和事实细节，而不是空话套话' },
+  { label: '结构化', key: 'structure', tip: '小标题分段清不清晰——结构清楚的内容 AI 更容易摘录引用' },
+  { label: '独特性', key: 'uniqueness', tip: '有没有别处没有的观点和信息——搬运内容不会被优先引用' },
+  { label: '时效性', key: 'recency', tip: '信息新不新鲜——提到近期时间和新事件的加分' },
 ]
 
 // 目标 AI 引擎偏好（GEO 优化侧差异：按引擎偏好调整内容格式，提高被引用概率）
@@ -32,24 +32,26 @@ const ENGINE_OPTIONS = [
   { value: 'doubao', label: '豆包' },
 ]
 
-// 内容格式选择（P1-5：线下品牌需要点评/小红书/脚本等短内容，不只长文章）
+// 想写什么内容（傻瓜化：场景化命名——让用户选"要干嘛"，不是选"格式参数"）
 const FORMAT_OPTIONS = [
-  { value: '', label: '📄 SEO 文章（默认）' },
-  { value: 'review', label: '📝 点评文案（大众点评风格）' },
-  { value: 'xiaohongshu', label: '📕 小红书笔记（种草风格）' },
-  { value: 'script', label: '🎬 视频口播脚本' },
-  { value: 'faq', label: '❓ FAQ 问答集' },
-  { value: 'comparison', label: '⚖️ 对比评测' },
-  { value: 'citation', label: '🔗 高引用结构（AI 易摘录/引用）' },
+  { value: '', label: '写一篇网站文章（默认）' },
+  { value: 'review', label: '写顾客好评风格的文案' },
+  { value: 'xiaohongshu', label: '写种草笔记（适合发小红书）' },
+  { value: 'script', label: '写短视频口播稿' },
+  { value: 'faq', label: '写常见问题解答' },
+  { value: 'comparison', label: '写和同行的对比评测' },
+  { value: 'citation', label: '写深度长文（最容易被 AI 引用）' },
 ]
 
-export default function Content() {
+export default function Content({ embedded }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   // 全局品牌上下文：与关键词/分发/监测页共享，跨页不丢
   const { brands, brandId: selectedBrand, setCurrentBrand } = useBrandContext()
   const [originalText, setOriginalText] = useState('')
   const [optimizing, setOptimizing] = useState(false)
+  // 傻瓜化：显式"帮我写 / 帮我改"切换（此前靠输入框空不空隐式决定——用户无感知）
+  const [mode, setMode] = useState<'write' | 'improve'>('write')
   const [result, setResult] = useState<OptimizedContent | null>(null)
   const [genKeywords, setGenKeywords] = useState<string[]>([])
   const [targetEngine, setTargetEngine] = useState<string>('') // 目标 AI 引擎偏好
@@ -66,6 +68,56 @@ export default function Content() {
     queryFn: () => businessApi.listKeywords(selectedBrand!),
     enabled: !!selectedBrand,
   })
+  // 监测数据（共享缓存——仅用于关键词预选排序：最近体检过的词优先）
+  const { data: monitorResults = [] } = useQuery({
+    queryKey: ['geo-monitor-results'],
+    queryFn: () => businessApi.getAllMonitorResults().catch(() => []),
+    staleTime: 60_000,
+  })
+  const orderedKeywords = useMemo(() => {
+    const lastByKw = new Map<string, number>()
+    for (const r of monitorResults) {
+      const t = new Date(r.probed_at).getTime()
+      if (t > (lastByKw.get(r.keyword_id) || 0)) lastByKw.set(r.keyword_id, t)
+    }
+    return [...keywords].sort((a, b) => (lastByKw.get(b.id) || 0) - (lastByKw.get(a.id) || 0))
+  }, [keywords, monitorResults])
+
+  // 智能预选（傻瓜化 Q4）：进入页面/切换品牌自动预选前 3 个关键词（最近监测优先）——
+  // 打开即可直接点"帮我写"；用户手动改过则不覆盖（只在每个品牌首次进入时预选）
+  const lastPreselectBrand = useRef<string | null>(null)
+  useEffect(() => {
+    if (!selectedBrand || orderedKeywords.length === 0) return
+    if (lastPreselectBrand.current === selectedBrand) return
+    lastPreselectBrand.current = selectedBrand
+    if (genKeywords.length === 0) {
+      setGenKeywords(orderedKeywords.slice(0, 3).map((k: Keyword) => k.term))
+    }
+  }, [selectedBrand, orderedKeywords, genKeywords.length])
+
+  // 无词时就地补齐（傻瓜化 Q4）：不跳页，当前页生成并自动选中
+  const [recoKwLoading, setRecoKwLoading] = useState(false)
+  const recoAddKeywords = async () => {
+    if (!selectedBrand) return
+    setRecoKwLoading(true)
+    try {
+      const res = await businessApi.distillKeywords({ source: 'questions', brand_id: selectedBrand } as never)
+      const terms = (res.keywords || []).slice(0, 3)
+      if (terms.length === 0) {
+        message.warning('没有推荐出关键词——先去「品牌档案」完善定位和卖点')
+        return
+      }
+      for (const term of terms) {
+        await businessApi.addKeyword(selectedBrand, { term, intent: 'informational' })
+      }
+      queryClient.invalidateQueries({ queryKey: ['geo-keywords', selectedBrand] })
+      queryClient.invalidateQueries({ queryKey: ['geo-all-keywords'] })
+      setGenKeywords(terms)
+      message.success(`已添加并选中 ${terms.length} 个关键词`)
+    } catch { /* 拦截器已提示 */ } finally {
+      setRecoKwLoading(false)
+    }
+  }
   const { data: contents = [] } = useQuery({
     queryKey: ['geo-contents', selectedBrand],
     queryFn: () => businessApi.listContents(selectedBrand!),
@@ -142,17 +194,17 @@ export default function Content() {
   // 内容状态流转：发布到公开站 / 下线
   const handleSetStatus = async (c: OptimizedContent, status: 'draft' | 'published') => {
     try {
-      await businessApi.setContentStatus(selectedBrand!, c.id, status)
+      // 服务端在内容视图上附加 index_submitted / publish_warnings——
+      // 发布是否提交了收录、低分未提交等原因随响应下发（黑洞修复）
+      const res = await businessApi.setContentStatus(selectedBrand!, c.id, status) as
+        OptimizedContent & { index_submitted?: boolean; publish_warnings?: string[] }
       if (status === 'published') {
-        // 收录预期管理：发布后 IndexNow 立即通知，引擎爬取+引用约 1-2 周
-        // B1 质量护栏：低分内容（<50）只上线不自动提交收录，需手动补提交
-        const lowScore = (c.score?.total ?? 0) > 0 && (c.score?.total ?? 0) < 50
-        message.success(
-          lowScore
-            ? `「${c.title || c.id}」已发布到公开站。评分较低（${c.score?.total?.toFixed(0)} 分），未自动提交收录——可在内容列表点「补提交收录」手动提交`
-            : `「${c.title || c.id}」已发布到公开站（已通知搜索引擎收录，预计 1-2 周生效，届时可复测提及率）`,
-          5,
-        )
+        const warnings = res?.publish_warnings || []
+        if (warnings.length > 0) {
+          message.warning(`「${c.title || c.id}」${warnings[0]}`, 7)
+        } else {
+          message.success(`「${c.title || c.id}」已发布到公开站（已通知搜索引擎收录，预计 1-2 周生效，届时可复测提及率）`, 5)
+        }
       } else {
         message.success('已下线')
       }
@@ -186,11 +238,10 @@ export default function Content() {
   }
 
   const busy = optimizing || generating
-  const hasContent = originalText.trim().length > 0
 
-  // 统一操作
+  // 统一操作：按显式模式决定（写=AI 原创；改=优化贴入的内容）
   const handleAction = () => {
-    if (hasContent) {
+    if (mode === 'improve') {
       handleOptimize()
     } else {
       handleGenerate()
@@ -200,16 +251,18 @@ export default function Content() {
   return (
     <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
-        {/* ① Hero 区 */}
-        <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h1>内容生成</h1>
-            <p>文章 / 短内容 GEO 优化与生成</p>
+        {/* ① Hero 区（嵌入内容中心时隐藏——父层已有标题） */}
+        {!embedded && (
+          <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+            <div>
+              <h1>内容生成</h1>
+              <p>文章 / 短内容 GEO 优化与生成</p>
+            </div>
+            <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/studio?tab=media')}>
+              多媒体创作
+            </Button>
           </div>
-          <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/creation')}>
-            多媒体创作
-          </Button>
-        </div>
+        )}
 
         {/* ② 品牌上下文条 */}
         <Card className="wr-glass-card" styles={{ body: { padding: '16px 20px' } }} style={{ marginBottom: 16 }}>
@@ -239,18 +292,28 @@ export default function Content() {
           <Col xs={24} lg={fullWidth ? 24 : 12}>
             <Card styles={{ body: { padding: 24 } }}>
               <div className="wr-stagger">
-                {/* 关键词选择 */}
+                {/* 无词时就地补齐（傻瓜化 Q4：不跳页，当前页生成并自动选中） */}
+                {selectedBrand && keywords.length === 0 && (
+                  <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 10, background: 'var(--wr-primary-bg)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <Text style={{ fontSize: 13 }}>还没有关键词——写内容要围绕顾客会搜的词，让 AI 推荐 3 个？</Text>
+                    <Button size="small" type="primary" loading={recoKwLoading} onClick={recoAddKeywords}>
+                      推荐 3 个并自动填入
+                    </Button>
+                  </div>
+                )}
+
+                {/* 关键词选择（核心必填——顾客会搜的词） */}
                 <div style={{ marginBottom: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text strong>关键词</Text>
+                    <Text strong>围绕哪些关键词写？</Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      {genKeywords.length > 0 ? `已选 ${genKeywords.length} 个` : '可多选组合'}
+                      {genKeywords.length > 0 ? `已选 ${genKeywords.length} 个` : '可多选，选多个 = 写成一篇深度文'}
                     </Text>
                   </div>
                   <Select
                     mode="multiple"
                     style={{ width: '100%' }}
-                    placeholder="选择关键词（可多选，多选=组合成一篇深度文）"
+                    placeholder="选择顾客会搜的词（来自你的关键词库）"
                     value={genKeywords}
                     onChange={setGenKeywords}
                     options={keywords.map((k: Keyword) => ({ value: k.term, label: k.term }))}
@@ -259,87 +322,88 @@ export default function Content() {
                   />
                 </div>
 
-                {/* 目标引擎偏好选择 */}
+                {/* 傻瓜化：显式"帮我写 / 帮我改"（此前靠输入框空不空隐式决定，用户无感知） */}
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text strong>目标 AI 引擎</Text>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      按引擎偏好优化格式，提高被引用概率
-                    </Text>
-                  </div>
-                  <Select
-                    style={{ width: '100%' }}
-                    value={targetEngine || undefined}
-                    onChange={(v) => setTargetEngine(v || '')}
-                    options={ENGINE_OPTIONS}
-                    allowClear
-                    placeholder="选择目标引擎（空=通用优化）"
+                  <Segmented
+                    block
+                    value={mode}
+                    onChange={(v) => setMode(v as 'write' | 'improve')}
+                    options={[
+                      { value: 'write', label: '帮我写（AI 原创一篇）' },
+                      { value: 'improve', label: '帮我改（优化已有内容）' },
+                    ]}
                   />
                 </div>
-                {/* 内容格式选择（P1-5）*/}
-                <div>
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
-                    内容格式
-                  </Text>
+
+                {/* 想写什么类型（场景化命名——让用户选"要干嘛"，不是选"格式参数"） */}
+                <div style={{ marginBottom: 20 }}>
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>想写什么内容？</Text>
                   <Select
                     style={{ width: '100%' }}
                     value={format || undefined}
                     onChange={(v) => setFormat(v || '')}
                     options={FORMAT_OPTIONS}
                     allowClear
-                    placeholder="选择内容格式（默认 SEO 文章）"
+                    placeholder="智能推荐（默认写一篇网站文章）"
                   />
                 </div>
 
-                {/* 可引用结构开关（v3 P2：四开关可组合，与格式正交——任何格式都能加"AI 易摘录"结构） */}
-                <div style={{ marginTop: 12 }}>
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
-                    🔗 可引用结构（AI 易摘录/引用，与格式叠加）
-                  </Text>
-                  <Select
-                    mode="multiple"
-                    style={{ width: '100%' }}
-                    value={citationToggles}
-                    onChange={setCitationToggles}
-                    options={[
-                      { value: 'conclusion-first', label: '结论前置' },
-                      { value: 'standalone-paragraphs', label: '观点独立成段' },
-                      { value: 'data-cited', label: '数据标注来源' },
-                      { value: 'subheadings', label: '小标题分段' },
-                    ]}
-                    placeholder="选填：开启后生成内容带引用友好结构"
-                    maxTagCount={2}
-                  />
-                </div>
+                {/* 高级选项（默认折叠——90% 用户不需要动，推荐默认值已给足） */}
+                <Collapse
+                  ghost
+                  size="small"
+                  style={{ marginBottom: 20 }}
+                  items={[{
+                    key: 'adv',
+                    label: <span style={{ fontSize: 13 }}>高级选项（一般不用改）</span>,
+                    children: (<>
+                      <div style={{ marginBottom: 16 }}>
+                        <Text strong style={{ display: 'block', marginBottom: 8 }}>主要想让哪个 AI 引用？</Text>
+                        <Select
+                          style={{ width: '100%' }}
+                          value={targetEngine || undefined}
+                          onChange={(v) => setTargetEngine(v || '')}
+                          options={ENGINE_OPTIONS}
+                          allowClear
+                          placeholder="不指定（对所有 AI 通用优化）"
+                        />
+                      </div>
+                      <div style={{ marginBottom: 16 }}>
+                        <Text strong style={{ display: 'block', marginBottom: 8 }}>让 AI 更容易摘录引用的写法</Text>
+                        <Select
+                          mode="multiple"
+                          style={{ width: '100%' }}
+                          value={citationToggles}
+                          onChange={setCitationToggles}
+                          options={[
+                            { value: 'conclusion-first', label: '结论放开头' },
+                            { value: 'standalone-paragraphs', label: '观点分段清晰' },
+                            { value: 'data-cited', label: '数据带来源' },
+                            { value: 'subheadings', label: '加小标题' },
+                          ]}
+                          placeholder="选填：让 AI 一眼能摘到重点"
+                          maxTagCount={2}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Space size={6}>
+                          <Text strong>先做一次诊断，按建议写</Text>
+                          <Tag color={useDiagnose ? 'gold' : 'default'} style={{ margin: 0, fontSize: 11 }}>
+                            {useDiagnose ? '已开启' : '效果更好，消耗更多额度'}
+                          </Tag>
+                        </Space>
+                        <Switch checked={useDiagnose} onChange={setUseDiagnose} />
+                      </div>
+                    </>),
+                  }]}
+                />
 
-                {/* P5-03 诊断→优化闭环：先诊断再对症下药 */}
+                {/* 帮我改：贴入原文（仅 improve 模式显示） */}
+                {mode === 'improve' && (
                 <div style={{ marginBottom: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <Space size={6}>
-                      <Text strong>按诊断建议生成</Text>
-                      <Tag color={useDiagnose ? 'gold' : 'default'} style={{ margin: 0, fontSize: 11 }}>
-                        {useDiagnose ? '已开启' : '可选'}
-                      </Tag>
-                    </Space>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      先生成诊断报告，把改进建议直接注入文章（诊断消耗更多算力）
-                    </Text>
-                  </div>
-                  <Switch checked={useDiagnose} onChange={setUseDiagnose} />
-                </div>
-
-                {/* 内容编辑区——美化版 */}
-                <div style={{ marginBottom: 20 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Space size={6}>
-                      <Text strong>
-                        {hasContent ? '原始内容' : '内容编辑区'}
-                      </Text>
-                      {hasContent ? (
-                        <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>优化模式</Tag>
-                      ) : (
-                        <Tag color="green" style={{ margin: 0, fontSize: 11 }}>原创生成</Tag>
-                      )}
+                      <Text strong>贴入你想优化的内容</Text>
                     </Space>
                     <Space size={8}>
                       <Button
@@ -349,9 +413,9 @@ export default function Content() {
                         disabled={!selectedBrand || genKeywords.length === 0}
                         onClick={handleGenerateDraft}
                       >
-                        AI 生成素材
+                        让 AI 先写一版
                       </Button>
-                      {hasContent && (
+                      {originalText.trim().length > 0 && (
                         <Button
                           size="small"
                           type="text"
@@ -367,32 +431,20 @@ export default function Content() {
                   {/* 模式提示条 */}
                   <div style={{
                     marginBottom: 8, padding: '6px 12px', borderRadius: 8,
-                    background: hasContent ? 'var(--wr-primary-bg)' : 'var(--wr-bg-elevated)',
+                    background: 'var(--wr-primary-bg)',
                     display: 'flex', alignItems: 'center', gap: 6,
                   }}>
-                    {hasContent ? (
-                      <>
-                        <EditOutlined style={{ fontSize: 13, color: 'var(--wr-primary)' }} />
-                        <Text style={{ fontSize: 12, color: 'var(--wr-primary)' }}>
-                          已填入内容，点击下方按钮将进行 GEO 优化
-                        </Text>
-                      </>
-                    ) : (
-                      <>
-                        <ThunderboltOutlined style={{ fontSize: 13, color: 'var(--wr-success)' }} />
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          编辑区留空，点击下方按钮让 AI 从零原创生成
-                        </Text>
-                      </>
-                    )}
+                    <EditOutlined style={{ fontSize: 13, color: 'var(--wr-primary)' }} />
+                    <Text style={{ fontSize: 12, color: 'var(--wr-primary)' }}>
+                      AI 会围绕关键词改写，让它更容易被 AI 搜索引用
+                    </Text>
                   </div>
 
                   <TextArea
                     rows={8}
                     placeholder={drafting
                       ? 'AI 正在生成素材...'
-                      : '留空 = AI 根据关键词原创生成\n贴入内容 = AI 围绕关键词优化已有内容\n\n你也可以点右上角「AI 生成素材」让 AI 先写草稿，编辑后再优化'
-                    }
+                      : '把已有的文章/文案贴到这里（也可以点右上角让 AI 先写一版，再在此基础上改）'}
                     value={originalText}
                     onChange={(e) => setOriginalText(e.target.value)}
                     style={{ fontSize: 14, lineHeight: 1.8, resize: 'vertical' }}
@@ -400,6 +452,7 @@ export default function Content() {
                     maxLength={20000}
                   />
                 </div>
+                )}
 
                 {/* 统一操作按钮 */}
                 <Button
@@ -407,15 +460,15 @@ export default function Content() {
                   size="large"
                   block
                   loading={busy}
-                  disabled={genKeywords.length === 0}
+                  disabled={genKeywords.length === 0 || (mode === 'improve' && originalText.trim().length === 0)}
                   onClick={handleAction}
-                  icon={hasContent ? <EditOutlined /> : <ThunderboltOutlined />}
+                  icon={mode === 'improve' ? <EditOutlined /> : <ThunderboltOutlined />}
                 >
                   {busy
                     ? 'AI 创作中...'
-                    : hasContent
-                    ? '开始 GEO 优化'
-                    : `生成内容${genKeywords.length > 1 ? `（${genKeywords.length} 词组合）` : ''}`}
+                    : mode === 'improve'
+                    ? '开始优化'
+                    : `帮我写${genKeywords.length > 1 ? `（${genKeywords.length} 词合成一篇）` : ''}`}
                 </Button>
               </div>
             </Card>
@@ -451,7 +504,7 @@ export default function Content() {
                         <Col flex="auto">
                           <Space direction="vertical" size={10} style={{ width: '100%' }}>
                             {DIMENSIONS.map((d) => (
-                              <ScoreBar key={d.key} label={d.label} value={score[d.key]} />
+                              <ScoreBar key={d.key} label={d.label} value={score[d.key]} tip={d.tip} />
                             ))}
                           </Space>
                         </Col>
@@ -466,7 +519,7 @@ export default function Content() {
                       <div style={{ marginBottom: 20, padding: '12px 16px', borderRadius: 12, background: 'var(--wr-bg-elevated)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                           <Tooltip title="对齐 GEO 可引用素材结构：结论前置 / 小标题分段 / 数据标注来源——三个可机读信号的启发式检测（非精确评分）">
-                            <Text strong style={{ fontSize: 13 }}>🔗 可引用度</Text>
+                            <Text strong style={{ fontSize: 13 }}>可引用度</Text>
                           </Tooltip>
                           <Tag color={cit.score >= 67 ? 'success' : cit.score >= 34 ? 'warning' : 'default'} style={{ margin: 0 }}>
                             {cit.score}%（{3 - cit.hints.length}/3 结构信号）
@@ -494,6 +547,9 @@ export default function Content() {
                         <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>
                           {result.score_before.total?.toFixed(0)} → {score?.total?.toFixed(0)}
                         </Tag>
+                        <Tooltip title="优化前是免费规则快筛分（正则/关键词统计），优化后是 AI 深度评审分——两套口径不同，看提升方向即可，不必比较绝对值">
+                          <Text type="secondary" style={{ fontSize: 11 }}>数据口径说明</Text>
+                        </Tooltip>
                       </div>
                       <Space direction="vertical" size={8} style={{ width: '100%' }}>
                         {DIMENSIONS.map((d) => {
@@ -504,7 +560,7 @@ export default function Content() {
                           return (
                             <div key={d.key}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                                <Text type="secondary">{d.label}</Text>
+                                <Tooltip title={d.tip}><Text type="secondary">{d.label}</Text></Tooltip>
                                 <Text style={{ fontSize: 12 }}>
                                   <Text type="secondary" style={{ fontSize: 12 }}>{before.toFixed(0)}</Text>
                                   <Text strong style={{ color: diffColor, fontSize: 12 }}> → {after.toFixed(0)}</Text>
@@ -734,22 +790,26 @@ function ScoreRing({ total }: { total: number }) {
           position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
         }}>
-          <span className="wr-metric-value" style={{ fontSize: 34, color }}>{total.toFixed(0)}</span>
+                          <span className="wr-metric-value" style={{ fontSize: 34, color }}>{total.toFixed(0)}</span>
           <Text type="secondary" style={{ fontSize: 12 }}>GEO 总分</Text>
         </div>
       </div>
-      <Tag color={color} style={{ fontWeight: 600 }}>{scoreLevel(total)}</Tag>
+      <Tooltip title="AI 深度评审打分（0-100，五维平均）——衡量这篇内容被 AI 引用的难易程度">
+        <Tag color={color} style={{ fontWeight: 600 }}>{scoreLevel(total)}</Tag>
+      </Tooltip>
+      <Text type="secondary" style={{ fontSize: 11 }}>AI 深度评审</Text>
     </div>
   )
 }
 
-// 单维度评分横条
-function ScoreBar({ label, value }: { label: string; value: number }) {
+// 单维度评分横条（label 带"怎么算的"溯源 tooltip）
+function ScoreBar({ label, value, tip }: { label: string; value: number; tip?: string }) {
   const color = scoreColor(value)
+  const labelEl = <Text type="secondary">{label}</Text>
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-        <Text type="secondary">{label}</Text>
+        {tip ? <Tooltip title={tip}>{labelEl}</Tooltip> : labelEl}
         <Text strong style={{ color }}>{value.toFixed(0)}</Text>
       </div>
       <div style={{ height: 6, background: 'var(--wr-bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>

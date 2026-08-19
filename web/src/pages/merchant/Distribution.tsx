@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, DatePicker, Input, Tooltip, Tabs } from 'antd'
 import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons'
@@ -121,6 +121,31 @@ export default function Distribution() {
 
   const selectedContent = contents.find((c) => c.id === selectedContentId)
   const healthyAccounts = accounts.filter((a) => a.health === 'active')
+
+  // ---- 智能默认（傻瓜化 Q5）----
+  // 默认 Tab 跟着状态走：有健康账号直接落"发布"（主操作），没有则留在账号池（先绑定）
+  const tabTouched = useRef(false)
+  useEffect(() => {
+    if (!accountsLoading && !tabTouched.current && healthyAccounts.length > 0) {
+      setActiveTab('publish')
+    }
+  }, [accountsLoading, healthyAccounts.length])  
+  // 未带跳转参数时默认选中最新一篇内容（优先草稿），标题正文自动带出
+  const hasQueryParam = !!searchParams.get('contentId')
+  useEffect(() => {
+    if (hasQueryParam || selectedContentId) return
+    if (contents.length === 0) return
+    const drafts = contents.filter((c) => c.status === 'draft')
+    const pool = drafts.length > 0 ? drafts : contents
+    const latest = [...pool].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+    if (latest) setSelectedContentId(latest.id)
+  }, [contents, hasQueryParam, selectedContentId])  
+  // 只有一个健康账号时自动勾选——没有选择就不该是选择；多账号不预选（发布是外发动作，让用户明确选）
+  useEffect(() => {
+    if (healthyAccounts.length === 1 && selectedAccountIds.length === 0) {
+      setSelectedAccountIds([healthyAccounts[0].id])
+    }
+  }, [healthyAccounts]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- 账号操作 ----
   const openBindModal = (platform: string) => {
@@ -257,7 +282,7 @@ export default function Distribution() {
         {/* P1-6-1：单页五任务 → 三 Tab（账号池 / 发布 / 发布记录）——重页 Tab 化 */}
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={(k) => { tabTouched.current = true; setActiveTab(k) }}
           style={{ marginBottom: 12 }}
           items={[
             { key: 'accounts', label: '账号池', children: (<>
@@ -266,13 +291,13 @@ export default function Distribution() {
           <Space align="start" style={{ width: '100%' }}>
             <LinkOutlined style={{ color: 'var(--wr-warning)', marginTop: 3 }} />
             <div style={{ flex: 1 }}>
-              <Text strong style={{ fontSize: 14 }}>📍 发布带定位 = 附近搜索曝光（半自动指引）</Text>
+              <Text strong style={{ fontSize: 14 }}>发布带定位 = 附近搜索曝光（半自动指引）</Text>
               <Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 8px' }}>
                 平台"添加定位"（POI 挂载）自动化为暂缓项（RPA 定位风控高、抖音官方通道需服务商资质）——先用最稳的半自动方式：
               </Paragraph>
               <Space direction="vertical" size={2} style={{ fontSize: 12, color: 'var(--wr-text-secondary)' }}>
                 <div>① 门店档案维护好真实地址（左侧菜单「附近同行」→ 门店档案）</div>
-                <div>② 发布内容已自动附带"📍 门店地址"行（发布时 store_address 非空）</div>
+                <div>② 发布内容已自动附带"门店地址"行（发布时 store_address 非空）</div>
                 <div>③ 平台发布页手动选择"添加定位 → 搜索门店地址 → 选中"后发布</div>
                 <div>④ 带定位的内容更容易被附近的人搜到，也增强 AI 本地回答的引用概率</div>
               </Space>
@@ -399,29 +424,23 @@ export default function Distribution() {
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无健康账号，请先在上方绑定" style={{ padding: 40 }} />
                 ) : (
                   <>
-                    <Radio.Group
-                      value={publishMode}
-                      onChange={(e) => setPublishMode(e.target.value)}
-                      style={{ marginBottom: 16 }}
-                      optionType="button" buttonStyle="solid"
-                    >
-                      <Radio.Button value="semi-auto">半自动（推荐）</Radio.Button>
-                      <Radio.Button value="auto">全自动</Radio.Button>
-                    </Radio.Group>
-
-                    {publishMode === 'semi-auto' ? (
-                      <Alert type="info" showIcon style={{ marginBottom: 16 }} message="半自动发布模式"
-                        description="系统生成内容并预填发布链接，你点击跳转后在各平台确认发布。零封号风险。发布后约 1-2 周被 AI 引擎收录，届时可在发布记录点「复测提及率」验证效果。" />
-                    ) : (
-                      <>
-                        <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="全自动发布模式"
-                          description="系统自动打开浏览器，注入登录态，自动填充标题正文并点击发布。请确保服务器已安装 Chrome。收录周期约 1-2 周，发布记录支持复测验证。" />
-                        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Switch checked={autoSelect} onChange={setAutoSelect} size="small" />
-                          <Text style={{ fontSize: 13 }}>自动选号（系统自动选择最久未使用的健康账号，避免单号高频被封）</Text>
-                        </div>
-                      </>
-                    )}
+                  {/* 傻瓜化：半自动为默认路径（零风险），全自动降级为一个开关 */}
+                  <Alert type="info" showIcon style={{ marginBottom: 12 }} message="半自动发布（推荐）"
+                    description="系统准备好内容并生成发布链接，你点击跳转到知乎/小红书确认发布即可，零风险。发布后约 1-2 周被 AI 引擎收录，届时可在发布记录点「复测提及率」验证效果。" />
+                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Switch checked={publishMode === 'auto'} onChange={(v) => setPublishMode(v ? 'auto' : 'semi-auto')} size="small" />
+                    <Text style={{ fontSize: 13 }}>全自动发布（系统自动操作浏览器，免去手动确认）</Text>
+                  </div>
+                  {publishMode === 'auto' && (
+                    <>
+                      <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="全自动模式说明"
+                        description="系统自动打开浏览器、注入登录态，自动填充标题正文并点击发布。请确保服务器已安装 Chrome；封号风险略高于半自动。" />
+                      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Switch checked={autoSelect} onChange={setAutoSelect} size="small" />
+                        <Text style={{ fontSize: 13 }}>自动选号（自动用最久没发过的健康账号，降低封号风险）</Text>
+                      </div>
+                    </>
+                  )}
 
                     {/* D: 可编辑发布标题（带平台字数计数器——发布前可调整，解决截断问题） */}
                     {selectedContent && (
@@ -560,6 +579,48 @@ export default function Distribution() {
                         />
                       )}
                     </div>
+                    {/* 发布前检查清单（傻瓜化：散落的校验规则收进一处——发布前一眼看到"还差什么"，
+                        而不是提交后被逐个报错拦下） */}
+                    {(() => {
+                      const selectedAccs = autoSelect && publishMode === 'auto'
+                        ? healthyAccounts
+                        : accounts.filter((a) => selectedAccountIds.includes(a.id))
+                      const hasXHS = selectedAccs.some((a) => a.platform === 'xiaohongshu')
+                      const titleLen = [...publishTitle].length
+                      const items: { ok: boolean; text: string }[] = [
+                        selectedContent
+                          ? { ok: true, text: `已选内容：${selectedContent.title || '(无标题)'}` }
+                          : { ok: false, text: '还没选要发布的内容（左侧点选一篇）' },
+                        selectedAccs.length > 0
+                          ? { ok: true, text: `将发布到 ${selectedAccs.length} 个账号` }
+                          : { ok: false, text: '还没选发布账号（下方点选账号）' },
+                        ...(hasXHS ? [
+                          titleLen > 0 && titleLen <= 20
+                            ? { ok: true, text: '标题符合小红书 20 字限制' }
+                            : titleLen > 20
+                              ? { ok: false, text: `标题 ${titleLen} 字超了——小红书最多 20 字（发布时会自动截断）` }
+                              : { ok: false, text: '还没填标题' },
+                          mediaUrls.length > 0
+                            ? { ok: true, text: `已配 ${mediaUrls.length} 张图（小红书图文必须配图）` }
+                            : { ok: false, text: '发小红书必须至少配 1 张图（上方「从素材库选图」）' },
+                        ] : []),
+                      ]
+                      return (
+                        <div style={{ marginTop: 16, marginBottom: 4, padding: 12, borderRadius: 10, background: 'var(--wr-bg-elevated)' }}>
+                          <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>发布前检查</Text>
+                          {items.map((it, i) => (
+                            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
+                              <span style={{ color: it.ok ? 'var(--wr-success)' : 'var(--wr-warning)', fontSize: 13, lineHeight: '19px' }}>
+                                {it.ok ? '✓' : '⋯'}
+                              </span>
+                              <Text style={{ fontSize: 12.5, lineHeight: '19px', color: it.ok ? 'var(--wr-text-secondary)' : 'var(--wr-warning)' }}>
+                                {it.text}
+                              </Text>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })()}
                     <Button
                       type="primary" size="large" block style={{ marginTop: 16 }}
                       loading={publishing}

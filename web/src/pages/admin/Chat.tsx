@@ -363,9 +363,9 @@ export default function Chat() {
   }, [isMerchantChat, geoBrands, geoMonitor])
 
   const GEO_QUICK_QUESTIONS = [
-    { label: '📊 我的品牌最近表现如何？', q: '根据上面的 GEO 数据摘要，我的品牌最近在 AI 搜索中的表现如何？有什么亮点和问题？' },
-    { label: '⚔️ 哪个竞品威胁最大？', q: '根据上面的 GEO 数据摘要，哪个竞品对我的威胁最大？我应该怎么应对？' },
-    { label: '🎯 下一步该做什么？', q: '根据上面的 GEO 数据摘要，给我 3 条具体可执行的下一步优化建议。' },
+    { label: '我的品牌最近表现如何？', q: '根据上面的 GEO 数据摘要，我的品牌最近在 AI 搜索中的表现如何？有什么亮点和问题？' },
+    { label: '哪个竞品威胁最大？', q: '根据上面的 GEO 数据摘要，哪个竞品对我的威胁最大？我应该怎么应对？' },
+    { label: '下一步该做什么？', q: '根据上面的 GEO 数据摘要，给我 3 条具体可执行的下一步优化建议。' },
   ]
 
   const doSend = async (text: string) => {
@@ -626,7 +626,7 @@ export default function Chat() {
                       {c.updatedAt ? formatConvTime(c.updatedAt) : ''}
                     </span>
                     {/* 重命名（P2-9-11：标题为首句截断，用户可手动修正） */}
-                    <span onClick={(e) => { e.stopPropagation(); openRename(c.id, c.title) }} style={{ cursor: 'pointer', opacity: 0.5 }} title="重命名">✎</span>
+                    <span onClick={(e) => { e.stopPropagation(); openRename(c.id, c.title) }} style={{ cursor: 'pointer', opacity: 0.5 }} title="重命名">改</span>
                     <span onClick={(e) => { e.stopPropagation(); deleteConv(c.id) }} style={{ cursor: 'pointer', opacity: 0.5 }}>×</span>
                   </span>
               </div>

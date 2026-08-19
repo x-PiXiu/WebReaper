@@ -83,7 +83,7 @@ export default function AutoMonitorControl({ compact = false }: { compact?: bool
             ) : (
               <Button size="small" type="link" onClick={() => navigate('/m/my-plan')}>升级解锁 →</Button>
             )}
-            <Button size="small" type="link" onClick={() => navigate('/m/indexing-report')}>配置盯盘 →</Button>
+            <Button size="small" type="link" onClick={() => navigate('/m/checkup?tab=report')}>配置盯盘 →</Button>
           </Space>
         </div>
       </div>
@@ -103,7 +103,7 @@ export default function AutoMonitorControl({ compact = false }: { compact?: bool
         </Space>
         <Space size={8}>
           <Button size="small" type="link" onClick={() => setShowAdvanced(!showAdvanced)}>
-            {showAdvanced ? '收起设置 ↑' : '高级设置 ⚙'}
+            {showAdvanced ? '收起设置 ↑' : '高级设置'}
           </Button>
           {hasFeature ? (
             <Switch

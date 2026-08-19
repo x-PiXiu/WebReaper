@@ -49,6 +49,14 @@
   --wr-table-row-hover: rgba(255, 255, 255, 0.04);
   --wr-input-bg: rgba(255, 255, 255, 0.04);
 
+  /* 彩色语义 Tag 底/边（豁免全局抹灰规则——字=语义色、底=同色 12%）*/
+  --wr-purple: #a78bfa;
+  --wr-tag-success-bg: rgba(74, 222, 128, 0.12);  --wr-tag-success-bd: rgba(74, 222, 128, 0.32);
+  --wr-tag-danger-bg: rgba(251, 113, 133, 0.12);  --wr-tag-danger-bd: rgba(251, 113, 133, 0.32);
+  --wr-tag-warning-bg: rgba(251, 191, 36, 0.12);  --wr-tag-warning-bd: rgba(251, 191, 36, 0.32);
+  --wr-tag-purple-bg: rgba(167, 139, 250, 0.12);  --wr-tag-purple-bd: rgba(167, 139, 250, 0.32);
+  --wr-tag-accent-bg: rgba(34, 211, 238, 0.12);   --wr-tag-accent-bd: rgba(34, 211, 238, 0.32);
+
   /* 阴影（克制：Linear 几乎不用阴影，用边框分层）*/
   --wr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --wr-shadow-md: 0 8px 32px rgba(0, 0, 0, 0.45);
@@ -90,6 +98,14 @@
   --wr-table-header-bg: rgba(0, 0, 0, 0.02);
   --wr-table-row-hover: rgba(0, 0, 0, 0.03);
   --wr-input-bg: rgba(0, 0, 0, 0.02);
+
+  /* 彩色语义 Tag 底/边（亮色主题）*/
+  --wr-purple: #7c3aed;
+  --wr-tag-success-bg: rgba(22, 163, 74, 0.08);   --wr-tag-success-bd: rgba(22, 163, 74, 0.28);
+  --wr-tag-danger-bg: rgba(220, 38, 38, 0.08);    --wr-tag-danger-bd: rgba(220, 38, 38, 0.28);
+  --wr-tag-warning-bg: rgba(217, 119, 6, 0.08);   --wr-tag-warning-bd: rgba(217, 119, 6, 0.28);
+  --wr-tag-purple-bg: rgba(124, 58, 237, 0.08);   --wr-tag-purple-bd: rgba(124, 58, 237, 0.28);
+  --wr-tag-accent-bg: rgba(8, 145, 178, 0.08);    --wr-tag-accent-bd: rgba(8, 145, 178, 0.28);
 
   --wr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --wr-shadow-md: 0 8px 32px rgba(0, 0, 0, 0.08);
@@ -217,8 +233,43 @@ body::before {
 .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--wr-text-primary) !important; font-weight: 600; }
 .ant-tabs-ink-bar { background: var(--wr-gradient) !important; height: 2px !important; border-radius: 2px; }
 
-/* Tag：低饱和圆角 */
+/* Tag：低饱和圆角（默认灰 Tag——彩色语义 Tag 见下方豁免规则） */
 .ant-tag { border-radius: 6px !important; border: 1px solid var(--wr-border) !important; background: var(--wr-bg-elevated) !important; color: var(--wr-text-secondary) !important; font-size: 12px; }
+
+/* 彩色语义 Tag：豁免上方抹灰规则（同特异性按声明顺序覆盖）——
+   字=语义色、底=同色低透明、边=同色中透明。修复"所有彩 Tag 变深底灰字看不清" */
+.ant-tag-success, .ant-tag-green {
+  color: var(--wr-success) !important; background: var(--wr-tag-success-bg) !important; border-color: var(--wr-tag-success-bd) !important;
+}
+.ant-tag-error, .ant-tag-red {
+  color: var(--wr-danger) !important; background: var(--wr-tag-danger-bg) !important; border-color: var(--wr-tag-danger-bd) !important;
+}
+.ant-tag-warning, .ant-tag-gold, .ant-tag-orange {
+  color: var(--wr-warning) !important; background: var(--wr-tag-warning-bg) !important; border-color: var(--wr-tag-warning-bd) !important;
+}
+.ant-tag-processing, .ant-tag-blue, .ant-tag-geekblue {
+  color: var(--wr-primary) !important; background: var(--wr-primary-bg) !important; border-color: var(--wr-primary-border) !important;
+}
+.ant-tag-purple {
+  color: var(--wr-purple) !important; background: var(--wr-tag-purple-bg) !important; border-color: var(--wr-tag-purple-bd) !important;
+}
+.ant-tag-cyan {
+  color: var(--wr-accent) !important; background: var(--wr-tag-accent-bg) !important; border-color: var(--wr-tag-accent-bd) !important;
+}
+
+/* 可选中 Tag（引擎 chips 等）：选中=紫底白字加粗，未选中=灰——彻底区分 */
+.ant-tag-checkable {
+  background: transparent !important;
+  color: var(--wr-text-secondary) !important;
+  transition: all 150ms ease;
+}
+.ant-tag-checkable:hover { color: var(--wr-text-primary) !important; }
+.ant-tag-checkable-checked {
+  background: var(--wr-primary) !important;
+  color: #fff !important;
+  border-color: var(--wr-primary) !important;
+  font-weight: 600;
+}
 
 /* Modal：玻璃拟态 */
 .ant-modal-content, .ant-modal-header {
@@ -295,14 +346,21 @@ body::before {
 
 /* Button：克制、聚焦态清晰 */
 .ant-btn { border-radius: 8px !important; font-weight: 500; transition: all 150ms ease; }
-.ant-btn-primary { background: var(--wr-primary) !important; border: none !important; box-shadow: none !important; }
-.ant-btn-primary:hover { background: var(--wr-primary-hover) !important; transform: translateY(-1px); box-shadow: 0 4px 16px var(--wr-primary-bg) !important; }
+.ant-btn-primary { background: var(--wr-primary) !important; border: none !important; box-shadow: none !important; color: #fff !important; font-weight: 600; }
+.ant-btn-primary:hover { background: var(--wr-primary-hover) !important; transform: translateY(-1px); box-shadow: 0 4px 16px var(--wr-primary-bg) !important; color: #fff !important; }
 .ant-btn-primary:active { transform: translateY(0); }
 .ant-btn-default { background: transparent !important; border-color: var(--wr-border) !important; color: var(--wr-text-secondary) !important; }
 .ant-btn-default:hover { border-color: var(--wr-border-hover) !important; color: var(--wr-text-primary) !important; }
 .ant-btn-text { color: var(--wr-text-muted) !important; }
 .ant-btn-text:hover { background: var(--wr-bg-hover) !important; color: var(--wr-text-primary) !important; }
 .ant-btn-link { color: var(--wr-primary) !important; }
+
+/* Segmented：激活=紫底白字，未选=灰——与 CheckableTag 同规范 */
+.ant-segmented { background: var(--wr-input-bg) !important; border-radius: 10px !important; padding: 2px !important; }
+.ant-segmented-item { border-radius: 8px !important; }
+.ant-segmented-item-label { color: var(--wr-text-secondary) !important; transition: color 150ms ease; }
+.ant-segmented-item-selected { background: var(--wr-primary) !important; }
+.ant-segmented-item-selected .ant-segmented-item-label { color: #fff !important; font-weight: 600; }
 
 /* Typography */
 .ant-typography { color: var(--wr-text-primary) !important; }
