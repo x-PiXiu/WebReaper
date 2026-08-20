@@ -192,11 +192,12 @@ func (h *AccountHandler) HandleDouyinOAuthCallback(c *gin.Context) {
 	frontend := h.frontendBaseURL
 	accountID, name, err := h.accountUC.HandleOAuthCallback(c.Request.Context(), code, state)
 	if err != nil {
-		c.Redirect(http.StatusFound, frontend+"/distribution?douyin_oauth=failed&reason="+url.QueryEscape(err.Error()))
+		// 商户端路由挂在前缀 /m/ 下（App.tsx），重定向路径必须带 /m
+		c.Redirect(http.StatusFound, frontend+"/m/distribution?douyin_oauth=failed&reason="+url.QueryEscape(err.Error()))
 		return
 	}
 	log.Printf("[DouyinOAuth] 授权绑定成功：account=%s name=%s", accountID, name)
-	c.Redirect(http.StatusFound, frontend+"/distribution?douyin_oauth=success&name="+url.QueryEscape(name))
+	c.Redirect(http.StatusFound, frontend+"/m/distribution?douyin_oauth=success&name="+url.QueryEscape(name))
 }
 
 // ---- 发布管理端点 ----
