@@ -49,6 +49,9 @@ services:
       DOUYIN_CLIENT_SECRET: ${DOUYIN_CLIENT_SECRET:-}
       # 回调地址必须与抖音控制台配置完全一致（含 /webreaper 前缀）
       DOUYIN_OAUTH_CALLBACK: ${DOUYIN_OAUTH_CALLBACK:-https://your-domain.com/webreaper/api/v1/merchant/accounts/douyin/oauth/callback}
+      # ⚠️ 只能填应用已开通的 scope（含未开通项授权页直接报「scope权限非法」）；
+      # 拿到视频发布/数据权限后按控制台实际开通项扩展，逗号分隔
+      DOUYIN_OAUTH_SCOPE: ${DOUYIN_OAUTH_SCOPE:-user_info}
       # OAuth 回调完成后 302 跳回的前端地址
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
       # Bing 收录

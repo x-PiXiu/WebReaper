@@ -37,24 +37,31 @@ import (
 )
 
 const (
-	defaultScope = "user_info,video.create.bind" // 用户信息 + 视频发布（video.create.bind 需能力实验室审核通过才实际授予）
-	stateTTL     = 10 * time.Minute              // state 有效期（授权流程应在此内完成）
+	// defaultScope 默认只申请 user_info——抖音授权页规则：请求的 scope 中任何一个
+	// 未开通（如 video.create.bind 需定向准入），整个授权请求直接报「scope权限非法」。
+	// 拿到视频发布等权限后，通过 DOUYIN_OAUTH_SCOPE 环境变量扩展（逗号分隔）。
+	defaultScope = "user_info"
+	stateTTL     = 10 * time.Minute // state 有效期（授权流程应在此内完成）
 	defaultCallback = "http://localhost:8082/api/v1/merchant/accounts/douyin/oauth/callback"
 )
 
 // Client 抖音开放平台 OAuth 客户端（内部为官方 SDK）。
 type Client struct {
-	sdk         *openapi.Client
-	clientKey   string
+	sdk          *openapi.Client
+	clientKey    string
 	clientSecret string
-	callbackURL string // 必须与开放平台控制台「授权回调地址」完全一致
-	scope       string
+	callbackURL  string // 必须与开放平台控制台「授权回调地址」完全一致
+	scope        string
 }
 
-// NewClient 创建客户端（初始化官方 SDK）。callbackURL 空时用默认本地开发回调。
-func NewClient(clientKey, clientSecret, callbackURL string) (*Client, error) {
+// NewClient 创建客户端（初始化官方 SDK）。callbackURL 空时用默认本地开发回调；
+// scope 空时用 defaultScope（只能填应用已开通的 scope，逗号分隔）。
+func NewClient(clientKey, clientSecret, callbackURL, scope string) (*Client, error) {
 	if callbackURL == "" {
 		callbackURL = defaultCallback
+	}
+	if scope == "" {
+		scope = defaultScope
 	}
 	sdk, err := openapi.NewClient(new(credential.Config).
 		SetClientKey(clientKey).
@@ -67,7 +74,7 @@ func NewClient(clientKey, clientSecret, callbackURL string) (*Client, error) {
 		clientKey:    clientKey,
 		clientSecret: clientSecret,
 		callbackURL:  callbackURL,
-		scope:        defaultScope,
+		scope:        scope,
 	}, nil
 }
 

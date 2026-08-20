@@ -558,7 +558,7 @@ func main() {
 				if stateSecret == "" {
 					stateSecret = cfg.Publish.DouyinClientSecret
 				}
-				oauthClient, oErr := douyinoauth.NewClient(cfg.Publish.DouyinClientKey, cfg.Publish.DouyinClientSecret, cfg.Publish.DouyinOAuthCallback)
+				oauthClient, oErr := douyinoauth.NewClient(cfg.Publish.DouyinClientKey, cfg.Publish.DouyinClientSecret, cfg.Publish.DouyinOAuthCallback, cfg.Publish.DouyinOAuthScope)
 				if oErr != nil {
 					log.Error("抖音 OpenAPI SDK 初始化失败，官方授权不可用", port.Err(oErr))
 				} else {

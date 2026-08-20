@@ -102,7 +102,11 @@ type PublishConfig struct {
 	DouyinClientKey    string
 	DouyinClientSecret string
 	DouyinOAuthCallback string // 授权回调地址（必须与开放平台控制台「授权回调地址」完全一致，HTTPS）
-	FrontendBaseURL     string // 前端地址（OAuth 回调完成后 302 跳回）
+	// DouyinOAuthScope 申请的授权作用域（逗号分隔）。⚠️ 只能填应用已开通的 scope——
+	// 含任何一个未开通的 scope（如 video.create.bind）授权页直接报「scope权限非法」。
+	// 默认仅 user_info；拿到视频发布/数据权限后按控制台实际开通项扩展。
+	DouyinOAuthScope string
+	FrontendBaseURL  string // 前端地址（OAuth 回调完成后 302 跳回）
 }
 
 // ServerConfig 服务配置。
@@ -339,6 +343,7 @@ func Load() Config {
 			DouyinClientKey:     os.Getenv("DOUYIN_CLIENT_KEY"),
 			DouyinClientSecret:  os.Getenv("DOUYIN_CLIENT_SECRET"),
 			DouyinOAuthCallback: getenvDefault("DOUYIN_OAUTH_CALLBACK", "http://localhost:8082/api/v1/merchant/accounts/douyin/oauth/callback"),
+			DouyinOAuthScope:    getenvDefault("DOUYIN_OAUTH_SCOPE", "user_info"),
 			FrontendBaseURL:     getenvDefault("FRONTEND_BASE_URL", "http://localhost:5173"),
 		},
 		Crawler: CrawlerConfig{
