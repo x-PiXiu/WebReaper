@@ -29,7 +29,7 @@ const adminMenu: NavItem[] = [
     ],
   },
   {
-    key: 'geo', label: 'GEO 内容引擎',
+    key: 'engine', label: '内容引擎',
     children: [
       { key: '/admin/chat', label: 'AI 对话' },
       { key: '/admin/agent-configs', label: 'Agent 配置' },
@@ -69,7 +69,7 @@ export default function AdminLayout() {
       <AppShell
         menuItems={adminMenu}
         brandName="获客智能体 · 管理"
-        brandIcon="智"
+        brandIcon="获"
         noPaddingKeys={['/admin/chat']}
         banner={mustChange ? (
           <Alert

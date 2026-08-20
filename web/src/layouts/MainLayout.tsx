@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { useBrandStore } from '../store/brand'
+import { useWorksStore } from '../store/works'
 import { clearQueryCache } from '../queryClient'
 import { businessApi } from '../api/business'
 import { useNotificationList, useUnreadCount, useMarkNotificationRead } from '../hooks/useNotifications'
@@ -97,19 +98,14 @@ export function AppShell({
     document.title = `${pageTitle} · 获客智能体`
   }, [pageTitle])
 
-  // 全局资产搜索：复用业务页同一 queryKey；关键词/任务仅在聚焦搜索时拉取
+  // 全局搜索：人设 + 作品库 + 发布任务 + 快捷入口
   const [searchReady, setSearchReady] = useState(false)
+  const works = useWorksStore((s) => s.works)
   const { data: brands = [] } = useQuery({
     queryKey: ['geo-brands'],
     queryFn: () => businessApi.listBrands(),
     staleTime: 60_000,
     enabled: !inAdmin,
-  })
-  const { data: keywords = [] } = useQuery({
-    queryKey: ['geo-all-keywords'],
-    queryFn: () => businessApi.listAllKeywords(),
-    staleTime: 60_000,
-    enabled: !inAdmin && searchReady,
   })
   const { data: publishJobs = [] } = useQuery({
     queryKey: ['geo-publish-jobs'],
@@ -120,20 +116,25 @@ export function AppShell({
 
   const searchOptions = [
     ...brands.map((b: { id: string; name: string }) => ({
-      value: `品牌 · ${b.name}`,
-      label: `品牌 · ${b.name}`,
+      value: `人设 · ${b.name}`,
+      label: `人设 · ${b.name}`,
       target: '/m/brands',
     })),
-    ...keywords.slice(0, 30).map((k: { id: string; term: string }) => ({
-      value: `关键词 · ${k.term}`,
-      label: `关键词 · ${k.term}`,
-      target: '/m/checkup?tab=records',
+    ...works.slice(0, 30).map((w) => ({
+      value: `作品 · ${w.title}`,
+      label: `作品 · ${w.title}${w.status === 'published' ? '（已发布）' : w.status === 'ready' ? '（待发布）' : '（草稿）'}`,
+      target: '/m/works',
     })),
     ...publishJobs.slice(0, 20).map((j: { id: string; title: string; platform: string }) => ({
-      value: `发布任务 · ${j.title || j.id}`,
-      label: `发布任务 · ${j.title || j.id} (${j.platform})`,
+      value: `发布 · ${j.title || j.id}`,
+      label: `发布 · ${j.title || j.id} (${j.platform})`,
       target: '/m/distribution',
     })),
+    ...(searchReady ? [
+      { value: '快捷 · 内容合成', label: '快捷 · 内容合成', target: '/m/compose' },
+      { value: '快捷 · 资产库', label: '快捷 · 资产库', target: '/m/assets' },
+      { value: '快捷 · 作品数据', label: '快捷 · 作品数据', target: '/m/analytics' },
+    ] : []),
   ]
 
   const handleSearchSelect = (val: string) => {
@@ -142,16 +143,14 @@ export function AppShell({
   }
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#0a0a0f' }}>
+    <Layout className="wr-app-layout" style={{ minHeight: '100vh', background: 'var(--wr-bg-base)' }}>
       {/* 侧边栏 */}
       <Sider
-        width={240}
-        collapsible
+        className="wr-app-sider"
+        width={220}
         breakpoint="lg"
         collapsedWidth={64}
         style={{
-          background: 'var(--wr-bg-surface)',
-          borderRight: '1px solid var(--wr-border)',
           position: 'sticky',
           top: 0,
           height: '100vh',
@@ -161,19 +160,19 @@ export function AppShell({
         }}
       >
         {/* Logo 区 */}
-        <div style={{
-          height: 60,
+        <div className="wr-app-brand" style={{
+          height: 64,
           display: 'flex',
           alignItems: 'center',
           gap: 10,
-          padding: '0 20px',
+          padding: '0 18px',
           borderBottom: '1px solid var(--wr-border)',
         }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 10,
+          <div className="wr-app-brand-mark" style={{
+            width: 34, height: 34, borderRadius: 11,
             background: 'linear-gradient(135deg, var(--wr-primary), var(--wr-accent))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 17, fontWeight: 800, color: '#fff', flexShrink: 0,
+            fontSize: 16, fontWeight: 800, color: '#fff', flexShrink: 0,
             boxShadow: 'var(--wr-shadow-glow)',
           }}>{brandIcon}</div>
           <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--wr-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
@@ -182,7 +181,7 @@ export function AppShell({
         </div>
 
         <Menu
-          theme="dark"
+          theme={themeMode === 'dark' ? 'dark' : 'light'}
           mode="inline"
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
@@ -245,7 +244,7 @@ export function AppShell({
                 <Input
                   size="small"
                   prefix={<SearchOutlined style={{ color: 'var(--wr-text-muted)', fontSize: 13 }} />}
-                  placeholder="搜索品牌 / 关键词"
+                  placeholder="搜索人设 / 作品"
                   variant="borderless"
                   style={{ background: 'var(--wr-input-bg)', borderRadius: 8 }}
                 />
@@ -283,25 +282,26 @@ export function AppShell({
         </Header>
 
         {/* 内容区（外层极光背景）*/}
-        <Content style={{
+        <Content className="wr-app-main" style={{
           margin: 0,
           padding: noPadding ? 0 : '16px 20px 24px',
           minHeight: 'calc(100vh - 60px)',
           overflow: noPadding ? 'hidden' : 'visible',
         }}>
           <div className="wr-aurora-bg" style={{ minHeight: '100%', borderRadius: 0 }}>
-            <div className="wr-fade-in">
+            <div key={location.pathname} className="wr-page-enter">
               {banner}
               <Outlet />
             </div>
             <div style={{
-              marginTop: 32,
+              marginTop: 40,
               paddingTop: 16,
               borderTop: '1px solid var(--wr-border)',
               fontSize: 11,
               color: 'var(--wr-text-muted)',
               textAlign: 'center',
-              opacity: 0.8,
+              opacity: 0.72,
+              letterSpacing: '0.08em',
             }}>
               获客智能体
             </div>

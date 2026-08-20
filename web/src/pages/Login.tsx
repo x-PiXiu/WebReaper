@@ -90,29 +90,29 @@ export default function Login() {
         <div className="wr-login-torch-core" aria-hidden />
 
         <header className="wr-login-brand-top wr-login-rise">
-          <p className="wr-login-kicker">Generative Engine Optimization</p>
+          <p className="wr-login-kicker">Account IP Agent</p>
           <h1 className="wr-login-brand-title">获客智能体</h1>
           <span className="wr-login-title-line" aria-hidden />
         </header>
 
         <div className="wr-login-brand-body wr-login-rise wr-login-rise--delay">
           <h2 className="wr-login-headline">
-            在生成式搜索里，
+            打造账号 IP，
             <br />
-            让品牌被真正看见。
+            让内容持续获客。
           </h2>
           <p className="wr-login-lead">
-            关键词、内容、分发与收录监测连成一条工作流——
-            少一点热闹的包装，多一点可验证的可见度。
+            人设、资产、合成、发布与作品数据连成一条工作流——
+            少一点热闹包装，多一点可运营的增长闭环。
           </p>
         </div>
 
         <footer className="wr-login-brand-foot wr-login-rise wr-login-rise--delay2">
-          <span>关键词策略</span>
+          <span>人设档案</span>
           <span className="wr-login-dot" aria-hidden />
-          <span>内容生成</span>
+          <span>内容合成</span>
           <span className="wr-login-dot" aria-hidden />
-          <span>发布与收录</span>
+          <span>作品数据</span>
         </footer>
       </aside>
 
@@ -123,8 +123,8 @@ export default function Login() {
             <h2>{mode === 'login' ? '登录' : '注册'}</h2>
             <p>
               {mode === 'login'
-                ? '进入智擎AI 工作空间'
-                : '创建账号后即可开始管理品牌资产'}
+                ? '进入获客智能体工作空间'
+                : '创建账号后即可开始打造账号 IP'}
             </p>
           </div>
 

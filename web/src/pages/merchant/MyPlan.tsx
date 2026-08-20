@@ -10,11 +10,11 @@ const { Text, Title } = Typography
 
 const yuan = (cents: number) => `¥${(cents / 100).toFixed(0)}`
 const sceneLabels: Record<string, string> = {
-  monitor: '品牌监测',
-  'content-gen': '内容生成',
+  monitor: '效果监测',
+  'content-gen': '内容合成',
   'content-opt': '内容优化',
   chat: 'AI 对话',
-  'keyword-distill': '关键词蒸馏',
+  'keyword-distill': '选题蒸馏',
   video: '视频生成',
 }
 
@@ -62,21 +62,24 @@ export default function MyPlan() {
   }
 
   return (
-    <div className="wr-page-content">
-      <div className="wr-page-header">
-        <h1>我的套餐</h1>
-        <p>当前套餐用量 · 升级续费 · 订单记录</p>
+    <div className="wr-page-content ip-page">
+      <div className="ip-page-hero">
+        <div>
+          <p className="ip-kicker">Billing</p>
+          <h1>我的套餐</h1>
+          <p className="ip-lead">当前套餐用量 · 升级续费 · 订单记录</p>
+        </div>
       </div>
 
       {/* 当前套餐卡片 */}
-      <Card style={{ marginBottom: 16 }}>
+      <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
         <Row gutter={24} align="middle">
           <Col>
             <Space direction="vertical" size={0}>
               <Space>
-                <CrownOutlined style={{ fontSize: 24, color: currentPlan?.level === 'team' ? '#faad14' : currentPlan?.level === 'pro' ? '#722ed1' : '#8c8c8c' }} />
+                <CrownOutlined style={{ fontSize: 24, color: currentPlan?.level === 'team' ? '#faad14' : currentPlan?.level === 'pro' ? 'var(--wr-primary)' : '#8c8c8c' }} />
                 <Title level={4} style={{ margin: 0 }}>{currentPlan?.name || '免费版'}</Title>
-                <Tag color={currentPlan?.level === 'team' ? 'gold' : currentPlan?.level === 'pro' ? 'purple' : 'default'}>{currentPlan?.level || 'free'}</Tag>
+                <Tag color={currentPlan?.level === 'team' ? 'gold' : currentPlan?.level === 'pro' ? 'cyan' : 'default'}>{currentPlan?.level || 'free'}</Tag>
               </Space>
               {subscription ? (
                 <Text type="secondary">有效期至 {subscription.period_end?.slice(0, 10)}</Text>
@@ -87,7 +90,7 @@ export default function MyPlan() {
           </Col>
           <Col flex="auto" />
           <Col>
-            <Button type="primary" size="large" icon={<ThunderboltOutlined />} onClick={() => setBuyModal(plans.find(p => p.level === 'pro') || plans[0])}>
+            <Button type="primary" size="large" className="ip-btn-primary" icon={<ThunderboltOutlined />} onClick={() => setBuyModal(plans.find(p => p.level === 'pro') || plans[0])}>
               {subscription ? '续费 / 升级' : '立即开通'}
             </Button>
           </Col>
@@ -95,7 +98,7 @@ export default function MyPlan() {
       </Card>
 
       {/* 用量进度 */}
-      <Card title="本月用量" style={{ marginBottom: 16 }}>
+      <Card className="wr-glass-card" title="本月用量" style={{ marginBottom: 16 }}>
         {Object.keys(usage?.usages || {}).length === 0 ? (
           <Empty description="当前套餐无配额限制" />
         ) : (
@@ -128,7 +131,7 @@ export default function MyPlan() {
       </Card>
 
       {/* 可选套餐 */}
-      <Card title="可选套餐" style={{ marginBottom: 16 }}>
+      <Card className="wr-glass-card" title="可选套餐" style={{ marginBottom: 16 }}>
         <Row gutter={16}>
           {plans.map(p => (
             <Col span={8} key={p.id}>
@@ -148,7 +151,7 @@ export default function MyPlan() {
                         ))}
                       </Space>
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        配额按 LLM 调用次数计：1 次监测（1 关键词×1 引擎×5 采样）≈ 10 次
+                        配额按调用次数计：合成、发布与对话等均计入对应额度
                       </Text>
                     </div>
                   }
@@ -160,7 +163,7 @@ export default function MyPlan() {
       </Card>
 
       {/* 订单记录 */}
-      <Card title="订单记录">
+      <Card className="wr-glass-card" title="订单记录">
         <Table dataSource={orders} rowKey="id" size="small" pagination={{ pageSize: 10 }}>
           <Table.Column title="订单号" dataIndex="id" key="id" render={(id) => <Text copyable style={{ fontSize: 12 }}>{id}</Text>} />
           <Table.Column title="套餐" dataIndex="plan_id" key="plan" render={(p) => <Tag>{plans.find(x => x.id === p)?.name || p}</Tag>} />

@@ -17,6 +17,10 @@ const Brands = lazy(() => import('./pages/merchant/Brands'))
 const Distribution = lazy(() => import('./pages/merchant/Distribution'))
 const Checkup = lazy(() => import('./pages/merchant/checkup/Checkup'))
 const Studio = lazy(() => import('./pages/merchant/studio/Studio'))
+const AssetLibrary = lazy(() => import('./pages/merchant/assets/AssetLibrary'))
+const ComposeWizard = lazy(() => import('./pages/merchant/compose/ComposeWizard'))
+const MyWorks = lazy(() => import('./pages/merchant/works/MyWorks'))
+const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
 const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
 const Notifications = lazy(() => import('./pages/merchant/Notifications'))
 const AdminUsers = lazy(() => import('./pages/admin/Users'))
@@ -63,19 +67,22 @@ export default function App() {
           <Route path="/m" element={<Navigate to="/m/dashboard" replace />} />
           <Route path="/m/dashboard" element={<LazyPage><MerchantHome /></LazyPage>} />
           <Route path="/m/brands" element={<LazyPage><Brands /></LazyPage>} />
-          {/* 四步主线第 2 步：AI 体检（问问 AI / 报告 / 记录 / 自动体检）。
-              旧路由全部重定向兼容：站内旧链接与书签不失效（Tab 级深链经 ?tab= 传递） */}
-          <Route path="/m/checkup" element={<LazyPage><Checkup /></LazyPage>} />
-          <Route path="/m/keywords" element={<Navigate to="/m/checkup?tab=records" replace />} />
-          <Route path="/m/indexing-report" element={<Navigate to="/m/checkup" replace />} />
-          <Route path="/m/visibility" element={<Navigate to="/m/checkup" replace />} />
-          {/* 四步主线第 3 步：内容中心（写文章 / 做视频图片） */}
-          <Route path="/m/studio" element={<LazyPage><Studio /></LazyPage>} />
-          <Route path="/m/content" element={<Navigate to="/m/studio" replace />} />
-          <Route path="/m/creation" element={<Navigate to="/m/studio?tab=media" replace />} />
-          {/* 附近同行：已并入「AI 体检 · 体检记录 · 附近对比」子层（本地品牌显示）——旧链接重定向 */}
-          <Route path="/m/nearby" element={<Navigate to="/m/checkup?tab=records&sub=nearby" replace />} />
-          {/* 四步主线第 4 步：分发中心 */}
+          <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
+          <Route path="/m/compose" element={<LazyPage><ComposeWizard /></LazyPage>} />
+          <Route path="/m/works" element={<LazyPage><MyWorks /></LazyPage>} />
+          <Route path="/m/analytics" element={<LazyPage><WorksAnalytics /></LazyPage>} />
+          {/* 兼容旧路由 */}
+          <Route path="/m/checkup" element={<Navigate to="/m/analytics" replace />} />
+          <Route path="/m/keywords" element={<Navigate to="/m/analytics" replace />} />
+          <Route path="/m/indexing-report" element={<Navigate to="/m/analytics" replace />} />
+          <Route path="/m/visibility" element={<Navigate to="/m/analytics" replace />} />
+          <Route path="/m/studio" element={<Navigate to="/m/compose" replace />} />
+          <Route path="/m/content" element={<Navigate to="/m/compose" replace />} />
+          <Route path="/m/creation" element={<Navigate to="/m/compose" replace />} />
+          <Route path="/m/nearby" element={<Navigate to="/m/brands" replace />} />
+          {/* 旧页保留可直达（隐藏入口，便于对照） */}
+          <Route path="/m/studio-legacy" element={<LazyPage><Studio /></LazyPage>} />
+          <Route path="/m/checkup-legacy" element={<LazyPage><Checkup /></LazyPage>} />
           <Route path="/m/distribution" element={<LazyPage><Distribution /></LazyPage>} />
           <Route path="/m/my-plan" element={<LazyPage><MyPlan /></LazyPage>} />
           <Route path="/m/chat" element={<LazyPage><Chat /></LazyPage>} />

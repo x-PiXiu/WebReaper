@@ -125,7 +125,7 @@ export default function StoreTab({ brand }: { brand: Brand }) {
       }
     >
       <Text type="secondary" style={{ display: 'block', fontSize: 12.5, marginBottom: 12 }}>
-        门店建好后，「AI 体检 · 附近对比」会以它为中心展示附近同行双榜——现实排名 vs AI 排名。
+        门店建好后，本地发布可带定位；竞品推荐也可按门店周边给出候选。
       </Text>
       {isLoading ? <Spin /> : stores.length === 0 ? (
         <Empty description="还没有门店——添加真实地址后，AI 推荐附近商家才会带上你">

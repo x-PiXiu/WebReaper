@@ -193,12 +193,12 @@ export default function Brands() {
     const kwCount = allKeywords.filter((k: { brand_id: string }) => k.brand_id === selectedBrand.id).length
     const published = brandContents.filter((c: { status?: string }) => c.status === 'published').length
     return [
-      { label: '品牌定位与卖点已填写', short: '定位卖点', field: 'positioning', ok: !!selectedBrand.positioning?.trim() && (selectedBrand.core_selling?.length || 0) > 0 },
+      { label: '人设定位与卖点已填写', short: '定位卖点', field: 'positioning', ok: !!selectedBrand.positioning?.trim() && (selectedBrand.core_selling?.length || 0) > 0 },
       { label: '竞品已配置', short: '竞品', field: 'competitors', ok: (selectedBrand.competitors?.length || 0) > 0 },
       { label: '官网地址已填写', short: '官网', field: 'website_url', ok: !!selectedBrand.website_url?.trim() },
       { label: '行业已填写', short: '行业', field: 'industry', ok: !!selectedBrand.industry?.trim() },
-      { label: '关键词已有 3 个以上', short: '关键词（去添加）', link: '/m/checkup?tab=records', ok: kwCount >= 3 },
-      { label: '已发布第 1 篇内容', short: '发布内容（去生成）', link: '/m/studio', ok: published >= 1 },
+      { label: '选题素材已有 3 个以上', short: '去资产库', link: '/m/assets', ok: kwCount >= 3 },
+      { label: '已发布第 1 个作品', short: '去内容合成', link: '/m/compose', ok: published >= 1 },
     ]
   })()
   const auditScore = auditItems.filter((i) => i.ok).length
@@ -250,11 +250,11 @@ export default function Brands() {
       }
       // 成功即下一步：GEO 旅程是 品牌→关键词→监测→内容，创建完成直接引导去添加关键词
       Modal.success({
-        title: `品牌「${values.name}」创建成功`,
-        content: '资料可以随时回来补齐。下一步：添加几个关键词（顾客会搜的词），AI 才知道为哪些搜索优化你。',
-        okText: '去添加关键词',
+        title: `人设「${values.name}」创建成功`,
+        content: '资料可以随时回来补齐。下一步：去内容合成分步做出第一条成片。',
+        okText: '去内容合成',
         cancelText: '留在本页',
-        onOk: () => navigate('/m/checkup?tab=records'),
+        onOk: () => navigate('/m/compose'),
       })
     } catch { /* 拦截器已提示 */ }
   }
@@ -283,7 +283,7 @@ export default function Brands() {
         core_selling: values.core_selling ? values.core_selling.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
         competitors: values.competitors ? values.competitors.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
       })
-      message.success('品牌信息已保存')
+      message.success('人设信息已保存')
       setSelectedBrand(updated)
       invalidate()
     } catch {} finally {
@@ -348,21 +348,22 @@ export default function Brands() {
   }
 
   return (
-    <div className="wr-page-content" style={{ paddingTop: 0 }}>
-      <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+    <div className="wr-page-content ip-page" style={{ paddingTop: 0 }}>
+      <div className="ip-page-hero" style={{ alignItems: 'flex-end' }}>
         <div>
-          <h1>品牌管理</h1>
-          <p>品牌资料 · 竞品对比——先把"你是谁"讲清楚，AI 才会推荐你</p>
+          <p className="ip-kicker">Persona</p>
+          <h1>人设档案</h1>
+          <p className="ip-lead">人设资料 · 竞品对照——先把「你是谁」讲清楚，内容合成才贴合账号调性</p>
         </div>
-        <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>
-          创建品牌
+        <Button type="primary" size="large" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>
+          创建人设
         </Button>
       </div>
 
       {brands.length === 0 ? (
-        <div className="wr-glass-card" style={{ padding: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有品牌——创建第一个品牌，告诉 AI 你是谁">
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>创建第一个品牌</Button>
+        <div className="ip-panel" style={{ padding: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有人设——创建第一个人设，告诉智能体你是谁">
+            <Button type="primary" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>创建第一个人设</Button>
           </Empty>
         </div>
       ) : (
@@ -374,7 +375,7 @@ export default function Brands() {
               const h = brandHealthMap.get(brand.id)
               const lv = h !== undefined ? healthLevel(h) : null
               return (
-                <Tooltip key={brand.id} title={lv ? `健康分 ${h}（${lv.label}）——立身份与盯数据的综合表现` : '还没有健康分（发起监测后产生）'}>
+                <Tooltip key={brand.id} title={lv ? `完整度 ${h}（${lv.label}）` : '完善资料后会显示完整度评分'}>
                   <div
                     onClick={() => selectBrand(brand)}
                     style={{
@@ -409,7 +410,7 @@ export default function Brands() {
                 color: 'var(--wr-text-secondary)', fontSize: 13,
               }}
             >
-              <PlusOutlined style={{ fontSize: 11 }} /> 新品牌
+              <PlusOutlined style={{ fontSize: 11 }} /> 新人设
             </div>
           </div>
 
@@ -420,14 +421,14 @@ export default function Brands() {
               items={[
                 {
                   key: 'profile',
-                  label: '品牌资料',
+                  label: '人设资料',
                   children: (<>
-                    {/* ① 品牌资料卡（完善度嵌卡头——填表单与看进度是同一件事） */}
+                    {/* ① 人设资料卡 */}
                     <div className="wr-glass-card" style={{ padding: 24, marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
                         <Space>
                           <BulbOutlined style={{ color: 'var(--wr-primary)' }} />
-                          <Text strong style={{ fontSize: 16 }}>品牌资料</Text>
+                          <Text strong style={{ fontSize: 16 }}>人设资料</Text>
                           <Tag color={selectedBrand.biz_type === 'online' ? 'blue' : 'green'} style={{ margin: 0, fontSize: 10 }}>
                             {selectedBrand.biz_type === 'online' ? '线上业务' : '本地生意'}
                           </Tag>
@@ -444,43 +445,43 @@ export default function Brands() {
                             />
                             <Text strong style={{ fontSize: 13 }}>{auditPct}%（{auditScore}/6）</Text>
                           </Space>
-                          <Popconfirm title="删除品牌及其关键词？" onConfirm={() => handleDeleteBrand(selectedBrand.id)}>
+                          <Popconfirm title="删除此人设？" onConfirm={() => handleDeleteBrand(selectedBrand.id)}>
                             <Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ opacity: 0.55 }}>删除</Button>
                           </Popconfirm>
                         </Space>
                       </div>
 
                       <Form form={editForm} layout="vertical" requiredMark={false}>
-                        <Form.Item label="品牌名" name="name" rules={[{ required: true, message: '请输入品牌名' }]}>
-                          <Input placeholder="品牌名" />
+                        <Form.Item label="人设名称" name="name" rules={[{ required: true, message: '请输入人设名称' }]}>
+                          <Input placeholder="如 主理人小王 / 品牌官方号" />
                         </Form.Item>
-                        <Form.Item label="业务类型" name="biz_type" tooltip="有实体门店选本地生意（可以做附近同行对比）；只在线上经营选线上业务（可以做行业竞品对比）">
+                        <Form.Item label="业务类型" name="biz_type" tooltip="有实体门店选本地生意；只在线上经营选线上业务">
                           <Select options={[
-                            { value: 'local', label: '本地生意（有门店，做附近同行对比）' },
-                            { value: 'online', label: '线上业务（无门店，做行业竞品对比）' },
+                            { value: 'local', label: '本地生意（有门店）' },
+                            { value: 'online', label: '线上业务（无门店）' },
                           ]} />
                         </Form.Item>
-                        <Form.Item label="行业" name="industry" tooltip="如 餐饮/SaaS 工具——AI 会优先参考同行业的资料；留空则全行业参考">
+                        <Form.Item label="行业" name="industry" tooltip="如 餐饮/美业——合成内容时会参考同行业表达习惯；可留空">
                           <AutoComplete options={INDUSTRY_OPTIONS.map((v) => ({ value: v }))} placeholder="如 餐饮、美业/美容美发">
                             <Input maxLength={20} />
                           </AutoComplete>
                         </Form.Item>
                         <Form.Item label="官网地址" name="website_url"
-                          tooltip="发布的内容会自动附上官网链接，AI 引用你的内容时读者可直达官网（线上品牌必填）"
+                          tooltip="发布内容可附上官网链接（线上业务建议填写）"
                           dependencies={['biz_type']}
                           rules={websiteRules(watchedBizType === 'online')}>
-                          <Input placeholder="https://example.com（线上品牌必填，本地品牌可选）" />
+                          <Input placeholder="https://example.com（线上建议填写）" />
                         </Form.Item>
-                        <Form.Item label="品牌定位" name="positioning" tooltip="一句话说清你是干嘛的、给谁服务——AI 介绍你时会参考" rules={[{ max: 200, message: '品牌定位 ≤200 字' }, CLEAN_TEXT_VALIDATOR]}>
+                        <Form.Item label="人设定位" name="positioning" tooltip="一句话说清你是谁、服务谁——合成脚本会参考" rules={[{ max: 200, message: '人设定位 ≤200 字' }, CLEAN_TEXT_VALIDATOR]}>
                           <TextArea placeholder="如 专注北京地区中高端家装，提供设计-施工-软装一站式服务" autoSize={{ minRows: 2, maxRows: 4 }} />
                         </Form.Item>
-                        <Form.Item label="核心卖点" name="core_selling" tooltip="你最想让顾客记住的 3-8 个点，用顿号或逗号分隔（单项 ≤30 字）" rules={[CLEAN_TEXT_VALIDATOR]}>
+                        <Form.Item label="核心卖点" name="core_selling" tooltip="最想让观众记住的 3-8 个点，用顿号或逗号分隔" rules={[CLEAN_TEXT_VALIDATOR]}>
                           <TextArea placeholder="10年经验、环保材料、终身保修" autoSize={{ minRows: 2 }} />
                         </Form.Item>
-                        <Form.Item label="竞品" name="competitors" tooltip="你想对比的同行/对手，用逗号分隔。可留空——可用「竞品对比」页的一键推荐自动补充" rules={[CLEAN_TEXT_VALIDATOR]}>
-                          <TextArea placeholder="竞品A、竞品B、竞品C（可留空，可自动推荐）" autoSize={{ minRows: 1 }} />
+                        <Form.Item label="竞品" name="competitors" tooltip="想对照的同行/对手，用逗号分隔。可留空，稍后在竞品对比里补充" rules={[CLEAN_TEXT_VALIDATOR]}>
+                          <TextArea placeholder="竞品A、竞品B（可留空）" autoSize={{ minRows: 1 }} />
                         </Form.Item>
-                        <Button type="primary" loading={savingBrand} onClick={handleSaveBrand}>保存品牌信息</Button>
+                        <Button type="primary" className="ip-btn-primary" loading={savingBrand} onClick={handleSaveBrand}>保存人设信息</Button>
                       </Form>
 
                       {/* 未完成项一行提示（傻瓜化：不列 6 项清单，只告诉还差什么、点了就去） */}
@@ -522,20 +523,20 @@ export default function Brands() {
                             <Space size={8}>
                               <FileTextOutlined style={{ color: 'var(--wr-accent)' }} />
                               <Text strong style={{ fontSize: 14 }}>效果 · AI 眼中的你</Text>
-                              <Text type="secondary" style={{ fontSize: 12 }}>提及率 / 被引用等结果信号，点开查看</Text>
+                              <Text type="secondary" style={{ fontSize: 12 }}>曝光 / 互动等结果信号，点开查看</Text>
                             </Space>
                           ),
                           children: (<>
                             {/* 结果指标（原头部指标行收敛于此） */}
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 16 }}>
                               <div>
-                                <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>提及率</Text>
+                                <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>可见度</Text>
                                 <Text strong style={{ fontSize: 20, color: rateColor((overview as { avg_mention_rate?: number })?.avg_mention_rate || 0) }}>
                                   {Math.round(((overview as { avg_mention_rate?: number })?.avg_mention_rate || 0) * 100)}%
                                 </Text>
                               </div>
                               <div>
-                                <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>关键词</Text>
+                                <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>选题素材</Text>
                                 <Text strong style={{ fontSize: 20 }}>{allKeywords.filter((k: { brand_id: string }) => k.brand_id === selectedBrand.id).length}</Text>
                               </div>
                               <div>
@@ -564,7 +565,7 @@ export default function Brands() {
                             </Text>
                             <Space style={{ marginTop: 10 }}>
                               <Button size="small" type="link" onClick={() => navigate('/m/studio')}>去生成内容 →</Button>
-                              <Button size="small" type="link" onClick={() => navigate('/m/checkup?tab=report')}>查看 AI 可见度 →</Button>
+                              <Button size="small" type="link" onClick={() => navigate('/m/analytics')}>查看作品数据 →</Button>
                             </Space>
                           </>),
                         }]}
@@ -595,17 +596,17 @@ export default function Brands() {
                         <Space>
                           {selectedBrand.biz_type !== 'online' && (
                             <Button size="small" type="primary" ghost icon={<EnvironmentOutlined />} onClick={() => handleSuggestCompetitors('poi')}>
-                              从附近同行推荐
+                              从门店周边推荐
                             </Button>
                           )}
                           <Button size="small" type="primary" ghost icon={<RadarChartOutlined />} onClick={() => handleSuggestCompetitors('monitoring')}>
-                            从监测结果推荐
+                            从历史表现推荐
                           </Button>
                         </Space>
                       </div>
                       <Text type="secondary" style={{ display: 'block', marginBottom: 14, fontSize: 13, lineHeight: 1.6 }}>
-                        竞品是你观察差距的参照——发起监测后，这里能看到"你 vs 竞品"在 AI 回答里的提及率对比。
-                        {selectedBrand.biz_type !== 'online' && '本地品牌可一键从附近同行（按评分/距离）推荐竞品候选。'}
+                        竞品是你观察差距的参照。合成并发布作品后，可在「作品数据」里对照增长表现。
+                        {selectedBrand.biz_type !== 'online' && '本地生意也可一键从门店周边推荐竞品候选。'}
                       </Text>
 
                       {selectedBrand.competitors && selectedBrand.competitors.length > 0 ? (
@@ -622,7 +623,7 @@ export default function Brands() {
                               }}>
                                 {c}
                                 {ai && (
-                                  <Tooltip title={`AI 回答中提及率 ${ai.avgRate.toFixed(0)}%${ai.sentiment === 'positive' ? '· 被推荐' : ai.sentiment === 'negative' ? '· 被批评' : ''}${ai.avgRate > 0 ? '（高于你时标红提醒）' : ''}`}>
+                                  <Tooltip title={`曝光强度 ${ai.avgRate.toFixed(0)}%${ai.sentiment === 'positive' ? '· 偏正面' : ai.sentiment === 'negative' ? '· 偏负面' : ''}${ai.avgRate > 0 ? '（高于你时标红提醒）' : ''}`}>
                                     <span style={{ marginLeft: 6, color: ai.avgRate > 0 ? 'var(--wr-danger)' : 'var(--wr-text-muted)' }}>
                                       {ai.avgRate.toFixed(0)}%
                                       {ai.sentiment === 'positive' && <CheckCircleOutlined style={{ color: 'var(--wr-success)', fontSize: 11, marginLeft: 3 }} />}
@@ -644,14 +645,14 @@ export default function Brands() {
                             {selectedBrand.biz_type !== 'online' && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                                 <Button size="small" type="primary" ghost icon={<EnvironmentOutlined />} onClick={() => handleSuggestCompetitors('poi')}>
-                                  从附近同行推荐
+                                  从门店周边推荐
                                 </Button>
                                 <Text type="secondary" style={{ fontSize: 12 }}>按评分和距离，搜你门店周边的对手</Text>
                               </div>
                             )}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                               <Button size="small" type="primary" ghost icon={<RadarChartOutlined />} onClick={() => handleSuggestCompetitors('monitoring')}>
-                                从监测结果推荐
+                                从历史表现推荐
                               </Button>
                               <Text type="secondary" style={{ fontSize: 12 }}>AI 回答里出现过的对手（需先测过一题）</Text>
                             </div>
@@ -681,7 +682,7 @@ export default function Brands() {
                       {compAi.length === 0 ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 0' }}>
                           <Text type="secondary" style={{ fontSize: 13 }}>还没有和竞品的对比数据</Text>
-                          <Button size="small" type="primary" onClick={() => navigate('/m/checkup?tab=ask')}>去问一题，测出差距</Button>
+                          <Button size="small" type="primary" className="ip-btn-primary" onClick={() => navigate('/m/compose')}>去做一条对照内容</Button>
                         </div>
                       ) : (
                         <>
@@ -723,12 +724,12 @@ export default function Brands() {
                               <Tag color="success" style={{ margin: 0 }}>正面 {sentDist.positive}%</Tag>
                               <Tag style={{ margin: 0 }}>中性 {sentDist.neutral}%</Tag>
                               <Tag color="error" style={{ margin: 0 }}>负面 {sentDist.negative}%</Tag>
-                              <Text type="secondary" style={{ fontSize: 11 }}>基于 {sentDist.total} 次监测</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>基于 {sentDist.total} 次样本</Text>
                             </Space>
                             {/* 行动暗示（傻瓜化 3c：数据变行动——竞品领先时该干什么） */}
                             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--wr-border)' }}>
-                              竞品领先你时：去「AI 体检 · 引用归因」看看它被 AI 引用了什么内容，针对性写一篇——
-                              <a style={{ fontSize: 12 }} onClick={() => navigate('/m/checkup?tab=records&sub=citations')}>去看引用归因</a>
+                              竞品领先你时：去「内容合成」针对性做一条对照内容，发布后在「作品数据」复盘——
+                              <a style={{ fontSize: 12 }} onClick={() => navigate('/m/compose')}>去内容合成</a>
                             </Text>
                           </div>
                         </>
@@ -744,18 +745,18 @@ export default function Brands() {
 
       {/* 创建品牌弹窗——傻瓜化：首屏只有 2 个必填（品牌名+业务类型），其余收进选填折叠区。
           线上品牌才出现官网必填（渐进披露）；资料可创建后在"品牌档案"渐进补齐 */}
-      <Modal title="创建品牌" open={brandModalOpen} onCancel={() => setBrandModalOpen(false)} footer={null} width={560}>
+      <Modal title="创建人设" open={brandModalOpen} onCancel={() => setBrandModalOpen(false)} footer={null} width={560}>
         <Text type="secondary" style={{ display: 'block', marginBottom: 16, fontSize: 13 }}>
-          只需两步就能创建——资料越完整，AI 越懂你；选填部分随时可以回来补。
+          只需两步就能创建——资料越完整，合成内容越贴合账号调性；选填部分随时可以回来补。
         </Text>
         <Form form={brandForm} layout="vertical" onFinish={handleCreateBrand} requiredMark={false} initialValues={{ biz_type: 'local' }}>
-          <Form.Item label="品牌名" name="name" rules={[{ required: true, message: '请输入品牌名' }, { max: 50, message: '品牌名 ≤50 字' }, CLEAN_TEXT_VALIDATOR]}>
-            <Input placeholder={watchedCreateBizType === 'online' ? '如 NoteFlow、某 SaaS 工具' : '如 某装修公司、某餐厅'} />
+          <Form.Item label="人设名称" name="name" rules={[{ required: true, message: '请输入人设名称' }, { max: 50, message: '人设名称 ≤50 字' }, CLEAN_TEXT_VALIDATOR]}>
+            <Input placeholder={watchedCreateBizType === 'online' ? '如 NoteFlow 官方号' : '如 主理人小王'} />
           </Form.Item>
-          <Form.Item label="业务类型" name="biz_type" tooltip="有实体门店选本地生意（可以做附近同行对比）；只在线上经营选线上业务（可以做行业竞品对比）">
+          <Form.Item label="业务类型" name="biz_type" tooltip="有实体门店选本地生意；只在线上经营选线上业务">
             <Select options={[
-              { value: 'local', label: '本地生意（有门店，做附近同行对比）' },
-              { value: 'online', label: '线上业务（无门店，做行业竞品对比）' },
+              { value: 'local', label: '本地生意（有门店）' },
+              { value: 'online', label: '线上业务（无门店）' },
             ]} />
           </Form.Item>
           {watchedCreateBizType === 'online' && (
@@ -769,15 +770,15 @@ export default function Brands() {
             style={{ marginBottom: 8 }}
             items={[{
               key: 'optional',
-              label: <span style={{ fontSize: 13 }}>选填：完善资料，让 AI 更懂你（推荐填写）</span>,
+              label: <span style={{ fontSize: 13 }}>选填：完善资料，让合成更贴合（推荐填写）</span>,
               children: (<>
-                <Form.Item label="行业" name="industry" style={{ marginBottom: 12 }} tooltip="如 餐饮/SaaS 工具——AI 会优先参考同行业的资料；留空则全行业参考">
+                <Form.Item label="行业" name="industry" style={{ marginBottom: 12 }} tooltip="如 餐饮/美业——合成时会参考同行业表达习惯；可留空">
                   <AutoComplete options={INDUSTRY_OPTIONS.map((v) => ({ value: v }))} placeholder={watchedCreateBizType === 'online' ? '如 SaaS/软件工具、电商/零售' : '如 餐饮、美业/美容美发'}>
                     <Input maxLength={20} />
                   </AutoComplete>
                 </Form.Item>
-                <Form.Item label="品牌定位" name="positioning" style={{ marginBottom: 12 }} tooltip="一句话说清你是干嘛的、给谁服务——AI 介绍你时会参考" rules={[{ max: 200, message: '品牌定位 ≤200 字' }, CLEAN_TEXT_VALIDATOR]}>
-                  <TextArea placeholder={watchedCreateBizType === 'online' ? '如 面向个人与团队的智能云笔记，AI 检索与多端同步' : '如 专注北京地区中高端家装，提供设计-施工-软装一站式服务'} autoSize={{ minRows: 2, maxRows: 4 }} />
+                <Form.Item label="人设定位" name="positioning" style={{ marginBottom: 12 }} tooltip="一句话说清你是谁、服务谁" rules={[{ max: 200, message: '人设定位 ≤200 字' }, CLEAN_TEXT_VALIDATOR]}>
+                  <TextArea placeholder={watchedCreateBizType === 'online' ? '如 面向个人与团队的智能云笔记' : '如 专注北京地区中高端家装'} autoSize={{ minRows: 2, maxRows: 4 }} />
                 </Form.Item>
                 <Form.Item label="核心卖点" name="core_selling" style={{ marginBottom: 12 }} tooltip="你最想让顾客记住的 3-8 个点，用顿号或逗号分隔（单项 ≤30 字）" rules={[CLEAN_TEXT_VALIDATOR, {
                   validator: (_: unknown, v: string) => {
@@ -789,15 +790,15 @@ export default function Brands() {
                 }]}>
                   <TextArea placeholder="10年经验, 环保材料, 终身保修" autoSize={{ minRows: 2 }} />
                 </Form.Item>
-                <Form.Item label="竞品" name="competitors" style={{ marginBottom: 0 }} tooltip="你想对比的同行/对手，用逗号分隔。可留空——创建后可一键从附近同行自动推荐">
-                  <Input placeholder="竞品A, 竞品B, 竞品C（可留空，后续自动推荐）" />
+                <Form.Item label="竞品" name="competitors" style={{ marginBottom: 0 }} tooltip="想对照的同行/对手，可留空，稍后自动推荐">
+                  <Input placeholder="竞品A, 竞品B（可留空）" />
                 </Form.Item>
               </>),
             }]}
           />
           <Form.Item style={{ marginTop: 16 }}>
             <Space>
-              <Button type="primary" htmlType="submit">创建品牌</Button>
+              <Button type="primary" className="ip-btn-primary" htmlType="submit">创建人设</Button>
               <Button onClick={() => setBrandModalOpen(false)}>取消</Button>
             </Space>
           </Form.Item>
@@ -806,7 +807,7 @@ export default function Brands() {
 
       {/* 竞品推荐弹窗（附近同行 POI 按评分/距离排序） */}
       <Modal
-        title={`竞品推荐 · ${suggestSource === 'monitoring' ? '从监测结果' : '从附近同行'} · ${selectedBrand?.name || ''}`}
+        title={`竞品推荐 · ${suggestSource === 'monitoring' ? '从历史表现' : '从门店周边'} · ${selectedBrand?.name || ''}`}
         open={compSuggestOpen}
         onCancel={() => setCompSuggestOpen(false)}
         footer={
@@ -821,13 +822,13 @@ export default function Brands() {
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
           {suggestSource === 'monitoring'
-            ? '监测时 AI 回答中提到的对手（按提及率降序，已排除品牌自身和已有竞品）。勾选要采纳的竞品。'
-            : '附近同行 POI 按评分降序+距离升序推荐（已排除品牌自身和已有竞品）。勾选要采纳的竞品。'}
+            ? '系统根据历史内容表现中提到的对手推荐（已排除自身和已有竞品）。勾选要采纳的竞品。'
+            : '按门店周边评分与距离推荐（已排除自身和已有竞品）。勾选要采纳的竞品。'}
         </Text>
         {loadingSuggest ? (
-          <div style={{ textAlign: 'center', padding: 40 }}><Spin tip={suggestSource === 'monitoring' ? '正在从监测结果蒸馏...' : '正在搜索附近同行...'} /></div>
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin tip={suggestSource === 'monitoring' ? '正在分析历史表现...' : '正在搜索门店周边...'} /></div>
         ) : suggestions.length === 0 ? (
-          <Empty description={suggestSource === 'monitoring' ? '暂无推荐——需先发起监测' : '暂无推荐——需先创建门店并完成地理编码'} style={{ padding: 24 }} />
+          <Empty description={suggestSource === 'monitoring' ? '暂无推荐——先发布作品积累表现数据' : '暂无推荐——需先在门店档案完成定位'} style={{ padding: 24 }} />
         ) : (
           <Checkbox.Group value={checkedComps} onChange={(values) => setCheckedComps(values as string[])} style={{ width: '100%' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -836,7 +837,7 @@ export default function Brands() {
                   <Space size={8}>
                     <Text strong style={{ fontSize: 13 }}>{s.name}</Text>
                     {suggestSource === 'monitoring' ? (
-                      <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>提及率 {s.address}</Tag>
+                      <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>曝光 {s.address}</Tag>
                     ) : (
                       <>
                         {s.rating > 0 && <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>评分 {s.rating}</Tag>}

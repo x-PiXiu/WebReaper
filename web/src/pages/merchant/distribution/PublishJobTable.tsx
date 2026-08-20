@@ -41,7 +41,7 @@ export default function PublishJobTable({
       const job = await businessApi.reMonitorJob(jobId)
       const diff = job.post_mention_rate - job.pre_mention_rate
       const sign = diff > 0 ? '+' : ''
-      message.info(`复测完成：提及率 ${(job.pre_mention_rate * 100).toFixed(1)}% → ${(job.post_mention_rate * 100).toFixed(1)}%（${sign}${(diff * 100).toFixed(1)}%）`)
+      message.info(`复测完成：表现 ${(job.pre_mention_rate * 100).toFixed(1)}% → ${(job.post_mention_rate * 100).toFixed(1)}%（${sign}${(diff * 100).toFixed(1)}%）`)
       onRefresh()
     } catch { /* 拦截器已提示 */ }
   }
@@ -71,7 +71,7 @@ export default function PublishJobTable({
       render: (t: string) => <Text type="secondary" style={{ fontSize: 12 }}>{t ? new Date(t).toLocaleString() : '-'}</Text>,
     },
     {
-      title: '提及率变化', key: 'mention_rate', width: 140,
+      title: '表现变化', key: 'mention_rate', width: 140,
       render: (_: unknown, r: PublishJob) => {
         if (!r.post_mention_rate) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
         const pre = (r.pre_mention_rate * 100).toFixed(1)
@@ -89,7 +89,7 @@ export default function PublishJobTable({
             <Button size="small" type="link" icon={<ExportOutlined />} href={r.external_url} target="_blank">跳转</Button>
           )}
           {r.status === 'published' && (
-            <Button size="small" type="link" loading={reMonitorPending === r.id} onClick={() => handleReMonitor(r.id)}>复测提及率</Button>
+            <Button size="small" type="link" loading={reMonitorPending === r.id} onClick={() => handleReMonitor(r.id)}>复测表现</Button>
           )}
           {r.status === 'pending' && (
             <Button size="small" type="link" onClick={() => handleMarkPublished(r.id)}>标记已发布</Button>

@@ -8,11 +8,11 @@ import {
   MessageOutlined,
   CrownOutlined,
   BellOutlined,
+  DatabaseOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons'
 
-// 商户端导航：获客智能体四步主线（建档案 → 做视频 → 发出去 → 看效果）。
-// 菜单本身就是用户旅程：从上到下走完即见效，每步一个入口。
-// 转型变更：GEO 导向（体检第二步）→ 获客导向（视频第二步，效果最后）。
+/** 商户端导航：账号 IP / 获客智能体闭环 */
 const menu: NavItem[] = [
   {
     key: 'overview', label: '总览',
@@ -21,27 +21,24 @@ const menu: NavItem[] = [
     ],
   },
   {
-    key: 'profile', label: '① 建档案',
+    key: 'ip', label: '打造 IP',
     children: [
-      { key: '/m/brands', label: '品牌档案', icon: <AppstoreOutlined /> },
+      { key: '/m/brands', label: '人设档案', icon: <AppstoreOutlined /> },
+      { key: '/m/assets', label: '资产库', icon: <DatabaseOutlined /> },
     ],
   },
   {
-    key: 'create', label: '② 做视频',
+    key: 'create', label: '创作',
     children: [
-      { key: '/m/studio', label: '内容中心', icon: <VideoCameraOutlined /> },
+      { key: '/m/compose', label: '内容合成', icon: <VideoCameraOutlined /> },
+      { key: '/m/works', label: '我的作品', icon: <FolderOpenOutlined /> },
     ],
   },
   {
-    key: 'distribute', label: '③ 发出去',
+    key: 'growth', label: '增长',
     children: [
-      { key: '/m/distribution', label: '分发中心', icon: <ExportOutlined /> },
-    ],
-  },
-  {
-    key: 'results', label: '④ 看效果',
-    children: [
-      { key: '/m/checkup', label: 'AI 效果', icon: <FundOutlined /> },
+      { key: '/m/distribution', label: '发布中心', icon: <ExportOutlined /> },
+      { key: '/m/analytics', label: '作品数据', icon: <FundOutlined /> },
     ],
   },
   {
@@ -55,6 +52,5 @@ const menu: NavItem[] = [
 ]
 
 export default function MerchantLayout() {
-  // noPaddingKeys 仅保留 Chat（自带全屏布局）
   return <AppShell menuItems={menu} brandName="获客智能体" brandIcon="获" noPaddingKeys={['/m/chat']} />
 }

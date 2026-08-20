@@ -356,16 +356,16 @@ export default function Chat() {
       const latest = [...list].sort((a: any, c: any) => new Date(c.probed_at).getTime() - new Date(a.probed_at).getTime())[0]
       if (!latest) return
       const senti = latest.sentiment === 'positive' ? '正面' : latest.sentiment === 'negative' ? '负面' : '中性'
-      parts.push(`${b.name}：提及率 ${Math.round((latest.mention_rate || 0) * 100)}%、情感${senti}${latest.avg_position ? `、位次#${latest.avg_position}` : ''}${latest.self_source_count ? `、被引用${latest.self_source_count}次` : ''}`)
+      parts.push(`${b.name}：可见度 ${Math.round((latest.mention_rate || 0) * 100)}%、情感${senti}${latest.avg_position ? `、位次#${latest.avg_position}` : ''}${latest.self_source_count ? `、被引用${latest.self_source_count}次` : ''}`)
     })
     if (parts.length === 0) return ''
-    return `【GEO 数据摘要·仅供参考】\n${parts.join('\n')}`
+    return `【账号 IP 摘要·仅供参考】\n${parts.join('\n')}`
   }, [isMerchantChat, geoBrands, geoMonitor])
 
   const GEO_QUICK_QUESTIONS = [
-    { label: '我的品牌最近表现如何？', q: '根据上面的 GEO 数据摘要，我的品牌最近在 AI 搜索中的表现如何？有什么亮点和问题？' },
-    { label: '哪个竞品威胁最大？', q: '根据上面的 GEO 数据摘要，哪个竞品对我的威胁最大？我应该怎么应对？' },
-    { label: '下一步该做什么？', q: '根据上面的 GEO 数据摘要，给我 3 条具体可执行的下一步优化建议。' },
+    { label: '我的账号最近表现如何？', q: '根据上面的账号 IP 摘要，我最近在内容与曝光上的表现如何？有什么亮点和问题？' },
+    { label: '哪个竞品更值得盯？', q: '根据上面的账号 IP 摘要，哪个竞品对我的威胁最大？我应该怎么应对？' },
+    { label: '下一步该做什么？', q: '根据上面的账号 IP 摘要，给我 3 条具体可执行的下一步建议（合成、发布或数据复盘）。' },
   ]
 
   const doSend = async (text: string) => {
@@ -737,13 +737,13 @@ export default function Chat() {
           {/* GEO 快捷问（商户端）：注入实时数据摘要，让 AI 解读你的品牌状态 */}
           {isMerchantChat && (
             <div style={{ maxWidth: 1080, margin: '0 auto 8px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>GEO 助手：</Text>
+              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>IP 助手：</Text>
               {GEO_QUICK_QUESTIONS.map((item) => (
                 <Button
                   key={item.label}
                   size="small"
                   disabled={streaming || !geoSummary}
-                  title={geoSummary ? undefined : '暂无监测数据——先去 AI 可见度发起监测'}
+                  title={geoSummary ? undefined : '暂无摘要数据——先完善人设并发布作品'}
                   onClick={() => askGeo(item.q)}
                   style={{ fontSize: 12 }}
                 >

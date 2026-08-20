@@ -309,11 +309,15 @@ export default function Distribution() {
   ]
 
   return (
-    <div className="wr-page-content wr-aurora-bg" style={{ paddingTop: 8, position: 'relative' }}>
+    <div className="wr-page-content ip-page" style={{ paddingTop: 4, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <div className="wr-page-header">
-          <h1>社媒分发</h1>
-          <p>账号池维护 · 内容一键发布到知乎 / 小红书 · 发布后提及率复测</p>
+        <div className="ip-page-hero">
+          <div>
+            <p className="ip-kicker">Publish</p>
+            <h1>发布中心</h1>
+            <p className="ip-lead">绑定平台账号、发布作品——成功后可在「我的作品」与「作品数据」复盘</p>
+          </div>
+          <Button onClick={() => navigate('/m/works')}>查看我的作品</Button>
         </div>
 
         {/* P1-6-1：单页五任务 → 三 Tab（账号池 / 发布 / 发布记录）——重页 Tab 化 */}
@@ -328,15 +332,15 @@ export default function Distribution() {
           <Space align="start" style={{ width: '100%' }}>
             <LinkOutlined style={{ color: 'var(--wr-warning)', marginTop: 3 }} />
             <div style={{ flex: 1 }}>
-              <Text strong style={{ fontSize: 14 }}>发布带定位 = 附近搜索曝光（半自动指引）</Text>
+              <Text strong style={{ fontSize: 14 }}>发布带定位 = 本地曝光更好（半自动指引）</Text>
               <Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 8px' }}>
-                平台"添加定位"（POI 挂载）自动化为暂缓项（RPA 定位风控高、抖音官方通道需服务商资质）——先用最稳的半自动方式：
+                平台「添加定位」自动化暂缓——先用最稳的半自动方式：
               </Paragraph>
               <Space direction="vertical" size={2} style={{ fontSize: 12, color: 'var(--wr-text-secondary)' }}>
-                <div>① 门店档案维护好真实地址（左侧菜单「附近同行」→ 门店档案）</div>
-                <div>② 发布内容已自动附带"门店地址"行（发布时 store_address 非空）</div>
-                <div>③ 平台发布页手动选择"添加定位 → 搜索门店地址 → 选中"后发布</div>
-                <div>④ 带定位的内容更容易被附近的人搜到，也增强 AI 本地回答的引用概率</div>
+                <div>① 在「人设档案 · 门店档案」维护真实地址</div>
+                <div>② 发布内容会自动附带门店地址信息（有地址时）</div>
+                <div>③ 平台发布页手动「添加定位 → 搜索门店 → 选中」</div>
+                <div>④ 带定位内容更容易被附近的人看到，也利于账号本地信任感</div>
               </Space>
             </div>
           </Space>
@@ -426,10 +430,10 @@ export default function Distribution() {
       )},
             { key: 'publish', label: '发布', children: (<>
         <Card className="wr-glass-card" styles={{ body: { padding: 24 } }}>
-          {/* 品牌上下文 */}
+          {/* 人设上下文 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--wr-border)' }}>
-            <Text strong>品牌</Text>
-            <Select style={{ maxWidth: 320, minWidth: 200, flex: 1 }} placeholder="选择品牌" value={selectedBrand}
+            <Text strong>人设</Text>
+            <Select style={{ maxWidth: 320, minWidth: 200, flex: 1 }} placeholder="选择人设" value={selectedBrand}
               onChange={(v) => { setCurrentBrand(v); setSelectedContentId(undefined) }}
               options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))} />
           </div>
@@ -441,10 +445,13 @@ export default function Distribution() {
               options={[{ value: 'article', label: '发文章' }, { value: 'image', label: '发图文笔记' }, { value: 'video', label: '发视频' }]}
               style={{ marginBottom: 16 }} />
             {!selectedBrand ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择品牌" style={{ padding: 40 }} />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择人设" style={{ padding: 40 }} />
             ) : contents.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该品牌暂无内容，前往内容中心创建" style={{ padding: 40 }}>
-                <Button type="primary" onClick={() => navigate('/m/studio')}>去创建内容</Button>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该人设暂无可发内容，可先去内容合成" style={{ padding: 40 }}>
+                <Space>
+                  <Button type="primary" className="ip-btn-primary" onClick={() => navigate('/m/compose')}>去内容合成</Button>
+                  <Button onClick={() => navigate('/m/works')}>我的作品</Button>
+                </Space>
               </Empty>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, maxHeight: 320, overflowY: 'auto' }}>
@@ -614,8 +621,8 @@ export default function Distribution() {
                   </div>
                   <Text style={{ fontSize: 12, color: 'var(--wr-text-muted)' }}>
                     {avgDelta === null
-                      ? '暂无复测数据（发布 1-2 周后可复测）'
-                      : <>复测均值变化 <b style={{ color: avgDelta >= 0 ? 'var(--wr-success)' : 'var(--wr-danger)' }}>
+                      ? '暂无复测数据（发布一段时间后可复测表现）'
+                      : <>表现变化均值 <b style={{ color: avgDelta >= 0 ? 'var(--wr-success)' : 'var(--wr-danger)' }}>
                           {avgDelta >= 0 ? '+' : ''}{(avgDelta * 100).toFixed(1)}%</b>
                           （{monitored.length} 篇已复测）</>}
                   </Text>
@@ -648,7 +655,7 @@ export default function Distribution() {
         width={520}
       >
         <Alert type="success" showIcon style={{ marginBottom: 16 }} message="内容已准备就绪"
-          description="点击下方链接跳转到各平台发布页，粘贴内容并确认发布后，回到这里点击「标记已发布」。发布后约 1-2 周被 AI 引擎收录，可在发布记录点「复测提及率」验证效果。" />
+          description="点击下方链接前往各平台发布页完成发布，然后回到这里点「标记已发布」。效果可在「作品数据」查看；也可在发布记录中复测表现。" />
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {publishLinks.map((job) => (
             <div key={job.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
