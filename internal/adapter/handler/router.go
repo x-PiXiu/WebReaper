@@ -91,6 +91,8 @@ type Router struct {
 	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
 	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
 	apiPrefix          string                  // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
+	rootGroup          *gin.RouterGroup        // Engine() 装配时记录——延迟注册的公开路由用（OAuth 回调等）
+	accountFrontendURL string                  // 账号域 OAuth 回调后 302 跳回的前端地址
 	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
@@ -200,9 +202,11 @@ func (r *Router) SetNotifications(uc *notification.NotifyUseCase) {
 }
 
 // SetAccount 注入多平台发布账号域用例（可选；未注入则账号/发布端点不注册）。
-func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCase) {
+// frontendBaseURL：OAuth 授权回调完成后 302 跳回的前端地址。
+func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCase, frontendBaseURL string) {
 	r.accountUC = au
 	r.publishSemiUC = pu
+	r.accountFrontendURL = frontendBaseURL
 }
 
 // SetGeneration 注入统一生成用例（可选；Vidu 全量接入——未注入则生成端点不注册）。
@@ -304,6 +308,7 @@ func (r *Router) Engine() *gin.Engine {
 
 	// 统一前缀（nginx 分流用；空前缀时 root 等同 e，本地开发零影响）
 	root := e.Group(r.apiPrefix)
+	r.rootGroup = root
 
 	root.GET("/healthz", func(c *gin.Context) {
 		if r.healthCheck != nil {

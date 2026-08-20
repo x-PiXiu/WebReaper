@@ -32,19 +32,19 @@ export const businessApi = {
 
   // ---- 引擎名单（商户/聊天通用——仅 name/provider/model，不含厂商密钥）----
   listEngines: () =>
-    apiClient.get<unknown, EngineOption[]>('/api/v1/geo/engines'),
+    apiClient.get<unknown, EngineOption[]>('/api/v1/merchant/engines'),
 
   // ---- GEO 健康报告（后端聚合单一事实源：总分/五指数/环比/竞品对标/品牌级分值）----
   getHealthReport: () =>
-    apiClient.get<unknown, HealthReportView>('/api/v1/geo/health-report'),
+    apiClient.get<unknown, HealthReportView>('/api/v1/merchant/health-report'),
 
   // ---- 行业全景看板（admin：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）----
   getIndustryOverview: () =>
-    apiClient.get<unknown, IndustryOverviewView>('/api/v1/admin/geo/industry-overview'),
+    apiClient.get<unknown, IndustryOverviewView>('/api/v1/admin/merchant/industry-overview'),
 
   // ---- AI 榜缓存（F4 品牌卡徽章：只读最近一次探查，无缓存 available=false）----
   getAIRank: (brandId: string) =>
-    apiClient.get<unknown, { available: boolean; probed_at?: string; items?: AIRankItemView[] }>(`/api/v1/geo/brands/${brandId}/ai-rank`),
+    apiClient.get<unknown, { available: boolean; probed_at?: string; items?: AIRankItemView[] }>(`/api/v1/merchant/brands/${brandId}/ai-rank`),
 
   // ---- 认证：修改当前登录用户密码（F1-5 默认口令治理）----
   changePassword: (data: { old_password: string; new_password: string }) =>
@@ -84,16 +84,16 @@ export const businessApi = {
 
   // ---- GEO 品牌 ----
   listBrands: () =>
-    apiClient.get<unknown, Brand[]>('/api/v1/geo/brands'),
+    apiClient.get<unknown, Brand[]>('/api/v1/merchant/brands'),
 
   createBrand: (data: { name: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; industry?: string; website_url?: string }) =>
-    apiClient.post<unknown, Brand>('/api/v1/geo/brands', data),
+    apiClient.post<unknown, Brand>('/api/v1/merchant/brands', data),
 
   updateBrand: (id: string, data: { name?: string; positioning?: string; core_selling?: string[]; competitors?: string[]; biz_type?: string; industry?: string; website_url?: string }) =>
-    apiClient.put<unknown, Brand>(`/api/v1/geo/brands/${id}`, data),
+    apiClient.put<unknown, Brand>(`/api/v1/merchant/brands/${id}`, data),
 
   deleteBrand: (id: string) =>
-    apiClient.delete<unknown, unknown>(`/api/v1/geo/brands/${id}`),
+    apiClient.delete<unknown, unknown>(`/api/v1/merchant/brands/${id}`),
 
   // 竞品自动推荐——两种来源：poi（附近同行，local only）/ monitoring（监测结果蒸馏，local+online）
   suggestCompetitors: (brandId: string, source?: string, limit?: number) => {
@@ -101,51 +101,51 @@ export const businessApi = {
     if (source) params.set('source', source)
     if (limit) params.set('limit', String(limit))
     const qs = params.toString()
-    return apiClient.get<unknown, CompetitorSuggestion[]>(`/api/v1/geo/brands/${brandId}/competitor-suggestions${qs ? '?' + qs : ''}`)
+    return apiClient.get<unknown, CompetitorSuggestion[]>(`/api/v1/merchant/brands/${brandId}/competitor-suggestions${qs ? '?' + qs : ''}`)
   },
 
   // ---- GEO 门店档案（本地生活地基）----
   listStoreLocations: (brandId: string) =>
-    apiClient.get<unknown, StoreLocation[]>(`/api/v1/geo/brands/${brandId}/store-locations`),
+    apiClient.get<unknown, StoreLocation[]>(`/api/v1/merchant/brands/${brandId}/store-locations`),
 
   createStoreLocation: (brandId: string, data: { name?: string; address: string; phone?: string; hours?: string; price_level?: string; biz_type?: string }) =>
-    apiClient.post<unknown, StoreLocation>(`/api/v1/geo/brands/${brandId}/store-locations`, data),
+    apiClient.post<unknown, StoreLocation>(`/api/v1/merchant/brands/${brandId}/store-locations`, data),
 
   updateStoreLocation: (brandId: string, storeId: string, data: { name?: string; address?: string; phone?: string; hours?: string; price_level?: string; biz_type?: string }) =>
-    apiClient.put<unknown, StoreLocation>(`/api/v1/geo/brands/${brandId}/store-locations/${storeId}`, data),
+    apiClient.put<unknown, StoreLocation>(`/api/v1/merchant/brands/${brandId}/store-locations/${storeId}`, data),
 
   deleteStoreLocation: (brandId: string, storeId: string) =>
-    apiClient.delete<unknown, unknown>(`/api/v1/geo/brands/${brandId}/store-locations/${storeId}`),
+    apiClient.delete<unknown, unknown>(`/api/v1/merchant/brands/${brandId}/store-locations/${storeId}`),
 
   reGeocodeStoreLocation: (brandId: string, storeId: string) =>
-    apiClient.post<unknown, StoreLocation>(`/api/v1/geo/brands/${brandId}/store-locations/${storeId}/re-geocode`),
+    apiClient.post<unknown, StoreLocation>(`/api/v1/merchant/brands/${brandId}/store-locations/${storeId}/re-geocode`),
 
   // ---- GEO 附近同行双榜（现实世界地图榜 + AI 竞品榜）----
   getNearbyCompetitors: (brandId: string, types?: string) =>
-    apiClient.get<unknown, NearbyRanking>(`/api/v1/geo/brands/${brandId}/nearby-competitors`, { params: { types } }),
+    apiClient.get<unknown, NearbyRanking>(`/api/v1/merchant/brands/${brandId}/nearby-competitors`, { params: { types } }),
 
   // AI 榜单探查（v2：AI 真实搜索附近同行并归因上榜，缓存 24h；返回新双榜视图）
   runAIRankProbe: (brandId: string, types?: string) =>
-    apiClient.post<unknown, NearbyRanking>(`/api/v1/geo/brands/${brandId}/ai-rank-probe`, { types }),
+    apiClient.post<unknown, NearbyRanking>(`/api/v1/merchant/brands/${brandId}/ai-rank-probe`, { types }),
 
   // ---- GEO 行动建议（P5-05：给老板"下一步做什么"）----
   getAdvice: (brandId: string) =>
-    apiClient.get<unknown, { advices: Advice[] }>(`/api/v1/geo/brands/${brandId}/advice`),
+    apiClient.get<unknown, { advices: Advice[] }>(`/api/v1/merchant/brands/${brandId}/advice`),
 
   // ---- GEO 内容引用统计（P5-02：每篇被 AI 引用几次，归因细化到篇）----
   getContentCitations: (brandId: string) =>
-    apiClient.get<unknown, Record<string, number>>(`/api/v1/geo/brands/${brandId}/citations`),
+    apiClient.get<unknown, Record<string, number>>(`/api/v1/merchant/brands/${brandId}/citations`),
 
   // ---- 地址联想（P1 输入提示：门店建档边输入边联想）----
   suggestLocations: (q: string, city?: string, location?: string) =>
-    apiClient.get<unknown, LocationTip[]>(`/api/v1/geo/location/suggest`, { params: { q, city, location } }),
+    apiClient.get<unknown, LocationTip[]>(`/api/v1/merchant/location/suggest`, { params: { q, city, location } }),
 
   // ---- GEO 关键词 ----
   listKeywords: (brandId: string) =>
-    apiClient.get<unknown, Keyword[]>(`/api/v1/geo/brands/${brandId}/keywords`),
+    apiClient.get<unknown, Keyword[]>(`/api/v1/merchant/brands/${brandId}/keywords`),
 
   addKeyword: (brandId: string, data: { term: string; intent?: string }) =>
-    apiClient.post<unknown, Keyword>(`/api/v1/geo/brands/${brandId}/keywords`, data),
+    apiClient.post<unknown, Keyword>(`/api/v1/merchant/brands/${brandId}/keywords`, data),
 
   // 关键词蒸馏（六种来源：brand/text/seed/file/web/questions）
   distillKeywords: (data: {
@@ -156,83 +156,87 @@ export const businessApi = {
     topic?: string
     llm_config_name?: string
   }) =>
-    apiClient.post<unknown, { keywords: string[] }>('/api/v1/geo/keywords/distill', data),
+    apiClient.post<unknown, { keywords: string[] }>('/api/v1/merchant/keywords/distill', data),
 
   // 跨品牌列出所有关键词（关键词管理页用）
   listAllKeywords: () =>
-    apiClient.get<unknown, Keyword[]>('/api/v1/geo/keywords'),
+    apiClient.get<unknown, Keyword[]>('/api/v1/merchant/keywords'),
 
   // 删除关键词
   deleteKeyword: (id: string) =>
-    apiClient.delete<unknown, unknown>(`/api/v1/geo/keywords/${id}`),
+    apiClient.delete<unknown, unknown>(`/api/v1/merchant/keywords/${id}`),
 
   // ---- GEO 监测 ----
   // 租户全部监测结果（关键词一览页用，不依赖品牌筛选）
   getAllMonitorResults: () =>
-    apiClient.get<unknown, MonitoringResult[]>('/api/v1/geo/monitor-results'),
+    apiClient.get<unknown, MonitoringResult[]>('/api/v1/merchant/monitor-results'),
 
   // 单关键词即时监测（比品牌级批量更快）
   monitorKeyword: (data: { keyword_id: string; engine_name?: string; sample_size?: number }) =>
-    apiClient.post<unknown, MonitoringResult>('/api/v1/geo/monitor-keyword', data),
+    apiClient.post<unknown, MonitoringResult>('/api/v1/merchant/monitor-keyword', data),
 
   // 多引擎批量监测（采样矩阵：每引擎独立采样——"豆包测 3 次 vs 千问测 3 次"对比）
   monitorMulti: (data: { keyword_id: string; engine_names: string[]; sample_size?: number }) =>
-    apiClient.post<unknown, MonitoringResult[]>('/api/v1/geo/monitor-multi', data),
+    apiClient.post<unknown, MonitoringResult[]>('/api/v1/merchant/monitor-multi', data),
 
   getBrandOverview: (brandId: string, name?: string) =>
-    apiClient.get<unknown, BrandOverview>(`/api/v1/geo/brands/${brandId}/overview${name ? '?name=' + encodeURIComponent(name) : ''}`),
+    apiClient.get<unknown, BrandOverview>(`/api/v1/merchant/brands/${brandId}/overview${name ? '?name=' + encodeURIComponent(name) : ''}`),
 
   // ---- GEO 内容优化 ----
   optimizeContent: (data: { brand_id: string; keyword_id?: string; original_text: string; keyword: string; llm_config_name?: string; target_engine?: string; format?: string }) =>
-    apiClient.post<unknown, OptimizedContent>('/api/v1/geo/optimize', data),
+    apiClient.post<unknown, OptimizedContent>('/api/v1/merchant/optimize', data),
 
   listContents: (brandId: string) =>
-    apiClient.get<unknown, OptimizedContent[]>(`/api/v1/geo/brands/${brandId}/contents`),
+    apiClient.get<unknown, OptimizedContent[]>(`/api/v1/merchant/brands/${brandId}/contents`),
 
   // 从零生成内容（根据品牌信息+关键词，AI原创一篇 GEO 文章；支持单/多关键词组合）
   generateContent: (brandId: string, data: { keywords?: string[]; topic?: string; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean; format?: string; citation_toggles?: string[] }) =>
-    apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/generate`, data),
+    apiClient.post<unknown, OptimizedContent>(`/api/v1/merchant/brands/${brandId}/contents/generate`, data),
 
   // 内容状态流转：draft ↔ published（published 后公开站可访问，AI 引擎可爬取）
   setContentStatus: (brandId: string, contentId: string, status: 'draft' | 'published') =>
-    apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/${contentId}/status`, { status }),
+    apiClient.post<unknown, OptimizedContent>(`/api/v1/merchant/brands/${brandId}/contents/${contentId}/status`, { status }),
 
   // 商户端自助补提交收录（IndexNow——重新通知搜索引擎抓取已发布内容）
   resubmitIndex: (brandId: string, contentId: string) =>
-    apiClient.post<unknown, { submitted: boolean }>(`/api/v1/geo/brands/${brandId}/contents/${contentId}/resubmit-index`),
+    apiClient.post<unknown, { submitted: boolean }>(`/api/v1/merchant/brands/${brandId}/contents/${contentId}/resubmit-index`),
 
   // ---- GEO 平台账号（扫码绑定）----
   listAccounts: () =>
-    apiClient.get<unknown, Account[]>('/api/v1/geo/accounts'),
+    apiClient.get<unknown, Account[]>('/api/v1/merchant/accounts'),
 
   startQRLogin: (platform: string, method?: string) =>
-    apiClient.post<unknown, { session_id: string; platform: string; method: string }>('/api/v1/geo/accounts/qr-login', { platform, method }),
+    apiClient.post<unknown, { session_id: string; platform: string; method: string }>('/api/v1/merchant/accounts/qr-login', { platform, method }),
 
   pollQRLogin: (sessionId: string, platform: string, method?: string) =>
-    apiClient.get<unknown, { status: string; qr_image: string; account_id: string; account_name: string; expires_at: string }>(`/api/v1/geo/accounts/qr-login/${sessionId}?platform=${platform}${method ? '&method=' + method : ''}`),
+    apiClient.get<unknown, { status: string; qr_image: string; account_id: string; account_name: string; expires_at: string }>(`/api/v1/merchant/accounts/qr-login/${sessionId}?platform=${platform}${method ? '&method=' + method : ''}`),
 
   cancelQRLogin: (sessionId: string) =>
-    apiClient.delete<unknown, unknown>(`/api/v1/geo/accounts/qr-login/${sessionId}`),
+    apiClient.delete<unknown, unknown>(`/api/v1/merchant/accounts/qr-login/${sessionId}`),
 
   deleteAccount: (id: string) =>
-    apiClient.delete<unknown, unknown>(`/api/v1/geo/accounts/${id}`),
+    apiClient.delete<unknown, unknown>(`/api/v1/merchant/accounts/${id}`),
+
+  // 抖音官方 OAuth 授权（新窗口打开授权页扫码；回调由服务端处理并 302 跳回前端）
+  getDouyinOAuthURL: () =>
+    apiClient.get<unknown, { url: string }>('/api/v1/merchant/accounts/douyin/oauth/url'),
 
   // ---- GEO 内容发布（半自动）----
   publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string; scheduled_at?: string; content_type?: string; media_urls?: string[]; cover_url?: string }) =>
-    apiClient.post<unknown, PublishJob>('/api/v1/geo/publish', data),
+    apiClient.post<unknown, PublishJob>('/api/v1/merchant/publish', data),
 
   listPublishJobs: () =>
-    apiClient.get<unknown, PublishJob[]>('/api/v1/geo/publish-jobs'),
+    apiClient.get<unknown, PublishJob[]>('/api/v1/merchant/publish-jobs'),
 
   markPublished: (jobId: string) =>
-    apiClient.post<unknown, unknown>(`/api/v1/geo/publish-jobs/${jobId}/published`),
+    apiClient.post<unknown, unknown>(`/api/v1/merchant/publish-jobs/${jobId}/published`),
 
   getPublishJobStatus: (jobId: string) =>
-    apiClient.get<unknown, { id: string; status: string; external_url: string; error_msg: string; platform: string }>(`/api/v1/geo/publish-jobs/${jobId}/status`),
+    apiClient.get<unknown, { id: string; status: string; external_url: string; error_msg: string; platform: string }>(`/api/v1/merchant/publish-jobs/${jobId}/status`),
 
   // 发布效果复测：重新触发品牌监测并更新发布后提及率（建议收录周期 1-2 周后使用）
   reMonitorJob: (jobId: string) =>
-    apiClient.post<unknown, PublishJob>(`/api/v1/geo/publish-jobs/${jobId}/re-monitor`),
+    apiClient.post<unknown, PublishJob>(`/api/v1/merchant/publish-jobs/${jobId}/re-monitor`),
 
   // 收录管理（管理后台）
   getIndexingConfig: () =>
@@ -323,10 +327,10 @@ export const businessApi = {
 
   // ---- 商户端自动盯盘（租户级）----
   getTenantAutoMonitor: () =>
-    apiClient.get<unknown, { tenant_enabled: boolean; platform_enabled: boolean; config: AutoMonitorConfig }>('/api/v1/geo/monitor-auto'),
+    apiClient.get<unknown, { tenant_enabled: boolean; platform_enabled: boolean; config: AutoMonitorConfig }>('/api/v1/merchant/monitor-auto'),
   // 开关 + 盯盘配置（频率/采样/通知阈值——一次保存）
   setTenantAutoMonitor: (data: { enabled: boolean; config?: AutoMonitorConfig }) =>
-    apiClient.put<unknown, { tenant_enabled: boolean; config: AutoMonitorConfig }>('/api/v1/geo/monitor-auto', data),
+    apiClient.put<unknown, { tenant_enabled: boolean; config: AutoMonitorConfig }>('/api/v1/merchant/monitor-auto', data),
 
   // ---- Tavily 搜索配置（管理端）----
   getTavilyStatus: () =>
@@ -377,15 +381,15 @@ export const businessApi = {
   // 生成规格（管理后台：Vidu 端点×模型矩阵——DB 驱动 30s 热生效）
   // 品牌知识库（获客智能体转型：商户上传品牌文档，内容生成自动引用）
   listBrandKnowledge: (brandId: string) =>
-    apiClient.get<unknown, { materials: Array<{ id: string; title: string; summary: string; has_vector: boolean; crawl_keyword: string; created_at: string }>; total: number }>(`/api/v1/geo/brands/${brandId}/knowledge/materials`),
+    apiClient.get<unknown, { materials: Array<{ id: string; title: string; summary: string; has_vector: boolean; crawl_keyword: string; created_at: string }>; total: number }>(`/api/v1/merchant/brands/${brandId}/knowledge/materials`),
   uploadBrandKnowledge: (brandId: string, data: { title: string; content: string }) =>
-    apiClient.post<unknown, { id: string; message: string }>(`/api/v1/geo/brands/${brandId}/knowledge/materials`, data),
+    apiClient.post<unknown, { id: string; message: string }>(`/api/v1/merchant/brands/${brandId}/knowledge/materials`, data),
   deleteBrandKnowledge: (brandId: string, materialId: string) =>
-    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/geo/brands/${brandId}/knowledge/materials/${materialId}`),
+    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/merchant/brands/${brandId}/knowledge/materials/${materialId}`),
 
   // 发布通道能力清单（能力驱动：平台过滤/动态检查清单）
   listPublishChannels: () =>
-    apiClient.get<unknown, { channels: PublishChannelView[] }>('/api/v1/geo/publish/channels'),
+    apiClient.get<unknown, { channels: PublishChannelView[] }>('/api/v1/merchant/publish/channels'),
 
   // 生成模式开关（admin：sub_type 批量启停——商户端模式收敛）
   adminListGenerationModes: () =>

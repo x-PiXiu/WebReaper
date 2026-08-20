@@ -72,7 +72,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.DELETE("/contents/:id", geoHandler.HandleAdminDeleteContent)
 			// 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）
 			if geoHandler.industryUC != nil {
-				adminGroup.GET("/geo/industry-overview", geoHandler.HandleAdminIndustryOverview)
+				adminGroup.GET("/merchant/industry-overview", geoHandler.HandleAdminIndustryOverview)
 			}
 			// R3 运营指标（LLM 成功率/缓存命中率/配额拒绝/锁竞争——admin 专用）
 			adminGroup.GET("/debug/metrics", r.HandleDebugMetrics)

@@ -74,6 +74,21 @@ func (r *GormAccountRepository) Delete(ctx context.Context, tenantID, id string)
 	return q.Where("id = ?", id).Delete(&AccountPO{}).Error
 }
 
+// FindByOpenID 按 open_id 查 OAuth 授权账号（未找到返回零值 Account，不报错——
+// 调用方语义是"查有没有已绑的同号"，找不到是正常分支）。
+func (r *GormAccountRepository) FindByOpenID(ctx context.Context, tenantID, platform, openID string) (entity.Account, error) {
+	var po AccountPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
+	err := q.Where("platform = ? AND open_id = ?", platform, openID).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.Account{}, nil
+	}
+	if err != nil {
+		return entity.Account{}, err
+	}
+	return accountFromPO(po), nil
+}
+
 func (r *GormAccountRepository) ListAll(ctx context.Context) ([]entity.Account, error) {
 	var pos []AccountPO
 	if err := r.db.WithContext(ctx).Order("bound_at DESC").Find(&pos).Error; err != nil {

@@ -22,6 +22,12 @@ const (
 	AccountHealthBanned  = "banned"  // 账号被封禁，不可用
 )
 
+// 账号绑定方式常量（获客智能体：官方授权优先，浏览器扫码兜底）。
+const (
+	AccountAuthCookie = "cookie" // 浏览器扫码绑定（RPA 通道，cookie 维持登录态）
+	AccountAuthOAuth  = "oauth"  // 平台官方 OAuth 授权（API 通道，token 维持登录态）
+)
+
 // 发布模式常量。
 const (
 	PublishModeSemiAuto = "semi-auto" // 半自动：系统生成内容+预填链接，用户手动确认发布
@@ -45,12 +51,42 @@ type Account struct {
 	TenantID        string    // 租户隔离
 	Platform        string    // 平台标识：zhihu / xiaohongshu / douyin / gongzhonghao
 	DisplayName     string    // 账号显示名（如 "@某装修公司官方"）
-	CookieEncrypted string    // AES-GCM 加密后的 cookie 密文（绝不存明文）
+	CookieEncrypted string    // AES-GCM 加密后的 cookie 密文（绝不存明文；AuthType=cookie 时有值）
 	Health          string    // 健康状态：active / expired / banned
 	LoginMethod     string    // 登录方式：zhihu/wechat/qq/weibo（区分第三方登录）
-	ExpiresAt       time.Time // 认证 cookie 的过期时间（到期需重新扫码）
-	BoundAt         time.Time // 绑定时间（首次扫码成功）
+	ExpiresAt       time.Time // 认证凭据过期时间（cookie 或 access_token 到期；到期需重新绑定/刷新）
+	BoundAt         time.Time // 绑定时间（首次扫码/授权成功）
 	LastUsedAt      time.Time // 最后一次用于发布的时间
+
+	// ---- 官方 OAuth 授权（抖音等开放平台 API 通道）----
+	// AuthType 绑定方式：cookie（扫码浏览器）/ oauth（官方授权）；空=cookie（向后兼容）。
+	// 发布时按此路由：oauth → API 通道，cookie → RPA 通道。
+	AuthType string
+	// AccessTokenEnc / RefreshTokenEnc OAuth token 密文（AES-GCM，绝不存明文；AuthType=oauth 时有值）。
+	AccessTokenEnc  string
+	RefreshTokenEnc string
+	// OpenID 平台用户唯一标识（OAuth 授权返回；同一应用内 open_id 稳定，用于识别重复绑定）。
+	OpenID string
+}
+
+// IsOAuth 是否官方 OAuth 授权账号（发布走 API 通道而非浏览器 RPA）。
+func (a Account) IsOAuth() bool { return a.AuthType == AccountAuthOAuth }
+
+// OAuthToken 平台 OAuth 授权换取的凭据（抖音等开放平台，授权码模式）。
+type OAuthToken struct {
+	AccessToken      string // 接口调用凭据（加密落库）
+	RefreshToken     string // 刷新凭据（加密落库；access_token 过期前用它续期）
+	ExpiresIn        int    // access_token 有效期（秒）
+	RefreshExpiresIn int    // refresh_token 有效期（秒）
+	OpenID           string // 用户在应用内的唯一标识
+	UnionID          string // 用户在开放平台维度的唯一标识（可能为空）
+	Scope            string // 实际授予的权限作用域
+}
+
+// OAuthUserInfo OAuth 授权用户的公开信息（账号显示名用）。
+type OAuthUserInfo struct {
+	Nickname string // 昵称（账号显示名首选）
+	Avatar   string // 头像 URL
 }
 
 // IsValid 领域规则：账号必须有 ID、TenantID、Platform。

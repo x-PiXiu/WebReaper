@@ -98,6 +98,13 @@ func CurrentTenantID(c *gin.Context) string {
 	return s
 }
 
+// CurrentUserID 从 gin.Context 取当前用户 ID（审计/OAuth state 用）。
+func CurrentUserID(c *gin.Context) string {
+	v, _ := c.Get("user_id")
+	s, _ := v.(string)
+	return s
+}
+
 // CurrentRole 从 gin.Context 取当前请求的角色。
 func CurrentRole(c *gin.Context) string {
 	v, ok := c.Get("role")

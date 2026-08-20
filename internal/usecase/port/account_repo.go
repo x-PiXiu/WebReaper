@@ -24,6 +24,8 @@ type AccountRepository interface {
 	UpdateHealth(ctx context.Context, id, health string) error         // 更新健康状态（定时检查用）
 	UpdateLastUsed(ctx context.Context, id string, lastUsedAt time.Time) error // 更新最后使用时间（账号池调度用）
 	Delete(ctx context.Context, tenantID, id string) error
+	// FindByOpenID 按 open_id 查 OAuth 授权账号（同号重新授权=续期，不重复建号）。
+	FindByOpenID(ctx context.Context, tenantID, platform, openID string) (entity.Account, error)
 }
 
 // AccountPool 账号池调度接口。
@@ -95,6 +97,31 @@ type MonitorTrigger interface {
 type CookieVault interface {
 	Encrypt(cookie string) (string, error)
 	Decrypt(encCookie string) (string, error)
+}
+
+// OAuthStateCodec OAuth state 参数签名编解码（防 CSRF + 回调时还原绑定上下文）。
+// state = payload + HMAC 签名：payload 携带 tenant/user，签名防伪造；
+// 回调时验签 + 校验有效期，通过后才能用 state 里的租户创建账号。
+type OAuthStateCodec interface {
+	// SignState 生成签名 state（payload 格式由实现自定义，回调时原样传回 VerifyState）。
+	SignState(payload string) string
+	// VerifyState 验签并返回原始 payload（无效/过期返回错误）。
+	VerifyState(state string) (string, error)
+}
+
+// OAuthProvider 平台官方 OAuth 授权接口（授权码模式——抖音开放平台等）。
+//
+// 获客智能体架构演进：官方 OAuth 授权绑定（API 通道）替代浏览器扫码绑定（RPA 通道）。
+// usecase 只依赖此接口；平台差异（端点/响应格式）全部关在适配器层。
+type OAuthProvider interface {
+	// ConnectURL 生成授权页地址（用户在此扫码/确认授权，抖音 PC 端默认展示二维码）。
+	ConnectURL(state string) string
+	// ExchangeCode 用授权码换 token（code 一次性有效）。
+	ExchangeCode(ctx context.Context, code string) (*entity.OAuthToken, error)
+	// RefreshToken 用 refresh_token 换新的 access_token（access_token 过期前续期）。
+	RefreshToken(ctx context.Context, refreshToken string) (*entity.OAuthToken, error)
+	// UserInfo 拉取授权用户公开信息（昵称/头像，账号显示名用）。
+	UserInfo(ctx context.Context, accessToken, openID string) (*entity.OAuthUserInfo, error)
 }
 
 // PublishChannel 发布通道接口（策略模式）。

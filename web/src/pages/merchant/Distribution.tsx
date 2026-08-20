@@ -1,15 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, DatePicker, Input, Tooltip, Tabs, Segmented } from 'antd'
-import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, PictureOutlined, DeleteOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Modal, Alert, Switch, Popconfirm, Input, Tabs, Segmented, Collapse } from 'antd'
+import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import dayjs from 'dayjs'
 import { businessApi } from '../../api/business'
 import { scoreColor } from '../../utils/geo'
 import { useBrandContext } from '../../hooks/useBrands'
 import AssetPicker from '../../components/AssetPicker'
 import QRLoginModal from './distribution/QRLoginModal'
-import PublishJobTable, { statusConfig } from './distribution/PublishJobTable'
+import PublishJobTable from './distribution/PublishJobTable'
 import type { Brand, OptimizedContent, Account, PublishJob } from '../../types/api'
 
 const { Text, Paragraph } = Typography
@@ -38,6 +37,7 @@ function healthConfig(health: string) {
 // 子组件：QRLoginModal（扫码绑定）/ PublishJobTable（发布记录+复测）/ AssetPicker（配图，与多媒体创作共用）。
 export default function Distribution() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   // ---- 账号池状态 ----
   // 扫码会话细节（二维码/轮询/取消）封装在 QRLoginModal 内，页面只管开关与平台
@@ -54,7 +54,6 @@ export default function Distribution() {
   const [publishMode, setPublishMode] = useState<'semi-auto' | 'auto'>('semi-auto')
   const [autoSelect, setAutoSelect] = useState(false)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
-  const [scheduleTime, setScheduleTime] = useState<Date | null>(null) // 定时发送（null=立即）
   const [publishLinks, setPublishLinks] = useState<PublishJob[]>([])
   const [autoJobIds, setAutoJobIds] = useState<string[]>([])
   // 小红书图文配图（MediaType：小红书 image 必填，URL 来自素材库）
@@ -85,6 +84,31 @@ export default function Distribution() {
       setPublishForm('video') // 多媒体创作跳转的是视频产物
     }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 抖音官方 OAuth 授权回调结果（服务端完成绑定后 302 跳回本页并带结果参数）
+  useEffect(() => {
+    const oauthResult = searchParams.get('douyin_oauth')
+    if (!oauthResult) return
+    if (oauthResult === 'success') {
+      const name = searchParams.get('name') || ''
+      message.success(`抖音账号「${name}」官方授权绑定成功`)
+    } else {
+      message.error(`官方授权失败：${searchParams.get('reason') || '未知原因'}`)
+    }
+    queryClient.invalidateQueries({ queryKey: ['geo-accounts'] })
+    // 清掉 URL 参数，避免刷新重复弹提示
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [searchParams, queryClient])
+
+  // 抖音官方授权（推荐——API 通道，不受浏览器风控影响）：新窗口打开抖音授权页
+  const startDouyinOAuth = async () => {
+    try {
+      const { url } = await businessApi.getDouyinOAuthURL()
+      window.open(url, '_blank')
+    } catch (e: any) {
+      message.error(e?.response?.data?.msg || e?.message || '官方授权未配置')
+    }
+  }
 
   const { data: accounts = [], isLoading: accountsLoading } = useQuery({
     queryKey: ['geo-accounts'],
@@ -139,7 +163,6 @@ export default function Distribution() {
   const selectedContent = contents.find((c) => c.id === selectedContentId)
   // 账号按所选内容形态过滤（不支持该形态的平台账号不出现——能力驱动）
   const healthyAccounts = accounts.filter((a) => a.health === 'active' && supportsForm(a.platform, publishForm))
-  const hiddenByForm = accounts.filter((a) => a.health === 'active' && !supportsForm(a.platform, publishForm)).length
 
   // ---- 智能默认（傻瓜化 Q5）----
   // 默认 Tab 跟着状态走：有健康账号直接落"发布"（主操作），没有则留在账号池（先绑定）
@@ -186,8 +209,6 @@ export default function Distribution() {
     if (!autoSelect && selectedAccountIds.length === 0) { message.warning('请选择至少一个目标账号，或开启自动选号'); return }
     setPublishing(true)
     setPublishLinks([])
-    // 定时发送：选了排期时间则只落库排期任务（到期由调度器自动发布）
-    const scheduledAt = scheduleTime ? scheduleTime.toISOString() : undefined
     try {
       const results: PublishJob[] = []
       // 标题截断/素材按平台能力约束处理（constraints 从服务端下发——前端零硬编码）
@@ -205,7 +226,6 @@ export default function Distribution() {
           results.push(await businessApi.publishContent({
             account_id: '', platform, content_id: selectedContent.id, brand_id: selectedBrand,
             title: titleFor(platform), content: publishContentText, mode: publishMode,
-            scheduled_at: scheduledAt,
             content_type: publishForm,
             media_urls: needsMedia(platform) ? mediaUrls : undefined,
           }))
@@ -217,17 +237,12 @@ export default function Distribution() {
           results.push(await businessApi.publishContent({
             account_id: accId, platform: acc.platform, content_id: selectedContent.id, brand_id: selectedBrand,
             title: titleFor(acc.platform), content: publishContentText, mode: publishMode,
-            scheduled_at: scheduledAt,
             content_type: publishForm,
             media_urls: needsMedia(acc.platform) ? mediaUrls : undefined,
           }))
         }
       }
-      if (scheduledAt) {
-        // 排期模式：任务已落库，到期自动发布
-        message.success(`已排期 ${results.length} 个发布任务（${scheduleTime!.toLocaleString()} 自动执行）`)
-        setPublishing(false)
-      } else if (publishMode === 'auto') {
+      if (publishMode === 'auto') {
         setAutoJobIds(results.map(j => j.id))
         message.success(`已启动 ${results.length} 个自动发布任务`)
       } else {
@@ -349,6 +364,7 @@ export default function Distribution() {
                       {accs.map((a) => {
                         const cfg = healthConfig(a.health)
                         const isExpired = a.health === 'expired'
+                        const isOAuth = a.auth_type === 'oauth'
                         return (
                           <div key={a.id} style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -358,11 +374,15 @@ export default function Distribution() {
                             <Space>
                               <span style={{ color: cfg.color }}>{cfg.icon}</span>
                               <Text style={{ color: isExpired ? 'var(--wr-text-muted)' : 'inherit' }}>{a.display_name}</Text>
+                              {isOAuth && <Tag color="green" style={{ marginInlineEnd: 0 }}>官方通道</Tag>}
                             </Space>
                             <Space size={8}>
                               <Text style={{ fontSize: 12, color: cfg.color }}>{cfg.label}</Text>
-                              {isExpired && (
+                              {isExpired && !isOAuth && (
                                 <Button size="small" type="primary" danger onClick={() => openBindModal(pf.key)}>重新绑定</Button>
+                              )}
+                              {isExpired && isOAuth && pf.key === 'douyin' && (
+                                <Button size="small" type="primary" onClick={startDouyinOAuth}>重新授权</Button>
                               )}
                               <Popconfirm title="确定解绑？" onConfirm={() => handleDeleteAccount(a.id)}>
                                 <Button size="small" type="text" danger>解绑</Button>
@@ -371,8 +391,21 @@ export default function Distribution() {
                           </div>
                         )
                       })}
-                      <Button type="dashed" block icon={<LinkOutlined />} onClick={() => openBindModal(pf.key)}>
-                        绑定更多 {pf.name} 账号
+                      {pf.key === 'douyin' ? (
+                        <Button type="dashed" block onClick={startDouyinOAuth}>授权绑定更多抖音账号</Button>
+                      ) : (
+                        <Button type="dashed" block icon={<LinkOutlined />} onClick={() => openBindModal(pf.key)}>
+                          绑定更多 {pf.name} 账号
+                        </Button>
+                      )}
+                    </Space>
+                  ) : pf.key === 'douyin' ? (
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Button type="primary" block onClick={startDouyinOAuth} disabled={accountsLoading}>
+                        官方授权绑定抖音（推荐）
+                      </Button>
+                      <Button type="text" block onClick={() => openBindModal(pf.key)} disabled={accountsLoading}>
+                        浏览器扫码绑定（备用）
                       </Button>
                     </Space>
                   ) : (
@@ -393,327 +426,179 @@ export default function Distribution() {
         )}
 
         {/* ===== ② 发布工作台 ===== */}
-        </>)},
+        </>
+      )},
             { key: 'publish', label: '发布', children: (<>
-        <Card className="wr-glass-card" title="内容发布" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-            <Text strong style={{ whiteSpace: 'nowrap' }}>选择品牌</Text>
-            <Select
-              style={{ maxWidth: 320, minWidth: 200, flex: 1 }}
-              placeholder="选择品牌查看其内容"
-              value={selectedBrand}
+        <Card className="wr-glass-card" styles={{ body: { padding: 24 } }}>
+          {/* 品牌上下文 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--wr-border)' }}>
+            <Text strong>品牌</Text>
+            <Select style={{ maxWidth: 320, minWidth: 200, flex: 1 }} placeholder="选择品牌" value={selectedBrand}
               onChange={(v) => { setCurrentBrand(v); setSelectedContentId(undefined) }}
-              options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))}
-            />
+              options={brands.map((b: Brand) => ({ value: b.id, label: b.name }))} />
           </div>
-
-          <Row gutter={16}>
-            <Col xs={24} lg={12}>
-              <div style={{ minHeight: 260 }}>
-                {!selectedBrand ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择品牌" style={{ padding: 40 }} />
-                ) : contents.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该品牌暂无内容，前往「内容生成」创建" style={{ padding: 40 }} />
-                ) : (
-                  <Radio.Group value={selectedContentId} onChange={(e) => setSelectedContentId(e.target.value)} style={{ width: '100%' }}>
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      {contents.map((c: OptimizedContent) => {
-                        const total = c.score?.total || 0
-                        return (
-                          <Radio key={c.id} value={c.id} style={{ width: '100%', alignItems: 'flex-start' }}>
-                            <div style={{ marginLeft: 4 }}>
-                              <Space size={8} style={{ marginBottom: 4 }}>
-                                <Tag color={scoreColor(total)} style={{ fontWeight: 600 }}>{total.toFixed(0)}</Tag>
-                                <Text type="secondary" style={{ fontSize: 12 }}>v{c.version}</Text>
-                              </Space>
-                              <Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0, color: 'var(--wr-text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
-                                {c.optimized_text}
-                              </Paragraph>
-                            </div>
-                          </Radio>
-                        )
-                      })}
-                    </Space>
-                  </Radio.Group>
-                )}
+          {/* 第一步：发什么？ */}
+          <div style={{ marginBottom: 24 }}>
+            <Text strong style={{ fontSize: 16, display: 'block', marginBottom: 12 }}>你想发什么内容？</Text>
+            <Segmented block value={publishForm}
+              onChange={(v) => { setPublishForm(v as 'article' | 'image' | 'video'); setSelectedContentId(undefined); setSelectedAccountIds([]); setMediaUrls([]) }}
+              options={[{ value: 'article', label: '发文章' }, { value: 'image', label: '发图文笔记' }, { value: 'video', label: '发视频' }]}
+              style={{ marginBottom: 16 }} />
+            {!selectedBrand ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择品牌" style={{ padding: 40 }} />
+            ) : contents.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该品牌暂无内容，前往内容中心创建" style={{ padding: 40 }}>
+                <Button type="primary" onClick={() => navigate('/m/studio')}>去创建内容</Button>
+              </Empty>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, maxHeight: 320, overflowY: 'auto' }}>
+                {contents
+                  .sort((a, b) => {
+                    if (a.status === 'draft' && b.status !== 'draft') return -1
+                    if (a.status !== 'draft' && b.status === 'draft') return 1
+                    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                  })
+                  .slice(0, 20)
+                  .map((c: OptimizedContent) => {
+                    const total = c.score?.total || 0
+                    const isSelected = selectedContentId === c.id
+                    return (
+                      <div key={c.id} onClick={() => setSelectedContentId(c.id)} style={{
+                        padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
+                        border: isSelected ? '2px solid var(--wr-primary)' : '1px solid var(--wr-border)',
+                        background: isSelected ? 'var(--wr-primary-bg)' : 'var(--wr-bg-surface)',
+                        transition: 'all 200ms ease', opacity: c.status === 'published' ? 0.7 : 1,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Tag color={scoreColor(total)} style={{ margin: 0, fontSize: 10 }}>{total.toFixed(0)}</Tag>
+                          {c.status === 'published' ? <Tag color="success" style={{ margin: 0, fontSize: 10 }}>已发布</Tag> : <Tag style={{ margin: 0, fontSize: 10 }}>草稿</Tag>}
+                        </div>
+                        <Text strong ellipsis style={{ fontSize: 13, display: 'block' }}>{c.title || '(无标题)'}</Text>
+                        <Text type="secondary" ellipsis style={{ fontSize: 11, display: 'block', marginTop: 4 }}>{c.optimized_text?.slice(0, 60)}...</Text>
+                      </div>
+                    )
+                  })}
               </div>
-            </Col>
-
-            <Col xs={24} lg={12}>
-              <div style={{ minHeight: 260 }}>
-                {/* 发什么（能力驱动三选：文章/图文笔记/视频——平台按此过滤） */}
-                <Segmented
-                  block
-                  value={publishForm}
-                  onChange={(v) => { setPublishForm(v as 'article' | 'image' | 'video'); setSelectedAccountIds([]); setMediaUrls([]) }}
-                  options={[
-                    { value: 'article', label: '发文章' },
-                    { value: 'image', label: '发图文笔记' },
-                    { value: 'video', label: '发视频' },
-                  ]}
-                  style={{ marginBottom: 12 }}
-                />
-                {healthyAccounts.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={
-                    channels.length === 0
-                      ? '暂无健康账号，请先在上方绑定'
-                      : `当前发布形态下暂无可用账号${hiddenByForm > 0 ? `（${hiddenByForm} 个账号不支持发${publishForm === 'article' ? '文章' : publishForm === 'image' ? '图文' : '视频'}）` : '，请先在上方绑定'}`
-                  } style={{ padding: 40 }} />
-                ) : (
-                  <>
-                  {/* 傻瓜化：半自动为默认路径（零风险），全自动降级为一个开关 */}
-                  <Alert type="info" showIcon style={{ marginBottom: 12 }} message="半自动发布（推荐）"
-                    description="系统准备好内容并生成发布链接，你点击跳转到知乎/小红书确认发布即可，零风险。发布后约 1-2 周被 AI 引擎收录，届时可在发布记录点「复测提及率」验证效果。" />
+            )}
+          </div>
+          {/* 第二步：发到哪里？ */}
+          <div style={{ marginBottom: 24 }}>
+            <Text strong style={{ fontSize: 16, display: 'block', marginBottom: 12 }}>发到哪里？</Text>
+            {healthyAccounts.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>还没有绑定账号——先绑定才能发布</Text>
+                <Space>
+                  {PLATFORMS.map((pf) => (
+                    <Button key={pf.key} type="dashed" size="small" icon={<LinkOutlined />} onClick={() => openBindModal(pf.key)}>绑定 {pf.name}</Button>
+                  ))}
+                </Space>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {healthyAccounts.map((a) => {
+                  const selected = selectedAccountIds.includes(a.id)
+                  const ch = channelByPlatform.get(a.platform)
+                  return (
+                    <div key={a.id} onClick={() => setSelectedAccountIds(prev => selected ? prev.filter(x => x !== a.id) : [...prev, a.id])}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 20, cursor: 'pointer',
+                        border: selected ? '2px solid var(--wr-primary)' : '1px solid var(--wr-border)',
+                        background: selected ? 'var(--wr-primary-bg)' : 'var(--wr-bg-surface)', transition: 'all 200ms ease' }}>
+                      <Text style={{ fontSize: 13 }}>{ch?.name || PLATFORM_NAMES[a.platform] || a.platform}</Text>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{a.display_name}</Text>
+                      {selected && <CheckCircleOutlined style={{ color: 'var(--wr-primary)', fontSize: 14 }} />}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          {/* 第三步：确认 + 检查清单 + 发布 */}
+          {selectedContent && selectedAccountIds.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <Text strong style={{ fontSize: 16, display: 'block', marginBottom: 12 }}>确认发布信息</Text>
+              {/* 标题编辑 */}
+              {(() => {
+                const selectedAccs = accounts.filter(a => selectedAccountIds.includes(a.id))
+                let titleLimit = 0
+                for (const a of selectedAccs) {
+                  const max = channelByPlatform.get(a.platform)?.constraints?.[publishForm]?.title_max_runes || 0
+                  if (max > 0 && (titleLimit === 0 || max < titleLimit)) titleLimit = max
+                }
+                const titleLen = [...publishTitle].length
+                const overLimit = titleLimit > 0 && titleLen > titleLimit
+                return (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <Text strong style={{ fontSize: 13 }}>发布标题</Text>
+                      {titleLimit > 0 && <Text style={{ fontSize: 11 }} type={overLimit ? 'danger' : 'secondary'}>{titleLen}/{titleLimit} 字</Text>}
+                    </div>
+                    <Input.TextArea rows={2} value={publishTitle} onChange={e => setPublishTitle(e.target.value)} placeholder="发布标题" style={{ fontSize: 14 }} />
+                  </div>
+                )
+              })()}
+              {/* 正文预览 */}
+              {publishContentText && (
+                <details style={{ marginBottom: 12 }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--wr-text-secondary)' }}>正文预览（{[...publishContentText].length} 字，点击展开编辑）</summary>
+                  <Input.TextArea rows={6} value={publishContentText} onChange={e => setPublishContentText(e.target.value)} style={{ marginTop: 8, fontSize: 13 }} />
+                </details>
+              )}
+              {/* 高级选项 */}
+              <Collapse ghost size="small" style={{ marginBottom: 16 }} items={[{
+                key: 'advanced', label: <span style={{ fontSize: 13 }}>高级选项</span>,
+                children: (<>
                   <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Switch checked={publishMode === 'auto'} onChange={(v) => setPublishMode(v ? 'auto' : 'semi-auto')} size="small" />
-                    <Text style={{ fontSize: 13 }}>全自动发布（系统自动操作浏览器，免去手动确认）</Text>
+                    <Text style={{ fontSize: 13 }}>全自动发布（系统自动操作浏览器，有封号风险）</Text>
                   </div>
                   {publishMode === 'auto' && (
-                    <>
-                      <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="全自动模式说明"
-                        description="系统自动打开浏览器、注入登录态，自动填充标题正文并点击发布。请确保服务器已安装 Chrome；封号风险略高于半自动。" />
-                      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Switch checked={autoSelect} onChange={setAutoSelect} size="small" />
-                        <Text style={{ fontSize: 13 }}>自动选号（自动用最久没发过的健康账号，降低封号风险）</Text>
-                      </div>
-                    </>
-                  )}
-
-                    {/* D: 可编辑发布标题（带平台字数计数器——发布前可调整，解决截断问题） */}
-                    {selectedContent && (
-                      <div style={{ marginBottom: 16 }}>
-                        {(() => {
-                          // 标题上限 = 所选（或自动选号）平台在该形态下约束的最严值——服务端下发，零硬编码
-                          const selectedAccs = autoSelect ? healthyAccounts : accounts.filter(a => selectedAccountIds.includes(a.id))
-                          let titleLimit = 0
-                          for (const a of selectedAccs) {
-                            const max = channelByPlatform.get(a.platform)?.constraints?.[publishForm]?.title_max_runes || 0
-                            if (max > 0 && (titleLimit === 0 || max < titleLimit)) titleLimit = max
-                          }
-                          const titleLen = [...publishTitle].length
-                          const overLimit = titleLimit > 0 && titleLen > titleLimit
-                          return (
-                            <>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Text strong style={{ fontSize: 13 }}>发布标题{titleLimit > 0 && <Tag color="red" style={{ marginLeft: 6, fontSize: 10 }}>所选平台≤{titleLimit}字</Tag>}</Text>
-                                <Tooltip title={overLimit ? `超出${titleLen - titleLimit}字，发布时自动截断` : '可在发布前调整标题'}>
-                                  <Text style={{ fontSize: 12 }} type={overLimit ? 'danger' : 'secondary'}>{titleLimit > 0 ? `${titleLen}/${titleLimit}` : `${titleLen} 字`}</Text>
-                                </Tooltip>
-                              </div>
-                              <Input.TextArea
-                                rows={2}
-                                value={publishTitle}
-                                onChange={e => setPublishTitle(e.target.value)}
-                                placeholder="发布标题（可在发布前调整）"
-                                style={{ fontSize: 14, borderColor: overLimit ? 'var(--wr-danger)' : undefined }}
-                                showCount={false}
-                              />
-                              {overLimit && (
-                                <Text type="danger" style={{ fontSize: 11 }}>
-                                  当前{titleLen}字超限，发布时将截断为："{[...publishTitle].slice(0, titleLimit).join('')}"
-                                </Text>
-                              )}
-                            </>
-                          )
-                        })()}
-                      </div>
-                    )}
-
-                    {/* D: 正文预览（折叠展开，支持编辑） */}
-                    {selectedContent && publishContentText && (
-                      <details style={{ marginBottom: 16 }}>
-                        <summary style={{ cursor: 'pointer', fontSize: 13, color: 'var(--wr-text-secondary)' }}>
-                          正文预览（{[...publishContentText].length} 字，点击展开编辑）
-                        </summary>
-                        <Input.TextArea
-                          rows={6}
-                          value={publishContentText}
-                          onChange={e => setPublishContentText(e.target.value)}
-                          style={{ marginTop: 8, fontSize: 13 }}
-                        />
-                      </details>
-                    )}
-
-                    {/* 素材选择（能力驱动：所选平台在该形态下要求素材时显示——图文→配图、视频→视频素材） */}
-                    {(() => {
-                      const selectedAccs = autoSelect ? healthyAccounts : accounts.filter(a => selectedAccountIds.includes(a.id))
-                      let minImages = 0, minVideos = 0
-                      for (const a of selectedAccs) {
-                        const c = channelByPlatform.get(a.platform)?.constraints?.[publishForm]
-                        minImages = Math.max(minImages, c?.min_images || 0)
-                        minVideos = Math.max(minVideos, c?.min_videos || 0)
-                      }
-                      const needMedia = publishForm !== 'article' || minImages > 0 || minVideos > 0
-                      if (!needMedia) return null
-                      const needVideo = publishForm === 'video' || minVideos > 0
-                      return (
-                        <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                            <Text strong style={{ fontSize: 13 }}>
-                              {needVideo ? '视频素材' : '配图'}{!needVideo && minImages > 0 ? `（必填 ≥${minImages} 张）` : ''}
-                            </Text>
-                            <Button size="small" icon={needVideo ? <VideoCameraOutlined /> : <PictureOutlined />} onClick={() => setShowAssetPicker(true)}>
-                              从素材库选择
-                            </Button>
-                          </div>
-                          {mediaUrls.length === 0 ? (
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              未选择{needVideo ? '视频' : '图'}——所选平台的{needVideo ? '视频' : '图文'}发布要求至少 {Math.max(minImages, minVideos, 1)} 个素材
-                            </Text>
-                          ) : (
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {mediaUrls.map((u, i) => (
-                                <div key={i} style={{ position: 'relative' }}>
-                                  {needVideo && !/\.(png|jpe?g|webp)$/i.test(u) ? (
-                                    <div style={{ width: 52, height: 52, borderRadius: 6, border: '1px solid var(--wr-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--wr-bg-surface)' }}>
-                                      <VideoCameraOutlined style={{ fontSize: 18, color: 'var(--wr-primary)' }} />
-                                    </div>
-                                  ) : (
-                                    <img src={u} alt="" style={{ width: 52, height: 52, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--wr-border)' }} />
-                                  )}
-                                  <Button size="small" type="text" danger icon={<DeleteOutlined />}
-                                    onClick={() => setMediaUrls(mediaUrls.filter((_, j) => j !== i))}
-                                    style={{ position: 'absolute', top: -8, right: -8, padding: 0, background: 'var(--wr-bg-elevated)', borderRadius: '50%' }} />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })()}
-
-                    {publishing && publishMode === 'auto' && autoStatus && (
-                      <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
-                        {autoStatus.map(s => (
-                          <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <Space>
-                              <Tag>{PLATFORM_NAMES[s.platform] || s.platform}</Tag>
-                              <Text style={{ fontSize: 13, color: statusConfig(s.status).color }}>
-                                {statusConfig(s.status).icon} {statusConfig(s.status).label}
-                              </Text>
-                            </Space>
-                            {s.external_url && s.status === 'published' && (
-                              <Button size="small" type="link" icon={<ExportOutlined />} href={s.external_url} target="_blank">查看文章</Button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      {healthyAccounts.map((a) => {
-                        const selected = selectedAccountIds.includes(a.id)
-                        const toggle = () => {
-                          setSelectedAccountIds(prev => selected ? prev.filter(x => x !== a.id) : [...prev, a.id])
-                        }
-                        return (
-                          <div key={a.id} onClick={toggle} style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
-                            border: selected ? '1px solid var(--wr-primary)' : '1px solid var(--wr-border)',
-                            background: selected ? 'var(--wr-primary-bg)' : 'transparent',
-                            transition: 'all 200ms ease',
-                          }}>
-                            <Space>
-                              <Tag>{channelByPlatform.get(a.platform)?.name || PLATFORM_NAMES[a.platform] || a.platform}</Tag>
-                              <Text>{a.display_name}</Text>
-                            </Space>
-                            {selected && <CheckCircleOutlined style={{ color: 'var(--wr-primary)' }} />}
-                          </div>
-                        )
-                      })}
-                    </Space>
-
-                    {/* 定时发送（排期发布：到期自动执行）*/}
-                    <div style={{ marginTop: 16, padding: 12, borderRadius: 10, border: '1px solid var(--wr-border)', background: 'var(--wr-bg-elevated)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                        <Switch size="small" checked={!!scheduleTime} onChange={(v) => setScheduleTime(v ? dayjs().add(1, 'hour').toDate() : null)} />
-                        <Text style={{ fontSize: 13 }}>定时发送（排期发布）</Text>
-                      </div>
-                      {scheduleTime && (
-                        <DatePicker
-                          showTime
-                          value={dayjs(scheduleTime)}
-                          onChange={(v) => setScheduleTime(v ? v.toDate() : null)}
-                          style={{ width: '100%' }}
-                          disabledDate={(d) => d && d.isBefore(dayjs().startOf('day'))}
-                          placeholder="选择自动发布时间"
-                        />
-                      )}
+                    <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Switch checked={autoSelect} onChange={setAutoSelect} size="small" />
+                      <Text style={{ fontSize: 13 }}>自动选号（用最久没发过的账号，降低封号风险）</Text>
                     </div>
-                    {/* 发布前检查清单（傻瓜化：散落的校验规则收进一处——发布前一眼看到"还差什么"，
-                        而不是提交后被逐个报错拦下） */}
-                    {(() => {
-                      const selectedAccs = autoSelect && publishMode === 'auto'
-                        ? healthyAccounts
-                        : accounts.filter((a) => selectedAccountIds.includes(a.id))
-                      // 检查项按所选平台的 constraints 动态生成（服务端下发——前端零硬编码）
-                      let titleLimit = 0, minImages = 0, minVideos = 0
-                      for (const a of selectedAccs) {
-                        const c = channelByPlatform.get(a.platform)?.constraints?.[publishForm]
-                        const max = c?.title_max_runes || 0
-                        if (max > 0 && (titleLimit === 0 || max < titleLimit)) titleLimit = max
-                        minImages = Math.max(minImages, c?.min_images || 0)
-                        minVideos = Math.max(minVideos, c?.min_videos || 0)
-                      }
-                      const needMedia = publishForm !== 'article' || minImages > 0 || minVideos > 0
-                      const needVideo = publishForm === 'video' || minVideos > 0
-                      const titleLen = [...publishTitle].length
-                      const items: { ok: boolean; text: string }[] = [
-                        selectedContent
-                          ? { ok: true, text: `已选内容：${selectedContent.title || '(无标题)'}` }
-                          : { ok: false, text: '还没选要发布的内容（左侧点选一篇）' },
-                        selectedAccs.length > 0
-                          ? { ok: true, text: `将发布到 ${selectedAccs.length} 个账号` }
-                          : { ok: false, text: '还没选发布账号（下方点选账号）' },
-                        ...(titleLimit > 0 ? [
-                          titleLen > 0 && titleLen <= titleLimit
-                            ? { ok: true, text: `标题符合所选平台 ≤${titleLimit} 字限制` }
-                            : titleLen > titleLimit
-                              ? { ok: false, text: `标题 ${titleLen} 字超了——所选平台最多 ${titleLimit} 字（发布时会自动截断）` }
-                              : { ok: false, text: '还没填标题' },
-                        ] : []),
-                        ...(needMedia ? [
-                          mediaUrls.length > 0
-                            ? { ok: true, text: `已选 ${mediaUrls.length} 个${needVideo ? '视频' : '配图'}素材` }
-                            : { ok: false, text: `所选平台要求至少 ${Math.max(minImages, minVideos, 1)} 个${needVideo ? '视频' : '配图'}素材（上方「从素材库选择」）` },
-                        ] : []),
-                      ]
-                      return (
-                        <div style={{ marginTop: 16, marginBottom: 4, padding: 12, borderRadius: 10, background: 'var(--wr-bg-elevated)' }}>
-                          <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>发布前检查</Text>
-                          {items.map((it, i) => (
-                            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4 }}>
-                              <span style={{ color: it.ok ? 'var(--wr-success)' : 'var(--wr-warning)', fontSize: 13, lineHeight: '19px' }}>
-                                {it.ok ? '✓' : '⋯'}
-                              </span>
-                              <Text style={{ fontSize: 13, lineHeight: '19px', color: it.ok ? 'var(--wr-text-secondary)' : 'var(--wr-warning)' }}>
-                                {it.text}
-                              </Text>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    })()}
-                    <Button
-                      type="primary" size="large" block style={{ marginTop: 16 }}
-                      loading={publishing}
-                      disabled={!selectedContent || (!autoSelect && selectedAccountIds.length === 0)}
-                      onClick={handlePublish}
-                    >
-                      {publishing && publishMode === 'auto' ? '自动发布中...'
-                        : publishing ? '生成发布链接中...'
-                        : `发布到 ${selectedAccountIds.length} 个平台`}
-                    </Button>
-                  </>
-                )}
-              </div>
-            </Col>
-          </Row>
+                  )}
+                </>),
+              }]} />
+              {/* 检查清单 */}
+              {(() => {
+                const selectedAccs = autoSelect && publishMode === 'auto' ? healthyAccounts : accounts.filter(a => selectedAccountIds.includes(a.id))
+                let titleLimit = 0, minImages = 0, minVideos = 0
+                for (const a of selectedAccs) {
+                  const c = channelByPlatform.get(a.platform)?.constraints?.[publishForm]
+                  const max = c?.title_max_runes || 0
+                  if (max > 0 && (titleLimit === 0 || max < titleLimit)) titleLimit = max
+                  minImages = Math.max(minImages, c?.min_images || 0)
+                  minVideos = Math.max(minVideos, c?.min_videos || 0)
+                }
+                const needMedia = publishForm !== 'article' || minImages > 0 || minVideos > 0
+                const titleLen = [...publishTitle].length
+                const items: { ok: boolean; text: string }[] = [
+                  { ok: true, text: `已选内容：${selectedContent.title || '(无标题)'}` },
+                  { ok: true, text: `将发布到 ${selectedAccs.length} 个账号` },
+                  ...(titleLimit > 0 ? [titleLen > 0 && titleLen <= titleLimit ? { ok: true, text: '标题符合限制' } : titleLen > titleLimit ? { ok: false, text: '标题超限' } : { ok: false, text: '还没填标题' }] : []),
+                  ...(needMedia ? [mediaUrls.length > 0 ? { ok: true, text: '已选素材' } : { ok: false, text: '请选素材' }] : []),
+                ]
+                const allOk = items.every(i => i.ok)
+                return (
+                  <div style={{ marginBottom: 16, padding: 14, borderRadius: 10, background: allOk ? 'var(--wr-bg-elevated)' : 'rgba(251,191,36,0.08)', border: allOk ? '1px solid var(--wr-border)' : '1px solid rgba(251,191,36,0.2)' }}>
+                    <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>{allOk ? '准备就绪' : '发布前检查'}</Text>
+                    {items.map((it, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                        <span style={{ color: it.ok ? 'var(--wr-success)' : 'var(--wr-warning)', fontSize: 13 }}>{it.ok ? '✓' : '⋯'}</span>
+                        <Text style={{ fontSize: 12.5, color: it.ok ? 'var(--wr-text-secondary)' : 'var(--wr-warning)' }}>{it.text}</Text>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+              <Button type="primary" size="large" block loading={publishing} onClick={handlePublish}>
+                {publishing ? '发布中...' : `发布到 ${selectedAccountIds.length} 个平台`}
+              </Button>
+            </div>
+          )}
         </Card>
-
-        {/* ===== ③ 发布记录 ===== */}
-        </>)},
+        </>
+      )},
             { key: 'records', label: '发布记录', children: (<>
         {/* 效果聚合卡（P1-6-2）：平台×篇数×复测均值变化——分发效果一目了然 */}
         <Card className="wr-glass-card" style={{ marginBottom: 16 }}>

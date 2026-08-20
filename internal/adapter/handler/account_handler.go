@@ -1,6 +1,10 @@
 package handler
 
 import (
+	"log"
+	"net/http"
+	"net/url"
+
 	"github.com/gin-gonic/gin"
 
 	"webreaper/internal/adapter/handler/middleware"
@@ -12,17 +16,29 @@ import (
 //
 // 多租户：所有请求从 JWT 取 tenant_id（merchant 只能看自己的，admin 看全局）。
 type AccountHandler struct {
-	accountUC *account.AccountUseCase
-	publishUC *account.PublishUseCase
+	accountUC      *account.AccountUseCase
+	publishUC      *account.PublishUseCase
+	frontendBaseURL string // OAuth 回调完成后 302 跳回的前端地址
 }
 
 func NewAccountHandler(au *account.AccountUseCase, pu *account.PublishUseCase) *AccountHandler {
-	return &AccountHandler{accountUC: au, publishUC: pu}
+	return &AccountHandler{accountUC: au, publishUC: pu, frontendBaseURL: "http://localhost:5173"}
+}
+
+// SetFrontendBaseURL 注入前端地址（OAuth 回调 302 目标；main 装配时调用）。
+func (h *AccountHandler) SetFrontendBaseURL(baseURL string) {
+	if baseURL != "" {
+		h.frontendBaseURL = baseURL
+	}
 }
 
 // ---- DTO 转换（实体 → API 响应，PascalCase → snake_case）----
 
 func accountToView(a entity.Account) gin.H {
+	authType := a.AuthType
+	if authType == "" {
+		authType = entity.AccountAuthCookie
+	}
 	return gin.H{
 		"id":           a.ID,
 		"tenant_id":    a.TenantID,
@@ -30,10 +46,11 @@ func accountToView(a entity.Account) gin.H {
 		"display_name": a.DisplayName,
 		"health":       a.Health,
 		"login_method": a.LoginMethod,
+		"auth_type":    authType, // cookie（浏览器通道）/ oauth（官方 API 通道）
 		"expires_at":   a.ExpiresAt,
 		"bound_at":     a.BoundAt,
 		"last_used_at": a.LastUsedAt,
-		// 注意：cookie_encrypted 绝不返回前端
+		// 注意：cookie_encrypted / token 密文绝不返回前端
 	}
 }
 
@@ -149,6 +166,37 @@ func (h *AccountHandler) HandleDeleteAccount(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"id": id})
+}
+
+// ---- 官方 OAuth 授权绑定（抖音开放平台 API 通道）----
+
+// HandleDouyinOAuthURL GET /api/v1/geo/accounts/douyin/oauth/url —— 生成抖音官方授权页地址。
+// 前端新窗口打开该地址（PC 端展示扫码二维码），授权后抖音回调服务端公开端点自动完成绑定。
+func (h *AccountHandler) HandleDouyinOAuthURL(c *gin.Context) {
+	tenantID := middleware.CurrentTenantID(c)
+	userID := middleware.CurrentUserID(c)
+	url, err := h.accountUC.BuildOAuthURL(tenantID, userID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"url": url})
+}
+
+// HandleDouyinOAuthCallback GET /api/v1/geo/accounts/douyin/oauth/callback —— 抖音授权回调（公开）。
+// 浏览器从抖音授权页重定向至此（无 JWT）——state 签名携带租户上下文，
+// 验签后换 token 落库，最后 302 跳回前端分发页并带结果参数。
+func (h *AccountHandler) HandleDouyinOAuthCallback(c *gin.Context) {
+	code := c.Query("code")
+	state := c.Query("state")
+	frontend := h.frontendBaseURL
+	accountID, name, err := h.accountUC.HandleOAuthCallback(c.Request.Context(), code, state)
+	if err != nil {
+		c.Redirect(http.StatusFound, frontend+"/distribution?douyin_oauth=failed&reason="+url.QueryEscape(err.Error()))
+		return
+	}
+	log.Printf("[DouyinOAuth] 授权绑定成功：account=%s name=%s", accountID, name)
+	c.Redirect(http.StatusFound, frontend+"/distribution?douyin_oauth=success&name="+url.QueryEscape(name))
 }
 
 // ---- 发布管理端点 ----

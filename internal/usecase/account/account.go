@@ -25,15 +25,95 @@ import (
 
 // ============ 账号管理用例 ============
 
-// AccountUseCase 账号扫码绑定 / 列表 / 解绑。
+// AccountUseCase 账号扫码绑定 / 官方 OAuth 授权绑定 / 列表 / 解绑。
 type AccountUseCase struct {
 	accountRepo port.AccountRepository
-	qrLogin     port.QRLoginSession // 扫码登录会话（浏览器自动化）
-	vault       port.CookieVault    // cookie 加密存储
+	qrLogin     port.QRLoginSession // 扫码登录会话（浏览器自动化，cookie 通道）
+	vault       port.CookieVault    // cookie/token 加密存储
+	oauth       port.OAuthProvider  // 平台官方 OAuth（API 通道；nil=未配置，仅扫码可用）
+	stateCodec  port.OAuthStateCodec
 }
 
 func NewAccountUseCase(ar port.AccountRepository, qr port.QRLoginSession, vault port.CookieVault) *AccountUseCase {
 	return &AccountUseCase{accountRepo: ar, qrLogin: qr, vault: vault}
+}
+
+// SetOAuth 注入官方 OAuth 授权（可选；抖音开放平台等）。
+func (uc *AccountUseCase) SetOAuth(oauth port.OAuthProvider, codec port.OAuthStateCodec) {
+	uc.oauth = oauth
+	uc.stateCodec = codec
+}
+
+// ---- 官方 OAuth 授权绑定（抖音 API 通道）----
+
+// BuildOAuthURL 生成官方授权页地址（用户在授权页扫码确认，抖音回调后自动完成绑定）。
+func (uc *AccountUseCase) BuildOAuthURL(tenantID, userID string) (string, error) {
+	if uc.oauth == nil || uc.stateCodec == nil {
+		return "", fmt.Errorf("官方 OAuth 授权未配置（需 DOUYIN_CLIENT_KEY/SECRET）")
+	}
+	state := uc.stateCodec.SignState(tenantID + "|" + userID)
+	return uc.oauth.ConnectURL(state), nil
+}
+
+// HandleOAuthCallback 处理抖音授权回调：验 state → code 换 token → 拉用户信息 → 落库账号。
+// 返回 (账号ID, 显示名)。open_id 已绑定时覆盖更新（同一抖音号重新授权=续期，不重复建号）。
+func (uc *AccountUseCase) HandleOAuthCallback(ctx context.Context, code, state string) (string, string, error) {
+	if uc.oauth == nil || uc.stateCodec == nil {
+		return "", "", fmt.Errorf("官方 OAuth 授权未配置")
+	}
+	if code == "" || state == "" {
+		return "", "", fmt.Errorf("回调缺少 code/state 参数")
+	}
+	payload, err := uc.stateCodec.VerifyState(state)
+	if err != nil {
+		return "", "", fmt.Errorf("授权状态校验失败（请重新发起绑定）: %w", err)
+	}
+	tenantID, _, _ := strings.Cut(payload, "|")
+
+	token, err := uc.oauth.ExchangeCode(ctx, code)
+	if err != nil {
+		return "", "", fmt.Errorf("授权码换取 token 失败: %w", err)
+	}
+
+	// token 加密落库（与 cookie 同一 AES-GCM 保险库）
+	encAccess, aErr := uc.vault.Encrypt(token.AccessToken)
+	encRefresh, rErr := uc.vault.Encrypt(token.RefreshToken)
+	if aErr != nil || rErr != nil {
+		return "", "", fmt.Errorf("加密 token 失败: %v / %v", aErr, rErr)
+	}
+
+	// 显示名：拉抖音昵称，失败降级平台名
+	displayName := platformDisplayName("douyin")
+	if info, iErr := uc.oauth.UserInfo(ctx, token.AccessToken, token.OpenID); iErr == nil && info.Nickname != "" {
+		displayName = info.Nickname
+	}
+
+	now := time.Now()
+	acc := entity.Account{
+		ID:              fmt.Sprintf("acc-%d", now.UnixNano()),
+		TenantID:        tenantID,
+		Platform:        "douyin",
+		DisplayName:     displayName,
+		Health:          entity.AccountHealthActive,
+		LoginMethod:     "douyin",
+		AuthType:        entity.AccountAuthOAuth,
+		AccessTokenEnc:  encAccess,
+		RefreshTokenEnc: encRefresh,
+		OpenID:          token.OpenID,
+		ExpiresAt:       now.Add(time.Duration(max(token.ExpiresIn, 3600)) * time.Second),
+		BoundAt:         now,
+		LastUsedAt:      now,
+	}
+
+	// 同一 open_id 重新授权 = 续期：复用原账号记录，避免账号池重复
+	if existing, fErr := uc.accountRepo.FindByOpenID(ctx, tenantID, "douyin", token.OpenID); fErr == nil && existing.ID != "" {
+		acc.ID = existing.ID
+		acc.BoundAt = existing.BoundAt
+	}
+	if sErr := uc.accountRepo.Save(ctx, acc); sErr != nil {
+		return "", "", fmt.Errorf("保存授权账号失败: %w", sErr)
+	}
+	return acc.ID, acc.DisplayName, nil
 }
 
 // StartQRLogin 启动扫码登录，返回会话 ID（二维码图片通过 PollQRLogin 异步获取）。
@@ -135,8 +215,10 @@ func (uc *AccountUseCase) Delete(ctx context.Context, tenantID, accountID string
 	return uc.accountRepo.Delete(ctx, tenantID, accountID)
 }
 
-// CheckAccountHealth 检查所有账号的 cookie 过期状态。
-// 过期的账号自动标记为 expired，前端展示"重新绑定"提示。
+// CheckAccountHealth 检查所有账号的凭据过期状态。
+// - OAuth 账号：access_token 到期前 48h 自动用 refresh_token 续期（用户无感）；
+//   续期失败（refresh_token 也失效/用户在抖音侧解绑）才标记 expired。
+// - cookie 账号：过期直接标记 expired，前端展示"重新绑定"。
 // 由定时任务每 10 分钟调用一次。
 func (uc *AccountUseCase) CheckAccountHealth(ctx context.Context) {
 	accounts, err := uc.accountRepo.ListAll(ctx)
@@ -153,8 +235,40 @@ func (uc *AccountUseCase) CheckAccountHealth(ctx context.Context) {
 		}
 		if now.After(acc.ExpiresAt) {
 			_ = uc.accountRepo.UpdateHealth(ctx, acc.ID, entity.AccountHealthExpired)
+			continue
+		}
+		// OAuth 账号临期自动续期（提前 48h 窗口；每 10 分钟巡检会命中一次）
+		if acc.IsOAuth() && uc.oauth != nil && now.After(acc.ExpiresAt.Add(-48*time.Hour)) {
+			uc.refreshOAuthAccount(ctx, acc)
 		}
 	}
+}
+
+// refreshOAuthAccount 用 refresh_token 续期并回写账号（旧 refresh_token 同时失效，必须整体更新）。
+func (uc *AccountUseCase) refreshOAuthAccount(ctx context.Context, acc entity.Account) {
+	refreshToken, err := uc.vault.Decrypt(acc.RefreshTokenEnc)
+	if err != nil || refreshToken == "" {
+		_ = uc.accountRepo.UpdateHealth(ctx, acc.ID, entity.AccountHealthExpired)
+		return
+	}
+	token, err := uc.oauth.RefreshToken(ctx, refreshToken)
+	if err != nil {
+		// refresh_token 失效：需要用户重新授权
+		_ = uc.accountRepo.UpdateHealth(ctx, acc.ID, entity.AccountHealthExpired)
+		return
+	}
+	encAccess, aErr := uc.vault.Encrypt(token.AccessToken)
+	encRefresh, rErr := uc.vault.Encrypt(token.RefreshToken)
+	if aErr != nil || rErr == nil && encAccess == "" {
+		return // 加密失败保持现状，下次巡检重试
+	}
+	if rErr != nil {
+		return
+	}
+	acc.AccessTokenEnc = encAccess
+	acc.RefreshTokenEnc = encRefresh
+	acc.ExpiresAt = time.Now().Add(time.Duration(max(token.ExpiresIn, 3600)) * time.Second)
+	_ = uc.accountRepo.Save(ctx, acc)
 }
 
 // platformDisplayName 平台显示名。
@@ -164,6 +278,10 @@ func platformDisplayName(platform string) string {
 		return "知乎账号"
 	case "xiaohongshu":
 		return "小红书账号"
+	case "douyin":
+		return "抖音账号"
+	case "kuaishou":
+		return "快手账号"
 	default:
 		return platform + " 账号"
 	}

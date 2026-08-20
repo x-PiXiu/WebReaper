@@ -1,10 +1,14 @@
 package qrlogin
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +18,8 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"github.com/makiuchi-d/gozxing"
+	"github.com/makiuchi-d/gozxing/qrcode"
 
 	"webreaper/internal/adapter/chromedputil"
 	"webreaper/internal/config"
@@ -127,14 +133,17 @@ const findQRElementJS = `((method) => {
       if (w >= 60 && w <= 500 && h >= 60 && h <= 500) {
         const ratio = w / Math.max(h, 1);
         if (ratio > 0.85 && ratio < 1.15) {
-          try {
-            const dataURL = c.toDataURL('image/png');
-            if (dataURL && dataURL.length > 100) {
-              return JSON.stringify({ found: true, type: 'canvas-dataurl', width: w, height: h, className: (c.className||'').toString().slice(0,80), dataURL: dataURL });
+          // Go 侧已判定该 canvas 导出的是空白图（抖音篡改 toDataURL），跳过换下一个
+          if (c.getAttribute('data-qr-blank') !== '1') {
+            try {
+              const dataURL = c.toDataURL('image/png');
+              if (dataURL && dataURL.length > 100) {
+                return JSON.stringify({ found: true, type: 'canvas-dataurl', width: w, height: h, canvasIdx: canvasIdx, className: (c.className||'').toString().slice(0,80), dataURL: dataURL });
+              }
+            } catch(e) {
+              c.setAttribute('data-qr-shot', canvasIdx);
+              return JSON.stringify({ found: true, type: 'canvas-screenshot', width: w, height: h, canvasIdx: canvasIdx, className: (c.className||'').toString().slice(0,80), jsPath: 'document.querySelector(\'canvas[data-qr-shot=\"' + canvasIdx + '\"]\')' });
             }
-          } catch(e) {
-            c.setAttribute('data-qr-shot', canvasIdx);
-            return JSON.stringify({ found: true, type: 'canvas-screenshot', width: w, height: h, className: (c.className||'').toString().slice(0,80), jsPath: 'document.querySelector(\'canvas[data-qr-shot=\"' + canvasIdx + '\"]\')' });
           }
         }
       }
@@ -205,6 +214,176 @@ const findQRElementJS = `((method) => {
 
   return JSON.stringify({ found: false, debug: { imgCount: allImgs.length, iframeCount: iframeCount, imgs: imgDebug } });
 })`
+
+// findQRCandidatesJS 枚举页面上所有可能承载二维码的 canvas（≥100x100），
+// 返回候选列表（带 jsPath），排序：可见的正方形优先、可见的次之、其余最后。
+// 不做内容判断——由 Go 侧逐个元素截图并用 gozxing 解码验证（唯一可信的判定标准）。
+// 背景：抖音登录页 4 个 180x180 装饰 canvas + 1 个 902x552 登录卡大 canvas，
+// 真二维码渲染在大 canvas 区域的右下角——尺寸/比例启发式无法定位，只能穷举+解码。
+const findQRCandidatesJS = `(() => {
+  const out = [];
+  document.querySelectorAll('canvas').forEach((c, i) => {
+    if (c.width < 100 || c.height < 100) return;
+    const r = c.getBoundingClientRect();
+    const bigger = Math.max(c.width, c.height);
+    out.push({
+      kind: 'canvas', idx: i, w: c.width, h: c.height,
+      square: Math.abs(c.width - c.height) < bigger * 0.2,
+      visible: r.width > 0 && r.height > 0,
+      jsPath: 'document.querySelectorAll(\'canvas\')[' + i + ']'
+    });
+  });
+  const score = (c) => (c.visible && c.square ? 0 : c.visible ? 1 : 2);
+  out.sort((a, b) => score(a) - score(b));
+  return JSON.stringify({ candidates: out.slice(0, 10) });
+})()`
+
+// qrCandidate findQRCandidatesJS 返回的候选元素。
+type qrCandidate struct {
+	Kind    string `json:"kind"`
+	Idx     int    `json:"idx"`
+	W       int    `json:"w"`
+	H       int    `json:"h"`
+	Square  bool   `json:"square"`
+	Visible bool   `json:"visible"`
+	JSPath  string `json:"jsPath"`
+}
+
+// scanQRCandidates 阶段 A2：候选 canvas 逐个元素截图 + gozxing 解码验证。
+// 命中即裁剪出二维码区域写入会话；全部失败返回 false（继续走后续阶段）。
+func (q *ChromedpQRLogin) scanQRCandidates(ctx context.Context, sessionID string) bool {
+	candCtx, candCancel := context.WithTimeout(ctx, 10*time.Second)
+	var candJSON string
+	err := chromedp.Run(candCtx,
+		chromedp.Sleep(time.Second),
+		chromedp.Evaluate(findQRCandidatesJS, &candJSON),
+	)
+	candCancel()
+	if err != nil {
+		log.Printf("[QRLogin:%s] 候选枚举失败: %v", sessionID, err)
+		return false
+	}
+	var parsed struct {
+		Candidates []qrCandidate `json:"candidates"`
+	}
+	if jErr := json.Unmarshal([]byte(candJSON), &parsed); jErr != nil {
+		log.Printf("[QRLogin:%s] 候选解析失败: %v (raw=%s)", sessionID, jErr, candJSON)
+		return false
+	}
+	log.Printf("[QRLogin:%s] 候选扫描开始：共 %d 个 canvas 候选", sessionID, len(parsed.Candidates))
+
+	for i, cand := range parsed.Candidates {
+		if q.isSessionClosed(sessionID) {
+			return false
+		}
+		shotCtx, shotCancel := context.WithTimeout(ctx, 6*time.Second)
+		var qrBytes []byte
+		sErr := chromedp.Run(shotCtx, chromedp.Screenshot(cand.JSPath, &qrBytes, chromedp.ByJSPath))
+		shotCancel()
+		if sErr != nil || len(qrBytes) <= 500 {
+			log.Printf("[QRLogin:%s] 候选 %d/%d canvas[%d]（%dx%d）截图失败: %v（%d 字节）",
+				sessionID, i+1, len(parsed.Candidates), cand.Idx, cand.W, cand.H, sErr, len(qrBytes))
+			continue
+		}
+		if text := decodeQRText(qrBytes); text != "" {
+			log.Printf("[QRLogin:%s] 候选 %d/%d canvas[%d]（%dx%d）解出二维码 → %s",
+				sessionID, i+1, len(parsed.Candidates), cand.Idx, cand.W, cand.H, truncURL(text))
+			q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(cropToQR(qrBytes)))
+			return true
+		}
+		log.Printf("[QRLogin:%s] 候选 %d/%d canvas[%d]（%dx%d）不是二维码，继续",
+			sessionID, i+1, len(parsed.Candidates), cand.Idx, cand.W, cand.H)
+	}
+	return false
+}
+
+// findQRContainerJS 在页面内查找二维码容器元素并标记（用于元素截图）。
+// 与 findQRElementJS（提取 canvas/img 图片数据）不同，本脚本找的是二维码的**容器 div**——
+// 不关心内部是 canvas/img/SVG/iframe，找到后由 Go 侧对该元素截图。
+// 这是对话式扫码登录的核心策略（参考 MediaCrawler）：截图不依赖 DOM 内部结构，平台改版不影响。
+//
+// 查找策略（按优先级）：
+//   1. class/id 含 QR 相关关键词的元素（最可靠）
+//   2. 页面中央区域的正方形中等大小元素（登录弹窗中的二维码通常在中央）
+const findQRContainerJS = `(() => {
+  // 策略 1：class/id 含 QR 关键词
+  const kwSelectors = [
+    '[class*="qrcode"]', '[class*="qr-code"]', '[class*="qr_code"]',
+    '[class*="QRCode"]', '[class*="QrCode"]',
+    '[id*="qrcode"]', '[id*="qr-code"]', '[id*="qr_code"]',
+    '[class*="scan-code"]', '[class*="code-container"]', '[class*="code_container"]',
+    '[class*="web-login"]', '[class*="login-qr"]', '[class*="login_qr"]',
+  ];
+  for (const sel of kwSelectors) {
+    try {
+      const els = document.querySelectorAll(sel);
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width >= 100 && rect.width <= 500 && rect.height >= 100 && rect.height <= 500) {
+          const ratio = rect.width / Math.max(rect.height, 1);
+          if (ratio > 0.6 && ratio < 1.6) {
+            el.setAttribute('data-qr-container', '1');
+            return JSON.stringify({
+              found: true, type: 'container-screenshot',
+              width: Math.round(rect.width), height: Math.round(rect.height),
+              className: (el.className || '').toString().slice(0, 80),
+              jsPath: 'document.querySelector("[data-qr-container=\\"1\\"]")',
+            });
+          }
+        }
+      }
+    } catch(e) {}
+  }
+
+  // 策略 2：页面中央区域的正方形中等大小元素
+  const allEls = document.querySelectorAll('div, section');
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const cx = vw / 2, cy = vh / 2;
+  let best = null, bestScore = 0;
+
+  for (const el of allEls) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 120 || rect.width > 450) continue;
+    if (rect.height < 120 || rect.height > 450) continue;
+
+    const ratio = rect.width / Math.max(rect.height, 1);
+    if (ratio < 0.75 || ratio > 1.3) continue;
+
+    // 必须靠近页面中央（登录弹窗位置）
+    const elCX = rect.x + rect.width / 2;
+    const elCY = rect.y + rect.height / 2;
+    const dist = Math.sqrt((elCX - cx) ** 2 + (elCY - cy) ** 2);
+    if (dist > 350) continue;
+
+    // 必须有视觉内容（不是空 div）
+    if (el.children.length === 0 && !(el.textContent || '').trim()) continue;
+
+    // 排除明显的非二维码元素
+    const cls = (el.className || '').toString().toLowerCase();
+    if (cls.includes('nav') || cls.includes('header') || cls.includes('footer')) continue;
+    if (cls.includes('logo') || cls.includes('banner') || cls.includes('carousel')) continue;
+
+    const squareness = 1 - Math.abs(1 - ratio);
+    const score = squareness * (1 - dist / 500);
+    if (score > bestScore) {
+      bestScore = score;
+      best = el;
+    }
+  }
+
+  if (best && bestScore > 0.3) {
+    best.setAttribute('data-qr-container', '1');
+    const rect = best.getBoundingClientRect();
+    return JSON.stringify({
+      found: true, type: 'container-screenshot',
+      width: Math.round(rect.width), height: Math.round(rect.height),
+      className: (best.className || '').toString().slice(0, 80),
+      jsPath: 'document.querySelector("[data-qr-container=\\"1\\"]")',
+    });
+  }
+
+  return JSON.stringify({ found: false });
+})()`
 
 // clickTabByTextJS 通过文本内容点击扫码登录按钮的 JavaScript。
 const clickTabByTextJS = `(text) => {
@@ -407,17 +586,28 @@ func (q *ChromedpQRLogin) processQRDetection(ctx context.Context, sessionID stri
 	log.Printf("[QRLogin:%s] 处理二维码: type=%s class=%s %vx%v dataURL长度=%d jsPath=%s",
 		sessionID, det.Type, det.Class, det.Width, det.Height, len(det.DataURL), det.JSPath)
 
-	if det.Type == "canvas-screenshot" || det.Type == "img-screenshot" {
+	// 容器截图 / 元素截图：对二维码容器/元素做截图（不关心内部是 canvas/img/SVG/iframe）
+	if det.Type == "container-screenshot" || det.Type == "canvas-screenshot" || det.Type == "img-screenshot" {
+		jsPath := det.JSPath
+		if jsPath == "" {
+			// 容器检测可能只返回了 found=true 但没带 jsPath，用通用选择器
+			jsPath = `document.querySelector("[data-qr-container=\"1\"]")`
+		}
 		shotCtx, shotCancel := context.WithTimeout(ctx, 8*time.Second)
 		var qrBytes []byte
 		shotErr := chromedp.Run(shotCtx,
-			chromedp.Screenshot(det.JSPath, &qrBytes, chromedp.ByJSPath),
+			chromedp.Screenshot(jsPath, &qrBytes, chromedp.ByJSPath),
 		)
 		shotCancel()
 		if shotErr == nil && len(qrBytes) > 500 {
-			log.Printf("[QRLogin:%s] 元素截图成功（%d 字节）", sessionID, len(qrBytes))
-			q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(qrBytes))
-			return true
+			// 解码验证：只有 gozxing 解出二维码内容才接受（装饰插画会被拦截）
+			if text := decodeQRText(qrBytes); text != "" {
+				log.Printf("[QRLogin:%s] 元素截图解出二维码（%d 字节）→ %s", sessionID, len(qrBytes), truncURL(text))
+				q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(cropToQR(qrBytes)))
+				return true
+			}
+			log.Printf("[QRLogin:%s] 元素截图未解出二维码，拒绝（%d 字节，空白=%v）", sessionID, len(qrBytes), isBlankImage(qrBytes))
+			return false
 		}
 		log.Printf("[QRLogin:%s] 元素截图失败: %v (bytes=%d)", sessionID, shotErr, len(qrBytes))
 		return false
@@ -426,13 +616,32 @@ func (q *ChromedpQRLogin) processQRDetection(ctx context.Context, sessionID stri
 	qrBase64 := det.DataURL
 	if strings.HasPrefix(qrBase64, "data:image/") {
 		// data URL：去掉前缀，只保留 base64
-		if idx := strings.Index(qrBase64, ","); idx > 0 {
-			qrBase64 = qrBase64[idx+1:]
+		commaIdx := strings.Index(qrBase64, ",")
+		if commaIdx < 0 {
+			log.Printf("[QRLogin:%s] data URL 格式异常（无逗号分隔符）", sessionID)
+			return false
 		}
+		mime := qrBase64[:commaIdx]
+		qrBase64 = qrBase64[commaIdx+1:]
 		if len(qrBase64) > 100 {
-			log.Printf("[QRLogin:%s] 二维码提取成功（data URL, %d 字符）", sessionID, len(qrBase64))
-			q.setSessionQRImage(sessionID, qrBase64)
-			return true
+			if raw, dErr := base64.StdEncoding.DecodeString(qrBase64); dErr == nil {
+				// 解码验证：canvas.toDataURL 可能被平台篡改（返回空白）或命中装饰插画，
+				// 只有解出二维码内容才接受
+				if text := decodeQRText(raw); text != "" {
+					log.Printf("[QRLogin:%s] data URL 解出二维码 → %s", sessionID, truncURL(text))
+					q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(cropToQR(raw)))
+					return true
+				}
+				log.Printf("[QRLogin:%s] data URL 未解出二维码（空白=%v, mime=%s），尝试元素截图", sessionID, isBlankImage(raw), mime)
+			}
+			// 解码失败（空白/非二维码/SVG 等不可解格式）：canvas 改用元素截图走渲染管线
+			if det.Type == "canvas-dataurl" && q.screenshotCanvasByIdx(ctx, sessionID, det.CanvasIdx) {
+				return true
+			}
+			if det.Type == "canvas-dataurl" {
+				q.markCanvasBlank(ctx, det.CanvasIdx)
+			}
+			return false
 		}
 		log.Printf("[QRLogin:%s] data URL 太短，可能无效", sessionID)
 		return false
@@ -450,6 +659,11 @@ func (q *ChromedpQRLogin) processQRDetection(ctx context.Context, sessionID stri
 			if origin != "" {
 				qrBase64 = strings.TrimRight(origin, "/") + qrBase64
 			}
+		}
+		// 服务端下载验证（仅记录结论，不改变行为）：快手登录二维码是艺术字样式，
+		// gozxing 可能解不出来但手机可扫——下载失败/解码失败都不拦截 URL 返回
+		if raw, ok := downloadImage(qrBase64); ok {
+			log.Printf("[QRLogin:%s] 图片 URL 下载验证：%s", sessionID, map[bool]string{true: "解出二维码", false: "未解出（可能是样式化二维码）"}[decodeQRText(raw) != ""])
 		}
 		log.Printf("[QRLogin:%s] 二维码提取成功（URL: %s）", sessionID, qrBase64)
 		q.setSessionQRImage(sessionID, qrBase64)
@@ -480,7 +694,7 @@ func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, meth
 		}
 	}
 
-	// 用 JS 直接提取二维码图片（3 轮，每轮等 2s 让页面渲染）
+	// 阶段 A：用原有 JS 提取二维码图片数据（知乎/小红书的 canvas/img 方式）
 	for attempt := 1; attempt <= 3; attempt++ {
 		if q.isSessionClosed(sessionID) {
 			return
@@ -509,7 +723,6 @@ func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, meth
 			log.Printf("[QRLogin:%s] 提取尝试 %d：未找到二维码 (raw=%s)", sessionID, attempt, resultJSON)
 
 			// 主文档没找到 → 尝试在 iframe 里搜索（QQ 二维码在跨域 iframe 里）
-			// 用 chromedp.Targets 获取所有 frame target，在 iframe 里执行 JS
 			if attempt == 1 {
 				if q.searchIframesForQR(ctx, sessionID, method) {
 					return
@@ -520,6 +733,54 @@ func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, meth
 
 		if q.processQRDetection(ctx, sessionID, det) {
 			return
+		}
+	}
+
+	// 阶段 A2：候选 canvas 穷举扫描 + 解码验证。
+	// 抖音的真二维码在 902x552 大 canvas 区域内，阶段 A 的尺寸启发式（60-500 正方形）
+	// 永远命中不了它，只能逐个截图解码。
+	if q.isSessionClosed(sessionID) {
+		return
+	}
+	if q.scanQRCandidates(ctx, sessionID) {
+		return
+	}
+
+	// 阶段 B：容器截图方式（抖音/快手等平台二维码不暴露 canvas/img，用容器元素截图）
+	// 参考 MediaCrawler：不关心二维码内部渲染方式，直接对二维码容器截图
+	if !q.isSessionClosed(sessionID) {
+		log.Printf("[QRLogin:%s] 阶段 A 未找到，尝试容器截图方式", sessionID)
+		for attempt := 1; attempt <= 2; attempt++ {
+			if q.isSessionClosed(sessionID) {
+				return
+			}
+
+			containerCtx, containerCancel := context.WithTimeout(ctx, 10*time.Second)
+			var containerJSON string
+			err := chromedp.Run(containerCtx,
+				chromedp.Sleep(3*time.Second), // 等页面/JS 完全渲染
+				chromedp.Evaluate(findQRContainerJS, &containerJSON),
+			)
+			containerCancel()
+			if err != nil {
+				log.Printf("[QRLogin:%s] 容器检测 JS 执行失败: %v", sessionID, err)
+				continue
+			}
+
+			det, parseErr := parseQRDetection(containerJSON)
+			if parseErr != nil {
+				log.Printf("[QRLogin:%s] 容器检测结果解析失败: %v (raw=%s)", sessionID, parseErr, containerJSON)
+				continue
+			}
+			if !det.Found {
+				log.Printf("[QRLogin:%s] 容器截图尝试 %d：未找到二维码容器", sessionID, attempt)
+				continue
+			}
+
+			log.Printf("[QRLogin:%s] 容器截图尝试 %d：找到容器 %s (%vx%v)", sessionID, attempt, det.Class, det.Width, det.Height)
+			if q.processQRDetection(ctx, sessionID, det) {
+				return
+			}
 		}
 	}
 
@@ -538,6 +799,12 @@ func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, meth
 		return
 	}
 	if len(fullBytes) > 100 {
+		// 尽力裁剪：整页截图里若能解出二维码，裁出来给用户（比整页更清晰可扫）
+		if text := decodeQRText(fullBytes); text != "" {
+			log.Printf("[QRLogin:%s] 整页截图解出二维码 → %s", sessionID, truncURL(text))
+			q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(cropToQR(fullBytes)))
+			return
+		}
 		log.Printf("[QRLogin:%s] 整页截图成功（%d 字节）", sessionID, len(fullBytes))
 		q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(fullBytes))
 	} else {
@@ -546,15 +813,200 @@ func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, meth
 	}
 }
 
+// decodeQRText 用 gozxing 解码图片中的二维码，返回解码文本（失败为空串）。
+//
+// 这是二维码提取的唯一可信判定标准。踩坑记录（2026-08-20）：
+//   - 抖音篡改 canvas.toDataURL 返回空白的 PNG；
+//   - 抖音登录页有 4 个 180x180 装饰 canvas + 1 个 902x552 登录卡大 canvas，
+//     真二维码渲染在大 canvas 区域右下角——尺寸/比例/内容启发式全部失效；
+//   - 视觉 LLM 在引导性提问下会把装饰插画"确认"为二维码。
+// 只有解码成功才能证明图片是可扫描的二维码。
+func decodeQRText(data []byte) string {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return ""
+	}
+	bmp, err := gozxing.NewBinaryBitmapFromImage(img)
+	if err != nil {
+		return ""
+	}
+	res, err := qrcode.NewQRCodeReader().Decode(bmp, nil)
+	if err != nil || res == nil {
+		return ""
+	}
+	return res.GetText()
+}
+
+// cropToQR 从截图中裁出二维码区域（四周加 25% 边距作静区），解码失败时原样返回。
+// 场景：抖音二维码在 902x552 大 canvas 截图的右下角——裁剪后用户看到的就是干净二维码。
+func cropToQR(data []byte) []byte {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
+	bmp, err := gozxing.NewBinaryBitmapFromImage(img)
+	if err != nil {
+		return data
+	}
+	res, err := qrcode.NewQRCodeReader().Decode(bmp, nil)
+	if err != nil || res == nil {
+		return data
+	}
+	pts := res.GetResultPoints()
+	if len(pts) < 3 {
+		return data
+	}
+	b := img.Bounds()
+	minX, minY, maxX, maxY := b.Max.X, b.Max.Y, b.Min.X, b.Min.Y
+	for _, p := range pts {
+		x, y := int(p.GetX()), int(p.GetY())
+		if x < minX {
+			minX = x
+		}
+		if x > maxX {
+			maxX = x
+		}
+		if y < minY {
+			minY = y
+		}
+		if y > maxY {
+			maxY = y
+		}
+	}
+	padX, padY := max((maxX-minX)/4, 12), max((maxY-minY)/4, 12)
+	rect := image.Rect(minX-padX, minY-padY, maxX+padX, maxY+padY).Intersect(b)
+	type subImager interface{ SubImage(r image.Rectangle) image.Image }
+	si, ok := img.(subImager)
+	if !ok || rect.Empty() {
+		return data
+	}
+	var buf bytes.Buffer
+	if png.Encode(&buf, si.SubImage(rect)) == nil && buf.Len() > 500 {
+		return buf.Bytes()
+	}
+	return data
+}
+
+// truncURL 日志用：截断长 URL（扫码链接带长 token，全量打印会刷屏）。
+func truncURL(s string) string {
+	if len(s) > 90 {
+		return s[:90] + "..."
+	}
+	return s
+}
+
+// downloadImage 服务端下载图片 URL（验证 http 形式的 img 二维码用）。
+func downloadImage(url string) ([]byte, bool) {
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if err != nil || len(data) == 0 {
+		return nil, false
+	}
+	return data, true
+}
+
 // qrDetection JS 检测到的二维码信息。
 type qrDetection struct {
-	Found   bool    `json:"found"`
-	Type    string  `json:"type"` // canvas-dataurl / canvas-screenshot / img
-	Width   float64 `json:"width"`
-	Height  float64 `json:"height"`
-	Class   string  `json:"className"`
-	DataURL string  `json:"dataURL"` // base64 图片或 http URL（canvas-dataurl/img 类型有值）
-	JSPath  string  `json:"jsPath"`  // canvas 截图路径（canvas-screenshot 类型有值）
+	Found     bool    `json:"found"`
+	Type      string  `json:"type"` // canvas-dataurl / canvas-screenshot / img / container-screenshot
+	Width     float64 `json:"width"`
+	Height    float64 `json:"height"`
+	Class     string  `json:"className"`
+	DataURL   string  `json:"dataURL"`   // base64 图片或 http URL（canvas-dataurl/img 类型有值）
+	JSPath    string  `json:"jsPath"`    // 元素截图路径（canvas-screenshot 类型有值）
+	CanvasIdx int     `json:"canvasIdx"` // canvas 在 document.querySelectorAll('canvas') 中的序号（canvas-dataurl 用）
+}
+
+// isBlankImage 判断图片是否基本纯色（无可见内容）。入参兼容 base64 字符串与原始字节。
+//
+// 背景：抖音对 canvas.toDataURL/getContext 做了反爬篡改——返回有效长度但内容全白的 PNG，
+// 导致"提取成功"的二维码其实是空白图。这里解码图片抽样计算亮度极差：
+// 极差 < 24 视为空白（真二维码黑白模块极差通常 > 150）。
+// 解码失败（如 SVG/GIF）不拦截，返回 false。
+func isBlankImage(data []byte) bool {
+	raw, err := base64.StdEncoding.DecodeString(string(data))
+	if err == nil {
+		data = raw // 入参是 base64
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		img, err = jpeg.Decode(bytes.NewReader(data))
+		if err != nil {
+			return false
+		}
+	}
+	b := img.Bounds()
+	stepX := max(1, b.Dx()/64)
+	stepY := max(1, b.Dy()/64)
+	mn, mx := uint32(1<<30), uint32(0)
+	for y := b.Min.Y; y < b.Max.Y; y += stepY {
+		for x := b.Min.X; x < b.Max.X; x += stepX {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			lum := (r/257*299 + g/257*587 + bl/257*114) / 1000 // 0-255 亮度
+			if lum < mn {
+				mn = lum
+			}
+			if lum > mx {
+				mx = lum
+			}
+		}
+	}
+	return mx-mn < 24
+}
+
+// screenshotCanvasByIdx 对指定序号的 canvas 做元素截图（绕过 toDataURL 篡改，
+// 截图走浏览器渲染管线）。成功且解出二维码内容时写入会话并返回 true。
+func (q *ChromedpQRLogin) screenshotCanvasByIdx(ctx context.Context, sessionID string, idx int) bool {
+	if idx < 0 {
+		return false
+	}
+	markCtx, markCancel := context.WithTimeout(ctx, 5*time.Second)
+	var marked bool
+	err := chromedp.Run(markCtx, chromedp.Evaluate(
+		fmt.Sprintf(`(() => { const c = document.querySelectorAll('canvas')[%d]; if (!c) return false; c.setAttribute('data-qr-shot', '%d'); return true; })()`, idx, idx),
+		&marked))
+	markCancel()
+	if err != nil || !marked {
+		log.Printf("[QRLogin:%s] canvas[%d] 标记失败: %v", sessionID, idx, err)
+		return false
+	}
+
+	shotCtx, shotCancel := context.WithTimeout(ctx, 8*time.Second)
+	var qrBytes []byte
+	err = chromedp.Run(shotCtx,
+		chromedp.Screenshot(fmt.Sprintf(`document.querySelector('canvas[data-qr-shot="%d"]')`, idx), &qrBytes, chromedp.ByJSPath))
+	shotCancel()
+	if err == nil && len(qrBytes) > 500 {
+		if text := decodeQRText(qrBytes); text != "" {
+			log.Printf("[QRLogin:%s] canvas[%d] 元素截图解出二维码（%d 字节）→ %s", sessionID, idx, len(qrBytes), truncURL(text))
+			q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(cropToQR(qrBytes)))
+			return true
+		}
+		log.Printf("[QRLogin:%s] canvas[%d] 元素截图未解出二维码（%d 字节）", sessionID, idx, len(qrBytes))
+		return false
+	}
+	log.Printf("[QRLogin:%s] canvas[%d] 元素截图失败: %v（%d 字节）", sessionID, idx, err, len(qrBytes))
+	return false
+}
+
+// markCanvasBlank 给指定 canvas 打空白标记，findQRElementJS 下次提取时跳过它。
+func (q *ChromedpQRLogin) markCanvasBlank(ctx context.Context, idx int) {
+	if idx < 0 {
+		return
+	}
+	markCtx, markCancel := context.WithTimeout(ctx, 3*time.Second)
+	_ = chromedp.Run(markCtx, chromedp.Evaluate(
+		fmt.Sprintf(`(() => { const c = document.querySelectorAll('canvas')[%d]; if (c) c.setAttribute('data-qr-blank', '1'); })()`, idx),
+		nil))
+	markCancel()
 }
 
 // parseQRDetection 解析 JS 返回的二维码检测结果。

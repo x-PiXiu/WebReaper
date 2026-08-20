@@ -36,6 +36,7 @@ import (
 	"webreaper/internal/adapter/provider/vidu"
 	"webreaper/internal/adapter/provider/viduendpoint"
 	"webreaper/internal/adapter/publisher"
+	"webreaper/internal/adapter/douyinoauth"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
@@ -550,7 +551,23 @@ func main() {
 			// 注入账号池（全自动发布时自动选最优账号——最久未使用优先）
 			geoPublishUC.SetAccountPool(repository.NewGormAccountPool(accountRepos.account))
 
-			router.SetAccount(geoAccountUC, geoPublishUC)
+			// 抖音开放平台官方 OAuth 授权（API 通道——替代浏览器扫码 RPA 绑定；
+			// 内部统一走官方 SDK bytedance/douyin-openapi-sdk-go）
+			if cfg.Publish.DouyinClientKey != "" && vault != nil {
+				stateSecret := cfg.JWT.Secret
+				if stateSecret == "" {
+					stateSecret = cfg.Publish.DouyinClientSecret
+				}
+				oauthClient, oErr := douyinoauth.NewClient(cfg.Publish.DouyinClientKey, cfg.Publish.DouyinClientSecret, cfg.Publish.DouyinOAuthCallback)
+				if oErr != nil {
+					log.Error("抖音 OpenAPI SDK 初始化失败，官方授权不可用", port.Err(oErr))
+				} else {
+					geoAccountUC.SetOAuth(oauthClient, douyinoauth.NewStateCodec(stateSecret))
+					log.Info("抖音官方 OAuth 授权已启用（API 通道绑定，回调地址=" + cfg.Publish.DouyinOAuthCallback + "）")
+				}
+			}
+
+			router.SetAccount(geoAccountUC, geoPublishUC, cfg.Publish.FrontendBaseURL)
 			log.Info("多平台发布已启用（账号绑定 + 半自动/全自动发布：知乎/小红书）")
 		}
 	} else {

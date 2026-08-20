@@ -386,7 +386,7 @@ export interface OptimizedContent {
   created_at: string
 }
 
-// ---- GEO：平台账号（扫码绑定）----
+// ---- GEO：平台账号（扫码绑定 / 官方 OAuth 授权）----
 export interface Account {
   id: string
   tenant_id: string
@@ -394,7 +394,8 @@ export interface Account {
   display_name: string
   health: string           // active / expired / banned
   login_method: string     // zhihu / wechat / qq / weibo
-  expires_at: string       // cookie 过期时间
+  auth_type?: string       // cookie（浏览器通道）/ oauth（官方 API 通道）
+  expires_at: string       // 凭据过期时间（cookie 或 access_token）
   bound_at: string
   last_used_at: string
 }

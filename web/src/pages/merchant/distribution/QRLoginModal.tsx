@@ -29,12 +29,12 @@ export default function QRLoginModal({
   const [sessionId, setSessionId] = useState('')
   const [loginMethod, setLoginMethod] = useState('')
 
-  // 打开即重置会话；小红书无多登录方式，直接拉码
+  // 打开即重置会话；知乎需先选登录方式，其余平台（小红书/抖音/快手）只有自身扫码，直接拉码
   useEffect(() => {
     if (!open) return
     setSessionId('')
     setLoginMethod('')
-    if (platform === 'xiaohongshu') startQR()
+    if (platform !== 'zhihu') startQR()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, platform])
 

@@ -35,3 +35,6 @@ coverage.txt
 gui-test-screenshots/
 data/media/
 web/tsconfig.tsbuildinfo
+
+# 运行时数据目录（调试截图/媒体/会话产物，整体不入库）
+/data/

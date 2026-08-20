@@ -44,6 +44,13 @@ services:
       VIDU_API_KEY: ${VIDU_API_KEY:-}
       # 高德地图（本地生活 GEO）
       AMAP_API_KEY: ${AMAP_API_KEY:-}
+      # 抖音开放平台 OAuth（官方授权绑定——API 通道；KEY 留空=仅浏览器扫码绑定）
+      DOUYIN_CLIENT_KEY: ${DOUYIN_CLIENT_KEY:-}
+      DOUYIN_CLIENT_SECRET: ${DOUYIN_CLIENT_SECRET:-}
+      # 回调地址必须与抖音控制台配置完全一致（含 /webreaper 前缀）
+      DOUYIN_OAUTH_CALLBACK: ${DOUYIN_OAUTH_CALLBACK:-https://your-domain.com/webreaper/api/v1/merchant/accounts/douyin/oauth/callback}
+      # OAuth 回调完成后 302 跳回的前端地址
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
       # Bing 收录
       BING_API_KEY: ${BING_API_KEY:-}
       BING_SITE_URL: ${BING_SITE_URL:-}

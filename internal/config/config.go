@@ -98,6 +98,11 @@ func (c AgentCoreConfig) IsConfigured() bool {
 type PublishConfig struct {
 	CookieSecret  string // 多平台发布 cookie 加密密钥（AES-GCM，从 PUBLISH_COOKIE_SECRET 读取）
 	QRLoginHeaded bool   // 扫码登录是否显示浏览器窗口（调试用，生产保持 false 走灰盒 headless）
+	// 抖音开放平台 OAuth（官方授权绑定——API 通道，替代浏览器扫码 RPA 通道）
+	DouyinClientKey    string
+	DouyinClientSecret string
+	DouyinOAuthCallback string // 授权回调地址（必须与开放平台控制台「授权回调地址」完全一致，HTTPS）
+	FrontendBaseURL     string // 前端地址（OAuth 回调完成后 302 跳回）
 }
 
 // ServerConfig 服务配置。
@@ -331,6 +336,10 @@ func Load() Config {
 		Publish: PublishConfig{
 			CookieSecret:  os.Getenv("PUBLISH_COOKIE_SECRET"),
 			QRLoginHeaded: getenvBool("QR_LOGIN_HEADED", false),
+			DouyinClientKey:     os.Getenv("DOUYIN_CLIENT_KEY"),
+			DouyinClientSecret:  os.Getenv("DOUYIN_CLIENT_SECRET"),
+			DouyinOAuthCallback: getenvDefault("DOUYIN_OAUTH_CALLBACK", "http://localhost:8082/api/v1/merchant/accounts/douyin/oauth/callback"),
+			FrontendBaseURL:     getenvDefault("FRONTEND_BASE_URL", "http://localhost:5173"),
 		},
 		Crawler: CrawlerConfig{
 			RequestIntervalMs: getenvInt("CRAWLER_REQUEST_INTERVAL_MS", 1000),
