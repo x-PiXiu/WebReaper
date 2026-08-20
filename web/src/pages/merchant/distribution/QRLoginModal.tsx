@@ -8,6 +8,8 @@ const { Text, Paragraph } = Typography
 
 // 平台元信息（扫码弹窗内自用；页面级平台卡片仍在 Distribution 页）
 export const QR_PLATFORMS = [
+  { key: 'douyin', name: '抖音' },
+  { key: 'kuaishou', name: '快手' },
   { key: 'zhihu', name: '知乎' },
   { key: 'xiaohongshu', name: '小红书' },
 ]

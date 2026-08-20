@@ -16,10 +16,12 @@ const { Text, Paragraph } = Typography
 
 // ---- 平台元信息 ----
 const PLATFORMS = [
-  { key: 'zhihu', name: '知乎', color: 'var(--wr-primary)', desc: '知识问答社区，长文 SEO 效果好' },
+  { key: 'douyin', name: '抖音', color: 'var(--wr-text-primary)', desc: '短视频获客主战场，本地商户首选' },
+  { key: 'kuaishou', name: '快手', color: 'var(--wr-warning)', desc: '短视频平台，下沉市场覆盖广' },
   { key: 'xiaohongshu', name: '小红书', color: 'var(--wr-danger)', desc: '种草社区，本地生活/装修类精准触达' },
+  { key: 'zhihu', name: '知乎', color: 'var(--wr-primary)', desc: '知识问答社区，长文 SEO 效果好' },
 ]
-const PLATFORM_NAMES: Record<string, string> = { zhihu: '知乎', xiaohongshu: '小红书' }
+const PLATFORM_NAMES: Record<string, string> = { douyin: '抖音', kuaishou: '快手', zhihu: '知乎', xiaohongshu: '小红书' }
 
 // 健康度 → 显示配置（账号池表格用）
 function healthConfig(health: string) {

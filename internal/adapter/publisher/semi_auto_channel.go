@@ -92,6 +92,8 @@ func NewChannelRegistry() *ChannelRegistry {
 	r := &ChannelRegistry{channels: make(map[string]port.PublishChannel)}
 	r.Register(NewZhihuAutoChannel())
 	r.Register(NewXiaohongshuAutoChannel())
+	r.Register(NewDouyinAutoChannel())     // 抖音（获客智能体转型：视频分发主战场）
+	r.Register(NewKuaishouAutoChannel())   // 快手
 	return r
 }
 
@@ -128,6 +130,10 @@ func normalizePlatform(p string) string {
 		return "zhihu"
 	case "小红书", "xhs":
 		return "xiaohongshu"
+	case "抖音", "dy":
+		return "douyin"
+	case "快手", "ks":
+		return "kuaishou"
 	}
 	return p
 }

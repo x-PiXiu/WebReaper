@@ -88,6 +88,25 @@ var platformConfigs = map[string]platformConfig{
 			"xiaohongshu": "", // 小红书只有自身扫码登录
 		},
 	},
+	// 抖音创作者中心（获客智能体转型：视频分发主战场）
+	// 登录页默认显示二维码；可能先弹滑块验证——Agent 处理后回到二维码流程。
+	"douyin": {
+		LoginURL:    "https://creator.douyin.com/creator-micro/home",
+		TabText:     "",
+		AuthCookies: []string{"sessionid", "sessionid_ss"},
+		LoginMethods: map[string]string{
+			"douyin": "", // 抖音App扫码（默认）
+		},
+	},
+	// 快手创作者中心
+	"kuaishou": {
+		LoginURL:    "https://cp.kuaishou.com",
+		TabText:     "",
+		AuthCookies: []string{"passToken", "kuaishou.server.webday7_st"},
+		LoginMethods: map[string]string{
+			"kuaishou": "", // 快手App扫码（默认）
+		},
+	},
 }
 
 // findQRElementJS 在页面内动态查找二维码并直接提取图片内容。
@@ -100,7 +119,7 @@ var platformConfigs = map[string]platformConfig{
 // method 参数：如果是第三方登录（wechat/qq/weibo），跳过知乎自身 canvas，只查 img。
 const findQRElementJS = `((method) => {
   // 默认登录方式（知乎App/小红书）：优先查 canvas
-  if (method === 'zhihu' || method === 'xiaohongshu' || method === '' ) {
+  if (method === 'zhihu' || method === 'xiaohongshu' || method === 'douyin' || method === 'kuaishou' || method === '' ) {
     const canvases = document.querySelectorAll('canvas');
     let canvasIdx = 0;
     for (const c of canvases) {
@@ -344,7 +363,7 @@ func (q *ChromedpQRLogin) captureQRCode(ctx context.Context, sessionID string, p
 			var popupURL string
 			for _, t := range targets {
 				if t.Type == "page" && t.URL != "" && t.URL != "about:blank" {
-					if !strings.Contains(t.URL, "zhihu.com/signin") && !strings.Contains(t.URL, "xiaohongshu.com") {
+					if !strings.Contains(t.URL, "zhihu.com/signin") && !strings.Contains(t.URL, "xiaohongshu.com") && !strings.Contains(t.URL, "creator.douyin.com") && !strings.Contains(t.URL, "cp.kuaishou.com") {
 						popupURL = t.URL
 						log.Printf("[QRLogin:%s] 发现弹出窗口: %s", sessionID, popupURL)
 						break
