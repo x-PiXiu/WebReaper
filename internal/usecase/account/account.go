@@ -82,10 +82,14 @@ func (uc *AccountUseCase) HandleOAuthCallback(ctx context.Context, code, state s
 		return "", "", fmt.Errorf("加密 token 失败: %v / %v", aErr, rErr)
 	}
 
-	// 显示名：拉抖音昵称，失败降级平台名
+	// 显示名 + union_id：拉抖音公开信息，失败降级平台名
 	displayName := platformDisplayName("douyin")
-	if info, iErr := uc.oauth.UserInfo(ctx, token.AccessToken, token.OpenID); iErr == nil && info.Nickname != "" {
-		displayName = info.Nickname
+	unionID := ""
+	if info, iErr := uc.oauth.UserInfo(ctx, token.AccessToken, token.OpenID); iErr == nil {
+		if info.Nickname != "" {
+			displayName = info.Nickname
+		}
+		unionID = info.UnionID
 	}
 
 	now := time.Now()
@@ -100,6 +104,7 @@ func (uc *AccountUseCase) HandleOAuthCallback(ctx context.Context, code, state s
 		AccessTokenEnc:  encAccess,
 		RefreshTokenEnc: encRefresh,
 		OpenID:          token.OpenID,
+		UnionID:         unionID,
 		ExpiresAt:       now.Add(time.Duration(max(token.ExpiresIn, 3600)) * time.Second),
 		// 抖音 refresh_token 30 天（可续期 5 次）；响应未带时长时按 30 天计
 		RefreshExpiresAt: now.Add(time.Duration(max(token.RefreshExpiresIn, 30*24*3600)) * time.Second),

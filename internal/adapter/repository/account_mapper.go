@@ -13,7 +13,7 @@ func accountToPO(e entity.Account) AccountPO {
 		ID: e.ID, TenantID: e.TenantID, Platform: e.Platform, DisplayName: e.DisplayName,
 		CookieEncrypted: e.CookieEncrypted, Health: e.Health, LoginMethod: e.LoginMethod,
 		ExpiresAt: timeToPtr(e.ExpiresAt), BoundAt: timeToPtr(e.BoundAt), LastUsedAt: timeToPtr(e.LastUsedAt),
-		AuthType: e.AuthType, AccessTokenEnc: e.AccessTokenEnc, RefreshTokenEnc: e.RefreshTokenEnc, OpenID: e.OpenID,
+		AuthType: e.AuthType, AccessTokenEnc: e.AccessTokenEnc, RefreshTokenEnc: e.RefreshTokenEnc, OpenID: e.OpenID, UnionID: e.UnionID,
 		RefreshExpiresAt: timeToPtr(e.RefreshExpiresAt),
 	}
 }
@@ -31,7 +31,7 @@ func accountFromPO(p AccountPO) entity.Account {
 		ID: p.ID, TenantID: p.TenantID, Platform: p.Platform, DisplayName: p.DisplayName,
 		CookieEncrypted: p.CookieEncrypted, Health: health, LoginMethod: p.LoginMethod,
 		ExpiresAt: ptrToTime(p.ExpiresAt), BoundAt: ptrToTime(p.BoundAt), LastUsedAt: ptrToTime(p.LastUsedAt),
-		AuthType: authType, AccessTokenEnc: p.AccessTokenEnc, RefreshTokenEnc: p.RefreshTokenEnc, OpenID: p.OpenID,
+		AuthType: authType, AccessTokenEnc: p.AccessTokenEnc, RefreshTokenEnc: p.RefreshTokenEnc, OpenID: p.OpenID, UnionID: p.UnionID,
 		RefreshExpiresAt: ptrToTime(p.RefreshExpiresAt),
 	}
 }

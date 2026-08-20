@@ -190,6 +190,7 @@ func (c *Client) UserInfo(_ context.Context, accessToken, openID string) (*entit
 	return &entity.OAuthUserInfo{
 		Nickname: derefStr(resp.Data.Nickname),
 		Avatar:   derefStr(resp.Data.Avatar),
+		UnionID:  derefStr(resp.Data.UnionId),
 	}, nil
 }
 

@@ -67,6 +67,11 @@ type Account struct {
 	RefreshTokenEnc string
 	// OpenID 平台用户唯一标识（OAuth 授权返回；同一应用内 open_id 稳定，用于识别重复绑定）。
 	OpenID string
+	// UnionID 开放平台维度用户标识（同一开发者主体下跨应用稳定）。
+	// 跨端账号打通的钥匙：网站应用/小程序/移动应用是三个不同的 client_key，
+	// 同一抖音用户在各应用下 open_id 不同，但 UnionID 相同——未来接入小程序/App 时
+	// 靠它把三端的"同一个人"合并成一个账号。
+	UnionID string
 	// RefreshExpiresAt refresh_token 过期时间（抖音：授权起 30 天，续期一次 +30 天、
 	// 最多 5 次=最长 195 天；到期前健康检查自动续期，续尽则需用户重新授权）。
 	// ExpiresAt 存的是 access_token 过期时间（抖音 15 天，到期前 48h 自动刷新）。
@@ -91,6 +96,7 @@ type OAuthToken struct {
 type OAuthUserInfo struct {
 	Nickname string // 昵称（账号显示名首选）
 	Avatar   string // 头像 URL
+	UnionID  string // 开放平台维度用户标识（跨应用稳定——三端账号打通用）
 }
 
 // IsValid 领域规则：账号必须有 ID、TenantID、Platform。
