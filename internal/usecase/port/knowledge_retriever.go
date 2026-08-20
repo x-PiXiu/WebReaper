@@ -14,7 +14,8 @@ import (
 //   - 本地知识库优先于实时全网检索（省钱、稳定、可溯源）；返回空列表 =
 //     无命中，调用方降级为在线 RAG（行为与旧版一致）。
 type KnowledgeRetriever interface {
-	// Retrieve 检索知识库素材（industry 为空 = 全行业）。
+	// Retrieve 检索知识库素材（分层：品牌私有优先 → 行业公共池补位）。
+	// brandID 为空 = 纯行业检索（向后兼容）；industry 为空 = 全行业。
 	// num 为期望数量；实现可返回更少（阈值过滤后）。nil 列表 = 无命中。
-	Retrieve(ctx context.Context, industry, query string, num int) ([]entity.MaterialRef, error)
+	Retrieve(ctx context.Context, industry, brandID, query string, num int) ([]entity.MaterialRef, error)
 }

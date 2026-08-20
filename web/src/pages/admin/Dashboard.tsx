@@ -43,7 +43,7 @@ function StatCard({ label, value, sublabel, gradient, onClick }: {
       onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--wr-border)'; e.currentTarget.style.transform = 'translateY(0)' }}>
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: gradient }} />
       <Text style={{ color: 'var(--wr-text-muted)', fontSize: 13, display: 'block', marginBottom: 8 }}>{label}</Text>
-      <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--wr-text-primary)', letterSpacing: '-0.03em' }}>{value}</div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--wr-text-primary)', letterSpacing: '-0.03em' }}>{value}</div>
       {sublabel && <Text style={{ color: 'var(--wr-text-secondary)', fontSize: 11 }}>{sublabel}</Text>}
     </div>
   )

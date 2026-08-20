@@ -114,3 +114,92 @@ func existingEndpoint(registry port.EndpointRegistry, subType string) string {
 	}
 	return ""
 }
+
+// ---- 模式开关（傻瓜化：商户端生成模式按 sub_type 批量启停）----
+
+// modeTier 推荐模式分层（admin 开关的建议档位；tier 仅作展示分组，实际状态以 DB 为准）。
+var modeTier = map[string]string{
+	// 默认集：两类商户（实体店/线上运营）都用得上的核心创作能力
+	"text2image": "default", "text2video": "default", "img2video": "default",
+	"tts": "default", "digital_human": "default", "reference2video": "default",
+	// 进阶折叠：参考生视频的配套（音色互通 voice_id / 主体库 server_id 复用）
+	"voice_clone": "advanced", "subject": "advanced",
+	// 默认关闭：专业创作者功能（admin 可开）
+	"start_end2video": "closed", "multiframe": "closed", "text2audio": "closed",
+	"sound_effect": "closed", "template": "closed",
+}
+
+// HandleListModes GET /admin/generation/modes —— 模式开关状态（按 sub_type 聚合）。
+// enabled=该模式全部模型启用；partial=部分启用（开关显示为开，提示有 N 个模型单独停用）。
+func (h *GenerationAdminHandler) HandleListModes(c *gin.Context) {
+	if h.registry == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	specs := h.registry.AllSpecs(c.Request.Context())
+	type modeView struct {
+		SubType    string `json:"sub_type"`
+		Tier       string `json:"tier"`        // default/advanced/closed（推荐档位）
+		Enabled    bool   `json:"enabled"`     // 全部模型启用
+		Partial    bool   `json:"partial"`     // 部分模型启用
+		ModelCount int    `json:"model_count"` // 该模式模型数
+	}
+	agg := map[string]*modeView{}
+	for _, s := range specs {
+		mv := agg[s.SubType]
+		if mv == nil {
+			mv = &modeView{SubType: s.SubType, Tier: modeTier[s.SubType], Enabled: true, ModelCount: 0}
+			if mv.Tier == "" {
+				mv.Tier = "closed" // 未知模式默认归关闭档（如后续新端点）
+			}
+			agg[s.SubType] = mv
+		}
+		mv.ModelCount++
+		if !s.Enabled {
+			mv.Enabled = false
+			mv.Partial = true
+		}
+	}
+	out := make([]modeView, 0, len(agg))
+	for _, mv := range agg {
+		out = append(out, *mv)
+	}
+	success(c, gin.H{"modes": out})
+}
+
+// HandleSetMode PUT /admin/generation/modes/:subType —— 模式开关（批量启停该模式全部模型）。
+// 保留各模型现有能力 JSON（只改 Enabled）；客户端 listGenerationTypes 自动收敛。
+func (h *GenerationAdminHandler) HandleSetMode(c *gin.Context) {
+	if h.specRepo == nil || h.registry == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	subType := c.Param("subType")
+	var req struct {
+		Enabled bool `json:"enabled" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	specs := h.registry.AllSpecs(c.Request.Context())
+	saved := 0
+	for _, s := range specs {
+		if s.SubType != subType {
+			continue
+		}
+		if err := h.specRepo.Upsert(c.Request.Context(), entity.GenerationSpec{
+			SubType: s.SubType, Model: s.Model, Endpoint: s.Endpoint,
+			Enabled: req.Enabled, CapabilitiesJSON: s.CapabilitiesJSON,
+		}); err != nil {
+			fail(c, fmt.Errorf("保存 %s/%s 失败: %w", s.SubType, s.Model, err))
+			return
+		}
+		saved++
+	}
+	if saved == 0 {
+		fail(c, fmt.Errorf("未知模式: %s", subType))
+		return
+	}
+	success(c, gin.H{"saved": saved})
+}

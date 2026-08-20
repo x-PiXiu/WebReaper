@@ -43,18 +43,18 @@ export default function Checkup() {
   return (
     <div className="wr-page-content" style={{ paddingTop: 4 }}>
       <div className="wr-page-header" style={{ marginBottom: 8 }}>
-        <h1>AI 体检</h1>
-        <p>问一句，看 AI 会不会推荐你——测完的报告会告诉你下一步做什么</p>
+        <h1>AI 效果</h1>
+        <p>测一测 AI 怎么推荐你——效果报告告诉你哪里做得好、哪里还能提升</p>
       </div>
 
       <Tabs
         activeKey={activeTab}
         onChange={setTab}
         items={[
-          { key: 'ask', label: <span><SearchOutlined /> 问问 AI</span> },
-          { key: 'report', label: <span><BarChartOutlined /> 体检报告</span> },
-          { key: 'records', label: <span><FolderOpenOutlined /> 体检记录</span> },
-          { key: 'auto', label: <span><SettingOutlined /> 自动体检</span> },
+          { key: 'ask', label: <span><SearchOutlined /> 测一测</span> },
+          { key: 'report', label: <span><BarChartOutlined /> 效果报告</span> },
+          { key: 'records', label: <span><FolderOpenOutlined /> 效果记录</span> },
+          { key: 'auto', label: <span><SettingOutlined /> 自动追踪</span> },
         ]}
         style={{ marginBottom: 12 }}
       />
@@ -109,7 +109,7 @@ function AutoTab({ monitorResults }: { monitorResults: MonitoringResult[] }) {
       <Card className="wr-glass-card" styles={{ body: { padding: 16 } }} style={{ marginBottom: 16 }}>
         <Space size={8} style={{ marginBottom: 6 }}>
           <ClockCircleOutlined style={{ color: 'var(--wr-primary)' }} />
-          <Text strong style={{ fontSize: 14 }}>自动体检是什么？</Text>
+          <Text strong style={{ fontSize: 14 }}>自动追踪是什么？</Text>
         </Space>
         <Text type="secondary" style={{ fontSize: 13, lineHeight: 1.8, display: 'block' }}>
           不用惦记复测——系统按你设置的节奏（{freqLabel[cfg.frequency] || '每天 1 次'}）自动把问题库里的问题问一遍 AI，
@@ -126,7 +126,7 @@ function AutoTab({ monitorResults }: { monitorResults: MonitoringResult[] }) {
         <Space size={8} style={{ marginBottom: 6 }}>
           <BarChartOutlined style={{ color: 'var(--wr-accent)' }} />
           <Text strong style={{ fontSize: 14 }}>最近的体检</Text>
-          {enabled && <Tag color="processing" style={{ fontSize: 11, margin: 0 }}>自动体检运行中 · {freqLabel[cfg.frequency] || '每天'}</Tag>}
+          {enabled && <Tag color="processing" style={{ fontSize: 11, margin: 0 }}>自动追踪运行中 · {freqLabel[cfg.frequency] || '每天'}</Tag>}
         </Space>
         {lastBatch ? (
           <Text type="secondary" style={{ fontSize: 13, display: 'block' }}>

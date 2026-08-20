@@ -138,6 +138,14 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 	api.DELETE("/geo/accounts/qr-login/:sessionId", accountHandler.HandleCancelQRLogin)
 	api.DELETE("/geo/accounts/:id", accountHandler.HandleDeleteAccount)
 	// 发布管理
+	api.GET("/geo/publish/channels", accountHandler.HandleListChannels) // 平台能力清单（发布页能力驱动）
+	// 品牌知识库（商户上传品牌文档——获客智能体转型：知识库成为内容生成输入源）
+	if r.knowledgeUC != nil {
+		bkHandler := NewBrandKnowledgeHandler(r.knowledgeUC)
+		api.POST("/geo/brands/:id/knowledge/materials", bkHandler.HandleUploadMaterial)
+		api.GET("/geo/brands/:id/knowledge/materials", bkHandler.HandleListMaterials)
+		api.DELETE("/geo/brands/:id/knowledge/materials/:mid", bkHandler.HandleDeleteMaterial)
+	}
 	api.POST("/geo/publish", accountHandler.HandlePublish)
 	api.GET("/geo/publish-jobs", accountHandler.HandleListPublishJobs)
 	api.POST("/geo/publish-jobs/:id/published", accountHandler.HandleMarkPublished)

@@ -114,6 +114,36 @@
   --wr-scrollbar: rgba(0, 0, 0, 0.15);
 }
 
+/* ===== 设计 Token（专业感规范：字阶 5 档 + 间距 8 基数 + 数字规范）=====
+   用法：style={{ fontSize: 'var(--wr-fs-page)' }} 或 CSS 类。全站收敛依据：
+   - 页面标题 24 / 卡片标题 16 / 正文 13 / 辅助 12 / 微标签 11
+   - 间距 8/16/24/32（卡片 padding 统一 20|24 两档）
+   - 指标值 28px/700 + 单位 12px/muted */
+:root {
+  --wr-fs-page: 24px;      /* 页面标题（wr-page-header h1） */
+  --wr-fs-card-title: 16px; /* 卡片标题 */
+  --wr-fs-body: 13px;       /* 正文 */
+  --wr-fs-aux: 12px;        /* 辅助说明 */
+  --wr-fs-micro: 11px;      /* 微标签/徽标 */
+  --wr-fs-metric: 28px;     /* 指标值（提及率/健康分/评分等大数字） */
+  --wr-fs-metric-unit: 12px; /* 指标单位 */
+  --wr-space-1: 8px;
+  --wr-space-2: 16px;
+  --wr-space-3: 24px;
+  --wr-space-4: 32px;
+}
+
+/* 指标值统一规范（大数字全站收敛到 28px/700——消除 40/34/32/22 混用） */
+.wr-metric-value { font-size: var(--wr-fs-metric) !important; }
+
+/* 表格统一 small 密度 + 行高（专业感：数据密度一致） */
+.ant-table { font-size: var(--wr-fs-body) !important; }
+.ant-table-thead > tr > th { padding: 10px 12px !important; font-weight: 600 !important; font-size: var(--wr-fs-aux) !important; letter-spacing: 0.02em; }
+.ant-table-tbody > tr > td { padding: 10px 12px !important; }
+
+/* 页面标题字号统一（24px——收缩自 26px，与其他层级拉开节奏） */
+.wr-page-header h1 { font-size: var(--wr-fs-page) !important; }
+
 /* ===== 全局重置 ===== */
 * { box-sizing: border-box; }
 
@@ -205,6 +235,7 @@ body::before {
   border-bottom: 1px solid var(--wr-border) !important;
   color: var(--wr-text-primary) !important;
   font-weight: 600 !important;
+  font-size: var(--wr-fs-card-title) !important;
 }
 
 /* 输入：极低对比底 + 聚焦紫环 */

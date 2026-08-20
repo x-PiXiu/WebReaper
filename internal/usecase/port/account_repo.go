@@ -114,6 +114,15 @@ type PublishChannel interface {
 	SupportedContentTypes() []string
 }
 
+// ChannelInfoProvider 通道能力信息（可选接口——与 AutoPublishChannel 同模式，零破坏）。
+// 发布页能力驱动的数据源（平台过滤/动态检查清单）；未实现时用 Platform() 兜底。
+type ChannelInfoProvider interface {
+	// DisplayName 商户友好平台名（"知乎"/"小红书"）。
+	DisplayName() string
+	// Constraints 按内容形态声明的约束（规则归平台适配器——谁的能力谁声明）。
+	Constraints() map[string]entity.ChannelConstraints
+}
+
 // AutoPublishChannel 全自动发布通道（可选接口）。
 //
 // 不修改现有 PublishChannel 接口——半自动通道不实现此接口，零破坏。

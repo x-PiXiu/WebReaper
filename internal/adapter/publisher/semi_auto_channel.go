@@ -31,6 +31,14 @@ func (c *ZhihuChannel) Platform() string           { return "zhihu" }
 func (c *ZhihuChannel) SupportedMediaType() []string { return []string{"text"} }
 func (c *ZhihuChannel) SupportedContentTypes() []string { return []string{entity.ContentTypeArticle} }
 
+// DisplayName / Constraints 能力声明（port.ChannelInfoProvider）。
+func (c *ZhihuChannel) DisplayName() string { return "知乎" }
+func (c *ZhihuChannel) Constraints() map[string]entity.ChannelConstraints {
+	return map[string]entity.ChannelConstraints{
+		entity.ContentTypeArticle: {TitleMaxRunes: 100}, // 知乎专栏标题上限 100 字
+	}
+}
+
 // PublishSemiAuto 生成知乎写文章页 URL（知乎暂不支持 URL 预填正文，引导用户到发布页）。
 func (c *ZhihuChannel) PublishSemiAuto(_ context.Context, job entity.PublishJob, _ entity.Account) (string, error) {
 	// 知乎的写文章页：https://zhuanlan.zhihu.com/write
@@ -53,6 +61,15 @@ func NewXiaohongshuChannel() *XiaohongshuChannel { return &XiaohongshuChannel{} 
 func (c *XiaohongshuChannel) Platform() string           { return "xiaohongshu" }
 func (c *XiaohongshuChannel) SupportedMediaType() []string { return []string{"text", "image"} }
 func (c *XiaohongshuChannel) SupportedContentTypes() []string { return []string{entity.ContentTypeImage, entity.ContentTypeVideo, entity.ContentTypeArticle, entity.ContentTypeAudio} }
+
+// DisplayName / Constraints 能力声明（此前标题 20 字/配图必填散在前端硬编码——规则归位适配器）。
+func (c *XiaohongshuChannel) DisplayName() string { return "小红书" }
+func (c *XiaohongshuChannel) Constraints() map[string]entity.ChannelConstraints {
+	return map[string]entity.ChannelConstraints{
+		entity.ContentTypeImage: {TitleMaxRunes: 20, MinImages: 1}, // 图文笔记：标题≤20字、至少1图
+		entity.ContentTypeVideo: {TitleMaxRunes: 20},               // 视频笔记：标题≤20字
+	}
+}
 
 // PublishSemiAuto 生成小红书发布页 URL。
 func (c *XiaohongshuChannel) PublishSemiAuto(_ context.Context, _ entity.PublishJob, _ entity.Account) (string, error) {

@@ -57,7 +57,7 @@ function findSelectedKey(items: NavItem[], pathname: string): string | undefined
 //   - 抽出 AppShell 后，新增角色布局只需传菜单，零重复代码
 export function AppShell({
   menuItems,
-  brandName = '智擎AI',
+  brandName = '获客智能体',
   brandIcon = 'G',
   noPaddingKeys = [],
   banner,
@@ -94,7 +94,7 @@ export function AppShell({
   const pageTitle = findMenuLabel(menuItems, selectedKey) || '控制台'
 
   useEffect(() => {
-    document.title = `${pageTitle} · 智擎AI`
+    document.title = `${pageTitle} · 获客智能体`
   }, [pageTitle])
 
   // 全局资产搜索：复用业务页同一 queryKey；关键词/任务仅在聚焦搜索时拉取
@@ -303,7 +303,7 @@ export function AppShell({
               textAlign: 'center',
               opacity: 0.8,
             }}>
-              智擎AI · GEO
+              获客智能体
             </div>
           </div>
         </Content>

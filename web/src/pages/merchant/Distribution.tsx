@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, DatePicker, Input, Tooltip, Tabs } from 'antd'
-import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, PictureOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Card, Typography, Button, Row, Col, Select, Tag, Space, message, Empty, Table, Radio, Modal, Alert, Switch, Popconfirm, DatePicker, Input, Tooltip, Tabs, Segmented } from 'antd'
+import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, PictureOutlined, DeleteOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
 import { businessApi } from '../../api/business'
@@ -78,13 +78,28 @@ export default function Distribution() {
     const qMediaUrls = searchParams.get('mediaUrls')
     if (qBrandId) setCurrentBrand(qBrandId)
     if (qContentId) setSelectedContentId(qContentId)
-    if (qMediaUrls) setMediaUrls(qMediaUrls.split(',').filter(Boolean))
+    if (qMediaUrls) {
+      setMediaUrls(qMediaUrls.split(',').filter(Boolean))
+      setPublishForm('video') // 多媒体创作跳转的是视频产物
+    }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: accounts = [], isLoading: accountsLoading } = useQuery({
     queryKey: ['geo-accounts'],
     queryFn: () => businessApi.listAccounts(),
   })
+  // 平台能力清单（服务端 ChannelRegistry 导出——能力驱动：平台过滤/动态检查清单，
+  // 新平台注册即自动出现，前端零硬编码）
+  const { data: channels = [] } = useQuery({
+    queryKey: ['geo-publish-channels'],
+    queryFn: () => businessApi.listPublishChannels().then((r) => r.channels).catch(() => []),
+    staleTime: 5 * 60_000,
+  })
+  const channelByPlatform = useMemo(() => new Map(channels.map((ch) => [ch.platform, ch])), [channels])
+  const supportsForm = (platform: string, form: string) =>
+    channelByPlatform.get(platform)?.content_types?.includes(form) ?? false
+  // 发布形态（发什么）：文章 / 图文笔记 / 视频——跳转参数预判（视频产物→video）
+  const [publishForm, setPublishForm] = useState<'article' | 'image' | 'video'>('article')
   const { data: contents = [] } = useQuery({
     queryKey: ['geo-contents', selectedBrand],
     queryFn: () => businessApi.listContents(selectedBrand!),
@@ -120,7 +135,9 @@ export default function Distribution() {
   }, [autoStatus, queryClient])
 
   const selectedContent = contents.find((c) => c.id === selectedContentId)
-  const healthyAccounts = accounts.filter((a) => a.health === 'active')
+  // 账号按所选内容形态过滤（不支持该形态的平台账号不出现——能力驱动）
+  const healthyAccounts = accounts.filter((a) => a.health === 'active' && supportsForm(a.platform, publishForm))
+  const hiddenByForm = accounts.filter((a) => a.health === 'active' && !supportsForm(a.platform, publishForm)).length
 
   // ---- 智能默认（傻瓜化 Q5）----
   // 默认 Tab 跟着状态走：有健康账号直接落"发布"（主操作），没有则留在账号池（先绑定）
@@ -171,34 +188,36 @@ export default function Distribution() {
     const scheduledAt = scheduleTime ? scheduleTime.toISOString() : undefined
     try {
       const results: PublishJob[] = []
+      // 标题截断/素材按平台能力约束处理（constraints 从服务端下发——前端零硬编码）
+      const titleFor = (platform: string): string => {
+        const max = channelByPlatform.get(platform)?.constraints?.[publishForm]?.title_max_runes || 0
+        return max > 0 && publishTitle ? [...publishTitle].slice(0, max).join('') : publishTitle
+      }
+      const needsMedia = (platform: string): boolean => {
+        const c = channelByPlatform.get(platform)?.constraints?.[publishForm]
+        return !!c && ((c.min_images || 0) > 0 || (c.min_videos || 0) > 0)
+      }
       if (autoSelect && publishMode === 'auto') {
         const platforms = [...new Set(healthyAccounts.map(a => a.platform))]
         for (const platform of platforms) {
-          // D: 按平台截断标题（小红书≤20字），用可编辑的 publishTitle/publishContentText
-          const titleForPlatform = platform === 'xiaohongshu'
-            ? (publishTitle && [...publishTitle].slice(0, 20).join(''))
-            : publishTitle
           results.push(await businessApi.publishContent({
             account_id: '', platform, content_id: selectedContent.id, brand_id: selectedBrand,
-            title: titleForPlatform, content: publishContentText, mode: publishMode,
+            title: titleFor(platform), content: publishContentText, mode: publishMode,
             scheduled_at: scheduledAt,
-            content_type: platform === 'xiaohongshu' ? 'image' : 'article',
-            media_urls: platform === 'xiaohongshu' ? mediaUrls : undefined,
+            content_type: publishForm,
+            media_urls: needsMedia(platform) ? mediaUrls : undefined,
           }))
         }
       } else {
         for (const accId of selectedAccountIds) {
           const acc = accounts.find((a) => a.id === accId)
           if (!acc) continue
-          const titleForPlatform = acc.platform === 'xiaohongshu'
-            ? (publishTitle && [...publishTitle].slice(0, 20).join(''))
-            : publishTitle
           results.push(await businessApi.publishContent({
             account_id: accId, platform: acc.platform, content_id: selectedContent.id, brand_id: selectedBrand,
-            title: titleForPlatform, content: publishContentText, mode: publishMode,
+            title: titleFor(acc.platform), content: publishContentText, mode: publishMode,
             scheduled_at: scheduledAt,
-            content_type: acc.platform === 'xiaohongshu' ? 'image' : 'article',
-            media_urls: acc.platform === 'xiaohongshu' ? mediaUrls : undefined,
+            content_type: publishForm,
+            media_urls: needsMedia(acc.platform) ? mediaUrls : undefined,
           }))
         }
       }
@@ -402,7 +421,7 @@ export default function Distribution() {
                           <Radio key={c.id} value={c.id} style={{ width: '100%', alignItems: 'flex-start' }}>
                             <div style={{ marginLeft: 4 }}>
                               <Space size={8} style={{ marginBottom: 4 }}>
-                                <Tag color={scoreColor(total)} style={{ fontWeight: 600 }}>GEO {total.toFixed(0)}</Tag>
+                                <Tag color={scoreColor(total)} style={{ fontWeight: 600 }}>{total.toFixed(0)}</Tag>
                                 <Text type="secondary" style={{ fontSize: 12 }}>v{c.version}</Text>
                               </Space>
                               <Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0, color: 'var(--wr-text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
@@ -420,8 +439,24 @@ export default function Distribution() {
 
             <Col xs={24} lg={12}>
               <div style={{ minHeight: 260 }}>
+                {/* 发什么（能力驱动三选：文章/图文笔记/视频——平台按此过滤） */}
+                <Segmented
+                  block
+                  value={publishForm}
+                  onChange={(v) => { setPublishForm(v as 'article' | 'image' | 'video'); setSelectedAccountIds([]); setMediaUrls([]) }}
+                  options={[
+                    { value: 'article', label: '发文章' },
+                    { value: 'image', label: '发图文笔记' },
+                    { value: 'video', label: '发视频' },
+                  ]}
+                  style={{ marginBottom: 12 }}
+                />
                 {healthyAccounts.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无健康账号，请先在上方绑定" style={{ padding: 40 }} />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={
+                    channels.length === 0
+                      ? '暂无健康账号，请先在上方绑定'
+                      : `当前发布形态下暂无可用账号${hiddenByForm > 0 ? `（${hiddenByForm} 个账号不支持发${publishForm === 'article' ? '文章' : publishForm === 'image' ? '图文' : '视频'}）` : '，请先在上方绑定'}`
+                  } style={{ padding: 40 }} />
                 ) : (
                   <>
                   {/* 傻瓜化：半自动为默认路径（零风险），全自动降级为一个开关 */}
@@ -446,18 +481,21 @@ export default function Distribution() {
                     {selectedContent && (
                       <div style={{ marginBottom: 16 }}>
                         {(() => {
-                          // 检测选中平台：小红书标题≤20字，知乎≤100字，混合取最严(20)
+                          // 标题上限 = 所选（或自动选号）平台在该形态下约束的最严值——服务端下发，零硬编码
                           const selectedAccs = autoSelect ? healthyAccounts : accounts.filter(a => selectedAccountIds.includes(a.id))
-                          const hasXHS = selectedAccs.some(a => a.platform === 'xiaohongshu')
-                          const titleLimit = hasXHS ? 20 : 100
+                          let titleLimit = 0
+                          for (const a of selectedAccs) {
+                            const max = channelByPlatform.get(a.platform)?.constraints?.[publishForm]?.title_max_runes || 0
+                            if (max > 0 && (titleLimit === 0 || max < titleLimit)) titleLimit = max
+                          }
                           const titleLen = [...publishTitle].length
-                          const overLimit = titleLen > titleLimit
+                          const overLimit = titleLimit > 0 && titleLen > titleLimit
                           return (
                             <>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Text strong style={{ fontSize: 13 }}>发布标题{hasXHS && <Tag color="red" style={{ marginLeft: 6, fontSize: 10 }}>小红书≤{titleLimit}字</Tag>}</Text>
+                                <Text strong style={{ fontSize: 13 }}>发布标题{titleLimit > 0 && <Tag color="red" style={{ marginLeft: 6, fontSize: 10 }}>所选平台≤{titleLimit}字</Tag>}</Text>
                                 <Tooltip title={overLimit ? `超出${titleLen - titleLimit}字，发布时自动截断` : '可在发布前调整标题'}>
-                                  <Text style={{ fontSize: 12 }} type={overLimit ? 'danger' : 'secondary'}>{titleLen}/{titleLimit}</Text>
+                                  <Text style={{ fontSize: 12 }} type={overLimit ? 'danger' : 'secondary'}>{titleLimit > 0 ? `${titleLen}/${titleLimit}` : `${titleLen} 字`}</Text>
                                 </Tooltip>
                               </div>
                               <Input.TextArea
@@ -470,7 +508,7 @@ export default function Distribution() {
                               />
                               {overLimit && (
                                 <Text type="danger" style={{ fontSize: 11 }}>
-                                  当前{titleLen}字超限，发{hasXHS ? '小红书' : '该平台'}将截断为："{[...publishTitle].slice(0, titleLimit).join('')}"
+                                  当前{titleLen}字超限，发布时将截断为："{[...publishTitle].slice(0, titleLimit).join('')}"
                                 </Text>
                               )}
                             </>
@@ -494,31 +532,53 @@ export default function Distribution() {
                       </details>
                     )}
 
-                    {/* 小红书图文配图（小红书账号存在时显示；image 类型必填 ≥1 张） */}
-                    {healthyAccounts.some(a => a.platform === 'xiaohongshu') && (
-                      <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <Text strong style={{ fontSize: 13 }}>小红书配图（图文必填 ≥1 张）</Text>
-                          <Button size="small" icon={<PictureOutlined />} onClick={() => setShowAssetPicker(true)}>
-                            从素材库选图
-                          </Button>
-                        </div>
-                        {mediaUrls.length === 0 ? (
-                          <Text type="secondary" style={{ fontSize: 12 }}>未选图——发小红书会失败（图文笔记硬约束）</Text>
-                        ) : (
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            {mediaUrls.map((u, i) => (
-                              <div key={i} style={{ position: 'relative' }}>
-                                <img src={u} alt="" style={{ width: 52, height: 52, borderRadius: 6, objectFit: 'cover', border: '1px solid #eee' }} />
-                                <Button size="small" type="text" danger icon={<DeleteOutlined />}
-                                  onClick={() => setMediaUrls(mediaUrls.filter((_, j) => j !== i))}
-                                  style={{ position: 'absolute', top: -8, right: -8, padding: 0, background: '#fff', borderRadius: '50%' }} />
-                              </div>
-                            ))}
+                    {/* 素材选择（能力驱动：所选平台在该形态下要求素材时显示——图文→配图、视频→视频素材） */}
+                    {(() => {
+                      const selectedAccs = autoSelect ? healthyAccounts : accounts.filter(a => selectedAccountIds.includes(a.id))
+                      let minImages = 0, minVideos = 0
+                      for (const a of selectedAccs) {
+                        const c = channelByPlatform.get(a.platform)?.constraints?.[publishForm]
+                        minImages = Math.max(minImages, c?.min_images || 0)
+                        minVideos = Math.max(minVideos, c?.min_videos || 0)
+                      }
+                      const needMedia = publishForm !== 'article' || minImages > 0 || minVideos > 0
+                      if (!needMedia) return null
+                      const needVideo = publishForm === 'video' || minVideos > 0
+                      return (
+                        <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <Text strong style={{ fontSize: 13 }}>
+                              {needVideo ? '视频素材' : '配图'}{!needVideo && minImages > 0 ? `（必填 ≥${minImages} 张）` : ''}
+                            </Text>
+                            <Button size="small" icon={needVideo ? <VideoCameraOutlined /> : <PictureOutlined />} onClick={() => setShowAssetPicker(true)}>
+                              从素材库选择
+                            </Button>
                           </div>
-                        )}
-                      </div>
-                    )}
+                          {mediaUrls.length === 0 ? (
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              未选择{needVideo ? '视频' : '图'}——所选平台的{needVideo ? '视频' : '图文'}发布要求至少 {Math.max(minImages, minVideos, 1)} 个素材
+                            </Text>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {mediaUrls.map((u, i) => (
+                                <div key={i} style={{ position: 'relative' }}>
+                                  {needVideo && !/\.(png|jpe?g|webp)$/i.test(u) ? (
+                                    <div style={{ width: 52, height: 52, borderRadius: 6, border: '1px solid var(--wr-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--wr-bg-surface)' }}>
+                                      <VideoCameraOutlined style={{ fontSize: 18, color: 'var(--wr-primary)' }} />
+                                    </div>
+                                  ) : (
+                                    <img src={u} alt="" style={{ width: 52, height: 52, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--wr-border)' }} />
+                                  )}
+                                  <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                                    onClick={() => setMediaUrls(mediaUrls.filter((_, j) => j !== i))}
+                                    style={{ position: 'absolute', top: -8, right: -8, padding: 0, background: 'var(--wr-bg-elevated)', borderRadius: '50%' }} />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
 
                     {publishing && publishMode === 'auto' && autoStatus && (
                       <div style={{ marginBottom: 16, padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
@@ -553,7 +613,7 @@ export default function Distribution() {
                             transition: 'all 200ms ease',
                           }}>
                             <Space>
-                              <Tag>{PLATFORM_NAMES[a.platform] || a.platform}</Tag>
+                              <Tag>{channelByPlatform.get(a.platform)?.name || PLATFORM_NAMES[a.platform] || a.platform}</Tag>
                               <Text>{a.display_name}</Text>
                             </Space>
                             {selected && <CheckCircleOutlined style={{ color: 'var(--wr-primary)' }} />}
@@ -585,7 +645,17 @@ export default function Distribution() {
                       const selectedAccs = autoSelect && publishMode === 'auto'
                         ? healthyAccounts
                         : accounts.filter((a) => selectedAccountIds.includes(a.id))
-                      const hasXHS = selectedAccs.some((a) => a.platform === 'xiaohongshu')
+                      // 检查项按所选平台的 constraints 动态生成（服务端下发——前端零硬编码）
+                      let titleLimit = 0, minImages = 0, minVideos = 0
+                      for (const a of selectedAccs) {
+                        const c = channelByPlatform.get(a.platform)?.constraints?.[publishForm]
+                        const max = c?.title_max_runes || 0
+                        if (max > 0 && (titleLimit === 0 || max < titleLimit)) titleLimit = max
+                        minImages = Math.max(minImages, c?.min_images || 0)
+                        minVideos = Math.max(minVideos, c?.min_videos || 0)
+                      }
+                      const needMedia = publishForm !== 'article' || minImages > 0 || minVideos > 0
+                      const needVideo = publishForm === 'video' || minVideos > 0
                       const titleLen = [...publishTitle].length
                       const items: { ok: boolean; text: string }[] = [
                         selectedContent
@@ -594,15 +664,17 @@ export default function Distribution() {
                         selectedAccs.length > 0
                           ? { ok: true, text: `将发布到 ${selectedAccs.length} 个账号` }
                           : { ok: false, text: '还没选发布账号（下方点选账号）' },
-                        ...(hasXHS ? [
-                          titleLen > 0 && titleLen <= 20
-                            ? { ok: true, text: '标题符合小红书 20 字限制' }
-                            : titleLen > 20
-                              ? { ok: false, text: `标题 ${titleLen} 字超了——小红书最多 20 字（发布时会自动截断）` }
+                        ...(titleLimit > 0 ? [
+                          titleLen > 0 && titleLen <= titleLimit
+                            ? { ok: true, text: `标题符合所选平台 ≤${titleLimit} 字限制` }
+                            : titleLen > titleLimit
+                              ? { ok: false, text: `标题 ${titleLen} 字超了——所选平台最多 ${titleLimit} 字（发布时会自动截断）` }
                               : { ok: false, text: '还没填标题' },
+                        ] : []),
+                        ...(needMedia ? [
                           mediaUrls.length > 0
-                            ? { ok: true, text: `已配 ${mediaUrls.length} 张图（小红书图文必须配图）` }
-                            : { ok: false, text: '发小红书必须至少配 1 张图（上方「从素材库选图」）' },
+                            ? { ok: true, text: `已选 ${mediaUrls.length} 个${needVideo ? '视频' : '配图'}素材` }
+                            : { ok: false, text: `所选平台要求至少 ${Math.max(minImages, minVideos, 1)} 个${needVideo ? '视频' : '配图'}素材（上方「从素材库选择」）` },
                         ] : []),
                       ]
                       return (
@@ -613,7 +685,7 @@ export default function Distribution() {
                               <span style={{ color: it.ok ? 'var(--wr-success)' : 'var(--wr-warning)', fontSize: 13, lineHeight: '19px' }}>
                                 {it.ok ? '✓' : '⋯'}
                               </span>
-                              <Text style={{ fontSize: 12.5, lineHeight: '19px', color: it.ok ? 'var(--wr-text-secondary)' : 'var(--wr-warning)' }}>
+                              <Text style={{ fontSize: 13, lineHeight: '19px', color: it.ok ? 'var(--wr-text-secondary)' : 'var(--wr-warning)' }}>
                                 {it.text}
                               </Text>
                             </div>

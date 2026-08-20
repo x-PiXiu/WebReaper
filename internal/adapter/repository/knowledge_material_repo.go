@@ -19,6 +19,8 @@ import (
 // KnowledgeMaterialPO 知识库素材。
 type KnowledgeMaterialPO struct {
 	ID             string         `gorm:"primaryKey;size:64"`
+	BrandID        string         `gorm:"size:64;index"` // 品牌私有素材归属（空 = 行业公共池）
+	TenantID       string         `gorm:"size:64"`       // 租户隔离（品牌私有必填）
 	Industry       string         `gorm:"size:64;index"`
 	SourceURL      string         `gorm:"size:1024"`
 	URLFingerprint string         `gorm:"size:64;uniqueIndex"`
@@ -38,7 +40,8 @@ func (KnowledgeMaterialPO) TableName() string { return "kb_materials" }
 
 func knowledgeMaterialToPO(e entity.KnowledgeMaterial) KnowledgeMaterialPO {
 	return KnowledgeMaterialPO{
-		ID: e.ID, Industry: e.Industry, SourceURL: e.SourceURL, URLFingerprint: e.URLFingerprint,
+		ID: e.ID, BrandID: e.BrandID, TenantID: e.TenantID,
+		Industry: e.Industry, SourceURL: e.SourceURL, URLFingerprint: e.URLFingerprint,
 		Title: e.Title, Content: e.Content, Summary: e.Summary,
 		Tags: toJSON(e.Tags), CrawlKeyword: e.CrawlKeyword,
 		Embedding: toFloat32JSON(e.Embedding),
@@ -48,7 +51,8 @@ func knowledgeMaterialToPO(e entity.KnowledgeMaterial) KnowledgeMaterialPO {
 
 func knowledgeMaterialFromPO(p KnowledgeMaterialPO) entity.KnowledgeMaterial {
 	return entity.KnowledgeMaterial{
-		ID: p.ID, Industry: p.Industry, SourceURL: p.SourceURL, URLFingerprint: p.URLFingerprint,
+		ID: p.ID, BrandID: p.BrandID, TenantID: p.TenantID,
+		Industry: p.Industry, SourceURL: p.SourceURL, URLFingerprint: p.URLFingerprint,
 		Title: p.Title, Content: p.Content, Summary: p.Summary,
 		Tags: toStringSlice(p.Tags), CrawlKeyword: p.CrawlKeyword,
 		Embedding: fromFloat32JSON(p.Embedding),
@@ -123,9 +127,10 @@ func (r *GormKnowledgeMaterialRepository) ExistsByFingerprint(ctx context.Contex
 	return count > 0, nil
 }
 
-// SearchSimilar 向量检索：委托注入的 VectorStoreProvider（按配置取当前向量库：
-// 行业过滤 + 余弦 topK），再按结果 ID 回查素材组装 MaterialRef（带来源——溯源需求）。
-func (r *GormKnowledgeMaterialRepository) SearchSimilar(ctx context.Context, industry string, vec []float32, limit int) ([]entity.MaterialRef, error) {
+// SearchSimilar 分层向量检索（获客智能体转型）：
+// brandID 非空 → 先查品牌私有素材（brand_id = ?），不足 limit 补行业公共池（brand_id = '' AND industry = ?）。
+// brandID 为空 → 纯行业检索（与原有行为完全兼容）。
+func (r *GormKnowledgeMaterialRepository) SearchSimilar(ctx context.Context, industry, brandID string, vec []float32, limit int) ([]entity.MaterialRef, error) {
 	if r.vecStore == nil {
 		return nil, nil // 无向量能力：返回空（调用方降级）
 	}
@@ -133,19 +138,49 @@ func (r *GormKnowledgeMaterialRepository) SearchSimilar(ctx context.Context, ind
 	if err != nil {
 		return nil, err
 	}
-	var filter map[string]string
-	if industry != "" {
-		filter = map[string]string{"industry": industry}
+
+	// 第一层：品牌私有素材
+	var refs []entity.MaterialRef
+	if brandID != "" {
+		refs, err = r.searchWithFilter(ctx, store, map[string]string{"brand_id": brandID}, vec, limit)
+		if err != nil {
+			return nil, err
+		}
 	}
-	// 预取 num×3（阈值过滤后可能不足 num），由 VectorStore 按余弦降序返回
-	results, err := store.Search(ctx, filter, vec, limit*3)
-	if err != nil {
-		return nil, err
+	// 第二层：行业公共池补位（品牌素材不足 limit 时）
+	if len(refs) < limit {
+		remaining := limit - len(refs)
+		var filter map[string]string
+		if industry != "" {
+			filter = map[string]string{"industry": industry}
+		}
+		// 公共池排除品牌已有的（去重：按 title 匹配近似——简化处理）
+		seen := make(map[string]bool, len(refs))
+		for _, ref := range refs {
+			seen[ref.Title] = true
+		}
+		pubRefs, err := r.searchWithFilter(ctx, store, filter, vec, remaining+3)
+		if err != nil {
+			return nil, err
+		}
+		for _, ref := range pubRefs {
+			if !seen[ref.Title] && len(refs) < limit {
+				refs = append(refs, ref)
+			}
+		}
 	}
-	if len(results) == 0 {
+	return refs, nil
+}
+
+// searchWithFilter 按过滤器做向量检索并回查素材组装 MaterialRef。
+func (r *GormKnowledgeMaterialRepository) searchWithFilter(ctx context.Context, store port.VectorStore, filter map[string]string, vec []float32, limit int) ([]entity.MaterialRef, error) {
+	if limit <= 0 {
 		return nil, nil
 	}
-	// 按 ID 回查素材信息
+	results, err := store.Search(ctx, filter, vec, limit*3)
+	if err != nil || len(results) == 0 {
+		return nil, err
+	}
 	ids := make([]string, 0, len(results))
 	for _, res := range results {
 		ids = append(ids, res.ID)
@@ -154,7 +189,6 @@ func (r *GormKnowledgeMaterialRepository) SearchSimilar(ctx context.Context, ind
 	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&pos).Error; err != nil {
 		return nil, err
 	}
-	// 按搜索结果顺序组装（VectorStore 已按相似度降序）
 	byID := make(map[string]KnowledgeMaterialPO, len(pos))
 	for i := range pos {
 		byID[pos[i].ID] = pos[i]
@@ -163,7 +197,7 @@ func (r *GormKnowledgeMaterialRepository) SearchSimilar(ctx context.Context, ind
 	for _, res := range results {
 		po, ok := byID[res.ID]
 		if !ok {
-			continue // 素材被删（残留向量）——跳过
+			continue
 		}
 		refs = append(refs, entity.MaterialRef{
 			Title:     po.Title,
@@ -171,9 +205,9 @@ func (r *GormKnowledgeMaterialRepository) SearchSimilar(ctx context.Context, ind
 			SourceURL: po.SourceURL,
 			Score:     res.Score,
 		})
-	}
-	if len(refs) > limit {
-		refs = refs[:limit]
+		if len(refs) >= limit {
+			break
+		}
 	}
 	return refs, nil
 }
@@ -216,6 +250,47 @@ func (r *GormKnowledgeMaterialRepository) Delete(ctx context.Context, id string)
 	if r.vecStore != nil {
 		if store, err := r.vecStore.Get(ctx); err == nil {
 			_ = store.Delete(ctx, id)
+		}
+	}
+	return nil
+}
+
+// CountByBrand 统计某品牌私有素材数。
+func (r *GormKnowledgeMaterialRepository) CountByBrand(ctx context.Context, brandID string) (int64, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&KnowledgeMaterialPO{}).
+		Where("brand_id = ?", brandID).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// ListByBrand 分页列出某品牌私有素材（created_at 降序；tenantID 做隔离校验——只能看自己品牌的）。
+func (r *GormKnowledgeMaterialRepository) ListByBrand(ctx context.Context, tenantID, brandID string, limit, offset int) ([]entity.KnowledgeMaterial, error) {
+	var pos []KnowledgeMaterialPO
+	if err := r.db.WithContext(ctx).
+		Where("brand_id = ? AND tenant_id = ?", brandID, tenantID).
+		Order("created_at DESC").Limit(limit).Offset(offset).
+		Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.KnowledgeMaterial, 0, len(pos))
+	for i := range pos {
+		out = append(out, knowledgeMaterialFromPO(pos[i]))
+	}
+	return out, nil
+}
+
+// DeleteByBrand 删除品牌私有素材（tenantID 隔离——只能删自己品牌的）。
+func (r *GormKnowledgeMaterialRepository) DeleteByBrand(ctx context.Context, tenantID, brandID, materialID string) error {
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND brand_id = ? AND tenant_id = ?", materialID, brandID, tenantID).
+		Delete(&KnowledgeMaterialPO{}).Error; err != nil {
+		return err
+	}
+	if r.vecStore != nil {
+		if store, err := r.vecStore.Get(ctx); err == nil {
+			_ = store.Delete(ctx, materialID)
 		}
 	}
 	return nil

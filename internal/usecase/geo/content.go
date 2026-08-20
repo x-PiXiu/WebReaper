@@ -282,7 +282,7 @@ func (uc *ContentUseCase) buildReferencePrompt(ctx context.Context, in GenerateI
 	if uc.knowledgeRetriever != nil {
 		industry := uc.brandIndustry(ctx, in)
 		ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
-		refs, rErr := uc.knowledgeRetriever.Retrieve(ctx2, industry, ragQuery, want)
+		refs, rErr := uc.knowledgeRetriever.Retrieve(ctx2, industry, in.BrandID, ragQuery, want)
 		cancel()
 		if rErr == nil && len(refs) > 0 {
 			prompt := buildMaterialPrompt(refs)
@@ -835,7 +835,8 @@ func (uc *ContentUseCase) ResubmitIndex(ctx context.Context, tenantID, contentID
 type GenerateInput struct {
 	TenantID      string
 	BrandID       string
-	Keywords      []string // 一个或多个关键词（组合模式）
+	Keywords      []string // 一个或多个关键词（组合模式；可选——获客智能体转型）
+	Topic         string   // 用户一句话（可选——"想写什么"；留空 = AI 从知识库+品牌资料自动提炼）
 	BrandInfo     string   // 品牌定位/卖点摘要（供 LLM 参考，让内容贴合品牌）
 	LLMConfigName string
 	TargetEngine  string // 目标 AI 引擎偏好（chatgpt/perplexity/kimi/doubao；空=通用）
@@ -916,9 +917,8 @@ func validateGeneratedContent(text, title, format string) []string {
 // onDelta 回调实时推送正文增量（供 SSE 流式输出用）；传 nil 则等全部生成完返回。
 // 只推正文 content，不推思考过程（ChatStream 的 onDelta 本身只推 content delta）。
 func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, onDelta func(delta string)) (entity.OptimizedContent, error) {
-	if len(in.Keywords) == 0 {
-		return entity.OptimizedContent{}, fmt.Errorf("关键词不能为空")
-	}
+	// 获客智能体转型：keywords 可选——留空时 AI 从知识库+品牌资料全自动提炼主题。
+	// keywordDesc 用于 prompt/RAG/评分/标题兜底——无关键词时从 Topic 或品牌定位取。
 
 	// 配额检查（计费周期内 content-gen 次数；超限返回 ErrQuotaExceeded → HTTP 402）
 	if uc.quotaGate != nil {
@@ -926,8 +926,17 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 			return entity.OptimizedContent{}, err
 		}
 	}
-	keywordDesc := strings.Join(in.Keywords, "、")
+	// keywordDesc 构建（获客智能体转型：三层替代源——关键词 > 用户一句话 > 品牌名）
+	var keywordDesc string
 	isMulti := len(in.Keywords) > 1
+	if len(in.Keywords) > 0 {
+		keywordDesc = strings.Join(in.Keywords, "、")
+	} else if in.Topic != "" {
+		keywordDesc = in.Topic
+	} else {
+		// 全自动模式：取品牌名作为主题锚点（RAG 检索词 = 品牌名，仍能命中品牌知识库素材）
+		keywordDesc = "品牌相关内容"
+	}
 
 	systemPrompt := uc.systemPrompt(ctx, entity.PromptKeyContentGenerate, defaultGeneratePrompt, in.TargetEngine, in.Format)
 	// 可引用结构开关（v3 P2）：与格式正交叠加——注入到格式指令之后、基础 prompt 之前
@@ -938,6 +947,10 @@ func (uc *ContentUseCase) GenerateStream(ctx context.Context, in GenerateInput, 
 	modeHint := "围绕这个关键词创作一篇文章"
 	if isMulti {
 		modeHint = fmt.Sprintf("把这 %d 个关键词有机融合到一篇文章中（各有侧重、逻辑连贯）", len(in.Keywords))
+	} else if in.Topic != "" {
+		modeHint = "围绕用户的这个要求创作一篇文章"
+	} else {
+		modeHint = "根据品牌信息和参考资料，创作一篇能展示品牌专业性和吸引力的文章"
 	}
 	userPrompt := fmt.Sprintf(`品牌信息：%s
 目标关键词：%s

@@ -16,7 +16,7 @@ type mockKBRetriever struct {
 	err  error
 }
 
-func (m *mockKBRetriever) Retrieve(context.Context, string, string, int) ([]entity.MaterialRef, error) {
+func (m *mockKBRetriever) Retrieve(context.Context, string, string, string, int) ([]entity.MaterialRef, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

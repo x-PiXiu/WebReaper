@@ -11,6 +11,7 @@ import { INDUSTRY_OPTIONS, CLEAN_TEXT_VALIDATOR, websiteRules } from '../../cons
 import { useBrandOverviews } from '../../hooks/useBrandOverviews'
 import { rateColor } from '../../utils/geo'
 import StoreTab from './brands/StoreTab'
+import KnowledgeTab from './brands/KnowledgeTab'
 import type { Brand, CompetitorSuggestion } from '../../types/api'
 
 const { Text } = Typography
@@ -484,11 +485,11 @@ export default function Brands() {
 
                       {/* 未完成项一行提示（傻瓜化：不列 6 项清单，只告诉还差什么、点了就去） */}
                       {missingItems.length > 0 && (
-                        <div style={{ marginTop: 14, padding: '9px 12px', borderRadius: 8, background: 'var(--wr-primary-bg)', fontSize: 12.5, lineHeight: 1.9 }}>
-                          <Text style={{ fontSize: 12.5 }}>还差 {missingItems.length} 项：</Text>
+                        <div style={{ marginTop: 14, padding: '9px 12px', borderRadius: 8, background: 'var(--wr-primary-bg)', fontSize: 13, lineHeight: 1.9 }}>
+                          <Text style={{ fontSize: 13 }}>还差 {missingItems.length} 项：</Text>
                           {missingItems.map((m, i) => (
                             <span key={m.label}>
-                              <a style={{ fontSize: 12.5 }} onClick={() => {
+                              <a style={{ fontSize: 13 }} onClick={() => {
                                 if (m.field) editForm.scrollToField(m.field, { behavior: 'smooth', block: 'center' })
                                 else if (m.link) navigate(m.link)
                               }}>{m.short}</a>
@@ -501,10 +502,10 @@ export default function Brands() {
 
                       {/* 本地品牌无门店提示（门店档案就在隔壁 Tab——点击直达） */}
                       {selectedBrand.biz_type !== 'online' && stores.length === 0 && (
-                        <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--wr-bg-elevated)', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <div style={{ marginTop: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--wr-bg-elevated)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                           <EnvironmentOutlined style={{ color: 'var(--wr-warning)' }} />
                           <span>本地生意还没添加门店——补上门店地址，AI 推荐附近商家时才不会漏掉你</span>
-                          <a style={{ fontSize: 12.5 }} onClick={() => setActiveInnerTab('stores')}>去「门店档案」添加 →</a>
+                          <a style={{ fontSize: 13 }} onClick={() => setActiveInnerTab('stores')}>去「门店档案」添加 →</a>
                         </div>
                       )}
                     </div>
@@ -529,24 +530,24 @@ export default function Brands() {
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 16 }}>
                               <div>
                                 <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>提及率</Text>
-                                <Text strong style={{ fontSize: 22, color: rateColor((overview as { avg_mention_rate?: number })?.avg_mention_rate || 0) }}>
+                                <Text strong style={{ fontSize: 20, color: rateColor((overview as { avg_mention_rate?: number })?.avg_mention_rate || 0) }}>
                                   {Math.round(((overview as { avg_mention_rate?: number })?.avg_mention_rate || 0) * 100)}%
                                 </Text>
                               </div>
                               <div>
                                 <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>关键词</Text>
-                                <Text strong style={{ fontSize: 22 }}>{allKeywords.filter((k: { brand_id: string }) => k.brand_id === selectedBrand.id).length}</Text>
+                                <Text strong style={{ fontSize: 20 }}>{allKeywords.filter((k: { brand_id: string }) => k.brand_id === selectedBrand.id).length}</Text>
                               </div>
                               <div>
                                 <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>内容（已发布）</Text>
-                                <Text strong style={{ fontSize: 22 }}>
+                                <Text strong style={{ fontSize: 20 }}>
                                   {brandContents.length}
                                   <Text type="secondary" style={{ fontSize: 13 }}>（{brandContents.filter((c: { status?: string }) => c.status === 'published').length}）</Text>
                                 </Text>
                               </div>
                               <div>
                                 <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>被 AI 引用</Text>
-                                <Text strong style={{ fontSize: 22, color: citeTotal > 0 ? 'var(--wr-accent)' : undefined }}>{citeTotal}</Text>
+                                <Text strong style={{ fontSize: 20, color: citeTotal > 0 ? 'var(--wr-accent)' : undefined }}>{citeTotal}</Text>
                               </div>
                             </div>
 
@@ -571,11 +572,14 @@ export default function Brands() {
                     </div>
                   </>),
                 },
-                ...(selectedBrand.biz_type !== 'online' ? [{
-                  key: 'stores',
-                  label: '门店档案',
-                  children: <StoreTab brand={selectedBrand} />,
-                }] : []),
+                ...(selectedBrand.biz_type !== 'online'
+                  ? [{ key: 'stores', label: '门店档案', children: <StoreTab brand={selectedBrand} /> }]
+                  : []),
+                {
+                  key: 'knowledge',
+                  label: '知识库',
+                  children: <KnowledgeTab brandId={selectedBrand.id} />,
+                },
                 {
                   key: 'competitors',
                   label: '竞品对比',
@@ -599,7 +603,7 @@ export default function Brands() {
                           </Button>
                         </Space>
                       </div>
-                      <Text type="secondary" style={{ display: 'block', marginBottom: 14, fontSize: 12.5, lineHeight: 1.6 }}>
+                      <Text type="secondary" style={{ display: 'block', marginBottom: 14, fontSize: 13, lineHeight: 1.6 }}>
                         竞品是你观察差距的参照——发起监测后，这里能看到"你 vs 竞品"在 AI 回答里的提及率对比。
                         {selectedBrand.biz_type !== 'online' && '本地品牌可一键从附近同行（按评分/距离）推荐竞品候选。'}
                       </Text>

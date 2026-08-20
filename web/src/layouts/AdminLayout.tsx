@@ -68,7 +68,7 @@ export default function AdminLayout() {
     <>
       <AppShell
         menuItems={adminMenu}
-        brandName="智擎AI 管理"
+        brandName="获客智能体 · 管理"
         brandIcon="智"
         noPaddingKeys={['/admin/chat']}
         banner={mustChange ? (

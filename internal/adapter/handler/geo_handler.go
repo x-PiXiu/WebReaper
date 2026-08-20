@@ -742,7 +742,8 @@ func (h *GEOHandler) HandleAdminDeleteContent(c *gin.Context) {
 func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 	brandID := c.Param("id")
 	var req struct {
-		Keywords      []string `json:"keywords" binding:"required"`
+		Keywords      []string `json:"keywords"`           // 可选（获客智能体转型：留空 = AI 从知识库+品牌资料全自动提炼）
+		Topic         string   `json:"topic"`               // 用户一句话（可选——"想写什么"）
 		BrandInfo     string   `json:"brand_info"`
 		LLMConfigName string   `json:"llm_config_name"`
 		TargetEngine  string   `json:"target_engine"`
@@ -758,6 +759,7 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 		TenantID:         middleware.CurrentTenantID(c),
 		BrandID:          brandID,
 		Keywords:         req.Keywords,
+		Topic:            req.Topic,
 		BrandInfo:        req.BrandInfo,
 		LLMConfigName:    req.LLMConfigName,
 		TargetEngine:     req.TargetEngine,
@@ -783,7 +785,8 @@ func (h *GEOHandler) HandleGenerateContent(c *gin.Context) {
 func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 	brandID := c.Param("id")
 	var req struct {
-		Keywords      []string `json:"keywords" binding:"required"`
+		Keywords      []string `json:"keywords"`  // 可选（获客智能体转型）
+		Topic         string   `json:"topic"`      // 用户一句话（可选）
 		BrandInfo     string   `json:"brand_info"`
 		LLMConfigName string   `json:"llm_config_name"`
 		TargetEngine  string   `json:"target_engine"`

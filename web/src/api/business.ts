@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -190,7 +190,7 @@ export const businessApi = {
     apiClient.get<unknown, OptimizedContent[]>(`/api/v1/geo/brands/${brandId}/contents`),
 
   // 从零生成内容（根据品牌信息+关键词，AI原创一篇 GEO 文章；支持单/多关键词组合）
-  generateContent: (brandId: string, data: { keywords: string[]; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean; format?: string; citation_toggles?: string[] }) =>
+  generateContent: (brandId: string, data: { keywords?: string[]; topic?: string; brand_info?: string; llm_config_name?: string; target_engine?: string; use_diagnose?: boolean; format?: string; citation_toggles?: string[] }) =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/geo/brands/${brandId}/contents/generate`, data),
 
   // 内容状态流转：draft ↔ published（published 后公开站可访问，AI 引擎可爬取）
@@ -375,6 +375,24 @@ export const businessApi = {
     apiClient.put<unknown, { providers: ProviderConfig[] }>(`/api/v1/admin/provider-configs/${provider}`, data),
 
   // 生成规格（管理后台：Vidu 端点×模型矩阵——DB 驱动 30s 热生效）
+  // 品牌知识库（获客智能体转型：商户上传品牌文档，内容生成自动引用）
+  listBrandKnowledge: (brandId: string) =>
+    apiClient.get<unknown, { materials: Array<{ id: string; title: string; summary: string; has_vector: boolean; crawl_keyword: string; created_at: string }>; total: number }>(`/api/v1/geo/brands/${brandId}/knowledge/materials`),
+  uploadBrandKnowledge: (brandId: string, data: { title: string; content: string }) =>
+    apiClient.post<unknown, { id: string; message: string }>(`/api/v1/geo/brands/${brandId}/knowledge/materials`, data),
+  deleteBrandKnowledge: (brandId: string, materialId: string) =>
+    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/geo/brands/${brandId}/knowledge/materials/${materialId}`),
+
+  // 发布通道能力清单（能力驱动：平台过滤/动态检查清单）
+  listPublishChannels: () =>
+    apiClient.get<unknown, { channels: PublishChannelView[] }>('/api/v1/geo/publish/channels'),
+
+  // 生成模式开关（admin：sub_type 批量启停——商户端模式收敛）
+  adminListGenerationModes: () =>
+    apiClient.get<unknown, { modes: GenerationModeView[] }>('/api/v1/admin/generation/modes'),
+  adminSetGenerationMode: (subType: string, enabled: boolean) =>
+    apiClient.put<unknown, { saved: number }>(`/api/v1/admin/generation/modes/${subType}`, { enabled }),
+
   adminListGenerationSpecs: () =>
     apiClient.get<unknown, { specs: GenerationSpec[] }>('/api/v1/admin/generation/specs'),
   adminSaveGenerationSpec: (subType: string, model: string, body: { capability: unknown; enabled: boolean }) =>

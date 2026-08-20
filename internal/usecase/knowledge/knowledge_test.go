@@ -78,7 +78,7 @@ func (m *mockKbRepo) ExistsByFingerprint(_ context.Context, fp string) (bool, er
 	}
 	return m.existsFP[fp], nil
 }
-func (m *mockKbRepo) SearchSimilar(context.Context, string, []float32, int) ([]entity.MaterialRef, error) {
+func (m *mockKbRepo) SearchSimilar(context.Context, string, string, []float32, int) ([]entity.MaterialRef, error) {
 	return nil, nil
 }
 func (m *mockKbRepo) Count(context.Context, string) (int64, error) { return 0, nil }
@@ -102,6 +102,11 @@ func (m *mockKbRepo) ListByIndustry(_ context.Context, industry string, limit, o
 	}
 	return filtered[offset:end], nil
 }
+func (m *mockKbRepo) CountByBrand(context.Context, string) (int64, error) { return 0, nil }
+func (m *mockKbRepo) ListByBrand(context.Context, string, string, int, int) ([]entity.KnowledgeMaterial, error) {
+	return nil, nil
+}
+func (m *mockKbRepo) DeleteByBrand(context.Context, string, string, string) error { return nil }
 func (m *mockKbRepo) Delete(_ context.Context, id string) error {
 	for i := range m.saved {
 		if m.saved[i].ID == id {

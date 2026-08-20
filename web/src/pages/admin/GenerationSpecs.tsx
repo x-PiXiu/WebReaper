@@ -2,9 +2,23 @@ import { useState } from 'react'
 import { Typography, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Switch, Select, Tooltip, Card } from 'antd'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import type { GenerationSpec } from '../../types/api'
+import type { GenerationSpec, GenerationModeView } from '../../types/api'
 
 const { Text } = Typography
+
+// 模式中文名（模式开关区展示——与商户端 SUBTYPE_META 同口径）
+const MODE_LABEL: Record<string, string> = {
+  text2image: '文生图', text2video: '文生视频', img2video: '图生视频',
+  tts: '语音合成', digital_human: '数字人', reference2video: '参考生视频',
+  voice_clone: '声音克隆', subject: '主体创建',
+  start_end2video: '首尾帧', multiframe: '智能多帧', text2audio: '音乐生成',
+  sound_effect: '音效生成', template: '模板成片',
+}
+const TIER_META: Record<string, { label: string; hint: string }> = {
+  default: { label: '默认集', hint: '商户端快捷卡片区直接可见' },
+  advanced: { label: '进阶折叠', hint: '收进"更多模式"折叠区' },
+  closed: { label: '默认关闭', hint: '商户端不显示（开启后进折叠区）' },
+}
 
 interface GenerationCapability {
   model?: string
@@ -49,6 +63,25 @@ export default function GenerationSpecs() {
       return r.specs
     },
   })
+
+  // 模式开关（sub_type 批量启停——傻瓜化：三档分组，切一个开关=批量改该模式全部模型）
+  const { data: modes = [] } = useQuery<GenerationModeView[]>({
+    queryKey: ['admin-gen-modes'],
+    queryFn: () => businessApi.adminListGenerationModes().then((r) => r.modes),
+  })
+  const setModeMut = useMutation({
+    mutationFn: ({ subType, enabled }: { subType: string; enabled: boolean }) =>
+      businessApi.adminSetGenerationMode(subType, enabled),
+    onSuccess: (_d, v) => {
+      message.success(`${MODE_LABEL[v.subType] || v.subType} 已${v.enabled ? '开启' : '关闭'}（30 秒热生效）`)
+      queryClient.invalidateQueries({ queryKey: ['admin-gen-modes'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] })
+      queryClient.invalidateQueries({ queryKey: ['generation-types'] })
+    },
+    onError: (e: Error) => message.error('切换失败：' + e.message),
+  })
+  const tierOrder: Record<string, number> = { default: 0, advanced: 1, closed: 2 }
+  const sortedModes = [...modes].sort((a, b) => (tierOrder[a.tier] ?? 9) - (tierOrder[b.tier] ?? 9))
 
   const saveMut = useMutation({
     mutationFn: ({ subType, model, body }: { subType: string; model: string; body: { capability: GenerationCapability; enabled: boolean } }) =>
@@ -146,6 +179,51 @@ export default function GenerationSpecs() {
         <h1>生成规格（Vidu 端点×模型矩阵）</h1>
         <p>数据库驱动·全局掌控——所有端点/模型/参数可在后台动态调整，30 秒热生效（无需重启）。删除行 = 恢复出厂默认。</p>
       </div>
+
+      {/* 模式开关区（傻瓜化：商户端生成模式三档控制——切一个开关=批量启停该模式全部模型） */}
+      <Card className="wr-glass-card" style={{ marginBottom: 16 }} title="商户端模式开关">
+        <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
+          控制商户端「内容中心 · 做视频图片」展示哪些创作模式——关闭的模式（含快捷卡片、折叠区、模型下拉）自动隐藏，提交被拒。30 秒热生效。
+        </Text>
+        {(['default', 'advanced', 'closed'] as const).map((tier) => {
+          const group = sortedModes.filter((m) => m.tier === tier)
+          if (group.length === 0) return null
+          return (
+            <div key={tier} style={{ marginBottom: 12 }}>
+              <Space size={8} style={{ marginBottom: 8 }}>
+                <Tag color={tier === 'default' ? 'success' : tier === 'advanced' ? 'processing' : 'default'} style={{ margin: 0 }}>
+                  {TIER_META[tier].label}
+                </Tag>
+                <Text type="secondary" style={{ fontSize: 11 }}>{TIER_META[tier].hint}</Text>
+              </Space>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {group.map((m) => (
+                  <Tooltip key={m.sub_type} title={
+                    m.partial
+                      ? `该模式 ${m.model_count} 个模型中有部分被单独停用（见下方矩阵）——开关打开时以矩阵为准微调`
+                      : `${m.model_count} 个模型 · ${m.enabled ? '全部启用' : '全部停用'}`
+                  }>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px',
+                      border: `1px solid ${m.enabled ? 'var(--wr-primary-border)' : 'var(--wr-border)'}`,
+                      borderRadius: 10, background: m.enabled ? 'var(--wr-primary-bg)' : 'var(--wr-bg-elevated)',
+                    }}>
+                      <Text style={{ fontSize: 13 }}>{MODE_LABEL[m.sub_type] || m.sub_type}</Text>
+                      {m.partial && <Tag style={{ margin: 0, fontSize: 10 }}>部分</Tag>}
+                      <Switch
+                        size="small"
+                        checked={m.enabled}
+                        loading={setModeMut.isPending && setModeMut.variables?.subType === m.sub_type}
+                        onChange={(v) => setModeMut.mutate({ subType: m.sub_type, enabled: v })}
+                      />
+                    </div>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </Card>
 
       <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
         <Space>

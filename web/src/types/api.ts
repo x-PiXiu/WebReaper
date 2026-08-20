@@ -473,6 +473,30 @@ export interface GenerationType {
   }>
 }
 
+// 发布通道能力清单（服务端 ChannelRegistry 导出——发布页能力驱动的数据源）
+export interface PublishChannelConstraints {
+  title_max_runes?: number // 标题最大字数（0/缺省=不限）
+  min_images?: number      // 最少配图数（0/缺省=不要求）
+  min_videos?: number      // 最少视频数（0/缺省=不要求）
+}
+export interface PublishChannelView {
+  platform: string
+  name: string
+  content_types: string[]                      // article/image/video/audio
+  constraints?: Record<string, PublishChannelConstraints> // key=内容形态
+  semi_auto: boolean
+  auto: boolean
+}
+
+// 生成模式开关状态（admin：sub_type 聚合）
+export interface GenerationModeView {
+  sub_type: string
+  tier: 'default' | 'advanced' | 'closed' // 推荐档位
+  enabled: boolean                        // 全部模型启用
+  partial: boolean                        // 部分模型启用
+  model_count: number
+}
+
 // 生成规格（管理后台：Vidu 端点×模型矩阵——DB 驱动 30s 热生效）
 export interface GenerationSpec {
   sub_type: string

@@ -40,14 +40,14 @@ function Sparkline({ points }: { points: { d: string; v: number }[] }) {
 
 // 渐进式 Onboarding（四步主线：建档案 → 做体检 → 造内容 → 发出去）。
 // 基于实际数据判断 done/pending，非硬编码；口径与零品牌引导卡一致。
-function useOnboardingSteps(brands: any[], ovData: any[], contentCount: number, publishedCount: number, publishJobCount: number) {
+function useOnboardingSteps(brands: any[], ovData: any[], contentCount: number, publishedCount: number, publishJobCount: number, videoCount: number) {
   const hasBrands = brands.length > 0
-  const hasMonitor = ovData.some((o: any) => (o.trend?.length || 0) > 0)
-  const hasContent = contentCount > 0
+  const hasVideo = videoCount > 0 || contentCount > 0 // 视频或文章都算"做了内容"
   const hasPublished = publishedCount > 0 || publishJobCount > 0
-  const allDone = hasBrands && hasMonitor && hasContent && hasPublished
-  const doneCount = [hasBrands, hasMonitor, hasContent, hasPublished].filter(Boolean).length
-  return { hasBrands, hasMonitor, hasContent, hasPublished, allDone, doneCount }
+  const hasMonitor = ovData.some((o: any) => (o.trend?.length || 0) > 0)
+  const allDone = hasBrands && hasVideo && hasPublished && hasMonitor
+  const doneCount = [hasBrands, hasVideo, hasPublished, hasMonitor].filter(Boolean).length
+  return { hasBrands, hasVideo, hasPublished, hasMonitor, allDone, doneCount }
 }
 
 // 最近一次体检摘要（服务端监测数据实时计算——换设备也在，不依赖本地存储）：
@@ -120,13 +120,20 @@ export default function MerchantHome() {
     queryFn: () => businessApi.getAllMonitorResults().catch(() => []),
     staleTime: 60_000,
   })
+  // 视频生成任务（hasVideo 判定——获客智能体转型：视频成为主线第二步）
+  const { data: genTasks = [] } = useQuery({
+    queryKey: ['generation-tasks'],
+    queryFn: () => businessApi.listGenerationTasks().then((r) => r.tasks).catch(() => []),
+    staleTime: 60_000,
+  })
+  const videoCount = genTasks.filter((t: { state?: string }) => t.state === 'success').length
 
   const articleCount = allContents.length
   const publishedCount = allContents.filter((c: { status?: string }) => c.status === 'published').length
   const publishJobCount = publishJobs.length
 
   const ovData = (overviews.data || []) as any[]
-  const steps = useOnboardingSteps(brands, ovData, articleCount, publishedCount, publishJobCount)
+  const steps = useOnboardingSteps(brands, ovData, articleCount, publishedCount, publishJobCount, videoCount)
   const lastCheck = useLastCheck(monitorResults)
 
   // 7 天走势（按天聚合全量问答的平均提及率——一条线，克制在 sparkline 以内）
@@ -204,7 +211,7 @@ export default function MerchantHome() {
             <div style={{
               width: 72, height: 72, borderRadius: 20, margin: '0 auto 20px',
               background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 32, color: '#fff', boxShadow: 'var(--wr-shadow-glow)',
+              fontSize: 28, color: '#fff', boxShadow: 'var(--wr-shadow-glow)',
             }}>
               <RocketOutlined />
             </div>
@@ -212,7 +219,7 @@ export default function MerchantHome() {
               10 分钟，看到你的品牌在 AI 里的样子
             </h1>
             <Text type="secondary" style={{ fontSize: 14, maxWidth: 480, display: 'block', margin: '0 auto' }}>
-              现在用户问"XX哪家好"都问 AI 了——10 次回答里提到你几次？按下面四步走完，你的第一份 AI 体检报告就出来了。
+              现在用户问"XX哪家好"都问 AI 了——10 次回答里提到你几次？按下面四步走完，你的第一条获客视频就发出去了。
             </Text>
           </div>
 
@@ -220,9 +227,9 @@ export default function MerchantHome() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 32 }}>
             {[
               { title: '① 建档案', desc: '品牌名+定位，2 分钟', path: '/m/brands' },
-              { title: '② 做体检', desc: '问一句，看 AI 怎么回答', path: '/m/checkup' },
-              { title: '③ 造内容', desc: '让 AI 写容易被引用的内容', path: '/m/studio' },
-              { title: '④ 发出去', desc: '发布到公开站和社媒', path: '/m/distribution' },
+              { title: '② 做视频', desc: '让 AI 帮你做一条获客视频', path: '/m/studio' },
+              { title: '③ 发出去', desc: '发到小红书/知乎', path: '/m/distribution' },
+              { title: '④ 看效果', desc: '测一测 AI 怎么推荐你', path: '/m/checkup' },
             ].map((s, i) => (
               <div key={i} style={{
                 padding: 16, borderRadius: 12,
@@ -269,9 +276,9 @@ export default function MerchantHome() {
         {showOnboarding && (() => {
           const onboardingSteps = [
             { done: steps.hasBrands, label: '建档案', path: '/m/brands', cta: '告诉 AI 你是谁——品牌名和定位就行' },
-            { done: steps.hasMonitor, label: '做体检', path: '/m/checkup', cta: '问一句，看看 AI 现在会不会推荐你' },
-            { done: steps.hasContent, label: '造内容', path: '/m/studio', cta: '让 AI 写一篇容易被引用的内容' },
-            { done: steps.hasPublished, label: '发出去', path: '/m/distribution', cta: '发布到公开站和知乎/小红书，AI 才能引用' },
+            { done: steps.hasVideo, label: '做视频', path: '/m/studio', cta: '让 AI 帮你做一条视频——获客从视频开始' },
+            { done: steps.hasPublished, label: '发出去', path: '/m/distribution', cta: '把视频发到小红书/知乎，客人才能看到' },
+            { done: steps.hasMonitor, label: '看效果', path: '/m/checkup', cta: '测一测 AI 会不会推荐你，看哪里能提升' },
           ]
           const nextStep = onboardingSteps.find((s) => !s.done)
           if (!nextStep) return null
@@ -285,8 +292,8 @@ export default function MerchantHome() {
                   <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 4 }}>
                     你的下一步（第 {steps.doneCount + 1}/4 步）：{nextStep.label}
                   </Text>
-                  <Text type="secondary" style={{ fontSize: 12.5, display: 'block', marginBottom: 8 }}>
-                    {nextStep.cta}——四步走完，AI 就有理由推荐你了
+                  <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>
+                    {nextStep.cta}——四步走完，客人就开始找你了
                   </Text>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {onboardingSteps.map((s, i) => (
@@ -333,14 +340,14 @@ export default function MerchantHome() {
           </div>
           {lastCheck ? (
             <>
-              <Text style={{ fontSize: 13.5, display: 'block', marginTop: 6, color: 'var(--wr-text-secondary)' }}>
+              <Text style={{ fontSize: 13, display: 'block', marginTop: 6, color: 'var(--wr-text-secondary)' }}>
                 {timeAgo(lastCheck.at.toISOString())}问了 <b>{lastCheck.questions}</b> 个问题、动用了 <b>{lastCheck.engines}</b> 个 AI，其中 <b style={{ color: lastCheck.mentioned > 0 ? 'var(--wr-success)' : 'var(--wr-danger)' }}>{lastCheck.mentioned}</b> 次提到了你（共 {lastCheck.total} 次问答）
               </Text>
               <Sparkline points={spark} />
             </>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
-              <Text type="secondary" style={{ fontSize: 13.5 }}>还没体检过——问一句，看 AI 会不会推荐你</Text>
+              <Text type="secondary" style={{ fontSize: 13 }}>还没体检过——问一句，看 AI 会不会推荐你</Text>
               <Button size="small" type="primary" onClick={() => navigate('/m/checkup?tab=ask')}>去问问 AI</Button>
             </div>
           )}

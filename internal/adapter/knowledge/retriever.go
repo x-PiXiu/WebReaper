@@ -33,9 +33,10 @@ func NewKnowledgeRetriever(repo port.KnowledgeMaterialRepository, embedder port.
 	return &KnowledgeRetrieverImpl{repo: repo, embedder: embedder, minScore: defaultMinScore}
 }
 
-// Retrieve 检索知识库素材（industry 空 = 全行业）。
+// Retrieve 检索知识库素材（分层：品牌私有优先 → 行业公共池补位）。
+// brandID 空 = 纯行业检索（向后兼容）；industry 空 = 全行业。
 // 返回空列表 = 无命中（调用方降级为在线 RAG，行为与旧版一致）。
-func (r *KnowledgeRetrieverImpl) Retrieve(ctx context.Context, industry, query string, num int) ([]entity.MaterialRef, error) {
+func (r *KnowledgeRetrieverImpl) Retrieve(ctx context.Context, industry, brandID, query string, num int) ([]entity.MaterialRef, error) {
 	if r.repo == nil || r.embedder == nil || query == "" {
 		return nil, nil
 	}
@@ -47,7 +48,7 @@ func (r *KnowledgeRetrieverImpl) Retrieve(ctx context.Context, industry, query s
 		return nil, err // embedding 不可用：调用方降级
 	}
 	// 预取 num×3（阈值过滤后可能不足 num），由 repo 按余弦降序返回
-	refs, err := r.repo.SearchSimilar(ctx, industry, vec, num*3)
+	refs, err := r.repo.SearchSimilar(ctx, industry, brandID, vec, num*3)
 	if err != nil {
 		return nil, err
 	}

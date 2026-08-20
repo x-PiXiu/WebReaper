@@ -86,7 +86,7 @@ export default function Login() {
 
         <header className="wr-login-brand-top wr-login-rise">
           <p className="wr-login-kicker">Generative Engine Optimization</p>
-          <h1 className="wr-login-brand-title">智擎AI</h1>
+          <h1 className="wr-login-brand-title">获客智能体</h1>
           <span className="wr-login-title-line" aria-hidden />
         </header>
 

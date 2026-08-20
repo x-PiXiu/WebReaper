@@ -203,6 +203,38 @@ func (uc *PublishUseCase) SetPublicBaseURL(baseURL string) {
 	uc.publicBaseURL = baseURL
 }
 
+// ChannelCapabilities 发布通道能力清单（前端能力驱动的数据源：
+// 选内容形态 → 过滤可用平台 → 按约束动态生成检查清单）。
+// 新平台 = 注册新 Channel（声明 DisplayName/SupportedContentTypes/Constraints），
+// 本清单自动出现，前端零改动。
+func (uc *PublishUseCase) ChannelCapabilities() []entity.ChannelInfo {
+	if uc.registry == nil {
+		return nil
+	}
+	channels := uc.registry.List()
+	out := make([]entity.ChannelInfo, 0, len(channels))
+	for _, ch := range channels {
+		info := entity.ChannelInfo{
+			Platform:     ch.Platform(),
+			Name:         ch.Platform(),
+			ContentTypes: ch.SupportedContentTypes(),
+			SemiAuto:     true,
+		}
+		if _, ok := ch.(port.AutoPublishChannel); ok {
+			info.Auto = true
+		}
+		if ip, ok := ch.(port.ChannelInfoProvider); ok {
+			info.Name = ip.DisplayName()
+			info.Constraints = ip.Constraints()
+		}
+		if len(info.ContentTypes) == 0 {
+			info.ContentTypes = ch.SupportedMediaType() // 向后兼容兜底
+		}
+		out = append(out, info)
+	}
+	return out
+}
+
 // PublishInput 发布请求输入。
 type PublishInput struct {
 	TenantID  string

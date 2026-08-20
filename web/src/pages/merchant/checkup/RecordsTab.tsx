@@ -1,15 +1,13 @@
 import { useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Tabs, Typography } from 'antd'
-import Keywords from '../Keywords'
+import { Tabs } from 'antd'
 import AskHistory from './AskHistory'
 import CitationsTab from '../visibility/CitationsTab'
 import Nearby from '../Nearby'
 import type { Brand, Keyword, MonitoringResult } from '../../../types/api'
 
-const { Text } = Typography
 
-const SUB_KEYS = ['history', 'questions', 'citations', 'nearby'] as const
+const SUB_KEYS = ['history', 'citations', 'nearby'] as const
 
 /**
  * 体检记录 Tab（子层）：
@@ -45,7 +43,7 @@ export default function RecordsTab({
         onChange={setSub}
         items={[
           { key: 'history', label: '问答历史' },
-          { key: 'questions', label: '问题库' },
+
           { key: 'citations', label: '引用归因' },
           ...(hasLocalBrand ? [{ key: 'nearby', label: '附近对比' }] : []),
         ]}
@@ -54,14 +52,6 @@ export default function RecordsTab({
 
       {sub === 'history' && (
         <AskHistory keywords={keywords} monitorResults={monitorResults} brandMap={brandMap} />
-      )}
-      {sub === 'questions' && (
-        <>
-          <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
-            这里是你问过的所有问题（含 AI 出题入库的）——问题会用于体检报告汇总，也是内容生成的选题来源。
-          </Text>
-          <Keywords embedded />
-        </>
       )}
       {sub === 'citations' && (
         <CitationsTab monitorResults={monitorResults} brands={brands} navigate={navigate} />

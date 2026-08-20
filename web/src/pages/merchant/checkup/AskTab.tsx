@@ -104,7 +104,7 @@ function AskResultCard({ question, results, onRetest, retestText }: { question: 
       </div>
       {results.map((r, i) => <EngineRow key={r.id || i} r={r} />)}
       <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-        每个引擎真实提问 {SAMPLE_SIZE} 次取平均 · 结果已存入体检记录，报告页自动汇总
+        每个引擎真实提问 {SAMPLE_SIZE} 次取平均 · 结果已存入效果记录，报告页自动汇总
       </Text>
       {/* 行动条：写文章页的关键词预选按最近体检排序——刚测的这个问题会自动排在第一位被选中 */}
       <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10, background: 'var(--wr-primary-bg)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -117,7 +117,7 @@ function AskResultCard({ question, results, onRetest, retestText }: { question: 
 }
 
 /**
- * 问问 AI（AI 体检中心主交互）：
+ * 测一测（AI 效果中心主交互）：
  * 我来问（默认）/ AI 帮我出题 二选一 → 勾选引擎（默认全选）→ 一问多答统一结果。
  * 品牌跟随全局上下文；支持 ?q= 预填（问答历史的"再测一次"入口）；
  * 结果服务端留痕——回显上次结果也从服务端取（换设备也在）。
@@ -200,7 +200,7 @@ export default function AskTab({
   const targetQCount = mode === 'manual' ? 1 : checkedQs.length
   const estCost = targetQCount * Math.max(1, selectedEngines.length) * COST_PER_CHECK
 
-  // 解析/创建问题关键词（问题即关键词——入库后进体检记录与报告口径）
+  // 解析/创建问题关键词（问题即关键词——入库后进效果记录与报告口径）
   const resolveKwId = async (term: string): Promise<[string | undefined, boolean]> => {
     if (pickedKwId && term === brandKeywords.find((k) => k.id === pickedKwId)?.term) return [pickedKwId, false]
     const existed = brandKeywords.find((k) => k.term === term)
@@ -325,23 +325,11 @@ export default function AskTab({
                 新问题——测完会自动存入问题库，以后可以随时复测看变化
               </Text>
             )}
-            <div style={{ marginTop: 10 }}>
-              <Select
-                style={{ minWidth: 280 }}
-                placeholder="或从问题库选一个（复测历史问题）"
-                value={pickedKwId}
-                onChange={(v) => { setPickedKwId(v); setQuestionText(''); setRuns([]) }}
-                options={brandKeywords.map((k: Keyword) => ({ value: k.id, label: k.term }))}
-                disabled={!brandId}
-                showSearch
-                optionFilterProp="label"
-                allowClear
-              />
-            </div>
+
           </>
         ) : (
           <>
-            <Paragraph type="secondary" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 10 }}>
               AI 根据你的品牌资料生成顾客真实会问的问题——<Text strong>先勾选确认，再开始测</Text>（不浪费额度、不问歪）。
             </Paragraph>
             <Button icon={<RobotOutlined />} loading={generating} onClick={generateQuestions} style={{ marginBottom: 12 }}>
@@ -384,7 +372,7 @@ export default function AskTab({
                   key={e.name}
                   checked={checked}
                   onChange={() => setSelectedEngines(checked ? selectedEngines.filter((n) => n !== e.name) : [...selectedEngines, e.name])}
-                  style={{ fontSize: 12.5, padding: '3px 12px', borderRadius: 16, border: checked ? '1px solid var(--wr-primary)' : '1px solid var(--wr-border)' }}
+                  style={{ fontSize: 13, padding: '3px 12px', borderRadius: 16, border: checked ? '1px solid var(--wr-primary)' : '1px solid var(--wr-border)' }}
                 >
                   {engineLabel(e.name)}
                 </Tag.CheckableTag>
@@ -397,7 +385,7 @@ export default function AskTab({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 10 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {targetQCount > 0
-                ? <>将问 {targetQCount} 个问题 × {Math.max(1, selectedEngines.length)} 个 AI，预计消耗约 <Text strong>{estCost}</Text> 次体检额度（每个 AI 问 {SAMPLE_SIZE} 次取平均）</>
+                ? <>将问 {targetQCount} 个问题 × {Math.max(1, selectedEngines.length)} 个 AI，预计消耗约 <Text strong>{estCost}</Text> 次AI 查询额度（每个 AI 问 {SAMPLE_SIZE} 次取平均）</>
                 : '选择问题后开始'}
             </Text>
             <Button
@@ -431,11 +419,11 @@ export default function AskTab({
         />
       ))}
 
-      {/* 服务端回显：上次的体检结果（本次会话未查询时——换设备/换浏览器也在） */}
+      {/* 服务端回显：上次的结果（本次会话未查询时——换设备/换浏览器也在） */}
       {!running && runs.length === 0 && lastRunView && (
         <div>
           <Divider style={{ fontSize: 12, margin: '8px 0 16px' }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>上次的体检结果</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>上次的结果</Text>
           </Divider>
           <AskResultCard
             question={lastRunView.question}
@@ -455,8 +443,8 @@ export default function AskTab({
           <div style={{ textAlign: 'center', maxWidth: 380, margin: '0 auto' }}>
             <Text strong style={{ fontSize: 15 }}>问一句，看 AI 会不会推荐你</Text>
             <div style={{ marginTop: 6 }}>
-              <Text type="secondary" style={{ fontSize: 12.5 }}>
-                输入顾客会问的问题（或让 AI 出题），选几个 AI 引擎点「测一测」——结果立刻可见，并自动存入体检报告
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                输入顾客会问的问题（或让 AI 出题），选几个 AI 引擎点「测一测」——结果立刻可见，并自动存入效果报告
               </Text>
             </div>
           </div>

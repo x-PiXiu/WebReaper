@@ -20,32 +20,53 @@ const (
 	MaterialStatusRejected = "rejected" // 人工/规则拒绝
 )
 
-// KnowledgeMaterial 知识库素材——一条带来源的采集结果。
+// KnowledgeMaterial 知识库素材——一条带来源的采集结果或商户上传的品牌文档。
 //
 // 溯源与去重的双保险：
 //   - SourceURL：原始出处（生成内容时标注给 LLM，引用可查证）
 //   - URLFingerprint：sha256(SourceURL)，数据库唯一索引做持久化去重
 //     （替代爬虫装饰器的内存 map——重启不丢）
 //
-// 平台级维度（无 tenant_id）：按行业组织，多租户共享检索。
+// 双维度组织（获客智能体转型）：
+//   - 行业公共池：BrandID 为空，按 Industry 归组，多租户共享检索（admin 采集）
+//   - 品牌私有库：BrandID 非空，属于特定品牌的商户上传素材（优先检索）
 type KnowledgeMaterial struct {
 	ID             string
+	BrandID        string    // 品牌私有素材归属（空 = 行业公共池——admin 采集）
+	TenantID       string    // 租户隔离（品牌私有素材必填；公共池为空）
 	Industry       string    // 所属行业（如 "餐饮"/"美业"；须与 Brand.Industry 对齐）
-	SourceURL      string    // 来源 URL（原文出处）
+	SourceURL      string    // 来源 URL（原文出处；商户上传可为空——用 Content 指纹去重）
 	URLFingerprint string    // sha256(SourceURL)，唯一索引
 	Title          string    // 页面标题
 	Content        string    // 清洗后正文（入库截断 MaterialContentMaxRunes）
 	Summary        string    // 摘要（正文前 MaterialSummaryMaxRunes 字）
 	Tags           []string  // 标签（预留；LLM 打标 P2）
-	CrawlKeyword   string    // 本次采集命中的关键词（采集溯源）
+	CrawlKeyword   string    // 本次采集命中的关键词（采集溯源；商户上传 = "merchant_upload"）
 	Embedding      []float32 // 向量（title+summary+正文前 MaterialEmbedTextMaxRunes 字）
 	Status         string    // MaterialStatusActive / Rejected
 	CreatedAt      time.Time
 }
 
-// IsValid 领域规则：素材必须有来源 URL、指纹与行业（否则无法溯源/无法归组）。
+// IsValid 领域规则：素材必须有指纹与行业（否则无法去重/无法归组）。
+// 来源 URL 对商户上传素材可选（转型放宽：原为必填——商户粘贴文本无 URL）。
+// 品牌私有素材必须有 BrandID（否则退化为公共池，租户隔离失效）。
 func (m KnowledgeMaterial) IsValid() bool {
-	return m.SourceURL != "" && m.URLFingerprint != "" && m.Industry != ""
+	if m.URLFingerprint == "" || m.Industry == "" {
+		return false
+	}
+	// 品牌私有素材：必须有 BrandID + TenantID
+	if m.SourceURL == "" && m.BrandID == "" {
+		return false // 无 URL 且无品牌 = 既不是公共池采集也不是品牌上传，拒绝
+	}
+	if m.BrandID != "" && m.TenantID == "" {
+		return false // 品牌素材缺租户 = 隔离失效
+	}
+	return true
+}
+
+// IsBrandMaterial 是否为品牌私有素材（商户上传）。
+func (m KnowledgeMaterial) IsBrandMaterial() bool {
+	return m.BrandID != ""
 }
 
 // IsSearchable 是否可被向量检索（带向量 + 有效状态）。
@@ -82,6 +103,18 @@ func (c *IndustryCrawlConfig) Normalize() {
 // 采集前先查库去重，避免同一来源重复入库。
 func FingerprintURL(u string) string {
 	h := sha256.Sum256([]byte(u))
+	return hex.EncodeToString(h[:])
+}
+
+// FingerprintContent 生成内容指纹（sha256 hex）——商户上传素材的去重（无 URL 时用内容前 N 字做指纹）。
+// 同一段文本重复粘贴 → 同一指纹 → 不会重复入库。
+func FingerprintContent(content string) string {
+	// 截断到 EmbedTextMax 长度——前 800 字相同视为同一素材（尾部空白差异不敏感）
+	runes := []rune(content)
+	if len(runes) > MaterialEmbedTextMaxRunes {
+		runes = runes[:MaterialEmbedTextMaxRunes]
+	}
+	h := sha256.Sum256([]byte(string(runes)))
 	return hex.EncodeToString(h[:])
 }
 

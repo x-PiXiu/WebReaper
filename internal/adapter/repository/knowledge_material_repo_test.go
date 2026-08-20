@@ -108,7 +108,7 @@ func TestKnowledgeMaterial_SearchSimilar(t *testing.T) {
 	_ = repo.Save(ctx, newMaterial("m2", "餐饮", "https://a.com/2", []float32{0.9, 0.1, 0}))
 	_ = repo.Save(ctx, newMaterial("m3", "美业", "https://b.com/3", []float32{1, 0, 0}))
 
-	refs, err := repo.SearchSimilar(ctx, "餐饮", []float32{1, 0, 0}, 5)
+	refs, err := repo.SearchSimilar(ctx, "餐饮", "", []float32{1, 0, 0}, 5)
 	if err != nil {
 		t.Fatalf("检索失败: %v", err)
 	}
@@ -124,13 +124,13 @@ func TestKnowledgeMaterial_SearchSimilar(t *testing.T) {
 	}
 
 	// 无行业 → filter 为 nil（全行业）
-	_, _ = repo.SearchSimilar(ctx, "", []float32{1, 0, 0}, 5)
+	_, _ = repo.SearchSimilar(ctx, "", "", []float32{1, 0, 0}, 5)
 	if len(vec.filters) < 2 || vec.filters[1] != nil {
 		t.Errorf("空行业应传 nil filter: %+v", vec.filters)
 	}
 
 	// limit 截断
-	refs, _ = repo.SearchSimilar(ctx, "餐饮", []float32{1, 0, 0}, 1)
+	refs, _ = repo.SearchSimilar(ctx, "餐饮", "", []float32{1, 0, 0}, 1)
 	if len(refs) != 1 {
 		t.Errorf("limit=1 应只返回 1 条: %d", len(refs))
 	}
@@ -142,7 +142,7 @@ func TestKnowledgeMaterial_SearchSimilar_NoVectorStore(t *testing.T) {
 	repo := NewGormKnowledgeMaterialRepository(db, nil)
 	ctx := context.Background()
 	_ = repo.Save(ctx, newMaterial("m1", "餐饮", "https://a.com/1", []float32{1, 0, 0}))
-	refs, err := repo.SearchSimilar(ctx, "餐饮", []float32{1, 0, 0}, 5)
+	refs, err := repo.SearchSimilar(ctx, "餐饮", "", []float32{1, 0, 0}, 5)
 	if err != nil || refs != nil {
 		t.Errorf("无向量库应返回 nil: %v %v", refs, err)
 	}

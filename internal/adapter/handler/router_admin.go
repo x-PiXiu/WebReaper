@@ -106,6 +106,8 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 		if r.generationRegistry != nil && r.generationSpecRepo != nil {
 			gh := NewGenerationAdminHandler(r.generationRegistry, r.generationSpecRepo)
 			adminGroup.GET("/generation/specs", gh.HandleListSpecs)
+			adminGroup.GET("/generation/modes", gh.HandleListModes)   // 模式开关（sub_type 批量启停）
+			adminGroup.PUT("/generation/modes/:subType", gh.HandleSetMode)
 			adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
 			adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
 		}

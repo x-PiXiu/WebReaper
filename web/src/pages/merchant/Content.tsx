@@ -49,6 +49,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
   // 全局品牌上下文：与关键词/分发/监测页共享，跨页不丢
   const { brands, brandId: selectedBrand, setCurrentBrand } = useBrandContext()
   const [originalText, setOriginalText] = useState('')
+  const [topic, setTopic] = useState('') // 想写什么（可选——获客智能体转型：替代关键词选择）
   const [optimizing, setOptimizing] = useState(false)
   // 傻瓜化：显式"帮我写 / 帮我改"切换（此前靠输入框空不空隐式决定——用户无感知）
   const [mode, setMode] = useState<'write' | 'improve'>('write')
@@ -95,29 +96,6 @@ export default function Content({ embedded }: { embedded?: boolean }) {
     }
   }, [selectedBrand, orderedKeywords, genKeywords.length])
 
-  // 无词时就地补齐（傻瓜化 Q4）：不跳页，当前页生成并自动选中
-  const [recoKwLoading, setRecoKwLoading] = useState(false)
-  const recoAddKeywords = async () => {
-    if (!selectedBrand) return
-    setRecoKwLoading(true)
-    try {
-      const res = await businessApi.distillKeywords({ source: 'questions', brand_id: selectedBrand } as never)
-      const terms = (res.keywords || []).slice(0, 3)
-      if (terms.length === 0) {
-        message.warning('没有推荐出关键词——先去「品牌档案」完善定位和卖点')
-        return
-      }
-      for (const term of terms) {
-        await businessApi.addKeyword(selectedBrand, { term, intent: 'informational' })
-      }
-      queryClient.invalidateQueries({ queryKey: ['geo-keywords', selectedBrand] })
-      queryClient.invalidateQueries({ queryKey: ['geo-all-keywords'] })
-      setGenKeywords(terms)
-      message.success(`已添加并选中 ${terms.length} 个关键词`)
-    } catch { /* 拦截器已提示 */ } finally {
-      setRecoKwLoading(false)
-    }
-  }
   const { data: contents = [] } = useQuery({
     queryKey: ['geo-contents', selectedBrand],
     queryFn: () => businessApi.listContents(selectedBrand!),
@@ -159,8 +137,8 @@ export default function Content({ embedded }: { embedded?: boolean }) {
   // 从零生成内容（非流式：走结构化 JSON 输出，标题/正文零解析成本）
   // GEO 内容生成用非流式——结构化输出更可控；流式只给 Chat 用
   const handleGenerate = async () => {
-    if (!selectedBrand || genKeywords.length === 0) {
-      message.warning('请选择品牌并至少选择一个关键词')
+    if (!selectedBrand) {
+      message.warning('请选择品牌')
       return
     }
     setGenerating(true)
@@ -169,7 +147,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
     try {
       const brandInfo = brands.find((b: Brand) => b.id === selectedBrand)
       const res = await businessApi.generateContent(selectedBrand, {
-        keywords: genKeywords,
+        topic: topic || undefined,
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
         target_engine: targetEngine || undefined,
         format: format || undefined,
@@ -177,8 +155,8 @@ export default function Content({ embedded }: { embedded?: boolean }) {
         use_diagnose: useDiagnose, // P5-03 诊断→优化闭环：先诊断再对症下药
       })
       setResult(res)
-      const modeLabel = genKeywords.length > 1 ? `（${genKeywords.length} 个关键词组合）` : ''
-      const scoreLabel = res.score?.total ? `，GEO 评分 ${res.score.total.toFixed(0)}` : ''
+      const modeLabel = topic ? `（围绕“${topic.slice(0, 10)}”）` : ''
+      const scoreLabel = res.score?.total ? `，AI 推荐度 ${res.score.total.toFixed(0)}` : ''
       message.success(`内容生成成功${modeLabel}${scoreLabel}${useDiagnose ? '（已按诊断建议优化）' : ''}`)
       // A4 重复内容软提示：同品牌已有相似已发布内容
       const dups = (res as OptimizedContent & { duplicate_warnings?: string[] }).duplicate_warnings
@@ -256,7 +234,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
           <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
             <div>
               <h1>内容生成</h1>
-              <p>文章 / 短内容 GEO 优化与生成</p>
+              <p>AI 帮你写文章</p>
             </div>
             <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/studio?tab=media')}>
               多媒体创作
@@ -292,34 +270,18 @@ export default function Content({ embedded }: { embedded?: boolean }) {
           <Col xs={24} lg={fullWidth ? 24 : 12}>
             <Card styles={{ body: { padding: 24 } }}>
               <div className="wr-stagger">
-                {/* 无词时就地补齐（傻瓜化 Q4：不跳页，当前页生成并自动选中） */}
-                {selectedBrand && keywords.length === 0 && (
-                  <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 10, background: 'var(--wr-primary-bg)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <Text style={{ fontSize: 13 }}>还没有关键词——写内容要围绕顾客会搜的词，让 AI 推荐 3 个？</Text>
-                    <Button size="small" type="primary" loading={recoKwLoading} onClick={recoAddKeywords}>
-                      推荐 3 个并自动填入
-                    </Button>
-                  </div>
-                )}
-
-                {/* 关键词选择（核心必填——顾客会搜的词） */}
+                {/* 想写什么（可选——留空 = AI 从知识库+品牌资料全自动提炼；获客智能体转型：关键词管理界面已移除） */}
                 <div style={{ marginBottom: 20 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text strong>围绕哪些关键词写？</Text>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      {genKeywords.length > 0 ? `已选 ${genKeywords.length} 个` : '可多选，选多个 = 写成一篇深度文'}
-                    </Text>
-                  </div>
-                  <Select
-                    mode="multiple"
-                    style={{ width: '100%' }}
-                    placeholder="选择顾客会搜的词（来自你的关键词库）"
-                    value={genKeywords}
-                    onChange={setGenKeywords}
-                    options={keywords.map((k: Keyword) => ({ value: k.term, label: k.term }))}
-                    disabled={!selectedBrand}
-                    maxTagCount={5}
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>想写什么？（可选）</Text>
+                  <Input
+                    placeholder="如：介绍一下我们的招牌菜和开业优惠"
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    maxLength={200}
                   />
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                    留空 = AI 根据品牌资料和知识库自动提炼主题写一篇
+                  </Text>
                 </div>
 
                 {/* 傻瓜化：显式"帮我写 / 帮我改"（此前靠输入框空不空隐式决定，用户无感知） */}
@@ -454,13 +416,20 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                 </div>
                 )}
 
+                {/* AI 将参考（获客智能体：透明度提示——让用户知道 AI 不是睛写） */}
+                <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: 'var(--wr-bg-elevated)', fontSize: 12 }}>
+                  <Text type="secondary">AI 将参考：</Text>
+                  <Text strong>{brands.find((b: Brand) => b.id === selectedBrand)?.name || '品牌资料'}</Text>
+                  <Text type="secondary"> 的品牌资料与知识库素材（自动注入，无需手动选择）</Text>
+                </div>
+
                 {/* 统一操作按钮 */}
                 <Button
                   type="primary"
                   size="large"
                   block
                   loading={busy}
-                  disabled={genKeywords.length === 0 || (mode === 'improve' && originalText.trim().length === 0)}
+                  disabled={!selectedBrand || (mode === 'improve' && originalText.trim().length === 0)}
                   onClick={handleAction}
                   icon={mode === 'improve' ? <EditOutlined /> : <ThunderboltOutlined />}
                 >
@@ -468,13 +437,13 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                     ? 'AI 创作中...'
                     : mode === 'improve'
                     ? '开始优化'
-                    : `帮我写${genKeywords.length > 1 ? `（${genKeywords.length} 词合成一篇）` : ''}`}
+                    : '帮我写'}
                 </Button>
               </div>
             </Card>
           </Col>
 
-          {/* 右：结果面板（GEO 评分仪表盘；全宽模式占满整行在输入下方）*/}
+          {/* 右：结果面板（AI 推荐度仪表盘；全宽模式占满整行在输入下方）*/}
           <Col xs={24} lg={fullWidth ? 24 : 12}>
             <Card
               title="优化结果"
@@ -494,7 +463,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                 </div>
               ) : result ? (
                 <>
-                  {/* GEO 评分仪表盘 */}
+                  {/* AI 推荐度仪表盘 */}
                   {score && score.total > 0 && (
                     <div style={{ marginBottom: 20 }}>
                       <Row gutter={16} align="middle">
@@ -518,7 +487,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                     return (
                       <div style={{ marginBottom: 20, padding: '12px 16px', borderRadius: 12, background: 'var(--wr-bg-elevated)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <Tooltip title="对齐 GEO 可引用素材结构：结论前置 / 小标题分段 / 数据标注来源——三个可机读信号的启发式检测（非精确评分）">
+                          <Tooltip title="AI 引擎摘录友好的素材结构：结论前置 / 小标题分段 / 数据标注来源——三个可机读信号的启发式检测（非精确评分）">
                             <Text strong style={{ fontSize: 13 }}>可引用度</Text>
                           </Tooltip>
                           <Tag color={cit.score >= 67 ? 'success' : cit.score >= 34 ? 'warning' : 'default'} style={{ margin: 0 }}>
@@ -670,7 +639,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <Space size={8}>
                           <Tag color={scoreColor(total)} style={{ margin: 0, fontWeight: 600 }}>
-                            GEO {total.toFixed(0)}
+                            {total.toFixed(0)}
                           </Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>{scoreLevel(total)}</Text>
                           {c.status === 'published' ? (
@@ -685,7 +654,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                             <Tag color="warning" style={{ margin: 0, fontSize: 11 }}>待收录</Tag>
                           )}
                           {citations[c.id] > 0 && (
-                            <Tooltip title={`AI 回答引用了这篇内容 ${citations[c.id]} 次——内容 GEO 的直接效果证据`}>
+                            <Tooltip title={`AI 回答引用了这篇内容 ${citations[c.id]} 次——内容被 AI 引用的直接效果证据`}>
                               <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>被引用 {citations[c.id]} 次</Tag>
                             </Tooltip>
                           )}
@@ -768,7 +737,7 @@ function ContextStat({ icon, value, label }: { icon: React.ReactNode; value: num
   )
 }
 
-// GEO 总分进度环（自绘 SVG，颜色随分数变化）
+// AI 推荐度进度环（自绘 SVG，颜色随分数变化）
 function ScoreRing({ total }: { total: number }) {
   const color = scoreColor(total)
   const radius = 52
@@ -790,8 +759,8 @@ function ScoreRing({ total }: { total: number }) {
           position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
         }}>
-                          <span className="wr-metric-value" style={{ fontSize: 34, color }}>{total.toFixed(0)}</span>
-          <Text type="secondary" style={{ fontSize: 12 }}>GEO 总分</Text>
+                          <span className="wr-metric-value" style={{ fontSize: 28, color }}>{total.toFixed(0)}</span>
+          <Text type="secondary" style={{ fontSize: 12 }}>AI 推荐度</Text>
         </div>
       </div>
       <Tooltip title="AI 深度评审打分（0-100，五维平均）——衡量这篇内容被 AI 引用的难易程度">

@@ -11,13 +11,14 @@ import CreationWorkbench from '../Creation'
  */
 export default function Studio() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const activeTab = searchParams.get('tab') === 'media' ? 'media' : 'article'
+  // 获客智能体转型：默认打开「做视频图片」——视频创作是主线第二步
+  const activeTab = searchParams.get('tab') === 'article' ? 'article' : 'media'
 
   return (
     <div className="wr-page-content" style={{ paddingTop: 4 }}>
       <div className="wr-page-header" style={{ marginBottom: 8 }}>
         <h1>内容中心</h1>
-        <p>让 AI 帮你写文章、做视频——内容发布得越多，AI 越有东西可以引用你</p>
+        <p>让 AI 帮你做视频、写文章——内容发得越多，客人越容易找到你</p>
       </div>
 
       <Tabs

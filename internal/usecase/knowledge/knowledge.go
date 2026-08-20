@@ -59,7 +59,86 @@ func (uc *KnowledgeUseCase) SearchMaterials(ctx context.Context, industry, query
 	if num <= 0 {
 		num = 3
 	}
-	return uc.retriever.Retrieve(ctx, industry, query, num)
+	// admin 检索验证走行业公共池（brandID 为空 = 纯行业检索，向后兼容）
+	return uc.retriever.Retrieve(ctx, industry, "", query, num)
+}
+
+// ---- 品牌知识库（商户上传——获客智能体转型新增） ----
+
+// UploadBrandMaterial 商户上传品牌私有素材（文本粘贴/文件内容→向量化→入库）。
+// 流程：内容指纹去重 → embedder 向量化（可选）→ kb_materials（brand_id/tenant_id 标记）。
+// 内容指纹 = sha256(前800字)，同段文本重复粘贴不会重复入库。
+func (uc *KnowledgeUseCase) UploadBrandMaterial(ctx context.Context, tenantID, brandID, title, content, summary string) (entity.KnowledgeMaterial, error) {
+	if uc.repo == nil {
+		return entity.KnowledgeMaterial{}, fmt.Errorf("知识库未配置")
+	}
+	if tenantID == "" || brandID == "" {
+		return entity.KnowledgeMaterial{}, fmt.Errorf("%w: 缺少租户或品牌标识", pkg.ErrInvalidArgument)
+	}
+
+	// 内容指纹去重（商户上传无 URL → 用内容前 800 字做指纹）
+	fp := entity.FingerprintContent(content)
+	exists, err := uc.repo.ExistsByFingerprint(ctx, fp)
+	if err == nil && exists {
+		return entity.KnowledgeMaterial{}, fmt.Errorf("%w: 这份资料已上传过（内容相同）", pkg.ErrAlreadyExists)
+	}
+
+	// 取品牌行业（对齐公共池检索维度；取不到用"通用"）
+	industry := "通用"
+
+	mat := entity.KnowledgeMaterial{
+		ID:             fmt.Sprintf("km-%d", time.Now().UnixNano()),
+		BrandID:        brandID,
+		TenantID:       tenantID,
+		Industry:       industry,
+		URLFingerprint: fp,
+		Title:          title,
+		Content:        content,
+		Summary:        summary,
+		CrawlKeyword:   "merchant_upload",
+		Status:         entity.MaterialStatusActive,
+		CreatedAt:      time.Now(),
+	}
+
+	// 向量化（可选：embedder 未配置或失败 → 素材仍入库，只是不可检索）
+	if uc.embedder != nil {
+		embedText := title + "\n" + summary
+		if vec, err := uc.embedder.Embed(ctx, embedText); err == nil && len(vec) > 0 {
+			mat.Embedding = vec
+		} else if uc.logger != nil {
+			uc.logger.Warn("品牌素材向量化失败（素材已入库，暂不可检索）",
+				port.String("brand_id", brandID), port.String("title", title))
+		}
+	}
+
+	if !mat.IsValid() {
+		return entity.KnowledgeMaterial{}, fmt.Errorf("%w: 素材校验失败（标题/内容/品牌不能为空）", pkg.ErrInvalidArgument)
+	}
+	if err := uc.repo.Save(ctx, &mat); err != nil {
+		return entity.KnowledgeMaterial{}, fmt.Errorf("保存素材失败: %w", err)
+	}
+	return mat, nil
+}
+
+// ListBrandMaterials 列出品牌私有素材（tenantID 隔离）。
+func (uc *KnowledgeUseCase) ListBrandMaterials(ctx context.Context, tenantID, brandID string) ([]entity.KnowledgeMaterial, int64, error) {
+	if uc.repo == nil {
+		return nil, 0, fmt.Errorf("知识库未配置")
+	}
+	materials, err := uc.repo.ListByBrand(ctx, tenantID, brandID, 100, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, _ := uc.repo.CountByBrand(ctx, brandID)
+	return materials, total, nil
+}
+
+// DeleteBrandMaterial 删除品牌私有素材（tenantID 隔离）。
+func (uc *KnowledgeUseCase) DeleteBrandMaterial(ctx context.Context, tenantID, brandID, materialID string) error {
+	if uc.repo == nil {
+		return fmt.Errorf("知识库未配置")
+	}
+	return uc.repo.DeleteByBrand(ctx, tenantID, brandID, materialID)
 }
 
 // ---- 行业采集配置 ----

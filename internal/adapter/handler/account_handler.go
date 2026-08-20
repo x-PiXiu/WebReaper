@@ -153,6 +153,13 @@ func (h *AccountHandler) HandleDeleteAccount(c *gin.Context) {
 
 // ---- 发布管理端点 ----
 
+// HandleListChannels GET /api/v1/geo/publish/channels —— 发布通道能力清单。
+// 前端能力驱动的数据源：选内容形态 → 过滤可用平台 → 按约束动态生成检查清单。
+// 新平台注册即自动出现（规则归适配器声明，前端零硬编码）。
+func (h *AccountHandler) HandleListChannels(c *gin.Context) {
+	success(c, gin.H{"channels": h.publishUC.ChannelCapabilities()})
+}
+
 // HandlePublish POST /api/v1/geo/publish —— 半自动发布（生成预填链接）。
 func (h *AccountHandler) HandlePublish(c *gin.Context) {
 	tenantID := middleware.CurrentTenantID(c)

@@ -44,10 +44,12 @@ const CATEGORIES = [
   { key: 'other', label: '其他', icon: <AppstoreOutlined /> },
 ]
 
-// 傻瓜化：12 种模式收敛为 3 个高频卡片 + "更多模式"折叠——
-// 90% 用户只用文生视频/图生视频/文生图，其余 9 种是专业功能，默认收起
-const QUICK_MODES = ['text2video', 'img2video', 'text2image']
-const MORE_MODES = Object.keys(SUBTYPE_META).filter((st) => !QUICK_MODES.includes(st))
+// 傻瓜化三档分层（与 admin 模式开关同口径——此处只决定"出现顺序与分组"，
+// 是否出现由服务端 Enabled 过滤决定：admin 关掉的模式不会出现在 types 里）：
+//   默认集（快捷卡片区）：实体店/线上运营都用得上的核心创作
+//   进阶折叠：参考生视频的配套（音色互通 voice_id / 主体库 server_id 复用）+ admin 开启的其他模式
+const TIER_DEFAULT = ['text2image', 'text2video', 'img2video', 'tts', 'digital_human', 'reference2video']
+const TIER_ADVANCED = ['voice_clone', 'subject']
 
 const STATE_META: Record<string, { color: string; label: string }> = {
   created: { color: 'default', label: '排队中' },
@@ -426,6 +428,12 @@ export default function CreationWorkbench({ embedded }: { embedded?: boolean }) 
       </div>
     )
   }
+
+  // 分层渲染：默认集（服务端已过滤后的可用模式，按 TIER_DEFAULT 排序）+ 其余进折叠
+  const availableSts = new Set(modelEntries.flatMap((e) => e.endpoints.map((ep) => ep.sub_type)))
+  const quickModes = TIER_DEFAULT.filter((st) => availableSts.has(st))
+  const moreModes = [...TIER_ADVANCED, ...Object.keys(SUBTYPE_META).filter((st) => !TIER_DEFAULT.includes(st) && !TIER_ADVANCED.includes(st))]
+    .filter((st) => availableSts.has(st))
 
   // ---- 画布：当前模式所有成功产物（多结果缩略条——即梦式）----
   interface CanvasItem { taskId: string; url: string; cover?: string; type: string; createdAt: string }
@@ -1079,22 +1087,24 @@ export default function CreationWorkbench({ embedded }: { embedded?: boolean }) 
                   <div style={{ marginBottom: 10 }}>
                     <Text strong style={{ display: 'block', marginBottom: 8 }}>想创作什么？</Text>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
-                      {QUICK_MODES.map((st) => modeCard(st))}
+                      {quickModes.map((st) => modeCard(st))}
                     </div>
                   </div>
-                  {/* 专业模式收进折叠区（数字人/声音克隆/配音/音乐等） */}
-                  <Collapse
-                    ghost size="small" style={{ marginBottom: 16 }}
-                    items={[{
-                      key: 'more',
-                      label: <span style={{ fontSize: 13 }}>更多模式（配音 / 克隆音色 / 数字人 / 音乐 等 {MORE_MODES.length} 种进阶玩法）</span>,
-                      children: (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
-                          {MORE_MODES.map((st) => modeCard(st))}
-                        </div>
-                      ),
-                    }]}
-                  />
+                  {/* 进阶折叠（配套模式 + admin 开启的其他模式——服务端驱动；无则整块隐藏） */}
+                  {moreModes.length > 0 && (
+                    <Collapse
+                      ghost size="small" style={{ marginBottom: 16 }}
+                      items={[{
+                        key: 'more',
+                        label: <span style={{ fontSize: 13 }}>更多模式（声音克隆 / 主体库 等 {moreModes.length} 种进阶玩法）</span>,
+                        children: (
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+                            {moreModes.map((st) => modeCard(st))}
+                          </div>
+                        ),
+                      }]}
+                    />
+                  )}
                   <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                     {canvasView}
                     {rightPanel}

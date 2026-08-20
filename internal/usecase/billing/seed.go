@@ -47,6 +47,7 @@ func DefaultPlans() []entity.Plan {
 				"nearby":          30,  // 每月 30 次附近同行搜索（地图 API）
 				"diagnose":        10,  // 每月 10 次诊断
 				"keyword-distill": 30,  // 每月 30 次关键词蒸馏
+				"generation":      10,  // 每月 10 次视频/图片生成（获客主线体验门槛）
 			},
 			Features:  []string{}, // 无高级功能
 			Status:    entity.PlanStatusActive,
@@ -62,6 +63,7 @@ func DefaultPlans() []entity.Plan {
 				"nearby":          300,
 				"diagnose":        80,
 				"keyword-distill": 300,
+				"generation":      200, // 每月 200 次视频/图片生成（获客主力场景）
 			},
 			Features: []string{
 				"auto-monitor",  // 自动盯盘
@@ -82,6 +84,7 @@ func DefaultPlans() []entity.Plan {
 				"nearby":          -1,
 				"diagnose":        -1,
 				"keyword-distill": -1,
+				"generation":      -1, // 无限
 			},
 			Features: []string{
 				"auto-monitor",

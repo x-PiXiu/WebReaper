@@ -34,7 +34,7 @@ export function lowSampleHint(sampleCount?: number): string {
 
 /** 提及率一句话解释（tooltip 常用） */
 export const MENTION_RATE_TIP =
-  '提及率 = 问 AI 的次数里，它提到你的比例。比如问 10 次"装修公司哪家好"，AI 提到你 3 次 = 30%'
+  'AI 推荐度 = 问 AI 的次数里，它提到你的比例。比如问 10 次"装修公司哪家好"，AI 提到你 3 次 = 30%'
 
 /** 收录一句话解释 */
 export const INDEXED_TIP =

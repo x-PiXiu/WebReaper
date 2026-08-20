@@ -75,6 +75,25 @@ const (
 	ContentTypeAudio   = "audio"   // 音频
 )
 
+// ChannelConstraints 平台内容形态约束（发布前校验的单一事实源——规则归平台适配器声明，
+// 前端据此动态生成检查清单，不再硬编码）。零值 = 无约束。按内容形态分别声明。
+type ChannelConstraints struct {
+	TitleMaxRunes int `json:"title_max_runes,omitempty"` // 标题最大字数（0=不限）
+	MinImages     int `json:"min_images,omitempty"`      // 最少配图数（0=不要求）
+	MinVideos     int `json:"min_videos,omitempty"`      // 最少视频数（0=不要求）
+}
+
+// ChannelInfo 发布通道能力清单（GET /geo/publish/channels 下发——前端能力驱动的数据源：
+// 选内容形态 → 过滤可用平台 → 按约束生成检查清单。新平台注册即自动出现，前端零改动）。
+type ChannelInfo struct {
+	Platform     string                        `json:"platform"`
+	Name         string                        `json:"name"`           // 商户友好名（知乎/小红书）
+	ContentTypes []string                      `json:"content_types"`  // 支持的内容形态（article/image/video/audio）
+	Constraints  map[string]ChannelConstraints `json:"constraints,omitempty"` // key=内容形态
+	SemiAuto     bool                          `json:"semi_auto"`      // 半自动可用
+	Auto         bool                          `json:"auto"`           // 全自动可用
+}
+
 type PublishJob struct {
 	ID          string    // 任务 ID
 	TenantID    string    // 租户隔离
