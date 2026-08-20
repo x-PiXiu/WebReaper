@@ -110,7 +110,7 @@ function AskResultCard({ question, results, onRetest, retestText }: { question: 
       <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 10, background: 'var(--wr-primary-bg)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <ThunderboltOutlined style={{ color: 'var(--wr-primary)' }} />
         <Text style={{ fontSize: 13, flex: 1, minWidth: 200 }}>{act.text}</Text>
-        <Button size="small" type="primary" onClick={() => navigate('/m/studio')}>{act.label}</Button>
+        <Button size="small" type="primary" onClick={() => navigate('/m/compose')}>{act.label}</Button>
       </div>
     </Card>
   )

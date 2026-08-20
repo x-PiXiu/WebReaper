@@ -47,6 +47,12 @@ export type WorkItem = {
   likes?: number
   comments?: number
   leads?: number
+  /** 真实文章内容 ID（发布中心 contentId） */
+  contentId?: string
+  /** 多媒体产物 URL（发布中心 mediaUrls） */
+  mediaUrls?: string[]
+  brandId?: string
+  source?: 'demo' | 'article' | 'media' | 'wizard'
 }
 
 export type MetricPoint = { day: string; views: number; leads: number; engage: number }

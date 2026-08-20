@@ -9,7 +9,7 @@ const { Text } = Typography
 // 设计动机：此前商户端历史卡片只有 2 行摘要、结果面板挤在半宽列——
 // 长文章根本没法读；管理端却有完整 Drawer。统一为一个组件：
 //   - 已发布 → iframe 渲染真实公开页（所见即爬虫所得）
-//   - 草稿 → 全文视图（可读排版）+ GEO 评分摘要
+//   - 草稿 → 全文视图（可读排版）+ AI 推荐度摘要
 export default function ContentPreviewDrawer({
   content,
   onClose,
@@ -29,7 +29,7 @@ export default function ContentPreviewDrawer({
       {content && (
         <>
           <Space size={8} style={{ marginBottom: 16 }}>
-            <Tag color={scoreColor(score)} style={{ fontWeight: 600 }}>GEO {score.toFixed(0)}</Tag>
+            <Tag color={scoreColor(score)} style={{ fontWeight: 600 }}>AI 推荐度 {score.toFixed(0)}</Tag>
             <Text type="secondary" style={{ fontSize: 12 }}>{scoreLevel(score)}</Text>
             {content.status === 'published' ? (
               <Tag color="success">已发布</Tag>

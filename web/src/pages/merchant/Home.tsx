@@ -15,7 +15,7 @@ const { Text, Title } = Typography
 const JOURNEY = [
   { key: 'persona', label: '人设档案', desc: '定义账号人设与知识', path: '/m/brands', icon: <UserOutlined /> },
   { key: 'assets', label: '资产库', desc: '形象 · 音色 · 分镜 · 封面', path: '/m/assets', icon: <DatabaseOutlined /> },
-  { key: 'compose', label: '内容合成', desc: '分步向导产出成片', path: '/m/compose', icon: <VideoCameraOutlined /> },
+  { key: 'compose', label: '内容合成', desc: '写文章 / 做视频', path: '/m/compose', icon: <VideoCameraOutlined /> },
   { key: 'works', label: '我的作品', desc: '草稿与成片统一管理', path: '/m/works', icon: <AppstoreOutlined /> },
   { key: 'publish', label: '发布中心', desc: '账号绑定与发布', path: '/m/distribution', icon: <SendOutlined /> },
   { key: 'analytics', label: '作品数据', desc: '播放 · 互动 · 线索', path: '/m/analytics', icon: <FundOutlined /> },

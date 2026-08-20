@@ -18,7 +18,6 @@ const Distribution = lazy(() => import('./pages/merchant/Distribution'))
 const Checkup = lazy(() => import('./pages/merchant/checkup/Checkup'))
 const Studio = lazy(() => import('./pages/merchant/studio/Studio'))
 const AssetLibrary = lazy(() => import('./pages/merchant/assets/AssetLibrary'))
-const ComposeWizard = lazy(() => import('./pages/merchant/compose/ComposeWizard'))
 const MyWorks = lazy(() => import('./pages/merchant/works/MyWorks'))
 const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
 const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
@@ -68,7 +67,7 @@ export default function App() {
           <Route path="/m/dashboard" element={<LazyPage><MerchantHome /></LazyPage>} />
           <Route path="/m/brands" element={<LazyPage><Brands /></LazyPage>} />
           <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
-          <Route path="/m/compose" element={<LazyPage><ComposeWizard /></LazyPage>} />
+          <Route path="/m/compose" element={<LazyPage><Studio /></LazyPage>} />
           <Route path="/m/works" element={<LazyPage><MyWorks /></LazyPage>} />
           <Route path="/m/analytics" element={<LazyPage><WorksAnalytics /></LazyPage>} />
           {/* 兼容旧路由 */}
@@ -77,11 +76,10 @@ export default function App() {
           <Route path="/m/indexing-report" element={<Navigate to="/m/analytics" replace />} />
           <Route path="/m/visibility" element={<Navigate to="/m/analytics" replace />} />
           <Route path="/m/studio" element={<Navigate to="/m/compose" replace />} />
-          <Route path="/m/content" element={<Navigate to="/m/compose" replace />} />
-          <Route path="/m/creation" element={<Navigate to="/m/compose" replace />} />
+          <Route path="/m/content" element={<Navigate to="/m/compose?tab=article" replace />} />
+          <Route path="/m/creation" element={<Navigate to="/m/compose?tab=media" replace />} />
           <Route path="/m/nearby" element={<Navigate to="/m/brands" replace />} />
-          {/* 旧页保留可直达（隐藏入口，便于对照） */}
-          <Route path="/m/studio-legacy" element={<LazyPage><Studio /></LazyPage>} />
+          <Route path="/m/studio-legacy" element={<Navigate to="/m/compose" replace />} />
           <Route path="/m/checkup-legacy" element={<LazyPage><Checkup /></LazyPage>} />
           <Route path="/m/distribution" element={<LazyPage><Distribution /></LazyPage>} />
           <Route path="/m/my-plan" element={<LazyPage><MyPlan /></LazyPage>} />

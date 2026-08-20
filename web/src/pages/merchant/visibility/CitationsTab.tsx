@@ -194,7 +194,7 @@ export default function CitationsTab({
                 {
                   title: '操作', key: 'action', width: 90,
                   render: (_: unknown) => (
-                    <a onClick={() => navigate('/m/studio')} style={{ fontSize: 12 }}>去生产内容 →</a>
+                    <a onClick={() => navigate('/m/compose')} style={{ fontSize: 12 }}>去生产内容 →</a>
                   ),
                 },
               ]}

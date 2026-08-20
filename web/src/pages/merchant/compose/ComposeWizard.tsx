@@ -23,9 +23,10 @@ const STEPS = [
 ]
 
 /**
- * 内容合成分步向导（演示）：选题 → 分镜 → 配音 → 合成 → 封面 → 发布入作品库。
+ * 成片分步向导（演示）：选题 → 分镜 → 配音 → 合成 → 封面 → 发布入作品库。
+ * embedded：嵌在内容合成 Tabs 内时隐藏外层页头。
  */
-export default function ComposeWizard() {
+export default function ComposeWizard({ embedded }: { embedded?: boolean }) {
   const navigate = useNavigate()
   const upsertWork = useWorksStore((s) => s.upsertWork)
   const markPublished = useWorksStore((s) => s.markPublished)
@@ -76,6 +77,8 @@ export default function ComposeWizard() {
       likes: 0,
       comments: 0,
       leads: 0,
+      brandId,
+      source: 'wizard',
     })
     setWorkId(id)
     setComposed(true)
@@ -90,23 +93,30 @@ export default function ComposeWizard() {
     }
     if (publish) {
       markPublished(workId, platform)
-      message.success('已发布并写入作品库（演示数据）')
+      message.success('已写入作品库（演示发布）。真实分发请去发布中心')
       navigate('/m/works')
       return
     }
-    message.success('已保存到我的作品')
+    message.success('已保存到我的作品（演示）')
     navigate('/m/works')
   }
 
   return (
-    <div className="wr-page-content ip-page">
-      <div className="ip-page-hero">
-        <div>
-          <p className="ip-kicker">Compose</p>
-          <h1>内容合成</h1>
-          <p className="ip-lead">分步打造账号 IP 成片——完成后自动进入作品库</p>
+    <div className={embedded ? undefined : 'wr-page-content ip-page'}>
+      {!embedded && (
+        <div className="ip-page-hero">
+          <div>
+            <p className="ip-kicker">Wizard</p>
+            <h1>成片向导</h1>
+            <p className="ip-lead">分步打造账号 IP 成片（演示）——真实生成请用「写文章 / 做视频图片」</p>
+          </div>
         </div>
-      </div>
+      )}
+      {embedded && (
+        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+          演示流程：分镜 / 配音 / 合成不会调用真实生成 API。正式创作请切到「做视频图片」或「写文章」。
+        </Paragraph>
+      )}
 
       <div className="ip-wizard-shell">
         <Steps
@@ -268,7 +278,7 @@ export default function ComposeWizard() {
             <section className="ip-wizard-panel">
               <Title level={4}>入库与发布</Title>
               <Paragraph type="secondary">
-                保存即进入「我的作品」。选择发布将写入演示平台数据，并跳转作品库。
+                保存即进入「我的作品」。「发布」仅为演示状态；真实账号分发请走发布中心。
               </Paragraph>
               <div className="ip-form-stack">
                 <label>目标平台（演示）</label>

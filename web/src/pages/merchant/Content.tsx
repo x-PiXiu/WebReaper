@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Switch, Collapse, Segmented } from 'antd'
-import { FileTextOutlined, FileSearchOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
+import { FileTextOutlined, DatabaseOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { scoreColor, scoreLevel } from '../../utils/geo'
@@ -9,12 +9,13 @@ import { citabilityOf } from '../../utils/citability'
 import { useBrandContext } from '../../hooks/useBrands'
 import PublishToSiteButton from '../../components/PublishToSiteButton'
 import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
+import { useWorksStore } from '../../store/works'
 import type { Brand, Keyword, OptimizedContent } from '../../types/api'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
 
-// GEO 5 维度配置（标签 + 取值 key + 溯源说明——数据怎么来的，逐项人话）
+// 内容质量 5 维度（标签 + 取值 key + 溯源说明）
 const DIMENSIONS: { label: string; key: keyof OptimizedContent['score']; tip: string }[] = [
   { label: '权威性', key: 'authority', tip: '有没有数据、来源、专业依据——AI 更信任有据可查的内容' },
   { label: '具体性', key: 'specificity', tip: '有没有具体数字和事实细节，而不是空话套话' },
@@ -23,7 +24,7 @@ const DIMENSIONS: { label: string; key: keyof OptimizedContent['score']; tip: st
   { label: '时效性', key: 'recency', tip: '信息新不新鲜——提到近期时间和新事件的加分' },
 ]
 
-// 目标 AI 引擎偏好（GEO 优化侧差异：按引擎偏好调整内容格式，提高被引用概率）
+// 目标 AI 引擎偏好（按引擎偏好调整内容格式）
 const ENGINE_OPTIONS = [
   { value: '', label: '通用（不指定）' },
   { value: 'chatgpt', label: 'ChatGPT' },
@@ -46,7 +47,8 @@ const FORMAT_OPTIONS = [
 export default function Content({ embedded }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  // 全局品牌上下文：与关键词/分发/监测页共享，跨页不丢
+  const upsertWork = useWorksStore((s) => s.upsertWork)
+  // 全局品牌上下文：与分发/监测页共享，跨页不丢
   const { brands, brandId: selectedBrand, setCurrentBrand } = useBrandContext()
   const [originalText, setOriginalText] = useState('')
   const [topic, setTopic] = useState('') // 想写什么（可选——获客智能体转型：替代关键词选择）
@@ -84,8 +86,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
     return [...keywords].sort((a, b) => (lastByKw.get(b.id) || 0) - (lastByKw.get(a.id) || 0))
   }, [keywords, monitorResults])
 
-  // 智能预选（傻瓜化 Q4）：进入页面/切换品牌自动预选前 3 个关键词（最近监测优先）——
-  // 打开即可直接点"帮我写"；用户手动改过则不覆盖（只在每个品牌首次进入时预选）
+  // 智能预选：高级选项里的可选关键词种子（留空也可生成）
   const lastPreselectBrand = useRef<string | null>(null)
   useEffect(() => {
     if (!selectedBrand || orderedKeywords.length === 0) return
@@ -102,6 +103,14 @@ export default function Content({ embedded }: { embedded?: boolean }) {
     enabled: !!selectedBrand,
   })
 
+  const { data: knowledgePack } = useQuery({
+    queryKey: ['brand-knowledge', selectedBrand],
+    queryFn: () => businessApi.listBrandKnowledge(selectedBrand!),
+    enabled: !!selectedBrand,
+    staleTime: 60_000,
+  })
+  const knowledgeCount = knowledgePack?.total ?? knowledgePack?.materials?.length ?? 0
+
   // P5-02 内容引用统计：每篇被 AI 回答引用几次（归因细化到篇）
   const { data: citations = {} } = useQuery({
     queryKey: ['geo-citations', selectedBrand],
@@ -109,10 +118,14 @@ export default function Content({ embedded }: { embedded?: boolean }) {
     enabled: !!selectedBrand,
   })
 
+  const seedKeyword = () =>
+    genKeywords[0] || topic.trim() || brands.find((b: Brand) => b.id === selectedBrand)?.name || ''
+
   // 内容优化（有原始内容时调用）
   const handleOptimize = async () => {
-    if (!selectedBrand || !originalText.trim() || genKeywords.length === 0) {
-      message.warning('请选择品牌、关键词和原始内容')
+    const kw = seedKeyword()
+    if (!selectedBrand || !originalText.trim() || !kw) {
+      message.warning('请选择品牌并填写选题或关键词，再贴入原始内容')
       return
     }
     setOptimizing(true)
@@ -120,7 +133,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
     try {
       const res = await businessApi.optimizeContent({
         brand_id: selectedBrand,
-        keyword: genKeywords[0],
+        keyword: kw,
         original_text: originalText,
         target_engine: targetEngine || undefined,
         format: format || undefined,
@@ -128,6 +141,18 @@ export default function Content({ embedded }: { embedded?: boolean }) {
       setResult(res)
       message.success('优化完成')
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
+      if (res.id) {
+        upsertWork({
+          id: `article-${res.id}`,
+          title: res.title || topic || '未命名文章',
+          coverAccent: '#0f766e',
+          status: 'ready',
+          createdAt: res.created_at || new Date().toISOString(),
+          contentId: res.id,
+          brandId: selectedBrand,
+          source: 'article',
+        })
+      }
     } catch {
     } finally {
       setOptimizing(false)
@@ -135,7 +160,6 @@ export default function Content({ embedded }: { embedded?: boolean }) {
   }
 
   // 从零生成内容（非流式：走结构化 JSON 输出，标题/正文零解析成本）
-  // GEO 内容生成用非流式——结构化输出更可控；流式只给 Chat 用
   const handleGenerate = async () => {
     if (!selectedBrand) {
       message.warning('请选择品牌')
@@ -148,22 +172,34 @@ export default function Content({ embedded }: { embedded?: boolean }) {
       const brandInfo = brands.find((b: Brand) => b.id === selectedBrand)
       const res = await businessApi.generateContent(selectedBrand, {
         topic: topic || undefined,
+        keywords: genKeywords.length > 0 ? genKeywords : undefined,
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
         target_engine: targetEngine || undefined,
         format: format || undefined,
-        citation_toggles: citationToggles.length > 0 ? citationToggles : undefined, // 可引用结构开关（v3 P2）
-        use_diagnose: useDiagnose, // P5-03 诊断→优化闭环：先诊断再对症下药
+        citation_toggles: citationToggles.length > 0 ? citationToggles : undefined,
+        use_diagnose: useDiagnose,
       })
       setResult(res)
       const modeLabel = topic ? `（围绕“${topic.slice(0, 10)}”）` : ''
       const scoreLabel = res.score?.total ? `，AI 推荐度 ${res.score.total.toFixed(0)}` : ''
       message.success(`内容生成成功${modeLabel}${scoreLabel}${useDiagnose ? '（已按诊断建议优化）' : ''}`)
-      // A4 重复内容软提示：同品牌已有相似已发布内容
       const dups = (res as OptimizedContent & { duplicate_warnings?: string[] }).duplicate_warnings
       if (dups?.length) {
         message.warning(dups[0], 6)
       }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
+      if (res.id) {
+        upsertWork({
+          id: `article-${res.id}`,
+          title: res.title || topic || '未命名文章',
+          coverAccent: '#0f766e',
+          status: 'ready',
+          createdAt: res.created_at || new Date().toISOString(),
+          contentId: res.id,
+          brandId: selectedBrand,
+          source: 'article',
+        })
+      }
     } catch { /* 拦截器已提示 */ } finally {
       setGenerating(false)
     }
@@ -195,15 +231,16 @@ export default function Content({ embedded }: { embedded?: boolean }) {
 
   // AI 生成原始素材（填入编辑区，用户可编辑后再优化）
   const handleGenerateDraft = async () => {
-    if (!selectedBrand || genKeywords.length === 0) {
-      message.warning('请先选择品牌和关键词')
+    if (!selectedBrand) {
+      message.warning('请先选择品牌')
       return
     }
     setDrafting(true)
     try {
       const brandInfo = brands.find((b: Brand) => b.id === selectedBrand)
       const res = await businessApi.generateContent(selectedBrand, {
-        keywords: [genKeywords[0]],
+        topic: topic || undefined,
+        keywords: genKeywords.length > 0 ? genKeywords.slice(0, 1) : undefined,
         brand_info: brandInfo ? `${brandInfo.name}：${brandInfo.positioning || ''}` : '',
         target_engine: targetEngine || undefined,
         format: format || undefined,
@@ -236,7 +273,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
               <h1>内容生成</h1>
               <p>AI 帮你写文章</p>
             </div>
-            <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/studio?tab=media')}>
+            <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/compose?tab=media')}>
               多媒体创作
             </Button>
           </div>
@@ -257,7 +294,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
             </div>
             {selectedBrand && (
               <Space size={24}>
-                <ContextStat icon={<FileSearchOutlined />} value={keywords.length} label="关键词" />
+                <ContextStat icon={<DatabaseOutlined />} value={knowledgeCount} label="知识库" />
                 <ContextStat icon={<FileTextOutlined />} value={contents.length} label="历史内容" />
               </Space>
             )}
@@ -320,6 +357,21 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                     label: <span style={{ fontSize: 13 }}>高级选项（一般不用改）</span>,
                     children: (<>
                       <div style={{ marginBottom: 16 }}>
+                        <Text strong style={{ display: 'block', marginBottom: 8 }}>选题种子词（可选）</Text>
+                        <Select
+                          mode="tags"
+                          style={{ width: '100%' }}
+                          value={genKeywords}
+                          onChange={setGenKeywords}
+                          options={orderedKeywords.map((k: Keyword) => ({ value: k.term, label: k.term }))}
+                          placeholder="可从历史词选，也可自行输入；留空则按选题/人设写"
+                          maxTagCount={3}
+                        />
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+                          不再强制依赖关键词库；这里只是可选强化信号
+                        </Text>
+                      </div>
+                      <div style={{ marginBottom: 16 }}>
                         <Text strong style={{ display: 'block', marginBottom: 8 }}>主要想让哪个 AI 引用？</Text>
                         <Select
                           style={{ width: '100%' }}
@@ -372,7 +424,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                         size="small"
                         type="link"
                         loading={drafting}
-                        disabled={!selectedBrand || genKeywords.length === 0}
+                        disabled={!selectedBrand}
                         onClick={handleGenerateDraft}
                       >
                         让 AI 先写一版
@@ -398,7 +450,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                   }}>
                     <EditOutlined style={{ fontSize: 13, color: 'var(--wr-primary)' }} />
                     <Text style={{ fontSize: 12, color: 'var(--wr-primary)' }}>
-                      AI 会围绕关键词改写，让它更容易被 AI 搜索引用
+                      AI 会围绕选题与人设资料改写，让内容更适合发布获客
                     </Text>
                   </div>
 
@@ -419,8 +471,8 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                 {/* AI 将参考（获客智能体：透明度提示——让用户知道 AI 不是睛写） */}
                 <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: 'var(--wr-bg-elevated)', fontSize: 12 }}>
                   <Text type="secondary">AI 将参考：</Text>
-                  <Text strong>{brands.find((b: Brand) => b.id === selectedBrand)?.name || '品牌资料'}</Text>
-                  <Text type="secondary"> 的品牌资料与知识库素材（自动注入，无需手动选择）</Text>
+                  <Text strong>{brands.find((b: Brand) => b.id === selectedBrand)?.name || '人设资料'}</Text>
+                  <Text type="secondary"> + 知识库 {knowledgeCount} 份素材（自动注入）</Text>
                 </div>
 
                 {/* 统一操作按钮 */}
@@ -579,9 +631,9 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                     <Button
                       type="primary"
                       icon={<ExportOutlined />}
-                      onClick={() => navigate(`/m/distribution?contentId=${result.id}`)}
+                      onClick={() => navigate(`/m/distribution?contentId=${result.id}${selectedBrand ? `&brandId=${selectedBrand}` : ''}`)}
                     >
-                      去社媒分发（知乎 / 小红书）
+                      去发布中心分发
                     </Button>
                   </div>
 
@@ -614,7 +666,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
               ) : (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="选择关键词后点击生成，结果会显示在这里"
+                  description="选好人设后点「帮我写」，结果会显示在这里"
                   style={{ padding: 60 }}
                 />
               )}
@@ -679,7 +731,16 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                       >
                         {c.optimized_text}
                       </Paragraph>
-                      <div style={{ display: 'flex', gap: 4, marginTop: 'auto', paddingTop: 4 }}>
+                      <div style={{ display: 'flex', gap: 4, marginTop: 'auto', paddingTop: 4, flexWrap: 'wrap' }}>
+                        <Button
+                          size="small"
+                          type="link"
+                          icon={<ExportOutlined />}
+                          style={{ fontSize: 12 }}
+                          onClick={() => navigate(`/m/distribution?contentId=${c.id}&brandId=${selectedBrand}`)}
+                        >
+                          去发布中心
+                        </Button>
                         {c.status === 'published' ? (
                           <>
                             <Button size="small" type="link" icon={<ExportOutlined />} href={`/public/articles/${c.id}`} target="_blank" style={{ fontSize: 12 }}>

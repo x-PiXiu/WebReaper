@@ -1,24 +1,29 @@
 import { useSearchParams } from 'react-router-dom'
-import { Tabs } from 'antd'
-import { EditOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { Tabs, Tag } from 'antd'
+import { EditOutlined, VideoCameraOutlined, RocketOutlined } from '@ant-design/icons'
 import Content from '../Content'
 import CreationWorkbench from '../Creation'
+import ComposeWizard from '../compose/ComposeWizard'
+
+const TAB_KEYS = new Set(['media', 'article', 'wizard'])
 
 /**
- * 内容中心（四步主线第 3 步"造内容"）：写文章 / 做视频图片 两种形态合一。
- * 共享全局品牌上下文；两个子页保持各自状态（antd Tabs 已挂载面板不销毁）。
- * Tab 用 searchParams 持久化（?tab=media 深链）。
+ * 内容合成中心：写文章 / 做视频图片（真实 API）+ 成片向导（演示）。
+ * Tab 用 searchParams 持久化（?tab=media|article|wizard）。
  */
 export default function Studio() {
   const [searchParams, setSearchParams] = useSearchParams()
-  // 获客智能体转型：默认打开「做视频图片」——视频创作是主线第二步
-  const activeTab = searchParams.get('tab') === 'article' ? 'article' : 'media'
+  const raw = searchParams.get('tab') || 'media'
+  const activeTab = TAB_KEYS.has(raw) ? raw : 'media'
 
   return (
-    <div className="wr-page-content" style={{ paddingTop: 4 }}>
-      <div className="wr-page-header" style={{ marginBottom: 8 }}>
-        <h1>内容中心</h1>
-        <p>让 AI 帮你做视频、写文章——内容发得越多，客人越容易找到你</p>
+    <div className="wr-page-content ip-page" style={{ paddingTop: 4 }}>
+      <div className="ip-page-hero" style={{ marginBottom: 12 }}>
+        <div>
+          <p className="ip-kicker">Compose</p>
+          <h1>内容合成</h1>
+          <p className="ip-lead">写文章 / 做视频图片，生成后去发布中心分发</p>
+        </div>
       </div>
 
       <Tabs
@@ -26,14 +31,24 @@ export default function Studio() {
         onChange={(k) => setSearchParams({ tab: k }, { replace: true })}
         items={[
           {
+            key: 'media',
+            label: <span><VideoCameraOutlined /> 做视频图片</span>,
+            children: <CreationWorkbench embedded />,
+          },
+          {
             key: 'article',
             label: <span><EditOutlined /> 写文章</span>,
             children: <Content embedded />,
           },
           {
-            key: 'media',
-            label: <span><VideoCameraOutlined /> 做视频图片</span>,
-            children: <CreationWorkbench embedded />,
+            key: 'wizard',
+            label: (
+              <span>
+                <RocketOutlined /> 成片向导{' '}
+                <Tag style={{ marginInlineStart: 4, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>演示</Tag>
+              </span>
+            ),
+            children: <ComposeWizard embedded />,
           },
         ]}
       />

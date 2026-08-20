@@ -564,7 +564,7 @@ export default function Brands() {
                               灰色（未填写）项 = AI 理解你的事实缺口——补齐后 AI 才能准确描述、引用你
                             </Text>
                             <Space style={{ marginTop: 10 }}>
-                              <Button size="small" type="link" onClick={() => navigate('/m/studio')}>去生成内容 →</Button>
+                              <Button size="small" type="link" onClick={() => navigate('/m/compose')}>去生成内容 →</Button>
                               <Button size="small" type="link" onClick={() => navigate('/m/analytics')}>查看作品数据 →</Button>
                             </Space>
                           </>),
