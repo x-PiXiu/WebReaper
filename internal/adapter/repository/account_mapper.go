@@ -14,6 +14,7 @@ func accountToPO(e entity.Account) AccountPO {
 		CookieEncrypted: e.CookieEncrypted, Health: e.Health, LoginMethod: e.LoginMethod,
 		ExpiresAt: timeToPtr(e.ExpiresAt), BoundAt: timeToPtr(e.BoundAt), LastUsedAt: timeToPtr(e.LastUsedAt),
 		AuthType: e.AuthType, AccessTokenEnc: e.AccessTokenEnc, RefreshTokenEnc: e.RefreshTokenEnc, OpenID: e.OpenID,
+		RefreshExpiresAt: timeToPtr(e.RefreshExpiresAt),
 	}
 }
 
@@ -31,6 +32,7 @@ func accountFromPO(p AccountPO) entity.Account {
 		CookieEncrypted: p.CookieEncrypted, Health: health, LoginMethod: p.LoginMethod,
 		ExpiresAt: ptrToTime(p.ExpiresAt), BoundAt: ptrToTime(p.BoundAt), LastUsedAt: ptrToTime(p.LastUsedAt),
 		AuthType: authType, AccessTokenEnc: p.AccessTokenEnc, RefreshTokenEnc: p.RefreshTokenEnc, OpenID: p.OpenID,
+		RefreshExpiresAt: ptrToTime(p.RefreshExpiresAt),
 	}
 }
 

@@ -20,10 +20,11 @@ type AccountPO struct {
 	BoundAt         *time.Time
 	LastUsedAt      *time.Time
 	// 官方 OAuth 授权（抖音开放平台等）：token 密文 + open_id
-	AuthType          string `gorm:"size:16;default:cookie"` // cookie（扫码浏览器）/ oauth（官方授权）
-	AccessTokenEnc    string `gorm:"type:text"`
-	RefreshTokenEnc   string `gorm:"type:text"`
-	OpenID            string `gorm:"size:128"`
+	AuthType          string     `gorm:"size:16;default:cookie"` // cookie（扫码浏览器）/ oauth（官方授权）
+	AccessTokenEnc    string     `gorm:"type:text"`
+	RefreshTokenEnc   string     `gorm:"type:text"`
+	OpenID            string     `gorm:"size:128"`
+	RefreshExpiresAt  *time.Time `gorm:"index"` // refresh_token 过期时间（续期窗口管理）
 }
 
 func (AccountPO) TableName() string { return "geo_accounts" }

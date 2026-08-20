@@ -119,7 +119,8 @@ func (c *Client) ExchangeCode(_ context.Context, code string) (*entity.OAuthToke
 	}, nil
 }
 
-// RefreshToken 用 refresh_token 换新的 access_token（旧 refresh_token 同时失效，必须落库新的）。
+// RefreshToken 用 refresh_token 换新的 access_token（refresh_token 本身的有效期不变——
+// 30 天窗口从授权起算，延续它需在过期前调 RenewRefreshToken）。
 func (c *Client) RefreshToken(_ context.Context, refreshToken string) (*entity.OAuthToken, error) {
 	resp, err := c.sdk.OauthRefreshToken(new(openapi.OauthRefreshTokenRequest).
 		SetClientKey(c.clientKey).
@@ -145,6 +146,33 @@ func (c *Client) RefreshToken(_ context.Context, refreshToken string) (*entity.O
 		RefreshExpiresIn: int(derefI64(d.RefreshExpiresIn)),
 		OpenID:           derefStr(d.OpenId),
 		Scope:            derefStr(d.Scope),
+	}, nil
+}
+
+// RenewRefreshToken 续期 refresh_token（旧 refresh_token 立即失效，新 token 30 天有效；
+// 每次授权最多 5 次，即单次授权最长 15+30+30×5=195 天，之后必须用户重新授权）。
+// 前提：client_key 具备 renew_refresh_token 权限（控制台权限管理申请）。
+func (c *Client) RenewRefreshToken(_ context.Context, refreshToken string) (*entity.OAuthToken, error) {
+	resp, err := c.sdk.OauthRenewRefreshToken(new(openapi.OauthRenewRefreshTokenRequest).
+		SetClientKey(c.clientKey).
+		SetRefreshToken(refreshToken))
+	if err != nil {
+		return nil, fmt.Errorf("请求抖音开放平台失败: %w", err)
+	}
+	if resp == nil || resp.Data == nil {
+		return nil, fmt.Errorf("抖音返回空响应")
+	}
+	d := resp.Data
+	if d.ErrorCode != nil && *d.ErrorCode != 0 {
+		return nil, fmt.Errorf("续期 refresh_token 失败: error_code=%d %s", *d.ErrorCode, derefStr(d.Description))
+	}
+	if d.RefreshToken == nil || *d.RefreshToken == "" {
+		return nil, fmt.Errorf("续期响应缺少 refresh_token")
+	}
+	return &entity.OAuthToken{
+		RefreshToken:     *d.RefreshToken,
+		ExpiresIn:        int(derefI64(d.ExpiresIn)), // 新 refresh_token 的有效期（30 天）
+		RefreshExpiresIn: int(derefI64(d.ExpiresIn)),
 	}, nil
 }
 

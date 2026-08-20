@@ -67,6 +67,10 @@ type Account struct {
 	RefreshTokenEnc string
 	// OpenID 平台用户唯一标识（OAuth 授权返回；同一应用内 open_id 稳定，用于识别重复绑定）。
 	OpenID string
+	// RefreshExpiresAt refresh_token 过期时间（抖音：授权起 30 天，续期一次 +30 天、
+	// 最多 5 次=最长 195 天；到期前健康检查自动续期，续尽则需用户重新授权）。
+	// ExpiresAt 存的是 access_token 过期时间（抖音 15 天，到期前 48h 自动刷新）。
+	RefreshExpiresAt time.Time
 }
 
 // IsOAuth 是否官方 OAuth 授权账号（发布走 API 通道而非浏览器 RPA）。

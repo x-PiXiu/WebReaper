@@ -101,8 +101,10 @@ func (uc *AccountUseCase) HandleOAuthCallback(ctx context.Context, code, state s
 		RefreshTokenEnc: encRefresh,
 		OpenID:          token.OpenID,
 		ExpiresAt:       now.Add(time.Duration(max(token.ExpiresIn, 3600)) * time.Second),
-		BoundAt:         now,
-		LastUsedAt:      now,
+		// 抖音 refresh_token 30 天（可续期 5 次）；响应未带时长时按 30 天计
+		RefreshExpiresAt: now.Add(time.Duration(max(token.RefreshExpiresIn, 30*24*3600)) * time.Second),
+		BoundAt:          now,
+		LastUsedAt:       now,
 	}
 
 	// 同一 open_id 重新授权 = 续期：复用原账号记录，避免账号池重复
@@ -215,10 +217,12 @@ func (uc *AccountUseCase) Delete(ctx context.Context, tenantID, accountID string
 	return uc.accountRepo.Delete(ctx, tenantID, accountID)
 }
 
-// CheckAccountHealth 检查所有账号的凭据过期状态。
-// - OAuth 账号：access_token 到期前 48h 自动用 refresh_token 续期（用户无感）；
-//   续期失败（refresh_token 也失效/用户在抖音侧解绑）才标记 expired。
-// - cookie 账号：过期直接标记 expired，前端展示"重新绑定"。
+// CheckAccountHealth 检查所有账号的凭据过期状态（OAuth 账号双时钟自动管理）。
+//   - access_token 时钟（ExpiresAt，抖音 15 天）：到期前 48h 用 refresh_token 刷新
+//   - refresh_token 时钟（RefreshExpiresAt，抖音 30 天可续 5 次）：关闭前 7 天续期
+//     （RenewRefreshToken；需控制台申请 renew_refresh_token 权限，无权限则忽略并静默滑向重新授权）
+//   - 双时钟都失败/续期额度耗尽（单次授权最长 195 天）→ 标记 expired，用户重新授权
+// cookie 账号：过期直接标记 expired，前端展示"重新绑定"。
 // 由定时任务每 10 分钟调用一次。
 func (uc *AccountUseCase) CheckAccountHealth(ctx context.Context) {
 	accounts, err := uc.accountRepo.ListAll(ctx)
@@ -230,21 +234,64 @@ func (uc *AccountUseCase) CheckAccountHealth(ctx context.Context) {
 		if acc.Health != entity.AccountHealthActive {
 			continue
 		}
-		if acc.ExpiresAt.IsZero() {
+		if !acc.IsOAuth() {
+			if acc.ExpiresAt.IsZero() || now.After(acc.ExpiresAt) {
+				if !acc.ExpiresAt.IsZero() {
+					_ = uc.accountRepo.UpdateHealth(ctx, acc.ID, entity.AccountHealthExpired)
+				}
+			}
 			continue
 		}
-		if now.After(acc.ExpiresAt) {
+		if uc.oauth == nil {
+			continue
+		}
+		// refresh_token 续期窗口快关（7 天内）→ 先续期（旧 token 失效，必须回写新 token）
+		if !acc.RefreshExpiresAt.IsZero() && now.After(acc.RefreshExpiresAt.Add(-7*24*time.Hour)) {
+			uc.renewOAuthRefreshToken(ctx, acc)
+			// 回读续期后的新窗口再判断 access_token
+			if updated, fErr := uc.accountRepo.FindByID(ctx, acc.TenantID, acc.ID); fErr == nil && updated.RefreshExpiresAt.After(now) {
+				acc = updated
+			}
+		}
+		// access_token 到期前 48h → 刷新
+		if !acc.ExpiresAt.IsZero() && now.After(acc.ExpiresAt) {
 			_ = uc.accountRepo.UpdateHealth(ctx, acc.ID, entity.AccountHealthExpired)
 			continue
 		}
-		// OAuth 账号临期自动续期（提前 48h 窗口；每 10 分钟巡检会命中一次）
-		if acc.IsOAuth() && uc.oauth != nil && now.After(acc.ExpiresAt.Add(-48*time.Hour)) {
+		if !acc.ExpiresAt.IsZero() && now.After(acc.ExpiresAt.Add(-48*time.Hour)) {
 			uc.refreshOAuthAccount(ctx, acc)
 		}
 	}
 }
 
-// refreshOAuthAccount 用 refresh_token 续期并回写账号（旧 refresh_token 同时失效，必须整体更新）。
+// renewOAuthRefreshToken 续期 refresh_token（旧 token 立即失效；无 renew 权限/额度耗尽则不动，
+// 30 天窗口自然滑到 expired 由用户重新授权）。
+func (uc *AccountUseCase) renewOAuthRefreshToken(ctx context.Context, acc entity.Account) {
+	refreshToken, err := uc.vault.Decrypt(acc.RefreshTokenEnc)
+	if err != nil || refreshToken == "" {
+		return
+	}
+	renewed, err := uc.oauth.RenewRefreshToken(ctx, refreshToken)
+	if err != nil {
+		// 无 renew_refresh_token 权限（个体户常见）或 5 次额度耗尽——不标记过期，
+		// 让 refresh_token 30 天窗口自然到期（期间 access_token 刷新仍可用）
+		return
+	}
+	encRefresh, rErr := uc.vault.Encrypt(renewed.RefreshToken)
+	if rErr != nil {
+		return
+	}
+	acc.RefreshTokenEnc = encRefresh
+	if !acc.RefreshExpiresAt.IsZero() { // 基于旧窗口顺延，避免响应时长缺失时丢基准
+		acc.RefreshExpiresAt = acc.RefreshExpiresAt.Add(time.Duration(max(renewed.RefreshExpiresIn, 30*24*3600)) * time.Second)
+	} else {
+		acc.RefreshExpiresAt = time.Now().Add(time.Duration(max(renewed.RefreshExpiresIn, 30*24*3600)) * time.Second)
+	}
+	_ = uc.accountRepo.Save(ctx, acc)
+}
+
+// refreshOAuthAccount 用 refresh_token 刷新 access_token 并回写（抖音刷新 access_token
+// 不改变 refresh_token 有效期；若响应轮换了 refresh_token 则一并回写）。
 func (uc *AccountUseCase) refreshOAuthAccount(ctx context.Context, acc entity.Account) {
 	refreshToken, err := uc.vault.Decrypt(acc.RefreshTokenEnc)
 	if err != nil || refreshToken == "" {
@@ -253,20 +300,20 @@ func (uc *AccountUseCase) refreshOAuthAccount(ctx context.Context, acc entity.Ac
 	}
 	token, err := uc.oauth.RefreshToken(ctx, refreshToken)
 	if err != nil {
-		// refresh_token 失效：需要用户重新授权
+		// refresh_token 失效（error_code 10010）：需要用户重新授权
 		_ = uc.accountRepo.UpdateHealth(ctx, acc.ID, entity.AccountHealthExpired)
 		return
 	}
 	encAccess, aErr := uc.vault.Encrypt(token.AccessToken)
-	encRefresh, rErr := uc.vault.Encrypt(token.RefreshToken)
-	if aErr != nil || rErr == nil && encAccess == "" {
+	if aErr != nil {
 		return // 加密失败保持现状，下次巡检重试
 	}
-	if rErr != nil {
-		return
-	}
 	acc.AccessTokenEnc = encAccess
-	acc.RefreshTokenEnc = encRefresh
+	if token.RefreshToken != "" && token.RefreshToken != refreshToken {
+		if encRefresh, rErr := uc.vault.Encrypt(token.RefreshToken); rErr == nil {
+			acc.RefreshTokenEnc = encRefresh // 平台轮换了 refresh_token，必须回写
+		}
+	}
 	acc.ExpiresAt = time.Now().Add(time.Duration(max(token.ExpiresIn, 3600)) * time.Second)
 	_ = uc.accountRepo.Save(ctx, acc)
 }

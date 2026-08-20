@@ -118,8 +118,11 @@ type OAuthProvider interface {
 	ConnectURL(state string) string
 	// ExchangeCode 用授权码换 token（code 一次性有效）。
 	ExchangeCode(ctx context.Context, code string) (*entity.OAuthToken, error)
-	// RefreshToken 用 refresh_token 换新的 access_token（access_token 过期前续期）。
+	// RefreshToken 用 refresh_token 换新的 access_token（refresh_token 有效期不变）。
 	RefreshToken(ctx context.Context, refreshToken string) (*entity.OAuthToken, error)
+	// RenewRefreshToken 续期 refresh_token（旧 token 失效、新 token 30 天；每次授权最多 5 次，
+	// 单次授权最长 195 天——续期失败说明额度耗尽或无权限，需用户重新授权）。
+	RenewRefreshToken(ctx context.Context, refreshToken string) (*entity.OAuthToken, error)
 	// UserInfo 拉取授权用户公开信息（昵称/头像，账号显示名用）。
 	UserInfo(ctx context.Context, accessToken, openID string) (*entity.OAuthUserInfo, error)
 }
