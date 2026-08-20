@@ -97,6 +97,7 @@ export default function AgentConfigs() {
     llmForm.setFieldsValue({
       name: record.name,
       provider: record.provider,
+      usage: record.usage || '',
       api_key: record.api_key,
       base_url: record.base_url,
       model: record.model,
@@ -117,6 +118,7 @@ export default function AgentConfigs() {
         // 编辑模式：部分更新（name 不可改）
         await businessApi.updateLLMConfig(editingLLM, {
           provider: values.provider,
+          usage: values.usage || '',
           api_key: values.api_key,
           base_url: values.base_url,
           model: values.model,
@@ -193,7 +195,11 @@ export default function AgentConfigs() {
     },
     {
       title: '厂商', dataIndex: 'provider', key: 'provider', width: 100,
-      render: (p: string) => p ? <Tag color="cyan">{p}</Tag> : <Text type="secondary">-</Text>,
+      render: (p: string) => <Tag>{p || '未知'}</Tag>,
+    },
+    {
+      title: '用途', dataIndex: 'usage', key: 'usage', width: 100,
+      render: (u: string) => u === 'vision' ? <Tag color="purple">视觉</Tag> : <Tag>聊天</Tag>,
     },
     {
       title: '模型', dataIndex: 'model', key: 'model', width: 160,
@@ -344,6 +350,17 @@ export default function AgentConfigs() {
                 { value: 'zhipu', label: '智谱 (Zhipu)' },
                 { value: 'qwen', label: '通义千问 (Qwen)' },
                 { value: 'other', label: '其他' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="用途" name="usage"
+            tooltip="区分模型用途：聊天/内容模型（默认）用于内容生成/问答；视觉模型用于浏览器截图分析（Agent 智能化）">
+            <Select
+              placeholder="选择用途（默认聊天）"
+              allowClear
+              options={[
+                { value: '', label: '聊天/内容模型（默认）' },
+                { value: 'vision', label: '视觉模型（浏览器截图分析）' },
               ]}
             />
           </Form.Item>

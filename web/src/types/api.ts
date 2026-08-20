@@ -44,6 +44,7 @@ export interface LLMConfig {
   base_url: string   // 如 https://api.minimaxi.com/v1
   model: string      // 如 MiniMax-M2.5
   cost_per_mtok: number // 每百万 tokens 参考成本（分；成本分析按引擎细分）
+  usage?: string     // 用途：""=聊天模型（默认），"vision"=视觉模型（浏览器截图分析）
 }
 
 // ---- 引擎名单（商户端可见——仅展示字段，不含厂商密钥）----

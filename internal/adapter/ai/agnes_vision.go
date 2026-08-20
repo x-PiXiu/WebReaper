@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"webreaper/internal/adapter/publisher/browsertools"
+	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
 
@@ -60,21 +61,27 @@ type agnesResponse struct {
 	} `json:"error"`
 }
 
-// AgnesVisionLLM 是 browsertools.VisionLLM 的 Agnes 2.5 Flash 实现。
-// 截图 → Agnes 视觉分析 → AgentDecision JSON。
+// AgnesVisionLLM 是 browsertools.VisionLLM 的视觉 LLM 实现。
+// 截图 → 视觉模型分析 → AgentDecision JSON。
+//
+// 支持两种构造方式：
+//   - NewAgnesVisionLLM：直接传参（兼容测试/硬编码）
+//   - NewDynamicVisionLLM：从 llm_configs 按 usage="vision" 动态读取（管理后台热切换，零重启）
+//
+// 转型说明：视觉模型与聊天模型独立配置——聊天模型坏了浏览器 Agent 不受影响，反之亦然。
 type AgnesVisionLLM struct {
 	apiKey  string
 	baseURL string // 默认 https://apihub.agnes-ai.com/v1
 	model   string // 默认 agnes-2.5-flash
 	logger  port.Logger
 	client  *http.Client
+	repo    port.LLMConfigRepository // 可选：非 nil 时从 llm_configs 动态读取（30s TTL 热切换）
 }
 
 // 确保实现 browsertools.VisionLLM 接口。
 var _ browsertools.VisionLLM = (*AgnesVisionLLM)(nil)
 
-// NewAgnesVisionLLM 创建 Agnes 视觉 LLM。
-// apiKey 从 llm_configs 表或 env 获取；baseURL/model 可选（空用默认值）。
+// NewAgnesVisionLLM 创建视觉 LLM（直接传参——兼容测试/硬编码）。
 func NewAgnesVisionLLM(apiKey, baseURL, model string, logger port.Logger) *AgnesVisionLLM {
 	if baseURL == "" {
 		baseURL = "https://apihub.agnes-ai.com/v1"
@@ -91,22 +98,76 @@ func NewAgnesVisionLLM(apiKey, baseURL, model string, logger port.Logger) *Agnes
 	}
 }
 
-// IsConfigured 是否已配置（API Key 非空）。
+// NewDynamicVisionLLM 从 llm_configs 按 usage="vision" 动态读取（管理后台热切换，零重启）。
+// 管理后台配置一条 usage=vision 的 LLM → 30s 缓存过期后自动生效。
+// 未配置时 IsConfigured()=false → AgentRecover 降级为 TryQuickRecover（零成本）。
+func NewDynamicVisionLLM(repo port.LLMConfigRepository, logger port.Logger) *AgnesVisionLLM {
+	return &AgnesVisionLLM{
+		repo:   repo,
+		logger: logger,
+		client: &http.Client{Timeout: 60 * time.Second},
+	}
+}
+
+// IsConfigured 是否已配置（直接传参非空 或 从 llm_configs 能读到 vision 配置）。
 func (v *AgnesVisionLLM) IsConfigured() bool {
+	if v.repo != nil {
+		return v.resolveConfig() != nil
+	}
 	return v.apiKey != ""
 }
 
-// AnalyzeScreenshot 实现 VisionLLM 接口——截图 → Agnes → AgentDecision。
+// resolveConfig 从 llm_configs 读取视觉模型配置（usage="vision"）。
+// 管理后台改配置后 30s 缓存过期自动生效——零重启。
+func (v *AgnesVisionLLM) resolveConfig() *entity.LLMConfig {
+	if v.repo == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cfg, err := v.repo.FindByUsage(ctx, "vision")
+	if err != nil || cfg.APIKey == "" {
+		return nil
+	}
+	return &cfg
+}
+
+// effectiveConfig 返回生效的配置（动态优先，硬编码兜底）。
+func (v *AgnesVisionLLM) effectiveConfig() (apiKey, baseURL, model string) {
+	if cfg := v.resolveConfig(); cfg != nil {
+		apiKey = cfg.APIKey
+		baseURL = cfg.BaseURL
+		model = cfg.Model
+	} else {
+		apiKey = v.apiKey
+		baseURL = v.baseURL
+		model = v.model
+	}
+	if apiKey == "" {
+		return "", "", ""
+	}
+	if baseURL == "" {
+		baseURL = "https://apihub.agnes-ai.com/v1"
+	}
+	if model == "" {
+		model = "agnes-2.5-flash"
+	}
+	return apiKey, baseURL, model
+}
+
+// AnalyzeScreenshot 实现 VisionLLM 接口——截图 → 视觉模型 → AgentDecision。
+// 使用 effectiveConfig 动态读取——管理后台改配置后 30s 缓存过期自动生效。
 func (v *AgnesVisionLLM) AnalyzeScreenshot(ctx context.Context, systemPrompt, screenshotBase64 string) (*browsertools.AgentDecision, error) {
-	if !v.IsConfigured() {
-		return nil, fmt.Errorf("Agnes 视觉 LLM 未配置（需要 API Key）")
+	apiKey, baseURL, model := v.effectiveConfig()
+	if apiKey == "" {
+		return nil, fmt.Errorf("视觉 LLM 未配置——请在管理后台「Agent 配置 → LLM 配置」添加一条用途为「视觉模型」的配置")
 	}
 
 	// 构建请求：system prompt + 截图（data URI——OpenAI 兼容格式普遍支持）
 	imageURL := fmt.Sprintf("data:image/png;base64,%s", screenshotBase64)
 
 	reqBody := agnesRequest{
-		Model: v.model,
+		Model: model,
 		Messages: []agnesMessage{
 			{
 				Role: "system",
@@ -132,12 +193,12 @@ func (v *AgnesVisionLLM) AnalyzeScreenshot(ctx context.Context, systemPrompt, sc
 	}
 
 	// 发送 HTTP 请求
-	url := v.baseURL + "/chat/completions"
+	url := baseURL + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+v.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := v.client.Do(req)

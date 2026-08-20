@@ -166,6 +166,17 @@ func (r *MockLLMConfigRepository) Delete(_ context.Context, name string) error {
 	return nil
 }
 
+func (r *MockLLMConfigRepository) FindByUsage(_ context.Context, usage string) (entity.LLMConfig, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, cfg := range r.byName {
+		if cfg.Usage == usage || (usage == "" && cfg.Usage == "") {
+			return cfg, nil
+		}
+	}
+	return entity.LLMConfig{}, pkg.ErrNotFound
+}
+
 // ---- Conversation 仓储 ----
 
 type MockConversationRepository struct {

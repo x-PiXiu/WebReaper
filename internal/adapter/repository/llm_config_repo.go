@@ -53,3 +53,23 @@ func (r *GormLLMConfigRepository) List(ctx context.Context) ([]entity.LLMConfig,
 func (r *GormLLMConfigRepository) Delete(ctx context.Context, name string) error {
 	return r.db.WithContext(ctx).Where("name = ?", name).Delete(&LLMConfigPO{}).Error
 }
+
+// FindByUsage 按用途标签查找配置（usage="" = 聊天模型；"vision" = 视觉模型）。
+// 返回第一条匹配记录——多条同用途配置时取最新创建的。
+func (r *GormLLMConfigRepository) FindByUsage(ctx context.Context, usage string) (entity.LLMConfig, error) {
+	var po LLMConfigPO
+	q := r.db.WithContext(ctx).Order("created_at DESC")
+	if usage == "" {
+		q = q.Where("usage = '' OR usage IS NULL")
+	} else {
+		q = q.Where("usage = ?", usage)
+	}
+	err := q.First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return entity.LLMConfig{}, pkg.ErrNotFound
+	}
+	if err != nil {
+		return entity.LLMConfig{}, err
+	}
+	return llmConfigFromPO(po), nil
+}

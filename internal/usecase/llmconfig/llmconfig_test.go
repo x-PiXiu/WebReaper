@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/port"
 )
 
@@ -29,6 +30,12 @@ func (f *fakeRepo) List(_ context.Context) ([]entity.LLMConfig, error) {
 	return out, nil
 }
 func (f *fakeRepo) Delete(_ context.Context, name string) error { delete(f.saved, name); return nil }
+func (f *fakeRepo) FindByUsage(_ context.Context, _ string) (entity.LLMConfig, error) {
+	for _, cfg := range f.saved {
+		return cfg, nil
+	}
+	return entity.LLMConfig{}, pkg.ErrNotFound
+}
 
 // TestCreate_RejectsMissingAPIKey 验证领域校验（IsValid：name/api_key/model 非空）。
 func TestCreate_RejectsMissingAPIKey(t *testing.T) {

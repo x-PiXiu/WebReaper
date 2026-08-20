@@ -20,6 +20,10 @@ type LLMConfig struct {
 	// 按引擎差异化（豆包 ~20、DeepSeek ~20、GPT 级 ~300）——成本分析按引擎细分
 	// （P1-1：监测接入多引擎后，成本报表不能再按全局单一参考价估算）。
 	CostPerMTok int
+	// Usage 用途标签："" = 聊天/内容（默认）；"vision" = 视觉模型（浏览器截图分析）。
+	// 两套模型独立配置互不影响：聊天模型坏了浏览器 Agent 不受影响，反之亦然。
+	// 管理后台按用途筛选，视觉模型默认显示 Agnes 等支持视觉的模型。
+	Usage string
 }
 
 // IsValid 领域规则：有效的 LLM 配置必须有名称、API Key 和模型名。

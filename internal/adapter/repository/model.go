@@ -60,9 +60,11 @@ type LLMConfigPO struct {
 	BaseURL   string `gorm:"column:base_url;size:256"`
 	Model     string `gorm:"size:64"`
 	// CostPerMTok 每百万 tokens 参考成本（分；P1-1 按引擎差异化成本分析）。
-	CostPerMTok int `gorm:"column:cost_per_mtok;default:100"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	CostPerMTok int    `gorm:"column:cost_per_mtok;default:100"`
+	// Usage 用途标签："" = 聊天/内容（默认）；"vision" = 视觉模型。
+	Usage     string `gorm:"size:32;default:''"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (LLMConfigPO) TableName() string { return "llm_configs" }

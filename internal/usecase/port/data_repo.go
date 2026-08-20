@@ -21,6 +21,7 @@ type AgentConfigRepository interface {
 type LLMConfigRepository interface {
 	Save(ctx context.Context, cfg entity.LLMConfig) error
 	FindByName(ctx context.Context, name string) (entity.LLMConfig, error)
+	FindByUsage(ctx context.Context, usage string) (entity.LLMConfig, error)
 	List(ctx context.Context) ([]entity.LLMConfig, error)
 	Delete(ctx context.Context, name string) error
 }
