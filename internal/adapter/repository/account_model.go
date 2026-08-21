@@ -26,6 +26,7 @@ type AccountPO struct {
 	OpenID            string     `gorm:"size:128"`
 	UnionID           string     `gorm:"size:128"` // 开放平台维度用户标识（跨应用稳定——三端账号打通用）
 	RefreshExpiresAt  *time.Time `gorm:"index"`    // refresh_token 过期时间（续期窗口管理）
+	Role              string     `gorm:"size:16;default:merchant"` // merchant/platform
 }
 
 func (AccountPO) TableName() string { return "geo_accounts" }

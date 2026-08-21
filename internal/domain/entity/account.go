@@ -76,7 +76,21 @@ type Account struct {
 	// 最多 5 次=最长 195 天；到期前健康检查自动续期，续尽则需用户重新授权）。
 	// ExpiresAt 存的是 access_token 过期时间（抖音 15 天，到期前 48h 自动刷新）。
 	RefreshExpiresAt time.Time
+
+	// Role 账号角色：merchant（商户自有，发布用）/ platform（平台工作账号，只读搜索用）。
+	// 空值 = merchant（向后兼容）。搜索等只读操作优先用 platform 账号——
+	// 风控风险集中到平台可控的账号，不消耗商户账号的信任额度。
+	Role string
 }
+
+// AccountRole 常量。
+const (
+	AccountRoleMerchant = "merchant"
+	AccountRolePlatform = "platform"
+)
+
+// IsPlatform 是否平台工作账号。
+func (a Account) IsPlatform() bool { return a.Role == AccountRolePlatform }
 
 // IsOAuth 是否官方 OAuth 授权账号（发布走 API 通道而非浏览器 RPA）。
 func (a Account) IsOAuth() bool { return a.AuthType == AccountAuthOAuth }

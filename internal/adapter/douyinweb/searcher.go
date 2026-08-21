@@ -49,22 +49,37 @@ func NewSearcher(ar port.AccountRepository, vault port.CookieVault) *Searcher {
 
 func (s *Searcher) SupportedPlatforms() []string { return []string{platform} }
 
-// pickCookie 选租户下一个健康的抖音 cookie 账号并解密。
+// pickCookie 选健康的抖音 cookie 账号并解密。
+// 优先取平台工作账号（role=platform）——搜索是只读操作，风控风险集中到平台可控账号，
+// 不消耗商户账号的信任额度。无平台账号时回退商户账号（兼容期）。
 func (s *Searcher) pickCookie(ctx context.Context, tenantID, plat string) (string, error) {
-	accounts, err := s.accountRepo.ListByPlatform(ctx, tenantID, plat)
+	accounts, err := s.accountRepo.ListAll(ctx)
 	if err != nil {
 		return "", err
 	}
+	// 第一优先：平台工作账号（跨租户共享）
 	for _, acc := range accounts {
-		if !acc.IsHealthy() || acc.IsOAuth() || acc.CookieEncrypted == "" {
+		if acc.Platform != plat || !acc.IsHealthy() || acc.IsOAuth() || acc.CookieEncrypted == "" {
 			continue
 		}
-		cookie, dErr := s.vault.Decrypt(acc.CookieEncrypted)
-		if dErr == nil && cookie != "" {
+		if acc.Role == "platform" {
+			if cookie, dErr := s.vault.Decrypt(acc.CookieEncrypted); dErr == nil && cookie != "" {
+				log.Printf("[douyinweb] 使用平台工作账号 %s（风控集中）", acc.ID[:12])
+				return cookie, nil
+			}
+		}
+	}
+	// 兼容回退：商户自己的账号
+	for _, acc := range accounts {
+		if acc.Platform != plat || acc.TenantID != tenantID || !acc.IsHealthy() || acc.IsOAuth() || acc.CookieEncrypted == "" {
+			continue
+		}
+		if cookie, dErr := s.vault.Decrypt(acc.CookieEncrypted); dErr == nil && cookie != "" {
+			log.Printf("[douyinweb] 回退使用商户账号 %s（建议管理员绑定平台工作账号）", acc.ID[:12])
 			return cookie, nil
 		}
 	}
-	return "", fmt.Errorf("无可用 %s cookie 账号（需浏览器扫码绑定一个）", plat)
+	return "", fmt.Errorf("无可用 %s cookie 账号（建议管理员绑定平台工作账号）", plat)
 }
 
 // withSearchPage 打开搜索页 → 执行 fn（fn 内发 XHR）。

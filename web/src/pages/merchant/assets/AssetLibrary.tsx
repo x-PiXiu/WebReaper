@@ -1,11 +1,26 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Button, Empty, Input, Segmented, Space, Tag, Typography, message } from 'antd'
-import { SoundOutlined, PictureOutlined } from '@ant-design/icons'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Button, Empty, Input, Modal, Segmented, Space, Tag, Typography, Upload, message,
+} from 'antd'
+import {
+  SoundOutlined, PictureOutlined, VideoCameraOutlined, FileTextOutlined, UserOutlined,
+  PlusOutlined,
+} from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
-import type { MediaAsset } from '../../../types/api'
+import type { MediaAsset, GenerationTask } from '../../../types/api'
 
 const { Text } = Typography
+
+type TabKey = 'audio' | 'image' | 'video' | 'article' | 'digital_human'
+
+const TABS = [
+  { value: 'digital_human', label: '数字人', icon: <UserOutlined /> },
+  { value: 'video', label: '视频', icon: <VideoCameraOutlined /> },
+  { value: 'image', label: '图片', icon: <PictureOutlined /> },
+  { value: 'audio', label: '音频', icon: <SoundOutlined /> },
+  { value: 'article', label: '文章', icon: <FileTextOutlined /> },
+] as const
 
 function formatSize(bytes: number) {
   if (bytes > 1 << 30) return (bytes / (1 << 30)).toFixed(1) + ' GB'
@@ -24,14 +39,23 @@ function timeAgo(iso: string) {
   return `${Math.floor(h / 24)} 天前`
 }
 
+interface ViduSubject {
+  taskId: string
+  state: string
+  name: string
+  createdAt: string
+}
+
 /**
- * 资产库：真实媒体库（MediaAsset——素材上传 + AI 产物转存）。
- * 有则显示无则隐藏：音频/图片 tab 无数据时空态引导；
- * avatar/storyboard 等无后端概念的分类不出现（未来真做再恢复）。
+ * 资产库：统一媒体库（数字人/视频/图片/音频/文章 5 tab）。
+ * 数字人 tab = Vidu 主体管理（创建→列表→用于 reference2video 视频生成 @引用）。
+ * 其他 tab = 真实数据（MediaAsset 素材/AI 产物 + 作品库文章）。
  */
 export default function AssetLibrary() {
-  const [tab, setTab] = useState<'audio' | 'image'>('audio')
+  const [tab, setTab] = useState<TabKey>('digital_human')
   const [q, setQ] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const queryClient = useQueryClient()
 
   const { data: res, isLoading } = useQuery({
     queryKey: ['media-assets'],
@@ -39,85 +63,220 @@ export default function AssetLibrary() {
   })
   const assets = res?.assets || []
 
-  const audioAssets = useMemo(() => assets.filter((a) => a.mime.startsWith('audio/')), [assets])
-  const imageAssets = useMemo(() => assets.filter((a) => a.mime.startsWith('image/')), [assets])
+  const { data: genTasks = [], refetch: refetchSubjects } = useQuery({
+    queryKey: ['generation-tasks'],
+    queryFn: () => businessApi.listGenerationTasks().then(r => r.tasks).catch(() => [] as GenerationTask[]),
+    enabled: tab === 'digital_human',
+  })
+  const subjects: ViduSubject[] = useMemo(() => {
+    return (genTasks || [])
+      .filter((t: GenerationTask) => t.sub_type === 'subject')
+      .map((t: GenerationTask) => ({
+        taskId: t.id,
+        state: t.state,
+        name: ((t.params as any)?.name as string) || t.id.slice(0, 12),
+        createdAt: t.created_at,
+      }))
+  }, [genTasks])
 
   const filtered = useMemo(() => {
-    const list = tab === 'audio' ? audioAssets : imageAssets
+    const prefix = tab === 'audio' ? 'audio/' : tab === 'image' ? 'image/' : tab === 'video' ? 'video/' : ''
+    let list = prefix ? assets.filter(a => a.mime.startsWith(prefix)) : []
     const needle = q.trim().toLowerCase()
-    if (!needle) return list
-    return list.filter((a) => a.url.toLowerCase().includes(needle) || a.mime.toLowerCase().includes(needle))
-  }, [tab, audioAssets, imageAssets, q])
+    if (needle) list = list.filter(a => a.url.toLowerCase().includes(needle))
+    return list
+  }, [tab, assets, q])
 
-  const hint = tab === 'audio' ? '配音/音效素材（视频创作的音频引用源）' : '图片素材（封面/图文创作的引用源）'
+  const { data: works = [] } = useQuery({
+    queryKey: ['merchant-works'],
+    queryFn: () => businessApi.listWorks().catch(() => []),
+    enabled: tab === 'article',
+  })
+  const articles = useMemo(() => works.filter(w => w.kind === 'article'), [works])
+
+  const hint = {
+    digital_human: '通过 Vidu 主体 API 创建数字分身——上传形象照后可在视频生成中用 @名称 引用',
+    video: 'AI 生成的视频产物（Vidu 视频/数字人视频）',
+    image: 'AI 生成的图片 / 上传的素材图（封面/图文创作引用源）',
+    audio: '配音/音效素材（视频创作的音频引用源）',
+    article: '内容合成生成的文章作品（可发布到社媒平台）',
+  }[tab]
 
   return (
     <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
-          <p className="ip-kicker">Digital Twin</p>
-          <h1>数字分身</h1>
-          <p className="ip-lead">{hint}——形象、音色与封面素材，供口播数字人与成片取用</p>
+          <p className="ip-kicker">Assets</p>
+          <h1>资产库</h1>
+          <p className="ip-lead">{hint}</p>
         </div>
+        {tab === 'digital_human' && (
+          <Button type="primary" size="large" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            创建数字人
+          </Button>
+        )}
       </div>
 
       <div className="ip-toolbar">
-        <Segmented
-          value={tab}
-          onChange={(v) => setTab(v as 'audio' | 'image')}
-          options={[
-            { value: 'audio', label: `音频 ${audioAssets.length}`, icon: <SoundOutlined /> },
-            { value: 'image', label: `图片 ${imageAssets.length}`, icon: <PictureOutlined /> },
-          ]}
-        />
-        <Input.Search allowClear placeholder="按文件名/类型搜索" style={{ maxWidth: 240 }} value={q} onChange={(e) => setQ(e.target.value)} />
+        <Segmented value={tab} onChange={v => setTab(v as TabKey)} options={TABS.map(t => ({ ...t }))} />
+        {(tab === 'video' || tab === 'image' || tab === 'audio') && (
+          <Input.Search allowClear placeholder="搜索" style={{ maxWidth: 240 }} value={q} onChange={e => setQ(e.target.value)} />
+        )}
       </div>
 
-      {isLoading ? (
-        <Empty description="加载中…" style={{ padding: 60 }} />
-      ) : filtered.length === 0 ? (
-        <Empty style={{ padding: 60 }} description={`暂无${tab === 'audio' ? '音频' : '图片'}资产`}>
-          <Button type="primary" onClick={() => message.info('在内容合成中上传素材或生成作品，产物会自动入库存')}>
-            了解如何入库
-          </Button>
-        </Empty>
-      ) : (
-        <div className="ip-asset-grid">
-          {filtered.map((a) => (
-            <div key={a.id} className="ip-asset-card">
-              <div
-                className={`ip-asset-cover ${a.mime.startsWith('audio/') ? 'ip-asset-cover--voice' : ''}`}
-                style={a.mime.startsWith('image/') ? { background: `linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.45)), url(${a.url}) center/cover`, display: 'flex', alignItems: 'flex-end', padding: 12 } : undefined}
-              >
-                <Tag style={{ margin: 0 }} color={a.owner_type === 'creation' ? 'cyan' : 'blue'}>
-                  {a.owner_type === 'creation' ? 'AI 产物' : '上传素材'}
-                </Tag>
-              </div>
-              <div className="ip-asset-body">
-                <Text strong style={{ fontSize: 13 }} ellipsis={{ tooltip: a.url }}>
-                  {a.url.split('/').pop()?.split('?')[0] || '资产'}
-                </Text>
-                <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 12, color: 'var(--wr-text-secondary)' }}>
-                  <span>{a.mime.split('/')[1]?.toUpperCase()}</span>
-                  <span>{formatSize(a.size_bytes)}</span>
-                  <span>{timeAgo(a.created_at)}</span>
+      {tab === 'digital_human' && (
+        subjects.length === 0 ? (
+          <Empty style={{ padding: 60 }} description="还没有数字人——点击「创建数字人」上传形象照开始">
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>创建数字人</Button>
+          </Empty>
+        ) : (
+          <div className="ip-asset-grid">
+            {subjects.map(s => (
+              <div key={s.taskId} className="ip-asset-card">
+                <div className="ip-asset-cover ip-asset-cover--voice" style={{ justifyContent: 'center', alignItems: 'center' }}>
+                  <UserOutlined style={{ fontSize: 48, color: 'var(--wr-accent)' }} />
                 </div>
-                <Space style={{ marginTop: 10 }}>
-                  <Button size="small" onClick={() => window.open(a.url, '_blank', 'noopener')}>
-                    {a.mime.startsWith('image/') ? '查看' : '播放'}
-                  </Button>
-                  <Button size="small" type="text" danger onClick={async () => {
-                    try {
-                      await businessApi.deleteAsset(a.id)
-                      message.success('已删除')
-                    } catch { /* 拦截器已提示 */ }
-                  }}>删除</Button>
-                </Space>
+                <div className="ip-asset-body">
+                  <Text strong style={{ fontSize: 14 }}>{s.name}</Text>
+                  <div style={{ marginTop: 6, fontSize: 12 }}>
+                    <Tag color={s.state === 'success' ? 'green' : s.state === 'failed' ? 'red' : 'processing'}>
+                      {s.state === 'success' ? '就绪' : s.state === 'failed' ? '失败' : '创建中'}
+                    </Tag>
+                    <span style={{ color: 'var(--wr-text-secondary)', marginLeft: 8 }}>{timeAgo(s.createdAt)}</span>
+                  </div>
+                  {s.state === 'success' && (
+                    <Button size="small" style={{ marginTop: 10 }}
+                      onClick={() => message.info('去内容合成 → 做视频图片 → 参考生模式，在提示词中用 @名称 引用')}>
+                      用于视频生成
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )
       )}
+
+      {tab === 'article' && (
+        articles.length === 0 ? (
+          <Empty style={{ padding: 60 }} description="还没有文章——去内容合成写第一篇">
+            <Button type="primary" onClick={() => window.location.href = '/m/compose?tab=article'}>去写文章</Button>
+          </Empty>
+        ) : (
+          <div className="ip-asset-grid">
+            {articles.map(w => (
+              <div key={w.id} className="ip-asset-card">
+                <div className="ip-asset-cover" style={{ background: 'linear-gradient(145deg, #12121a, #1f2937)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <FileTextOutlined style={{ fontSize: 40, color: 'var(--wr-accent)' }} />
+                </div>
+                <div className="ip-asset-body">
+                  <Text strong style={{ fontSize: 13 }} ellipsis={{ tooltip: w.title }}>{w.title}</Text>
+                  <div style={{ marginTop: 6, fontSize: 12 }}>
+                    <Tag>{w.status === 'published' ? '已发布' : w.status === 'ready' ? '待发布' : '草稿'}</Tag>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {(tab === 'video' || tab === 'image' || tab === 'audio') && (
+        isLoading ? <Empty description="加载中…" style={{ padding: 60 }} /> :
+        filtered.length === 0 ? (
+          <Empty style={{ padding: 60 }} description={`暂无${tab === 'video' ? '视频' : tab === 'image' ? '图片' : '音频'}资产`} />
+        ) : (
+          <div className="ip-asset-grid">
+            {filtered.map(a => (
+              <div key={a.id} className="ip-asset-card">
+                <div
+                  className={`ip-asset-cover ${a.mime.startsWith('audio/') ? 'ip-asset-cover--voice' : ''}`}
+                  style={a.mime.startsWith('image/') ? { background: `linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.45)), url(${a.url}) center/cover`, display: 'flex', alignItems: 'flex-end', padding: 12 } : undefined}
+                >
+                  <Tag style={{ margin: 0 }} color={a.owner_type === 'creation' ? 'cyan' : 'blue'}>
+                    {a.owner_type === 'creation' ? 'AI 产物' : '上传素材'}
+                  </Tag>
+                </div>
+                <div className="ip-asset-body">
+                  <Text strong style={{ fontSize: 13 }} ellipsis={{ tooltip: a.url }}>
+                    {a.url.split('/').pop()?.split('?')[0] || '资产'}
+                  </Text>
+                  <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 12, color: 'var(--wr-text-secondary)' }}>
+                    <span>{a.mime.split('/')[1]?.toUpperCase()}</span>
+                    <span>{formatSize(a.size_bytes)}</span>
+                    <span>{timeAgo(a.created_at)}</span>
+                  </div>
+                  <Space style={{ marginTop: 10 }}>
+                    <Button size="small" onClick={() => window.open(a.url, '_blank', 'noopener')}>
+                      {a.mime.startsWith('image/') ? '查看' : '播放'}
+                    </Button>
+                    <Button size="small" type="text" danger onClick={async () => {
+                      try { await businessApi.deleteAsset(a.id); message.success('已删除'); queryClient.invalidateQueries({ queryKey: ['media-assets'] }) } catch { }
+                    }}>删除</Button>
+                  </Space>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      <CreateSubjectModal open={createOpen} onClose={() => setCreateOpen(false)}
+        onCreated={() => { refetchSubjects(); message.success('数字人创建任务已提交') }} />
     </div>
+  )
+}
+
+function CreateSubjectModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [name, setName] = useState('')
+  const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [creating, setCreating] = useState(false)
+  const queryClient = useQueryClient()
+
+  const handleCreate = async () => {
+    if (!name.trim()) { message.warning('请输入数字人名称'); return }
+    if (imageUrls.length === 0) { message.warning('请至少上传 1 张形象照'); return }
+    setCreating(true)
+    try {
+      await businessApi.submitGenerationTask({
+        sub_type: 'subject', model: '',
+        params: { name: name.trim(), images: imageUrls },
+      })
+      onCreated()
+      onClose()
+      setName(''); setImageUrls([])
+      queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
+    } catch (e: any) {
+      message.error(e?.response?.data?.msg || '创建失败')
+    } finally { setCreating(false) }
+  }
+
+  return (
+    <Modal open={open} title="创建数字人" okText="创建" cancelText="取消" onOk={handleCreate} onCancel={onClose} confirmLoading={creating}>
+      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          上传 1-3 张形象照，Vidu 将创建可复用的数字分身——后续视频生成中用 @名称 引用
+        </Text>
+        <Input placeholder="数字人名称（如：张师傅、李老板）" value={name} onChange={e => setName(e.target.value)} maxLength={64} />
+        <Upload
+          listType="picture-card"
+          maxCount={3}
+          accept="image/png,image/jpeg,image/jpg,image/webp"
+          customRequest={async ({ file, onSuccess, onError }) => {
+            try {
+              const r = await businessApi.uploadAsset(file as File)
+              setImageUrls(prev => [...prev, r.asset.url])
+              onSuccess?.(r)
+            } catch (e) { onError?.(e as Error) }
+          }}
+          onRemove={(file) => {
+            const url = (file.response as any)?.asset?.url
+            if (url) setImageUrls(prev => prev.filter(u => u !== url))
+          }}
+        >
+          {imageUrls.length < 3 && <div><PlusOutlined /><div style={{ fontSize: 12, marginTop: 4 }}>上传形象照</div></div>}
+        </Upload>
+      </Space>
+    </Modal>
   )
 }

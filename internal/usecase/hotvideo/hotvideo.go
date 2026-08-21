@@ -55,9 +55,12 @@ const douyinSearchCooldown = 10 * time.Minute
 type cacheEntry struct {
 	videos   []HotVideo
 	expireAt time.Time
+	cachedAt time.Time
 }
 
-const cacheTTL = 24 * time.Hour
+const cacheTTL = 12 * time.Hour
+
+const forceCooldownTTL = 24 * time.Hour
 
 // SetSocialSearcher 注入站内搜索（可选；未注入或无 cookie 账号时走通用搜索链路）。
 func (uc *HotVideoUseCase) SetSocialSearcher(ds port.SocialSearcher) {
@@ -75,14 +78,19 @@ func NewHotVideoUseCase(br port.BrandRepository, searcher port.LinkSearcher, aiG
 
 // ListHotVideos 发现品牌同赛道的热门视频（缓存 24h；force=true 跳过缓存重搜）。
 func (uc *HotVideoUseCase) ListHotVideos(ctx context.Context, tenantID, brandID string, force bool) ([]HotVideo, error) {
-	if !force {
-		uc.mu.Lock()
-		if e, ok := uc.cache[brandID]; ok && time.Now().Before(e.expireAt) {
+	uc.mu.Lock()
+	if e, ok := uc.cache[brandID]; ok {
+		if !force && time.Now().Before(e.expireAt) {
 			uc.mu.Unlock()
 			return e.videos, nil
 		}
-		uc.mu.Unlock()
+		if force && time.Since(e.cachedAt) < forceCooldownTTL {
+			remaining := int(forceCooldownTTL/time.Hour) - int(time.Since(e.cachedAt)/time.Hour)
+			uc.mu.Unlock()
+			return nil, fmt.Errorf("冷却中（约 %d 小时后可换一批）——频繁搜索有账号风控风险", remaining)
+		}
 	}
+	uc.mu.Unlock()
 
 	brand, err := uc.brandRepo.FindByID(ctx, tenantID, brandID)
 	if err != nil {
@@ -93,7 +101,7 @@ func (uc *HotVideoUseCase) ListHotVideos(ctx context.Context, tenantID, brandID 
 	if uc.douyin != nil {
 		if videos, dErr := uc.searchDouyinHot(ctx, tenantID, brand); dErr == nil && len(videos) > 0 {
 			uc.mu.Lock()
-			uc.cache[brandID] = cacheEntry{videos: videos, expireAt: time.Now().Add(cacheTTL)}
+			uc.cache[brandID] = cacheEntry{videos: videos, expireAt: time.Now().Add(cacheTTL), cachedAt: time.Now()}
 			uc.mu.Unlock()
 			return videos, nil
 		} else if dErr != nil {

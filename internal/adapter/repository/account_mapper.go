@@ -15,6 +15,7 @@ func accountToPO(e entity.Account) AccountPO {
 		ExpiresAt: timeToPtr(e.ExpiresAt), BoundAt: timeToPtr(e.BoundAt), LastUsedAt: timeToPtr(e.LastUsedAt),
 		AuthType: e.AuthType, AccessTokenEnc: e.AccessTokenEnc, RefreshTokenEnc: e.RefreshTokenEnc, OpenID: e.OpenID, UnionID: e.UnionID,
 		RefreshExpiresAt: timeToPtr(e.RefreshExpiresAt),
+		Role: e.Role,
 	}
 }
 
@@ -33,6 +34,7 @@ func accountFromPO(p AccountPO) entity.Account {
 		ExpiresAt: ptrToTime(p.ExpiresAt), BoundAt: ptrToTime(p.BoundAt), LastUsedAt: ptrToTime(p.LastUsedAt),
 		AuthType: authType, AccessTokenEnc: p.AccessTokenEnc, RefreshTokenEnc: p.RefreshTokenEnc, OpenID: p.OpenID, UnionID: p.UnionID,
 		RefreshExpiresAt: ptrToTime(p.RefreshExpiresAt),
+		Role: p.Role,
 	}
 }
 
