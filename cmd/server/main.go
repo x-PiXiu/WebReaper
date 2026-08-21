@@ -550,7 +550,7 @@ func main() {
 			// 抖音站内搜索（MediaCrawler 协议复刻：cookie 账号 + 页面内免签 fetch）——
 			// 热门同款 tab 主数据源；数据回读上线后复用 GetVideoDetail
 			if hotVideoUCRef != nil {
-				hotVideoUCRef.SetDouyinSearcher(douyinweb.NewSearcher(accountRepos.account, vault))
+				hotVideoUCRef.SetSocialSearcher(douyinweb.NewSearcher(accountRepos.account, vault))
 			}
 			// 发布通道注册表（工厂模式，已注册知乎/小红书全自动通道——同时支持半自动+全自动）
 			channelRegistry := publisher.NewChannelRegistry()

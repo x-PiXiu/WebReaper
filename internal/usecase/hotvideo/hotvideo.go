@@ -38,7 +38,7 @@ type HotVideo struct {
 type HotVideoUseCase struct {
 	brandRepo port.BrandRepository
 	searcher  port.LinkSearcher   // 通用搜索引擎（Bing/DDG）——降级数据源
-	douyin    port.DouyinSearcher // 抖音站内搜索——主数据源（真实爆款+数据，需 cookie 账号）
+	douyin    port.SocialSearcher // 站内搜索——主数据源（真实爆款+数据，需 cookie 账号；多平台泛化）
 	aiGen     port.AIGenerator
 
 	mu    sync.Mutex
@@ -52,8 +52,8 @@ type cacheEntry struct {
 
 const cacheTTL = 24 * time.Hour
 
-// SetDouyinSearcher 注入抖音站内搜索（可选；未注入或无 cookie 账号时走通用搜索链路）。
-func (uc *HotVideoUseCase) SetDouyinSearcher(ds port.DouyinSearcher) {
+// SetSocialSearcher 注入站内搜索（可选；未注入或无 cookie 账号时走通用搜索链路）。
+func (uc *HotVideoUseCase) SetSocialSearcher(ds port.SocialSearcher) {
 	uc.douyin = ds
 }
 
@@ -137,17 +137,17 @@ func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string,
 	}
 
 	seen := make(map[string]bool)
-	var videos []port.DouyinVideo
+	var videos []port.SocialVideo
 	for _, kw := range keywords {
-		list, err := uc.douyin.SearchHotVideos(ctx, tenantID, kw, 10)
+		list, err := uc.douyin.SearchHotVideos(ctx, tenantID, "douyin", kw, 10)
 		if err != nil {
 			return nil, err
 		}
 		for _, v := range list {
-			if v.AwemeID == "" || seen[v.AwemeID] {
+			if v.VideoID == "" || seen[v.VideoID] {
 				continue
 			}
-			seen[v.AwemeID] = true
+			seen[v.VideoID] = true
 			videos = append(videos, v)
 		}
 		time.Sleep(800 * time.Millisecond) // 两次搜索留间隔，降低风控概率
@@ -165,7 +165,7 @@ func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string,
 
 // curateDouyin LLM 为真实爆款视频生成"为什么火 + 拍摄同款选题"（一次调用批量生成）。
 // LLM 失败时降级：数据+链接仍然真实可用，选题用行业兜底文案。
-func (uc *HotVideoUseCase) curateDouyin(ctx context.Context, brand entity.Brand, videos []port.DouyinVideo) []HotVideo {
+func (uc *HotVideoUseCase) curateDouyin(ctx context.Context, brand entity.Brand, videos []port.SocialVideo) []HotVideo {
 	var b strings.Builder
 	for i, v := range videos {
 		fmt.Fprintf(&b, "%d. 标题：%s（@%s，播放%d 赞%d 评%d）\n", i+1,
