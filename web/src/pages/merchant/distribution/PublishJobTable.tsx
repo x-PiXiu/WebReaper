@@ -92,7 +92,7 @@ export default function PublishJobTable({
             <Button size="small" type="link" icon={<ExportOutlined />} href={r.external_url} target="_blank">跳转</Button>
           )}
           <Button size="small" type="link" onClick={() => setDetailWork({
-            title: r.title, platform: r.platform, content_type: r.content_type,
+            jobId: r.id, title: r.title, platform: r.platform, content_type: r.content_type,
             external_url: r.external_url, published_at: r.published_at, status: r.status,
           })}>详情</Button>
           {r.status === 'published' && (

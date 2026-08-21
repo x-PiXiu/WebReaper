@@ -166,6 +166,8 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 	api.POST("/merchant/publish", accountHandler.HandlePublish)
 	api.GET("/merchant/publish-jobs", accountHandler.HandleListPublishJobs)
 	api.GET("/merchant/works/analytics-summary", accountHandler.HandleAnalyticsSummary) // 作品数据页聚合
+	api.POST("/merchant/publish-jobs/:id/refresh-metrics", accountHandler.HandleRefreshJobMetrics) // 手动回读互动数据
+	api.GET("/merchant/publish-jobs/:id/metrics", accountHandler.HandleGetJobMetrics) // 指标时间序列（详情趋势）
 	api.POST("/merchant/publish-jobs/:id/published", accountHandler.HandleMarkPublished)
 	api.GET("/merchant/publish-jobs/:id/status", accountHandler.HandleGetJobStatus)
 	api.POST("/merchant/publish-jobs/:id/re-monitor", accountHandler.HandleReMonitor) // 发布效果复测（收录周期后验证提及率爬升）

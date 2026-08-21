@@ -226,7 +226,7 @@ export default function WorksAnalytics() {
               key: 'detail',
               width: 80,
               render: (_, r) => (
-                <Button size="small" onClick={() => setDetail({ title: r.title, platform: r.platform, content_type: r.content_type, external_url: r.external_url, published_at: r.published_at, status: r.status })}>
+                <Button size="small" onClick={() => setDetail({ jobId: r.job_id, title: r.title, platform: r.platform, content_type: r.content_type, external_url: r.external_url, published_at: r.published_at, status: r.status, views: r.views, likes: r.likes, comments: r.comments, shares: r.shares })}>
                   详情
                 </Button>
               ),
@@ -263,13 +263,13 @@ export default function WorksAnalytics() {
       {/* 作品详情 Drawer（与发布中心共用） */}
       <WorkDetailDrawer open={!!detail} onClose={() => setDetail(null)} work={detail} />
 
-      {works.length === 0 && !summaryLoading && (
+      {(totals?.views ?? 0) === 0 && works.length > 0 && (
         <Alert
           style={{ marginTop: 16 }}
           type="info"
           showIcon
-          message="互动数据（播放/点赞/评论）回读功能即将上线"
-          description="发布记录已实时汇总；数据回读上线后，此处与作品详情将自动展示每日互动趋势。"
+          message="互动数据回读待激活"
+          description="发布记录已实时汇总。互动数据（播放/点赞/评论）需对应平台的浏览器通道账号：账号池中给抖音补充「浏览器通道」绑定后，每日自动回读 + 详情页可手动刷新。"
         />
       )}
     </div>

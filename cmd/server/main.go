@@ -549,8 +549,10 @@ func main() {
 			geoAccountUC = account.NewAccountUseCase(accountRepos.account, qrSession, vault)
 			// 抖音站内搜索（MediaCrawler 协议复刻：cookie 账号 + 页面内免签 fetch）——
 			// 热门同款 tab 主数据源；数据回读上线后复用 GetVideoDetail
+			// 站内搜索共享实例（热门同款主数据源 + 数据回读取详情）
+			socialSearcher := douyinweb.NewSearcher(accountRepos.account, vault)
 			if hotVideoUCRef != nil {
-				hotVideoUCRef.SetSocialSearcher(douyinweb.NewSearcher(accountRepos.account, vault))
+				hotVideoUCRef.SetSocialSearcher(socialSearcher)
 			}
 			// 发布通道注册表（工厂模式，已注册知乎/小红书全自动通道——同时支持半自动+全自动）
 			channelRegistry := publisher.NewChannelRegistry()
@@ -563,6 +565,8 @@ func main() {
 			geoPublishUC.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 			// 注入账号池（全自动发布时自动选最优账号——最久未使用优先）
 			geoPublishUC.SetAccountPool(repository.NewGormAccountPool(accountRepos.account))
+			// 互动数据回读（快照仓储 + 站内详情接口——每日任务/手动刷新）
+			geoPublishUC.SetMetricsStore(accountRepos.metric, socialSearcher)
 
 			// 抖音开放平台官方 OAuth 授权（API 通道——替代浏览器扫码 RPA 绑定；
 			// 内部统一走官方 SDK bytedance/douyin-openapi-sdk-go）
@@ -724,6 +728,8 @@ func main() {
 	// 排期发布（定时发送）：每 5 分钟扫描到期任务
 	if geoPublishUC != nil && accountRepos != nil {
 		_ = taskScheduler.Register(scheduledtask.NewScheduledPublishTask(accountRepos.job, geoPublishUC, notifyUC, log))
+		// 视频互动数据回读（每日：全租户已发布作品 → 站内详情接口 → 快照时间序列）
+		_ = taskScheduler.Register(scheduledtask.NewVideoMetricsTask(geoPublishUC, log))
 	}
 	// 自动复测：发布 7 天后自动复测提及率并通知（效果追踪闭环）
 	if geoPublishUC != nil && accountRepos != nil {
@@ -960,6 +966,7 @@ func initGEORpositories(dbCfg config.DBConfig) *geoRepos {
 type accountRepos struct {
 	account port.AccountRepository
 	job     port.PublishJobRepository
+	metric  port.VideoMetricRepository // 视频互动数据快照（数据回读）
 }
 
 // initAccountRepositories 初始化发布账号域仓储（需要数据库；未配置 DB 时返回 nil）。
@@ -974,6 +981,7 @@ func initAccountRepositories(dbCfg config.DBConfig) *accountRepos {
 	return &accountRepos{
 		account: repository.NewGormAccountRepository(db),
 		job:     repository.NewGormPublishJobRepository(db),
+		metric:  repository.NewGormVideoMetricRepository(db),
 	}
 }
 

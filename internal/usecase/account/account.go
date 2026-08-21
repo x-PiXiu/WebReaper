@@ -352,6 +352,8 @@ type PublishUseCase struct {
 	monitorTrigger port.MonitorTrigger    // 可选：发布效果追踪（发布后触发监测对比提及率）
 	accountPool    port.AccountPool       // 可选：账号池调度（自动选最优账号）
 	publicBaseURL  string                 // 公开站根地址（发布内容尾部带公开站链接用）
+	metricRepo     port.VideoMetricRepository // 可选：互动数据快照（数据回读）
+	socialSearch   port.SocialSearcher        // 可选：站内搜索（回读取详情用）
 }
 
 func NewPublishUseCase(jr port.PublishJobRepository, reg port.PublishChannelRegistry, ar port.AccountRepository, vault port.CookieVault) *PublishUseCase {
@@ -371,6 +373,11 @@ func (uc *PublishUseCase) SetAccountPool(ap port.AccountPool) {
 // SetPublicBaseURL 注入公开站根地址（发布内容尾部带公开站链接，加速爬虫发现）。
 func (uc *PublishUseCase) SetPublicBaseURL(baseURL string) {
 	uc.publicBaseURL = baseURL
+}
+
+// SetMetricsStore 注入互动数据回读依赖（快照仓储 + 站内搜索）。
+func (uc *PublishUseCase) SetMetricsStore(mr port.VideoMetricRepository, ss port.SocialSearcher) {
+	uc.metricRepo, uc.socialSearch = mr, ss
 }
 
 // ChannelCapabilities 发布通道能力清单（前端能力驱动的数据源：
@@ -767,6 +774,97 @@ type AnalyticsSummary struct {
 	Works []WorkSummaryItem     `json:"works"`
 }
 
+// extractVideoID 从作品 URL 提取平台视频 ID（douyin.com/video/{id} 形态）。
+func extractVideoID(externalURL, platform string) string {
+	for _, pat := range []string{"/video/", "/note/"} {
+		if i := strings.Index(externalURL, pat); i >= 0 {
+			tail := externalURL[i+len(pat):]
+			id := tail
+			if j := strings.IndexAny(id, "/?&"); j >= 0 {
+				id = id[:j]
+			}
+			if len(id) >= 10 {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// RefreshJobMetrics 回读单作品互动数据（手动"立即刷新"与每日任务共用）：
+// 从作品 URL 提取视频 ID → SocialSearcher.GetVideoDetail → 写快照。
+// 前置：已发布 + 有作品链接 + 平台受支持 + 该平台有健康 cookie 账号。
+func (uc *PublishUseCase) RefreshJobMetrics(ctx context.Context, tenantID, jobID string) (*entity.VideoMetric, error) {
+	if uc.metricRepo == nil || uc.socialSearch == nil {
+		return nil, fmt.Errorf("数据回读未启用")
+	}
+	job, err := uc.GetJobStatus(ctx, tenantID, jobID)
+	if err != nil {
+		return nil, err
+	}
+	if job.Status != entity.PublishStatusPublished {
+		return nil, fmt.Errorf("仅已发布作品可回读数据")
+	}
+	videoID := extractVideoID(job.ExternalURL, job.Platform)
+	if videoID == "" {
+		return nil, fmt.Errorf("作品链接缺失或无法解析视频 ID（手动发布的作品未追踪链接）")
+	}
+	video, err := uc.socialSearch.GetVideoDetail(ctx, tenantID, job.Platform, videoID)
+	if err != nil {
+		return nil, fmt.Errorf("回读失败（%s 平台需绑定浏览器通道账号）: %w", job.Platform, err)
+	}
+	m := entity.VideoMetric{
+		ID:          fmt.Sprintf("vm-%d", time.Now().UnixNano()),
+		TenantID:    tenantID,
+		JobID:       job.ID,
+		Platform:    job.Platform,
+		VideoID:     videoID,
+		Views:       int64(video.PlayCount),
+		Likes:       int64(video.DiggCount),
+		Comments:    int64(video.CommentCount),
+		Shares:      int64(video.ShareCount),
+		CollectedAt: time.Now(),
+	}
+	if sErr := uc.metricRepo.Save(ctx, m); sErr != nil {
+		return nil, fmt.Errorf("快照写入失败: %w", sErr)
+	}
+	return &m, nil
+}
+
+// RunMetricsReadback 每日批量回读（定时任务入口）：全租户已发布且可解析视频 ID 的作品。
+// 单作品失败不中断（cookie 缺失/平台不支持都是常态——记录后继续）。
+func (uc *PublishUseCase) RunMetricsReadback(ctx context.Context) {
+	if uc.metricRepo == nil || uc.socialSearch == nil {
+		return
+	}
+	jobs, err := uc.jobRepo.ListPublished(ctx, 500)
+	if err != nil {
+		return
+	}
+	supported := map[string]bool{}
+	for _, p := range uc.socialSearch.SupportedPlatforms() {
+		supported[p] = true
+	}
+	for _, job := range jobs {
+		if !supported[job.Platform] || extractVideoID(job.ExternalURL, job.Platform) == "" {
+			continue
+		}
+		if _, rErr := uc.RefreshJobMetrics(ctx, job.TenantID, job.ID); rErr != nil {
+			// 静默继续：cookie 过期/风控等由健康检查与手动刷新兜底
+			continue
+		}
+		time.Sleep(2 * time.Second) // 作品间留间隔，降低风控概率
+	}
+}
+
+// ListJobMetrics 单作品指标时间序列（详情 Drawer 趋势图）。
+func (uc *PublishUseCase) ListJobMetrics(ctx context.Context, tenantID, jobID string) ([]entity.VideoMetric, error) {
+	if uc.metricRepo == nil {
+		return nil, fmt.Errorf("数据回读未启用")
+	}
+	return uc.metricRepo.ListByJob(ctx, tenantID, jobID, 0)
+}
+
 // AnalyticsSummary 聚合租户的作品数据：真实发布记录（PublishJob）+ 互动数据（回读上线后接入）。
 // 趋势在无回读数据阶段为发布数趋势；快照表上线后切换为播放/互动趋势。
 func (uc *PublishUseCase) AnalyticsSummary(ctx context.Context, tenantID string) (*AnalyticsSummary, error) {
@@ -777,6 +875,15 @@ func (uc *PublishUseCase) AnalyticsSummary(ctx context.Context, tenantID string)
 
 	summary := &AnalyticsSummary{Trend: make([]AnalyticsTrendPoint, 0, 14), Works: make([]WorkSummaryItem, 0, len(jobs))}
 	dayCount := map[string]int{}
+	// 最新互动指标（回读快照）：job → 最新一条
+	latest := map[string]entity.VideoMetric{}
+	if uc.metricRepo != nil {
+		if ms, mErr := uc.metricRepo.LatestByTenant(ctx, tenantID); mErr == nil {
+			for _, m := range ms {
+				latest[m.JobID] = m
+			}
+		}
+	}
 	for _, j := range jobs {
 		if j.Status != entity.PublishStatusPublished {
 			continue
@@ -787,7 +894,7 @@ func (uc *PublishUseCase) AnalyticsSummary(ctx context.Context, tenantID string)
 			publishedAt = j.CreatedAt
 		}
 		dayCount[publishedAt.Format("2006-01-02")]++
-		summary.Works = append(summary.Works, WorkSummaryItem{
+		item := WorkSummaryItem{
 			JobID:       j.ID,
 			Title:       j.Title,
 			Platform:    j.Platform,
@@ -795,7 +902,14 @@ func (uc *PublishUseCase) AnalyticsSummary(ctx context.Context, tenantID string)
 			Status:      j.Status,
 			ExternalURL: j.ExternalURL,
 			PublishedAt: publishedAt,
-		})
+		}
+		if m, ok := latest[j.ID]; ok {
+			item.Views, item.Likes, item.Comments, item.Shares = m.Views, m.Likes, m.Comments, m.Shares
+			summary.Totals.Views += m.Views
+			summary.Totals.Likes += m.Likes
+			summary.Totals.Comments += m.Comments
+		}
+		summary.Works = append(summary.Works, item)
 	}
 
 	// 近 14 天趋势（补零——无发布的日期也出点，图表连续）

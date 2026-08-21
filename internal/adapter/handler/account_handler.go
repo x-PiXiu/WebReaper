@@ -271,6 +271,39 @@ func (h *AccountHandler) HandleAnalyticsSummary(c *gin.Context) {
 	success(c, summary)
 }
 
+// HandleRefreshJobMetrics POST /api/v1/merchant/publish-jobs/:id/refresh-metrics
+// 手动回读单作品互动数据（详情 Drawer「立即刷新」）。
+func (h *AccountHandler) HandleRefreshJobMetrics(c *gin.Context) {
+	tenantID := middleware.CurrentTenantID(c)
+	m, err := h.publishUC.RefreshJobMetrics(c.Request.Context(), tenantID, c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{
+		"job_id": m.JobID, "views": m.Views, "likes": m.Likes,
+		"comments": m.Comments, "shares": m.Shares, "collected_at": m.CollectedAt,
+	})
+}
+
+// HandleGetJobMetrics GET /api/v1/merchant/publish-jobs/:id/metrics —— 单作品指标时间序列（详情趋势）。
+func (h *AccountHandler) HandleGetJobMetrics(c *gin.Context) {
+	tenantID := middleware.CurrentTenantID(c)
+	ms, err := h.publishUC.ListJobMetrics(c.Request.Context(), tenantID, c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	out := make([]gin.H, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, gin.H{
+			"views": m.Views, "likes": m.Likes, "comments": m.Comments,
+			"shares": m.Shares, "collected_at": m.CollectedAt,
+		})
+	}
+	success(c, out)
+}
+
 // HandleMarkPublished POST /api/v1/geo/publish-jobs/:id/published —— 标记任务为已发布。
 func (h *AccountHandler) HandleMarkPublished(c *gin.Context) {
 	tenantID := middleware.CurrentTenantID(c)

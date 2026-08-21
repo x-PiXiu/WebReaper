@@ -229,6 +229,14 @@ export const businessApi = {
   getAnalyticsSummary: () =>
     apiClient.get<unknown, AnalyticsSummary>('/api/v1/merchant/works/analytics-summary'),
 
+  // 手动回读单作品互动数据（详情 Drawer「立即刷新」）
+  refreshJobMetrics: (jobId: string) =>
+    apiClient.post<unknown, { job_id: string; views: number; likes: number; comments: number; shares: number; collected_at: string }>(`/api/v1/merchant/publish-jobs/${jobId}/refresh-metrics`),
+
+  // 单作品指标时间序列（详情趋势图）
+  getJobMetrics: (jobId: string) =>
+    apiClient.get<unknown, Array<{ views: number; likes: number; comments: number; shares: number; collected_at: string }>>(`/api/v1/merchant/publish-jobs/${jobId}/metrics`),
+
   // ---- GEO 内容发布（半自动）----
   publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string; scheduled_at?: string; content_type?: string; media_urls?: string[]; cover_url?: string }) =>
     apiClient.post<unknown, PublishJob>('/api/v1/merchant/publish', data),

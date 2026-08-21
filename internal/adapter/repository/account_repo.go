@@ -155,6 +155,24 @@ func (r *GormPublishJobRepository) Count(ctx context.Context) (int, error) {
 }
 
 // ListScheduledDue 列出已到期未执行的排期任务（全租户；调度任务扫描用）。
+// ListPublished 全租户已发布任务（数据回读定时任务用）。
+func (r *GormPublishJobRepository) ListPublished(ctx context.Context, limit int) ([]entity.PublishJob, error) {
+	var pos []PublishJobPO
+	q := r.db.WithContext(ctx).Where("status = ?", entity.PublishStatusPublished).
+		Order("published_at DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.PublishJob, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, publishJobFromPO(p))
+	}
+	return out, nil
+}
+
 func (r *GormPublishJobRepository) ListScheduledDue(ctx context.Context, before time.Time) ([]entity.PublishJob, error) {
 	var pos []PublishJobPO
 	if err := r.db.WithContext(ctx).

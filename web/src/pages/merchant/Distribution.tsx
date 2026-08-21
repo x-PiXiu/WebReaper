@@ -389,6 +389,9 @@ export default function Distribution() {
                               {isExpired && isOAuth && pf.key === 'douyin' && (
                                 <Button size="small" type="primary" onClick={bindDouyin}>重新授权</Button>
                               )}
+                              {isOAuth && !isExpired && pf.key === 'douyin' && (
+                                <Button size="small" type="text" onClick={() => openBindModal('douyin')} title="数据回读需要浏览器通道（官方 API 权限未开通期间的替代）">补充浏览器通道</Button>
+                              )}
                               <Popconfirm title="确定解绑？" onConfirm={() => handleDeleteAccount(a.id)}>
                                 <Button size="small" type="text" danger>解绑</Button>
                               </Popconfirm>

@@ -28,6 +28,15 @@ type AccountRepository interface {
 	FindByOpenID(ctx context.Context, tenantID, platform, openID string) (entity.Account, error)
 }
 
+// VideoMetricRepository 视频互动数据快照仓储（数据回读）。
+type VideoMetricRepository interface {
+	Save(ctx context.Context, m entity.VideoMetric) error
+	// ListByJob 单作品时间序列（趋势图，按时间升序；limit 0=全部）。
+	ListByJob(ctx context.Context, tenantID, jobID string, limit int) ([]entity.VideoMetric, error)
+	// LatestByTenant 每个作品最新一条快照（作品数据页汇总；Go 侧按 job 去重）。
+	LatestByTenant(ctx context.Context, tenantID string) ([]entity.VideoMetric, error)
+}
+
 // AccountPool 账号池调度接口。
 // 用于全自动发布时自动选择最优账号（最久未使用优先，避免单号高频被封）。
 type AccountPool interface {
@@ -46,6 +55,8 @@ type PublishJobRepository interface {
 	Count(ctx context.Context) (int, error)
 	// ListScheduledDue 列出已到期未执行的排期任务（调度任务用，全租户）。
 	ListScheduledDue(ctx context.Context, before time.Time) ([]entity.PublishJob, error)
+	// ListPublished 全租户已发布任务（数据回读定时任务用）。
+	ListPublished(ctx context.Context, limit int) ([]entity.PublishJob, error)
 }
 
 // QRLoginResult 是一次扫码登录轮询的结果。

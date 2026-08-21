@@ -178,3 +178,18 @@ type PublishJob struct {
 func (j PublishJob) IsValid() bool {
 	return j.ID != "" && j.TenantID != "" && j.Platform != ""
 }
+
+// VideoMetric 视频互动数据快照（数据回读——每日任务/手动刷新写入时间序列）。
+// 详情 Drawer 画趋势、作品数据页汇总最新值。
+type VideoMetric struct {
+	ID          string    // vm-{nano}
+	TenantID    string    // 租户隔离
+	JobID       string    // 发布任务 ID
+	Platform    string    // douyin / kuaishou / ...
+	VideoID     string    // 平台内视频 ID（aweme_id）
+	Views       int64     // 播放
+	Likes       int64     // 点赞
+	Comments    int64     // 评论
+	Shares      int64     // 分享
+	CollectedAt time.Time // 采集时间
+}
