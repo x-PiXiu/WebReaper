@@ -1145,10 +1145,18 @@ func (q *ChromedpQRLogin) checkAuthCookies(ctx context.Context, authCookieNames 
 			// web_session 登录后 100+ 字符，访客 session 约 38 字符）。
 			// 用这个区分"访客 cookie"和"登录 cookie"。
 			if len(v) < 50 {
-				log.Printf("[QRLogin] cookie %s 存在但值太短（%d 字符），可能是访客 session，跳过", name, len(v))
-				continue
+				// 长度校验的适用性按平台而异：小红书 web_session 访客 38/登录 100+ 适用；
+				// 但抖音 sessionid 固定 32 字符 hex（登录后也是 32）——单靠长度必误杀。
+				// 改用登录伴随 cookie 判定：sid_guard/uid_tt 只在扫码登录成功后签发，访客没有。
+				if _, ok2 := cookieMap["sid_guard"]; ok2 {
+					log.Printf("[QRLogin] cookie %s 值短（%d 字符）但 sid_guard 存在，判定为登录态", name, len(v))
+				} else {
+					log.Printf("[QRLogin] cookie %s 存在但值太短（%d 字符）且无 sid_guard，视为访客 session，跳过", name, len(v))
+					continue
+				}
+			} else {
+				log.Printf("[QRLogin] cookie %s 值长度 %d，判定为登录态", name, len(v))
 			}
-			log.Printf("[QRLogin] cookie %s 值长度 %d，判定为登录态", name, len(v))
 			// 提取该认证 cookie 的过期时间
 			// Expires 是 Unix 时间戳（秒），-1 表示 session cookie（浏览器关闭即过期）
 			var expiresAt time.Time
