@@ -3,17 +3,16 @@ import { Tabs } from 'antd'
 import { EditOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import Content from '../Content'
 import CreationWorkbench from '../Creation'
+import { ComposeModuleHeader } from '../compose/ComposeModuleHeader'
 
 const TAB_KEYS = new Set(['media', 'article'])
 
 /**
- * 内容合成中心：写文章 / 做视频图片（真实 API）+ 成片向导（演示）。
- * Tab 用 searchParams 持久化（?tab=media|article|wizard）。
+ * 多媒体 / 写文章工具台（高级）：从内容合成模块跳转细调生成参数。
  */
 export default function Studio() {
   const [searchParams, setSearchParams] = useSearchParams()
   const raw = searchParams.get('tab') || 'media'
-  // 热门同款「拍摄同款」跳转预填：topic=选题文案，refTitle=参考爆款标题（拼进提示词供 AI 参考）
   const topicParam = searchParams.get('topic') || ''
   const refTitle = searchParams.get('refTitle') || ''
   const initialPrompt = topicParam
@@ -23,17 +22,17 @@ export default function Studio() {
 
   return (
     <div className="wr-page-content ip-page" style={{ paddingTop: 4 }}>
-      <div className="ip-page-hero" style={{ marginBottom: 12 }}>
-        <div>
-          <p className="ip-kicker">Compose</p>
-          <h1>内容合成</h1>
-          <p className="ip-lead">写文章 / 做视频图片，生成后去发布中心分发</p>
-        </div>
-      </div>
-
+      <ComposeModuleHeader
+        title="生成工具台"
+        lead="写文章与做视频图片的完整参数面板——供配音/数字人等模块细调"
+      />
       <Tabs
         activeKey={activeTab}
-        onChange={(k) => setSearchParams({ tab: k }, { replace: true })}
+        onChange={(k) => {
+          const next = new URLSearchParams(searchParams)
+          next.set('tab', k)
+          setSearchParams(next, { replace: true })
+        }}
         items={[
           {
             key: 'media',

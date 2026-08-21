@@ -90,29 +90,31 @@ export default function Login() {
         <div className="wr-login-torch-core" aria-hidden />
 
         <header className="wr-login-brand-top wr-login-rise">
-          <p className="wr-login-kicker">Account IP Agent</p>
+          <p className="wr-login-kicker">IP Growth Agent</p>
           <h1 className="wr-login-brand-title">获客智能体</h1>
           <span className="wr-login-title-line" aria-hidden />
         </header>
 
         <div className="wr-login-brand-body wr-login-rise wr-login-rise--delay">
           <h2 className="wr-login-headline">
-            打造账号 IP，
+            垂直 IP 营销，
             <br />
-            让内容持续获客。
+            帮老板持续拓客。
           </h2>
           <p className="wr-login-lead">
-            人设、资产、合成、发布与作品数据连成一条工作流——
-            少一点热闹包装，多一点可运营的增长闭环。
+            对标爆款、口播成片、一键分发、看清线索——
+            为人设获客而生，而不是堆一堆通用 AI 工具。
           </p>
         </div>
 
         <footer className="wr-login-brand-foot wr-login-rise wr-login-rise--delay2">
-          <span>人设档案</span>
+          <span>建人设</span>
           <span className="wr-login-dot" aria-hidden />
-          <span>内容合成</span>
+          <span>出内容</span>
           <span className="wr-login-dot" aria-hidden />
-          <span>作品数据</span>
+          <span>发出去</span>
+          <span className="wr-login-dot" aria-hidden />
+          <span>看线索</span>
         </footer>
       </aside>
 

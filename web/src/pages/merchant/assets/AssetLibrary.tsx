@@ -55,9 +55,9 @@ export default function AssetLibrary() {
     <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
-          <p className="ip-kicker">Assets</p>
-          <h1>资产库</h1>
-          <p className="ip-lead">{hint}——素材上传与 AI 产物的统一媒体库</p>
+          <p className="ip-kicker">Digital Twin</p>
+          <h1>数字分身</h1>
+          <p className="ip-lead">{hint}——形象、音色与封面素材，供口播数字人与成片取用</p>
         </div>
       </div>
 

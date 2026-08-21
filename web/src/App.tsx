@@ -17,6 +17,16 @@ const Brands = lazy(() => import('./pages/merchant/Brands'))
 const Distribution = lazy(() => import('./pages/merchant/Distribution'))
 const Checkup = lazy(() => import('./pages/merchant/checkup/Checkup'))
 const Studio = lazy(() => import('./pages/merchant/studio/Studio'))
+const ComposeHub = lazy(() => import('./pages/merchant/compose/ComposeHub'))
+const ComposeTrackPage = lazy(() => import('./pages/merchant/compose/ComposeTrackPage'))
+const BenchmarkModule = lazy(() => import('./pages/merchant/compose/modules/BenchmarkModule'))
+const CopyModule = lazy(() => import('./pages/merchant/compose/modules/CopyModule'))
+const TitlesModule = lazy(() => import('./pages/merchant/compose/modules/TitlesModule'))
+const VoiceModule = lazy(() => import('./pages/merchant/compose/modules/VoiceModule'))
+const AvatarModule = lazy(() => import('./pages/merchant/compose/modules/AvatarModule'))
+const EditModule = lazy(() => import('./pages/merchant/compose/modules/EditModule'))
+const CoverModule = lazy(() => import('./pages/merchant/compose/modules/CoverModule'))
+const ImagesModule = lazy(() => import('./pages/merchant/compose/modules/ImagesModule'))
 const AssetLibrary = lazy(() => import('./pages/merchant/assets/AssetLibrary'))
 const MyWorks = lazy(() => import('./pages/merchant/works/MyWorks'))
 const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
@@ -51,6 +61,18 @@ function LazyPage({ children }: { children: React.ReactNode }) {
   )
 }
 
+function RedirectPreserve({ to }: { to: string }) {
+  const location = useLocation()
+  const base = to.split('?')[0]
+  const extra = to.includes('?') ? to.slice(to.indexOf('?') + 1) : ''
+  const params = new URLSearchParams(location.search)
+  if (extra) {
+    new URLSearchParams(extra).forEach((v, k) => { if (!params.has(k)) params.set(k, v) })
+  }
+  const q = params.toString()
+  return <Navigate to={q ? `${base}?${q}` : base} replace />
+}
+
 function homePath(role: string | null | undefined) {
   return role === 'admin' ? '/admin' : '/m/dashboard'
 }
@@ -67,7 +89,20 @@ export default function App() {
           <Route path="/m/dashboard" element={<LazyPage><MerchantHome /></LazyPage>} />
           <Route path="/m/brands" element={<LazyPage><Brands /></LazyPage>} />
           <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
-          <Route path="/m/compose" element={<LazyPage><Studio /></LazyPage>} />
+          <Route path="/m/compose" element={<LazyPage><ComposeHub /></LazyPage>} />
+          <Route path="/m/compose/video" element={<LazyPage><ComposeTrackPage track="video" /></LazyPage>} />
+          <Route path="/m/compose/graphic" element={<LazyPage><ComposeTrackPage track="graphic" /></LazyPage>} />
+          <Route path="/m/compose/benchmark" element={<LazyPage><BenchmarkModule /></LazyPage>} />
+          <Route path="/m/compose/copy" element={<LazyPage><CopyModule /></LazyPage>} />
+          <Route path="/m/compose/script" element={<Navigate to="/m/compose/copy" replace />} />
+          <Route path="/m/compose/rewrite" element={<Navigate to="/m/compose/copy" replace />} />
+          <Route path="/m/compose/titles" element={<LazyPage><TitlesModule /></LazyPage>} />
+          <Route path="/m/compose/voice" element={<LazyPage><VoiceModule /></LazyPage>} />
+          <Route path="/m/compose/avatar" element={<LazyPage><AvatarModule /></LazyPage>} />
+          <Route path="/m/compose/edit" element={<LazyPage><EditModule /></LazyPage>} />
+          <Route path="/m/compose/cover" element={<LazyPage><CoverModule /></LazyPage>} />
+          <Route path="/m/compose/images" element={<LazyPage><ImagesModule /></LazyPage>} />
+          <Route path="/m/compose/tools" element={<LazyPage><Studio /></LazyPage>} />
           <Route path="/m/works" element={<LazyPage><MyWorks /></LazyPage>} />
           <Route path="/m/analytics" element={<LazyPage><WorksAnalytics /></LazyPage>} />
           {/* 兼容旧路由 */}
@@ -75,11 +110,11 @@ export default function App() {
           <Route path="/m/keywords" element={<Navigate to="/m/analytics" replace />} />
           <Route path="/m/indexing-report" element={<Navigate to="/m/analytics" replace />} />
           <Route path="/m/visibility" element={<Navigate to="/m/analytics" replace />} />
-          <Route path="/m/studio" element={<Navigate to="/m/compose" replace />} />
-          <Route path="/m/content" element={<Navigate to="/m/compose?tab=article" replace />} />
-          <Route path="/m/creation" element={<Navigate to="/m/compose?tab=media" replace />} />
+          <Route path="/m/studio" element={<RedirectPreserve to="/m/compose/benchmark" />} />
+          <Route path="/m/content" element={<RedirectPreserve to="/m/compose/tools?tab=article" />} />
+          <Route path="/m/creation" element={<RedirectPreserve to="/m/compose/tools?tab=media" />} />
           <Route path="/m/nearby" element={<Navigate to="/m/brands" replace />} />
-          <Route path="/m/studio-legacy" element={<Navigate to="/m/compose" replace />} />
+          <Route path="/m/studio-legacy" element={<Navigate to="/m/compose/tools" replace />} />
           <Route path="/m/checkup-legacy" element={<LazyPage><Checkup /></LazyPage>} />
           <Route path="/m/distribution" element={<LazyPage><Distribution /></LazyPage>} />
           <Route path="/m/my-plan" element={<LazyPage><MyPlan /></LazyPage>} />

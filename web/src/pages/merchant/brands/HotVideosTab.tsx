@@ -47,7 +47,7 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
     }
   }
 
-  // 拍摄同款：确认/修改选题 → 带参跳多媒体创作（Studio 预填"想写什么"）
+  // 拍摄同款：确认/修改选题 → 进入「爆款对标」模块（保留 query）
   const openShoot = (v: HotVideo) => {
     setShooting(v)
     setTopicDraft(v.topic || `拍一条同款：${v.title}`)
@@ -59,8 +59,13 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
       message.warning('选题至少 4 个字')
       return
     }
-    const q = new URLSearchParams({ tab: 'media', topic, refTitle: shooting.title })
-    navigate(`/m/studio?${q.toString()}`)
+    const q = new URLSearchParams({
+      topic,
+      refTitle: shooting.title,
+      sourceUrl: shooting.url || '',
+      hotPoint: shooting.hot_point || '',
+    })
+    navigate(`/m/compose/benchmark?${q.toString()}`)
   }
 
   if (isLoading) {
@@ -130,7 +135,7 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
       >
         <Space direction="vertical" style={{ width: '100%' }} size={8}>
           <Text type="secondary" style={{ fontSize: 12 }}>参考爆款：{shooting?.title}</Text>
-          <Text style={{ fontSize: 13 }}>确认或修改选题后进入视频创作（已自动预填）：</Text>
+          <Text style={{ fontSize: 13 }}>确认或修改选题后进入「爆款对标」：</Text>
           <Input.TextArea
             rows={3}
             value={topicDraft}

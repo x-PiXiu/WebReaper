@@ -77,11 +77,19 @@ export default function Distribution() {
     const qContentId = searchParams.get('contentId')
     const qBrandId = searchParams.get('brandId')
     const qMediaUrls = searchParams.get('mediaUrls')
+    const qContentType = searchParams.get('contentType')
+    const qTitle = searchParams.get('title')
     if (qBrandId) setCurrentBrand(qBrandId)
     if (qContentId) setSelectedContentId(qContentId)
-    if (qMediaUrls) {
+    if (qTitle) setPublishTitle(qTitle)
+    if (qContentType === 'article' || qContentType === 'image') {
+      setPublishForm(qContentType)
+      if (qMediaUrls) setMediaUrls(qMediaUrls.split(',').filter(Boolean))
+    } else if (qMediaUrls) {
       setMediaUrls(qMediaUrls.split(',').filter(Boolean))
-      setPublishForm('video') // 多媒体创作跳转的是视频产物
+      setPublishForm('video')
+    } else if (qContentType === 'video') {
+      setPublishForm('video')
     }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -313,9 +321,9 @@ export default function Distribution() {
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div className="ip-page-hero">
           <div>
-            <p className="ip-kicker">Publish</p>
-            <h1>发布中心</h1>
-            <p className="ip-lead">绑定平台账号、发布作品——成功后可在「我的作品」与「作品数据」复盘</p>
+            <p className="ip-kicker">Go Live</p>
+            <h1>一键发布</h1>
+            <p className="ip-lead">按内容类型发布：短视频或图文种草——从爆款获客双轨带参进入更顺手</p>
           </div>
           <Button onClick={() => navigate('/m/works')}>查看我的作品</Button>
         </div>

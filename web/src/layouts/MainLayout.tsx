@@ -9,6 +9,7 @@ import { useBrandStore } from '../store/brand'
 import { clearQueryCache } from '../queryClient'
 import { businessApi } from '../api/business'
 import { useNotificationList, useUnreadCount, useMarkNotificationRead } from '../hooks/useNotifications'
+import { PRODUCT } from '../config/product'
 
 const { Header, Sider, Content } = Layout
 
@@ -36,13 +37,29 @@ function toMenuItems(items: NavItem[]) {
     : { key: m.key, label: m.label, icon: m.icon })
 }
 
-// 在菜单（含分组）中查找当前路由对应的菜单项（按完整 key 匹配，其次按末段路径匹配）。
+// 在菜单（含分组）中查找当前路由对应的菜单项（完整匹配优先；其次最长前缀）。
 function findSelectedKey(items: NavItem[], pathname: string): string | undefined {
+  let best: string | undefined
+  let bestLen = -1
+  const consider = (key: string) => {
+    if (key === pathname) {
+      best = key
+      bestLen = key.length
+      return
+    }
+    if (pathname.startsWith(key + '/') && key.length > bestLen) {
+      best = key
+      bestLen = key.length
+    }
+  }
+  for (const m of items) {
+    consider(m.key)
+    for (const c of m.children || []) consider(c.key)
+  }
+  if (best) return best
   const pathSegs = pathname.split('/').filter(Boolean)
   for (const m of items) {
-    if (m.key === pathname) return m.key
     for (const c of m.children || []) {
-      if (c.key === pathname) return c.key
       if (pathSegs.length > 0 && c.key.endsWith('/' + pathSegs[pathSegs.length - 1])) return c.key
     }
   }
@@ -57,7 +74,7 @@ function findSelectedKey(items: NavItem[], pathname: string): string | undefined
 //   - 抽出 AppShell 后，新增角色布局只需传菜单，零重复代码
 export function AppShell({
   menuItems,
-  brandName = '获客智能体',
+  brandName = PRODUCT.name,
   brandIcon = 'G',
   noPaddingKeys = [],
   banner,
@@ -94,7 +111,7 @@ export function AppShell({
   const pageTitle = findMenuLabel(menuItems, selectedKey) || '控制台'
 
   useEffect(() => {
-    document.title = `${pageTitle} · 获客智能体`
+    document.title = `${pageTitle} · ${PRODUCT.name}`
   }, [pageTitle])
 
   // 全局搜索：人设 + 作品库 + 发布任务 + 快捷入口
@@ -135,9 +152,12 @@ export function AppShell({
       target: '/m/distribution',
     })),
     ...(searchReady ? [
-      { value: '快捷 · 内容合成', label: '快捷 · 内容合成', target: '/m/compose' },
-      { value: '快捷 · 资产库', label: '快捷 · 资产库', target: '/m/assets' },
-      { value: '快捷 · 作品数据', label: '快捷 · 作品数据', target: '/m/analytics' },
+      { value: '快捷 · 爆款获客', label: '快捷 · 爆款获客', target: '/m/compose' },
+      { value: '快捷 · 爆款对标', label: '快捷 · 爆款对标', target: '/m/compose/benchmark' },
+      { value: '快捷 · 口播数字人', label: '快捷 · 口播数字人', target: '/m/compose/avatar' },
+      { value: '快捷 · 一键发布', label: '快捷 · 一键发布', target: '/m/distribution' },
+      { value: '快捷 · 数字分身', label: '快捷 · 数字分身', target: '/m/assets' },
+      { value: '快捷 · 获客数据', label: '快捷 · 获客数据', target: '/m/analytics' },
     ] : []),
   ]
 
@@ -248,7 +268,7 @@ export function AppShell({
                 <Input
                   size="small"
                   prefix={<SearchOutlined style={{ color: 'var(--wr-text-muted)', fontSize: 13 }} />}
-                  placeholder="搜索人设 / 作品"
+                  placeholder="搜索人设 / 作品 / 模块"
                   variant="borderless"
                   style={{ background: 'var(--wr-input-bg)', borderRadius: 8 }}
                 />
@@ -307,7 +327,7 @@ export function AppShell({
               opacity: 0.72,
               letterSpacing: '0.08em',
             }}>
-              获客智能体
+              {PRODUCT.name} · IP 营销拓客
             </div>
           </div>
         </Content>
