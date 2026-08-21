@@ -584,12 +584,20 @@ func downloadMediaToTemp(urls []string) (paths []string, cleanup func(), err err
 		}
 	}
 	for i, u := range urls {
-		// 扩展名：从 URL 推断，默认 .png
+		// 扩展名：从 URL 推断（图片/视频），默认 .png
 		ext := ".png"
-		if strings.HasSuffix(strings.ToLower(u), ".jpg") || strings.HasSuffix(strings.ToLower(u), ".jpeg") {
+		lu := strings.ToLower(u)
+		switch {
+		case strings.HasSuffix(lu, ".jpg") || strings.HasSuffix(lu, ".jpeg"):
 			ext = ".jpg"
-		} else if strings.HasSuffix(strings.ToLower(u), ".webp") {
+		case strings.HasSuffix(lu, ".webp"):
 			ext = ".webp"
+		case strings.HasSuffix(lu, ".mp4"):
+			ext = ".mp4" // 视频发布（抖音/快手）
+		case strings.HasSuffix(lu, ".mov"):
+			ext = ".mov"
+		case strings.HasSuffix(lu, ".webm"):
+			ext = ".webm"
 		}
 		req, e := http.NewRequest(http.MethodGet, u, nil)
 		if e != nil {

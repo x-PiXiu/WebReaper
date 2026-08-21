@@ -554,6 +554,8 @@ func main() {
 			}
 			// 发布通道注册表（工厂模式，已注册知乎/小红书全自动通道——同时支持半自动+全自动）
 			channelRegistry := publisher.NewChannelRegistry()
+			// cookie 滚动回写（发布会话后把浏览器最新 cookie 写回账号库——绑定滚动续期）
+			channelRegistry.SetAccountStore(accountRepos.account, vault)
 			geoPublishUC = account.NewPublishUseCase(accountRepos.job, channelRegistry, accountRepos.account, vault)
 			// 注入发布效果追踪（发布成功后自动触发监测对比提及率）
 			geoPublishUC.SetMonitorTrigger(geoMonitorUCRef)

@@ -3,9 +3,16 @@ package publisher
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strings"
+	"sync/atomic"
+	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
+	"webreaper/internal/adapter/publisher/humanize"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
@@ -18,11 +25,24 @@ import (
 // 反检测（Level 2）：全自动发布走 humanize.HumanAction（人类行为模拟 + 指纹伪装）。
 
 // DouyinAutoChannel 抖音发布通道（半自动 + 全自动）。
-type DouyinAutoChannel struct{}
+type DouyinAutoChannel struct {
+	accountRepo port.AccountRepository // 可选：cookie 回写（发布会话后滚动续期绑定寿命）
+	vault       port.CookieVault
+}
 
 var _ port.PublishChannel = (*DouyinAutoChannel)(nil)
 var _ port.ChannelInfoProvider = (*DouyinAutoChannel)(nil)
 var _ port.AutoPublishChannel = (*DouyinAutoChannel)(nil)
+
+// SetAccountStore 注入账号存储（可选；注入后发布成功把浏览器里的最新 cookie 回写账号库——
+// 抖音会话 cookie 滚动刷新，回写让绑定从"扫码快照时效"变成"滚动续期"）。
+func (c *DouyinAutoChannel) SetAccountStore(ar port.AccountRepository, v port.CookieVault) {
+	c.accountRepo, c.vault = ar, v
+}
+
+// publishDryRun DRY_RUN 安全验证模式（PUBLISH_DRY_RUN=true）：走完上传+填表后
+// 截图返回、不点发布——用于真机验证选择器，绝不动商户账号发出内容。
+var publishDryRun = strings.TrimSpace(os.Getenv("PUBLISH_DRY_RUN")) != ""
 
 func NewDouyinAutoChannel() *DouyinAutoChannel { return &DouyinAutoChannel{} }
 
@@ -47,7 +67,32 @@ func (c *DouyinAutoChannel) PublishSemiAuto(_ context.Context, _ entity.PublishJ
 
 // PublishAuto 全自动：chromedp + HumanAction 反检测层，RPA 发布视频。
 func (c *DouyinAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJob, cookie string) (string, error) {
-	return publishVideoRPA(ctx, job, cookie, "douyin", "https://creator.douyin.com/creator-micro/content/publish-video")
+	videoURL, newCookie, err := publishDouyinVideo(ctx, job, cookie)
+	if err != nil {
+		return "", err
+	}
+	// cookie 滚动回写：发布会话中抖音刷新了会话 cookie，写回账号库延长绑定寿命
+	c.writebackCookie(context.Background(), job, newCookie)
+	return videoURL, nil
+}
+
+// writebackCookie 把浏览器最新 cookie 加密回写账号（MediaCrawler update_cookies 思想）。
+func (c *DouyinAutoChannel) writebackCookie(ctx context.Context, job entity.PublishJob, newCookie string) {
+	if c.accountRepo == nil || c.vault == nil || newCookie == "" || job.AccountID == "" {
+		return
+	}
+	acc, err := c.accountRepo.FindByID(ctx, job.TenantID, job.AccountID)
+	if err != nil || acc.ID == "" {
+		return
+	}
+	enc, err := c.vault.Encrypt(newCookie)
+	if err != nil {
+		return
+	}
+	acc.CookieEncrypted = enc
+	if saveErr := c.accountRepo.Save(ctx, acc); saveErr == nil {
+		log.Printf("[PublishAuto:douyin] cookie 已滚动回写（账号 %s 绑定续期）", acc.ID)
+	}
 }
 
 // KuaishouAutoChannel 快手发布通道（半自动 + 全自动）。
@@ -83,24 +128,233 @@ func (c *KuaishouAutoChannel) PublishAuto(ctx context.Context, job entity.Publis
 	return publishVideoRPA(ctx, job, cookie, "kuaishou", "https://cp.kuaishou.com/article/publish/video")
 }
 
-// publishVideoRPA 通用的视频发布 RPA（混合模式：正常走代码，异常 Agent 接管）。
-// 使用 HumanAction 反检测层（人类行为模拟 + 指纹伪装）。
-// 完整实现待选择器调通后替换（当前返回占位错误，半自动模式已可用）。
+// publishVideoRPA 快手全自动发布（模式与抖音同构，选择器待真机调试后启用）。
 func publishVideoRPA(ctx context.Context, job entity.PublishJob, cookie, platform, publishURL string) (string, error) {
-	// TODO: 完整 RPA 实现（下一轮调试选择器后启用）
-	// 步骤：
-	//   1. humanize.New(ctx) + StealthOptions() 启动带反检测的浏览器
-	//   2. InjectFingerprint(ctx) 注入指纹伪装
-	//   3. 注入 Cookie（与现有 XHS 模式一致）
-	//   4. ha.Navigate(publishURL) → ha.WaitVisible(上传区域)
-	//   5. ha.Upload(上传选择器, 视频文件) → 验证
-	//   6. ha.Type(标题选择器, 标题) → 验证
-	//   7. ha.Click(发布按钮) → 验证成功
-	//   8. 成功后调用 extractVideoURLAfterPublish(ctx) 提取视频链接返回
-	//  异常处理：ha.VerifySuccess() 失败 → 截屏 → Agent 接管
 	_ = ctx
+	_ = job
 	_ = cookie
+	_ = publishURL
 	return "", fmt.Errorf("%s 全自动视频发布开发中（当前支持半自动模式——生成链接手动发布）", platform)
+}
+
+// publishDouyinVideo 抖音全自动发布——六步混合模式（MediaCrawler 工程思想在"写"场景的映射：
+// UI 负责执行（行为指纹与真人一致），网络响应负责状态确认（比 DOM/URL 解析确定））。
+//
+//	① 下载视频到临时文件 → ② Stealth 浏览器+cookie 注入+登录态预检
+//	→ ③ 上传（CDP SetUploadFiles，trusted）→ ④ 编辑器出现=上传/转码完成信号
+//	→ ⑤ humanize 填文案 → ⑥ 点发布 → 网络拦截响应取 aweme_id（降级页面提取）
+//
+// DRY_RUN（PUBLISH_DRY_RUN=true）：走完 ①-⑤ 截图返回，不点发布——真机验证选择器用。
+// ⚠️ 选择器为多策略候选（真机未验证）——首次真机调试务必从 DRY_RUN 开始。
+func publishDouyinVideo(ctx context.Context, job entity.PublishJob, cookie string) (videoURL, newCookie string, err error) {
+	if len(job.MediaURLs) == 0 {
+		return "", "", fmt.Errorf("视频文件缺失（MediaURLs 为空）——全自动发布需要 mp4 的 URL")
+	}
+	// ① 视频落本地（上传控件需要本地文件路径）
+	paths, cleanup, dErr := downloadMediaToTemp(job.MediaURLs)
+	if dErr != nil {
+		return "", "", fmt.Errorf("下载视频失败: %w", dErr)
+	}
+	defer cleanup()
+	videoPath := paths[0]
+	log.Printf("[PublishAuto:douyin] 视频已就绪 %s（%d 个媒体）", videoPath, len(paths))
+
+	// ② Stealth 浏览器 + cookie 注入（发布是平台风控最敏感操作，反检测全开）
+	opts := humanize.StealthOptions()
+	opts = append(opts,
+		chromedp.WindowSize(1280, 800),
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
+	)
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	defer browserCancel()
+	// 发布是分钟级流程（上传+转码），超时给足
+	sessionCtx, sessionCancel := context.WithTimeout(browserCtx, 5*time.Minute)
+	defer sessionCancel()
+
+	// 发布接口响应捕获（状态确认数据面）：item/create 等回包含 aweme_id
+	var publishBody atomic.Value
+	chromedp.ListenTarget(sessionCtx, func(ev interface{}) {
+		resp, ok := ev.(*network.EventResponseReceived)
+		if !ok || resp == nil {
+			return
+		}
+		u := resp.Response.URL
+		if !strings.Contains(u, "item/create") && !strings.Contains(u, "aweme/v1/creator") {
+			return
+		}
+		go func(reqID network.RequestID) {
+			body, e := network.GetResponseBody(reqID).Do(sessionCtx)
+			if e == nil && len(body) > 0 {
+				publishBody.Store(string(body))
+				log.Printf("[PublishAuto:douyin] 捕获发布接口响应 %.200s", string(body))
+			}
+		}(resp.RequestID)
+	})
+
+	ha := humanize.New(sessionCtx)
+	// 首次 Run + cookie 注入 + 导航必须同一 context（qrlogin 同款陷阱）
+	var currentURL string
+	if e := chromedp.Run(sessionCtx,
+		network.Enable(),
+		network.SetCookies(parseCookies(cookie, ".douyin.com")),
+		chromedp.ActionFunc(func(c context.Context) error { return humanize.InjectFingerprint(c) }),
+		chromedp.Navigate("https://creator.douyin.com/creator-micro/content/publish-video"),
+		chromedp.Sleep(4*time.Second),
+		chromedp.Location(&currentURL),
+	); e != nil {
+		return "", "", fmt.Errorf("打开抖音发布页失败: %w", e)
+	}
+	if strings.Contains(currentURL, "login") {
+		return "", "", fmt.Errorf("cookie 失效（重定向登录页），请重新绑定抖音账号")
+	}
+	log.Printf("[PublishAuto:douyin] 登录态预检通过，发布页已打开")
+
+	// ③ 上传视频（input[type=file] 隐藏控件，CDP SetUploadFiles 是 trusted 事件）
+	if e := chromedp.Run(sessionCtx,
+		chromedp.WaitVisible(`input[type=file]`, chromedp.ByQuery),
+		chromedp.SetUploadFiles(`input[type=file]`, []string{videoPath}, chromedp.ByQuery),
+	); e != nil {
+		return "", "", fmt.Errorf("上传视频失败: %w", e)
+	}
+	log.Printf("[PublishAuto:douyin] 视频已提交上传，等待转码…")
+
+	// ④ 上传/转码完成信号：编辑器出现（视频处理好后表单才可编辑）——多策略候选
+	editorSel := waitFirstVisible(sessionCtx, 90*time.Second,
+		`[contenteditable=true]`, `.ql-editor`, `[class*="editor"][contenteditable]`, `.ProseMirror`)
+	if editorSel == "" {
+		return "", "", fmt.Errorf("等待上传完成超时（编辑器未出现）——建议 PUBLISH_DRY_RUN 模式核查选择器")
+	}
+	log.Printf("[PublishAuto:douyin] 上传/转码完成（编辑器选择器=%s）", editorSel)
+
+	// ⑤ 填文案（标题+正文合并进描述编辑器；抖音发布页为单编辑器）
+	desc := job.Title
+	if job.Content != "" && job.Content != job.Title {
+		desc = job.Title + " " + job.Content
+	}
+	if e := ha.Click(editorSel); e == nil {
+		if te := ha.Type(editorSel, clampRunes(desc, 400)); te != nil {
+			log.Printf("[PublishAuto:douyin] 文案填充失败（不阻断）: %v", te)
+		}
+	}
+
+	// DRY_RUN：到此为止——截图留证，不点发布
+	if publishDryRun {
+		_ = os.MkdirAll("data", 0o755)
+		var shot []byte
+		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil {
+			p := fmt.Sprintf("data/publish-dryrun-%s.png", job.ID)
+			_ = os.WriteFile(p, shot, 0o644)
+			log.Printf("[PublishAuto:douyin] DRY_RUN 完成（未发布）——截图 %s", p)
+		}
+		return "", readBackCookie(sessionCtx), nil
+	}
+
+	// ⑥ 点发布（按文本定位按钮：含"发布"、排除"存草稿"，标记后 humanize 点击）
+	if e := markButtonByText(sessionCtx, "发布", "存草稿"); e != nil {
+		return "", "", fmt.Errorf("定位发布按钮失败: %w", e)
+	}
+	if e := ha.Click(`[data-wr-publish-btn]`); e != nil {
+		return "", "", fmt.Errorf("点击发布失败: %w", e)
+	}
+	log.Printf("[PublishAuto:douyin] 已点击发布，等待结果确认…")
+
+	// 确认链（三级降级）：网络响应 aweme_id → 页面提取 → 超时失败
+	confirmCtx, confirmCancel := context.WithTimeout(sessionCtx, 90*time.Second)
+	defer confirmCancel()
+	for i := 0; i < 30; i++ {
+		if b, ok := publishBody.Load().(string); ok && b != "" {
+			if id := extractAwemeIDFromJSON(b); id != "" {
+				return "https://www.douyin.com/video/" + id, readBackCookie(confirmCtx), nil
+			}
+		}
+		if url, e := extractVideoURLAfterPublish(confirmCtx); e == nil && url != "" {
+			return url, readBackCookie(confirmCtx), nil
+		}
+		chromedp.Sleep(3 * time.Second)
+	}
+	return "", readBackCookie(confirmCtx), fmt.Errorf("发布结果确认超时（可能已发出——请到抖音创作者中心人工核对）")
+}
+
+// readBackCookie 从浏览器导出最新抖音 cookie（滚动回写用）。
+func readBackCookie(ctx context.Context) string {
+	cookies, err := network.GetCookies().Do(ctx)
+	if err != nil {
+		return ""
+	}
+	var parts []string
+	for _, c := range cookies {
+		if strings.HasSuffix(c.Domain, "douyin.com") {
+			parts = append(parts, c.Name+"="+c.Value)
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// extractAwemeIDFromJSON 从发布响应 JSON 提取 aweme_id/item_id（容错：多字段名候选）。
+func extractAwemeIDFromJSON(body string) string {
+	for _, key := range []string{`"aweme_id"`, `"item_id"`} {
+		i := strings.Index(body, key)
+		if i < 0 {
+			continue
+		}
+		rest := body[i+len(key):]
+		j := strings.Index(rest, `"`)
+		if j < 0 {
+			continue
+		}
+		k := strings.Index(rest[j+1:], `"`)
+		if k > 0 {
+			id := rest[j+1 : j+1+k]
+			if len(id) >= 15 { // 抖音视频 ID 为 15+ 位数字
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+// markButtonByText 按可见文本标记发布按钮（排除 exclude 文本），标记后供 humanize.Click。
+func markButtonByText(ctx context.Context, include, exclude string) error {
+	var found bool
+	return chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+		const btns = document.querySelectorAll('button, [role=button], .byte-btn');
+		for (const b of btns) {
+			const t = (b.textContent || '').trim();
+			if (t.includes(%q) && !t.includes(%q) && b.offsetParent !== null) {
+				b.setAttribute('data-wr-publish-btn', '1');
+				return true;
+			}
+		}
+		return false;
+	})()`, include, exclude), &found))
+}
+
+// waitFirstVisible 依次等待候选选择器，返回首个可见者（多策略选择器模式——平台改版容错）。
+func waitFirstVisible(ctx context.Context, timeout time.Duration, selectors ...string) string {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		for _, sel := range selectors {
+			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err := chromedp.Run(cctx, chromedp.WaitVisible(sel, chromedp.ByQuery))
+			cancel()
+			if err == nil {
+				return sel
+			}
+		}
+		chromedp.Sleep(2 * time.Second)
+	}
+	return ""
+}
+
+// clampRunes 截断到 n 个 rune。
+func clampRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // extractVideoURLAfterPublish RPA 发布成功后提取视频链接（作品数据详情/数据回读依赖）。

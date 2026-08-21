@@ -102,7 +102,7 @@ func (r *ChannelRegistry) Register(ch port.PublishChannel) {
 	r.channels[ch.Platform()] = ch
 }
 
-// Get 按平台名获取通道。
+// Register 按平台名获取通道。
 func (r *ChannelRegistry) Get(platform string) (port.PublishChannel, error) {
 	// 兼容前端可能传的别名
 	platform = normalizePlatform(platform)
@@ -111,6 +111,21 @@ func (r *ChannelRegistry) Get(platform string) (port.PublishChannel, error) {
 		return nil, fmt.Errorf("publish channel not registered for platform: %s", platform)
 	}
 	return ch, nil
+}
+
+// AccountStoreUser 支持账号存储注入的通道（cookie 滚动回写用——发布会话后
+// 把浏览器最新 cookie 写回账号库，绑定寿命从扫码快照变成滚动续期）。
+type AccountStoreUser interface {
+	SetAccountStore(ar port.AccountRepository, v port.CookieVault)
+}
+
+// SetAccountStore 向所有支持账号存储的通道转发（main 装配时调用一次）。
+func (r *ChannelRegistry) SetAccountStore(ar port.AccountRepository, v port.CookieVault) {
+	for _, ch := range r.channels {
+		if asu, ok := ch.(AccountStoreUser); ok {
+			asu.SetAccountStore(ar, v)
+		}
+	}
 }
 
 // List 列出所有已注册通道。

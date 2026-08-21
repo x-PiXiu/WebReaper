@@ -62,6 +62,8 @@ services:
       PUBLISH_COOKIE_SECRET: ${PUBLISH_COOKIE_SECRET:-change-me-in-production}
       # RPA 浏览器（容器无显示器 → headless）
       QR_LOGIN_HEADED: "false"
+      # 发布 DRY_RUN（true=走完上传+填表截图但不点发布——真机验证选择器用，生产勿开）
+      PUBLISH_DRY_RUN: ${PUBLISH_DRY_RUN:-}
       # 其他
       AUTO_MONITOR_ENABLED: ${AUTO_MONITOR_ENABLED:-true}
       TELEMETRY_ENABLED: "false"
