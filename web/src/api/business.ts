@@ -240,6 +240,13 @@ export const businessApi = {
   cancelPublishPlan: (planId: string) =>
     apiClient.post<unknown, unknown>(`/api/v1/merchant/publish-plans/${planId}/cancel`),
 
+  // 发布通道管理（admin：双链路共存的手动切换）
+  listPublishTransports: () =>
+    apiClient.get<unknown, { platforms: Array<{ platform: string; available: string[]; override: string; mode: string }> }>(`/api/v1/admin/publish/transports`),
+
+  setPublishTransport: (platform: string, kind: string) =>
+    apiClient.put<unknown, { platform: string; override: string; mode: string }>(`/api/v1/admin/publish/transports/${platform}`, { kind }),
+
   // 手动回读单作品互动数据（详情 Drawer「立即刷新」）
   refreshJobMetrics: (jobId: string) =>
     apiClient.post<unknown, { job_id: string; views: number; likes: number; comments: number; shares: number; collected_at: string }>(`/api/v1/merchant/publish-jobs/${jobId}/refresh-metrics`),

@@ -172,6 +172,9 @@ type PublishJob struct {
 	MediaURLs []string
 	// CoverURL 封面图 URL（视频/长文/音频需要；图文取首图）。
 	CoverURL string
+	// Transport 实际执行通道（link/rpa/api——发布域三轴重构后按次记录，
+	// 降级链"启动前短路切换"的实际落点；空=历史数据）。
+	Transport string
 }
 
 // IsValid 领域规则。

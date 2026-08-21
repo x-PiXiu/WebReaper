@@ -354,6 +354,8 @@ type PublishUseCase struct {
 	publicBaseURL  string                 // 公开站根地址（发布内容尾部带公开站链接用）
 	metricRepo     port.VideoMetricRepository // 可选：互动数据快照（数据回读）
 	socialSearch   port.SocialSearcher        // 可选：站内搜索（回读取详情用）
+	transports     *port.TransportRegistry    // 可选：通道轴注册表（link/rpa/api 多通道共存+降级链）
+	resolver       port.CredentialResolver    // 可选：凭证解析（rpa→cookie/api→token，用例层不碰 vault）
 }
 
 func NewPublishUseCase(jr port.PublishJobRepository, reg port.PublishChannelRegistry, ar port.AccountRepository, vault port.CookieVault) *PublishUseCase {
@@ -373,6 +375,51 @@ func (uc *PublishUseCase) SetAccountPool(ap port.AccountPool) {
 // SetPublicBaseURL 注入公开站根地址（发布内容尾部带公开站链接，加速爬虫发现）。
 func (uc *PublishUseCase) SetPublicBaseURL(baseURL string) {
 	uc.publicBaseURL = baseURL
+}
+
+// SetTransports 注入通道轴（多通道共存 + 自动降级 + 管理后台 override）。
+func (uc *PublishUseCase) SetTransports(tr *port.TransportRegistry, cr port.CredentialResolver) {
+	uc.transports, uc.resolver = tr, cr
+}
+
+// validateCapability 服务端能力强校验（诊断 P3：Agent/curl 绕过前端时的裸奔缺口）。
+// 校验 平台×素材形态支持 + Constraints（标题字数/最少配图/最少视频）——规则数据来自
+// 通道的 ChannelInfoProvider 声明（谁的能力谁声明），校验动作归用例（服务端强制）。
+func (uc *PublishUseCase) validateCapability(ch port.PublishChannel, contentType string, in PublishInput) error {
+	// 形态支持
+	if contentType != "" {
+		supported := ch.SupportedContentTypes()
+		if len(supported) == 0 {
+			supported = ch.SupportedMediaType()
+		}
+		ok := false
+		for _, t := range supported {
+			if t == contentType {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("该平台不支持 %s 形态（支持：%v）", contentType, supported)
+		}
+	}
+	// 约束（按形态）
+	if ip, isInfo := ch.(port.ChannelInfoProvider); isInfo && contentType != "" {
+		if cs, ok := ip.Constraints()[contentType]; ok {
+			titleRunes := len([]rune(in.Title))
+			if cs.TitleMaxRunes > 0 && titleRunes > cs.TitleMaxRunes {
+				return fmt.Errorf("标题超长：%d 字 > 上限 %d 字", titleRunes, cs.TitleMaxRunes)
+			}
+			mediaCount := len(in.MediaURLs)
+			if cs.MinImages > 0 && contentType == entity.ContentTypeImage && mediaCount < cs.MinImages {
+				return fmt.Errorf("图文至少需要 %d 张图（当前 %d）", cs.MinImages, mediaCount)
+			}
+			if cs.MinVideos > 0 && contentType == entity.ContentTypeVideo && mediaCount < cs.MinVideos {
+				return fmt.Errorf("视频发布至少需要 %d 个视频文件（当前 %d）", cs.MinVideos, mediaCount)
+			}
+		}
+	}
+	return nil
 }
 
 // SetMetricsStore 注入互动数据回读依赖（快照仓储 + 站内搜索）。
@@ -468,6 +515,10 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 	ch, err := uc.registry.Get(in.Platform)
 	if err != nil {
 		return entity.PublishJob{}, fmt.Errorf("获取发布通道失败: %w", err)
+	}
+	// 服务端能力强校验（平台×形态×约束——Agent/curl 绕过前端时的防线）
+	if vErr := uc.validateCapability(ch, in.ContentType, in); vErr != nil {
+		return entity.PublishJob{}, vErr
 	}
 
 	// 发布前处理：Markdown 转纯文本（社媒平台不渲染 Markdown）。
@@ -586,16 +637,82 @@ func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob
 		}
 	}
 
-	// 解密 cookie
-	cookie, err := uc.vault.Decrypt(acc.CookieEncrypted)
-	if err != nil {
-		job.Status = entity.PublishStatusFailed
-		job.ErrorMsg = "解密cookie失败: " + err.Error()
-		_ = uc.jobRepo.Save(ctx, job)
-		return job, fmt.Errorf("解密cookie失败: %w", err)
+	// ---- 通道轴执行（三轴重构：多通道共存 + 启动前短路降级 + override）----
+	// 候选链（自动策略）：api（OAuth 账号+已注册）→ rpa（cookie 账号）→ link 兜底；
+	// 管理后台 override 的通道由 Registry.Chain 自动提到链头。
+	// ⚠️ 降级只在"启动前失败"（凭证缺失/通道未注册/权限未开通）发生；
+	// 执行中失败落库报错、不自动换通道重发——视频可能实际已发出，重发=重复发布事故。
+	var selected port.PublishTransport
+	var req port.TransportRequest
+	if uc.transports != nil && uc.resolver != nil {
+		candidates := []string{port.TransportRPA, port.TransportLink}
+		if acc.IsOAuth() {
+			candidates = append([]string{port.TransportAPI}, candidates...)
+		}
+		for _, t := range uc.transports.Chain(job.Platform, candidates) {
+			// 凭证匹配预检（不匹配的通道直接跳过——OAuth 账号不会走 rpa 解 cookie）
+			kind := t.Kind()
+			if kind == port.TransportRPA && acc.CookieEncrypted == "" {
+				continue
+			}
+			if kind == port.TransportAPI && acc.AccessTokenEnc == "" {
+				continue
+			}
+			cookie, apiToken, rErr := uc.resolver.Resolve(ctx, job.TenantID, acc.ID, kind)
+			if rErr != nil {
+				continue // 凭证解析失败 → 短路下一通道
+			}
+			selected = t
+			req = port.TransportRequest{
+				Job: port.PublishJobRequest{
+					TenantID: job.TenantID, Title: job.Title, Content: job.Content,
+					ContentType: job.ContentType, MediaURLs: job.MediaURLs, CoverURL: job.CoverURL,
+				},
+				Account:  port.AccountView{ID: acc.ID, Platform: acc.Platform, DisplayName: acc.DisplayName, AuthType: acc.AuthType},
+				Cookie:   cookie,
+				APIToken: apiToken,
+			}
+			break
+		}
+	}
+	if selected == nil {
+		// 通道轴未装配（旧部署兼容）或全链无可用凭证 → 旧路径兜底（原有行为不变）
+		cookie, dErr := uc.vault.Decrypt(acc.CookieEncrypted)
+		if dErr != nil {
+			job.Status = entity.PublishStatusFailed
+			job.ErrorMsg = "无可用发布通道（rpa 凭证缺失）: " + dErr.Error()
+			_ = uc.jobRepo.Save(ctx, job)
+			return job, fmt.Errorf("无可用发布通道: %w", dErr)
+		}
+		job.Transport = port.TransportRPA
+		job.Status = entity.PublishStatusRunning
+		if sErr := uc.jobRepo.Save(ctx, job); sErr != nil {
+			return job, fmt.Errorf("保存发布任务失败: %w", sErr)
+		}
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			articleURL, gErr := autoCh.PublishAuto(bgCtx, job, cookie)
+			if gErr != nil {
+				_ = uc.jobRepo.UpdateStatus(bgCtx, job.TenantID, job.ID, entity.PublishStatusFailed, "", gErr.Error())
+				return
+			}
+			job.Status = entity.PublishStatusPublished
+			job.ExternalURL = articleURL
+			job.PublishedAt = time.Now()
+			_ = uc.jobRepo.Save(bgCtx, job)
+			if uc.accountPool != nil {
+				_ = uc.accountPool.Release(bgCtx, acc)
+			}
+			if uc.monitorTrigger != nil {
+				uc.trackPublishEffect(bgCtx, job)
+			}
+		}()
+		return job, nil
 	}
 
-	// 保存 job（status=running），立即返回给前端
+	// 通道轴路径：link 同步返回；rpa/api 由通道实现自行管理异步收尾（包装层契约）
+	job.Transport = selected.Kind()
 	job.Status = entity.PublishStatusRunning
 	if err := uc.jobRepo.Save(ctx, job); err != nil {
 		return job, fmt.Errorf("保存发布任务失败: %w", err)
@@ -606,7 +723,7 @@ func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		articleURL, err := autoCh.PublishAuto(bgCtx, job, cookie)
+		result, err := selected.Publish(bgCtx, req)
 		if err != nil {
 			_ = uc.jobRepo.UpdateStatus(bgCtx, job.TenantID, job.ID, entity.PublishStatusFailed, "", err.Error())
 			return
@@ -614,7 +731,7 @@ func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob
 
 		// 发布成功：更新状态 + 记录发布时间 + 文章URL
 		job.Status = entity.PublishStatusPublished
-		job.ExternalURL = articleURL
+		job.ExternalURL = result.ExternalURL
 		job.PublishedAt = time.Now()
 		_ = uc.jobRepo.Save(bgCtx, job)
 

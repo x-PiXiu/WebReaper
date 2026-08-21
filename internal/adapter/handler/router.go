@@ -99,6 +99,8 @@ type Router struct {
 	accountFrontendURL string                  // 账号域 OAuth 回调后 302 跳回的前端地址
 	worksUC            *works.WorksUseCase     // 作品库聚合（可选；未注入则端点不注册）
 	pendingPublish     *agent.PendingPublishStore // 发布计划暂存（主 Agent 硬确认；可选）
+	transportRegistry  *port.TransportRegistry    // 通道轴注册表（管理后台切换端点用；可选）
+	settingRepo        port.SystemSettingRepository // 系统设置仓储（通道 override 持久化用；可选）
 	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
@@ -210,6 +212,12 @@ func (r *Router) SetSystemSettings(uc *systemsettings.SystemSettingsUseCase) {
 // SetNotifications 注入站内通知用例（可选；未注入则通知端点返回空）。
 func (r *Router) SetNotifications(uc *notification.NotifyUseCase) {
 	r.notifyUC = uc
+}
+
+// SetTransportRegistry 注入通道轴注册表（可选；管理后台通道切换端点用）。
+func (r *Router) SetTransportRegistry(tr *port.TransportRegistry, sr port.SystemSettingRepository) {
+	r.transportRegistry = tr
+	r.settingRepo = sr
 }
 
 // SetPendingPublishStore 注入发布计划暂存（可选；主 Agent 硬确认卡片端点用）。

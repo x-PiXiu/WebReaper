@@ -37,6 +37,7 @@ import (
 	"webreaper/internal/adapter/provider/vidu"
 	"webreaper/internal/adapter/provider/viduendpoint"
 	"webreaper/internal/adapter/publisher"
+	transport "webreaper/internal/adapter/publisher/transport"
 	"webreaper/internal/adapter/douyinoauth"
 	"webreaper/internal/adapter/douyinweb"
 	"webreaper/internal/adapter/qrlogin"
@@ -569,6 +570,14 @@ func main() {
 			geoPublishUC.SetAccountPool(repository.NewGormAccountPool(accountRepos.account))
 			// 互动数据回读（快照仓储 + 站内详情接口——每日任务/手动刷新）
 			geoPublishUC.SetMetricsStore(accountRepos.metric, socialSearcher)
+			// 通道轴装配（发布域三轴重构）：link/rpa 双通道共存 + 启动前短路降级 +
+			// 管理后台 override；API 通道权限批下来后 Register 即接入（结构已就位）
+			transportRegistry := port.NewTransportRegistry()
+			credResolver := transport.NewVaultCredentialResolver(vault, accountRepos.account)
+			transportRegistry.Register(transport.NewLinkTransport(channelRegistry))
+			transportRegistry.Register(transport.NewRPATransport(channelRegistry))
+			geoPublishUC.SetTransports(transportRegistry, credResolver)
+			router.SetTransportRegistry(transportRegistry, settingRepo)
 			// 作品库三源聚合（文章 + 多媒体产物 + 发布状态 + 互动数据）
 			worksUC := works.NewWorksUseCase(geoRepos.content, repository.NewGormGenerationTaskRepository(geoRepos.db), accountRepos.job, accountRepos.metric)
 			router.SetWorks(worksUC)

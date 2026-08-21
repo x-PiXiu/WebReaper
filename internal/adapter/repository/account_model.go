@@ -53,6 +53,7 @@ type PublishJobPO struct {
 	ContentType     string      `gorm:"size:16"`  // 内容形态：image/video/article/audio
 	MediaURLsJSON   string      `gorm:"type:text"` // 媒体文件 URL 列表（JSON 数组）
 	CoverURL        string      `gorm:"type:text"` // 封面图 URL
+	Transport       string      `gorm:"size:16"`   // 实际执行通道：link/rpa/api（空=历史）
 }
 
 func (PublishJobPO) TableName() string { return "geo_publish_jobs" }

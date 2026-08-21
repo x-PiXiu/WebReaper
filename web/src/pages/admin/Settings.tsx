@@ -1,5 +1,5 @@
-import { Typography, Switch, Space, message, Alert, Tag } from 'antd'
-import { RadarChartOutlined, EyeOutlined } from '@ant-design/icons'
+import { Typography, Switch, Space, message, Alert, Tag, Segmented, Button } from 'antd'
+import { RadarChartOutlined, EyeOutlined, SwapOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 
@@ -36,6 +36,20 @@ export default function AdminSettings() {
       message.success('浏览器可见性已切换（下次 RPA 操作即时生效）')
       queryClient.invalidateQueries({ queryKey: ['settings-browser-headed'] })
     },
+  })
+
+  // 发布通道矩阵（三轴重构：双链路共存 + 手动切换）
+  const { data: transports, refetch: refetchTransports } = useQuery({
+    queryKey: ['admin-publish-transports'],
+    queryFn: () => businessApi.listPublishTransports().catch(() => ({ platforms: [] })),
+  })
+  const setTransport = useMutation({
+    mutationFn: ({ platform, kind }: { platform: string; kind: string }) => businessApi.setPublishTransport(platform, kind),
+    onSuccess: (_d, v) => {
+      message.success(v.kind ? `${v.platform} 已强制走 ${v.kind.toUpperCase()} 通道` : `${v.platform} 已恢复自动降级`)
+      refetchTransports()
+    },
+    onError: () => message.error('切换失败'),
   })
 
   return (
@@ -99,6 +113,36 @@ export default function AdminSettings() {
           </div>
           <Switch checked={browserHeaded?.headed} loading={toggleBrowser.isPending} onChange={(v) => toggleBrowser.mutate(v)} />
         </div>
+      </div>
+      {/* 发布通道管理（双链路共存） */}
+      <div className="wr-glass-card" style={{ padding: 24 }}>
+        <Space size={8} style={{ marginBottom: 8 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--wr-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 15 }}>
+            <SwapOutlined />
+          </div>
+          <Text strong style={{ fontSize: 15 }}>发布通道管理（官方 API / 浏览器 RPA 双链路）</Text>
+        </Space>
+        <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 16, lineHeight: 1.7 }}>
+          自动策略：按账号凭证降级（OAuth→API，浏览器→RPA，兜底→半自动链接）；一条路启动失败自动切换下一条。
+          此处可按平台<strong>强制指定通道</strong>（优先于自动策略；清除即恢复自动）。发布执行中失败不自动重发（防重复发布）。
+        </Text>
+        {(transports?.platforms || []).map((p) => (
+          <div key={p.platform} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderTop: '1px solid var(--wr-border)' }}>
+            <Space>
+              <Text strong style={{ width: 72 }}>{p.platform}</Text>
+              <Tag>可用：{p.available.join(' / ')}</Tag>
+              <Tag color={p.mode === 'auto' ? 'default' : 'warning'}>{p.mode === 'auto' ? '自动降级' : `手动：${p.override.toUpperCase()}`}</Tag>
+            </Space>
+            <Space>
+              <Segmented
+                value={p.override || 'auto'}
+                options={[{ value: 'auto', label: '自动' }, ...p.available.map((k) => ({ value: k, label: k.toUpperCase() }))]}
+                onChange={(v) => setTransport.mutate({ platform: p.platform, kind: v === 'auto' ? '' : String(v) })}
+              />
+              {p.override && <Button size="small" type="text" onClick={() => setTransport.mutate({ platform: p.platform, kind: '' })}>恢复自动</Button>}
+            </Space>
+          </div>
+        ))}
       </div>
     </div>
   )
