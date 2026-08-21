@@ -395,7 +395,10 @@ export default function Distribution() {
                                 <Button size="small" type="primary" danger onClick={() => openBindModal(pf.key)}>重新绑定</Button>
                               )}
                               {isExpired && isOAuth && pf.key === 'douyin' && (
-                                <Button size="small" type="primary" onClick={bindDouyin}>重新授权</Button>
+                                <>
+                                  <Button size="small" type="primary" onClick={bindDouyin}>重新授权</Button>
+                                  <Button size="small" type="text" onClick={() => openBindModal('douyin')}>扫码重绑</Button>
+                                </>
                               )}
                               {isOAuth && !isExpired && pf.key === 'douyin' && (
                                 <Button size="small" type="text" onClick={() => openBindModal('douyin')} title="数据回读需要浏览器通道（官方 API 权限未开通期间的替代）">补充浏览器通道</Button>
@@ -408,7 +411,10 @@ export default function Distribution() {
                         )
                       })}
                       {pf.key === 'douyin' ? (
-                        <Button type="dashed" block onClick={bindDouyin}>绑定更多抖音账号</Button>
+                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                          <Button type="dashed" block onClick={bindDouyin}>官方授权绑定更多</Button>
+                          <Button type="text" block onClick={() => openBindModal('douyin')}>浏览器扫码绑定（数据回读通道）</Button>
+                        </Space>
                       ) : (
                         <Button type="dashed" block icon={<LinkOutlined />} onClick={() => openBindModal(pf.key)}>
                           绑定更多 {pf.name} 账号
@@ -416,9 +422,14 @@ export default function Distribution() {
                       )}
                     </Space>
                   ) : pf.key === 'douyin' ? (
-                    <Button type="primary" block onClick={bindDouyin} disabled={accountsLoading}>
-                      绑定抖音账号
-                    </Button>
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <Button type="primary" block onClick={bindDouyin} disabled={accountsLoading}>
+                        官方授权绑定抖音（推荐）
+                      </Button>
+                      <Button type="text" block onClick={() => openBindModal('douyin')} disabled={accountsLoading}>
+                        浏览器扫码绑定（数据回读通道）
+                      </Button>
+                    </Space>
                   ) : (
                     <Button type="primary" block onClick={() => openBindModal(pf.key)} disabled={accountsLoading}>
                       点击绑定 {pf.name} 账号
