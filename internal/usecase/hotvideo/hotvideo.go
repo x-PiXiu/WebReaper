@@ -149,13 +149,18 @@ func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string,
 		keywords = keywords[:3] // 最多搜 3 个词
 	}
 
+	// 单个关键词失败不放弃——太具体的词（"20年老店"）返回空是正常的，
+	// 只要其他词有结果就继续；全部失败才降级到通用搜索引擎
 	seen := make(map[string]bool)
 	var videos []port.SocialVideo
+	var succeeded int
 	for _, kw := range keywords {
 		list, err := uc.douyin.SearchHotVideos(ctx, tenantID, "douyin", kw, 10)
 		if err != nil {
-			return nil, err
+			log.Printf("[HotVideo] 站内搜索 %q 失败: %v（继续下一词）", kw, err)
+			continue
 		}
+		succeeded++
 		for _, v := range list {
 			if v.VideoID == "" || seen[v.VideoID] {
 				continue
@@ -165,9 +170,10 @@ func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string,
 		}
 		time.Sleep(5 * time.Second) // 两次搜索留间隔（太短触发抖音 verify_check 频率风控）
 	}
-	if len(videos) == 0 {
-		return nil, fmt.Errorf("站内搜索无结果")
+	if succeeded == 0 || len(videos) == 0 {
+		return nil, fmt.Errorf("站内搜索全部关键词无结果（%d 个词）", len(keywords))
 	}
+	log.Printf("[HotVideo] 站内搜索：%d/%d 个词成功，共 %d 个视频", succeeded, len(keywords), len(videos))
 	// 按点赞数排序取前 8（最近很火）
 	sort.Slice(videos, func(i, j int) bool { return videos[i].DiggCount > videos[j].DiggCount })
 	if len(videos) > 8 {
