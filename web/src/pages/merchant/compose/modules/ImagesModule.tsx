@@ -57,7 +57,7 @@ export default function ImagesModule() {
   const onUpload = async (file: File) => {
     setBusy(true)
     try {
-      const { asset } = await businessApi.uploadAsset(file)
+      const asset = await businessApi.uploadAsset(file)
       draft.patch({ imageUrls: [...urls, asset.url], track: 'graphic' })
       message.success('已加入配图')
     } catch {

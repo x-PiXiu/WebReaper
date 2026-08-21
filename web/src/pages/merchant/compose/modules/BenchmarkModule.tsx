@@ -70,7 +70,7 @@ export default function BenchmarkModule() {
   const onUpload = async (file: File) => {
     setBusy(true)
     try {
-      const { asset } = await businessApi.uploadAsset(file)
+      const asset = await businessApi.uploadAsset(file)
       draft.patch({ sourceUrl: asset.url, brandId: brandId || draft.brandId })
       applyTranscript(
         `【本地文件】${file.name}\n素材地址：${asset.url}\n\n（语音转写即将接入——请粘贴转写文案，或去「文案工作室」撰写）`,

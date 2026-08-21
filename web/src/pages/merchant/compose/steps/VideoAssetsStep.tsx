@@ -156,7 +156,7 @@ export function VideoAssetsStep() {
           showUploadList={false}
           beforeUpload={async (file) => {
             try {
-              const { asset } = await businessApi.uploadAsset(file)
+              const asset = await businessApi.uploadAsset(file)
               setAvatarImage(asset.url)
               message.success('形象已上传')
             } catch {

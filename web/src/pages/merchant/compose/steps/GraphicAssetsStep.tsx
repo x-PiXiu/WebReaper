@@ -66,7 +66,7 @@ export function GraphicAssetsStep() {
             beforeUpload={async (file) => {
               setBusy(true)
               try {
-                const { asset } = await businessApi.uploadAsset(file)
+                const asset = await businessApi.uploadAsset(file)
                 draft.patch({ imageUrls: [...list, asset.url], track: 'graphic' })
                 message.success('已加入配图')
               } catch {
