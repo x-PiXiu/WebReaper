@@ -18,8 +18,8 @@ export const GROWTH_STAGES = [
   {
     key: 'create',
     label: '出内容',
-    desc: '发视频或发图文，两条获客线',
-    path: '/m/compose',
+    desc: '灵感广场找爆款，再发视频或发图文',
+    path: '/m/inspire',
   },
   {
     key: 'publish',

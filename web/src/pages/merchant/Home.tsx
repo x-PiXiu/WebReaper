@@ -71,7 +71,7 @@ export default function MerchantHome() {
           <p className="ip-lead">全国获客热力与城市热点——点选地图查看线索、发布量与对标话题</p>
         </div>
         <Space wrap>
-          <Button icon={<LinkOutlined />} onClick={() => navigate('/m/compose')}>爆款获客</Button>
+          <Button icon={<LinkOutlined />} onClick={() => navigate('/m/inspire')}>灵感广场</Button>
           <Button type="primary" className="ip-btn-primary" icon={<RobotOutlined />} onClick={() => navigate('/m/compose/video')}>
             发视频
           </Button>

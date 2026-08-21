@@ -20,7 +20,7 @@ export default function ComposeHub() {
         <div>
           <p className="ip-kicker">{PRODUCT.nameEn}</p>
           <h1>爆款获客</h1>
-          <p className="ip-lead">选一条线进入三步引导：左编辑、右预览——发视频或发图文互不混淆</p>
+          <p className="ip-lead">选一条线进入三步引导：左编辑、右预览——也可先去灵感广场找爆款再复刻</p>
         </div>
       </div>
 
@@ -91,6 +91,10 @@ export default function ComposeHub() {
           </div>
         </div>
       )}
+
+      <div style={{ marginTop: 20 }}>
+        <Link to="/m/inspire">灵感广场找爆款再复刻 →</Link>
+      </div>
     </div>
   )
 }

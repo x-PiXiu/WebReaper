@@ -152,6 +152,7 @@ export function AppShell({
       target: '/m/distribution',
     })),
     ...(searchReady ? [
+      { value: '快捷 · 灵感广场', label: '快捷 · 灵感广场', target: '/m/inspire' },
       { value: '快捷 · 爆款获客', label: '快捷 · 爆款获客', target: '/m/compose' },
       { value: '快捷 · 爆款对标', label: '快捷 · 爆款对标', target: '/m/compose/benchmark' },
       { value: '快捷 · 口播数字人', label: '快捷 · 口播数字人', target: '/m/compose/avatar' },

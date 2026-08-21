@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Empty, Input, Modal, Space, Spin, Tag, Typography, message } from 'antd'
 import { PlayCircleOutlined, SyncOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
+import { useComposeDraft } from '../../../store/composeDraft'
 import type { HotVideo } from '../../../types/api'
 
 const { Text, Paragraph } = Typography
@@ -18,12 +19,12 @@ const PLATFORM_LABEL: Record<string, string> = {
 }
 
 /**
- * 热门同款（人设档案 Tab）：同赛道最近很火的短视频——可直接播放参考，
- * 一键「拍摄同款」带选题进多媒体创作。数据 = LLM+网络搜索发现（24h 缓存）。
+ * 热门同款（人设档案 Tab）：同赛道爆款短视频入口；完整广场见「灵感广场」。
  */
 export default function HotVideosTab({ brandId }: { brandId: string }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const draft = useComposeDraft()
   const [shooting, setShooting] = useState<HotVideo | null>(null)
   const [topicDraft, setTopicDraft] = useState('')
 
@@ -35,7 +36,6 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
   })
   const videos = data?.videos || []
 
-  // 换一批：跳过服务端缓存重搜
   const refresh = async () => {
     message.loading({ content: '正在搜索最新热门视频…', key: 'hv', duration: 0 })
     try {
@@ -47,11 +47,11 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
     }
   }
 
-  // 拍摄同款：确认/修改选题 → 进入「爆款对标」模块（保留 query）
   const openShoot = (v: HotVideo) => {
     setShooting(v)
     setTopicDraft(v.topic || `拍一条同款：${v.title}`)
   }
+
   const confirmShoot = () => {
     if (!shooting) return
     const topic = topicDraft.trim()
@@ -59,13 +59,22 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
       message.warning('选题至少 4 个字')
       return
     }
-    const q = new URLSearchParams({
-      topic,
+    draft.setTrack('video')
+    draft.patch({
+      brandId,
+      sourceUrl: shooting.url || undefined,
       refTitle: shooting.title,
-      sourceUrl: shooting.url || '',
-      hotPoint: shooting.hot_point || '',
+      hotPoint: shooting.hot_point || undefined,
+      script: topic,
+      transcript: [
+        shooting.hot_point ? `【为什么火】${shooting.hot_point}` : '',
+        `【选题】${topic}`,
+        shooting.url ? `【来源】${shooting.url}` : '',
+      ].filter(Boolean).join('\n'),
+      selectedTitle: shooting.title.slice(0, 40),
     })
-    navigate(`/m/compose/benchmark?${q.toString()}`)
+    setShooting(null)
+    navigate('/m/compose/video')
   }
 
   if (isLoading) {
@@ -85,7 +94,8 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
           <Tag style={{ margin: 0 }}>{videos.length} 个</Tag>
         </Space>
         <Space>
-          <Text type="secondary" style={{ fontSize: 12 }}>同赛道爆款 · 每天 1 次自动更新</Text>
+          <Button type="link" size="small" onClick={() => navigate('/m/inspire')}>灵感广场 →</Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>同赛道爆款 · 每天更新</Text>
           <Button size="small" icon={<SyncOutlined />} onClick={refresh}>换一批</Button>
         </Space>
       </div>
@@ -116,18 +126,17 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
               )}
               <Space style={{ marginTop: 'auto' }}>
                 <Button size="small" icon={<PlayCircleOutlined />} onClick={() => window.open(v.url, '_blank', 'noopener')}>播放</Button>
-                <Button size="small" type="primary" onClick={() => openShoot(v)}>拍摄同款</Button>
+                <Button size="small" type="primary" onClick={() => openShoot(v)}>复刻视频</Button>
               </Space>
             </div>
           ))}
         </div>
       )}
 
-      {/* 拍摄同款：确认/修改选题 → 跳创作 */}
       <Modal
         open={!!shooting}
-        title="拍摄同款"
-        okText="去创作"
+        title="复刻为短视频"
+        okText="进入发视频"
         cancelText="取消"
         onOk={confirmShoot}
         onCancel={() => setShooting(null)}
@@ -135,7 +144,7 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
       >
         <Space direction="vertical" style={{ width: '100%' }} size={8}>
           <Text type="secondary" style={{ fontSize: 12 }}>参考爆款：{shooting?.title}</Text>
-          <Text style={{ fontSize: 13 }}>确认或修改选题后进入「爆款对标」：</Text>
+          <Text style={{ fontSize: 13 }}>确认或修改选题后进入发视频步骤：</Text>
           <Input.TextArea
             rows={3}
             value={topicDraft}

@@ -2266,3 +2266,64 @@ html.light .cf-phone {
   .cf-steps { max-width: 100%; overflow-x: auto; }
   .cf-top-right { width: 100%; justify-content: flex-start; }
 }
+
+/* —— 灵感广场 —— */
+.inspire-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.inspire-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.inspire-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 16px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--wr-border);
+  background: var(--wr-card-bg);
+  transition: border-color 180ms ease, transform 180ms ease;
+}
+.inspire-card:hover {
+  border-color: var(--wr-border-hover);
+  transform: translateY(-2px);
+}
+.inspire-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.inspire-card-title {
+  margin: 0 !important;
+  font-size: 15px !important;
+  line-height: 1.45 !important;
+  color: var(--wr-text-primary) !important;
+  min-height: 2.9em;
+}
+.inspire-card-hot {
+  margin: 0 !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+  min-height: 3.6em;
+}
+.inspire-topic {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--wr-primary-bg);
+  border: 1px solid var(--wr-primary-border);
+}
+.inspire-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
+}

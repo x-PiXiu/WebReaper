@@ -10,11 +10,12 @@ import {
   FolderOpenOutlined,
   AppstoreAddOutlined,
   UserOutlined,
+  FireOutlined,
 } from '@ant-design/icons'
 import { PRODUCT } from '../config/product'
 
 /**
- * 老板向精简导航：爆款获客内分「发视频 / 发图文」双轨。
+ * 老板向精简导航：灵感广场发现爆款 → 爆款获客双轨复刻。
  */
 const menu: NavItem[] = [
   {
@@ -33,6 +34,7 @@ const menu: NavItem[] = [
   {
     key: 'create', label: '内容获客',
     children: [
+      { key: '/m/inspire', label: '灵感广场', icon: <FireOutlined /> },
       { key: '/m/compose', label: '爆款获客', icon: <AppstoreAddOutlined /> },
       { key: '/m/works', label: '我的作品', icon: <FolderOpenOutlined /> },
     ],

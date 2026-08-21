@@ -27,6 +27,7 @@ const AvatarModule = lazy(() => import('./pages/merchant/compose/modules/AvatarM
 const EditModule = lazy(() => import('./pages/merchant/compose/modules/EditModule'))
 const CoverModule = lazy(() => import('./pages/merchant/compose/modules/CoverModule'))
 const ImagesModule = lazy(() => import('./pages/merchant/compose/modules/ImagesModule'))
+const InspirationPlaza = lazy(() => import('./pages/merchant/inspire/InspirationPlaza'))
 const AssetLibrary = lazy(() => import('./pages/merchant/assets/AssetLibrary'))
 const MyWorks = lazy(() => import('./pages/merchant/works/MyWorks'))
 const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="/m/dashboard" element={<LazyPage><MerchantHome /></LazyPage>} />
           <Route path="/m/brands" element={<LazyPage><Brands /></LazyPage>} />
           <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
+          <Route path="/m/inspire" element={<LazyPage><InspirationPlaza /></LazyPage>} />
           <Route path="/m/compose" element={<LazyPage><ComposeHub /></LazyPage>} />
           <Route path="/m/compose/video" element={<LazyPage><ComposeTrackPage track="video" /></LazyPage>} />
           <Route path="/m/compose/graphic" element={<LazyPage><ComposeTrackPage track="graphic" /></LazyPage>} />
