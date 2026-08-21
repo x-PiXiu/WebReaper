@@ -9,7 +9,6 @@ import { citabilityOf } from '../../utils/citability'
 import { useBrandContext } from '../../hooks/useBrands'
 import PublishToSiteButton from '../../components/PublishToSiteButton'
 import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
-import { useWorksStore } from '../../store/works'
 import type { Brand, Keyword, OptimizedContent } from '../../types/api'
 
 const { Text, Paragraph } = Typography
@@ -47,7 +46,6 @@ const FORMAT_OPTIONS = [
 export default function Content({ embedded }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const upsertWork = useWorksStore((s) => s.upsertWork)
   // 全局品牌上下文：与分发/监测页共享，跨页不丢
   const { brands, brandId: selectedBrand, setCurrentBrand } = useBrandContext()
   const [originalText, setOriginalText] = useState('')
@@ -141,18 +139,6 @@ export default function Content({ embedded }: { embedded?: boolean }) {
       setResult(res)
       message.success('优化完成')
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
-      if (res.id) {
-        upsertWork({
-          id: `article-${res.id}`,
-          title: res.title || topic || '未命名文章',
-          coverAccent: '#0f766e',
-          status: 'ready',
-          createdAt: res.created_at || new Date().toISOString(),
-          contentId: res.id,
-          brandId: selectedBrand,
-          source: 'article',
-        })
-      }
     } catch {
     } finally {
       setOptimizing(false)
@@ -188,18 +174,6 @@ export default function Content({ embedded }: { embedded?: boolean }) {
         message.warning(dups[0], 6)
       }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
-      if (res.id) {
-        upsertWork({
-          id: `article-${res.id}`,
-          title: res.title || topic || '未命名文章',
-          coverAccent: '#0f766e',
-          status: 'ready',
-          createdAt: res.created_at || new Date().toISOString(),
-          contentId: res.id,
-          brandId: selectedBrand,
-          source: 'article',
-        })
-      }
     } catch { /* 拦截器已提示 */ } finally {
       setGenerating(false)
     }

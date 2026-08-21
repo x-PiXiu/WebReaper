@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -15,7 +15,6 @@ import {
 import { businessApi } from '../../api/business'
 import AssetPicker from '../../components/AssetPicker'
 import { useBrandContext } from '../../hooks/useBrands'
-import { useWorksStore } from '../../store/works'
 import type { GenerationTask, GenerationType, ModelCapability, MediaAsset, PromptRef } from '../../types/api'
 
 const { Text } = Typography
@@ -212,8 +211,6 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
   // 全局品牌上下文（与内容生成/分发页共享）；本页允许清空=不关联品牌
   const { brands, brandId: ctxBrandId } = useBrandContext()
   const [brandId, setBrandId] = useState<string>(ctxBrandId || '')
-  const upsertWork = useWorksStore((s) => s.upsertWork)
-  const syncedTaskIds = useRef(new Set<string>())
 
   const { data: types = [] } = useQuery({
     queryKey: ['generation-types'],
@@ -229,28 +226,6 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     },
   })
 
-  // 成功任务写入本地作品库，便于「我的作品」跳转发布中心
-  useEffect(() => {
-    for (const t of tasks) {
-      if (t.state !== 'success' || syncedTaskIds.current.has(t.id)) continue
-      const urls = (t.creations || []).map((c) => c.stored_url || c.url).filter(Boolean) as string[]
-      if (urls.length === 0) continue
-      syncedTaskIds.current.add(t.id)
-      const p = parseTaskParams(t)
-      const prompt = typeof p.prompt === 'string' ? p.prompt : ''
-      const label = SUBTYPE_META[t.sub_type]?.label || t.sub_type
-      upsertWork({
-        id: `gen-${t.id}`,
-        title: (prompt || label).slice(0, 40) || '多媒体作品',
-        coverAccent: '#b45309',
-        status: 'ready',
-        createdAt: t.created_at || new Date().toISOString(),
-        mediaUrls: urls,
-        brandId: t.brand_id || brandId || undefined,
-        source: 'media',
-      })
-    }
-  }, [tasks, brandId, upsertWork])
 
   const submitMutation = useMutation({
     mutationFn: (data: Parameters<typeof businessApi.submitGenerationTask>[0]) => businessApi.submitGenerationTask(data),

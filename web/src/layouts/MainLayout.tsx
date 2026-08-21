@@ -6,7 +6,6 @@ import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { useBrandStore } from '../store/brand'
-import { useWorksStore } from '../store/works'
 import { clearQueryCache } from '../queryClient'
 import { businessApi } from '../api/business'
 import { useNotificationList, useUnreadCount, useMarkNotificationRead } from '../hooks/useNotifications'
@@ -100,7 +99,12 @@ export function AppShell({
 
   // 全局搜索：人设 + 作品库 + 发布任务 + 快捷入口
   const [searchReady, setSearchReady] = useState(false)
-  const works = useWorksStore((s) => s.works)
+  const { data: works = [] } = useQuery({
+    queryKey: ['merchant-works'],
+    queryFn: () => businessApi.listWorks().catch(() => []),
+    staleTime: 60_000,
+    enabled: !inAdmin,
+  })
   const { data: brands = [] } = useQuery({
     queryKey: ['geo-brands'],
     queryFn: () => businessApi.listBrands(),

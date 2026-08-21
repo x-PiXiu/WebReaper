@@ -1,42 +1,52 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Button, Empty, Input, Segmented, Space, Tag, Typography } from 'antd'
-import { PlusOutlined, SendOutlined, ExportOutlined } from '@ant-design/icons'
-import { formatDuration } from '../../../mock/ipAssets'
-import { useWorksStore } from '../../../store/works'
+import { PlusOutlined, SendOutlined } from '@ant-design/icons'
+import { businessApi } from '../../../api/business'
+import type { WorkItem } from '../../../types/api'
 
-const { Text, Title } = Typography
+const { Text } = Typography
 
 type Filter = 'all' | 'draft' | 'ready' | 'published'
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: '草稿',
-  ready: '待发布',
-  published: '已发布',
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  draft: { label: '草稿', color: 'default' },
+  generating: { label: '生成中', color: 'processing' },
+  ready: { label: '待发布', color: 'gold' },
+  published: { label: '已发布', color: 'green' },
 }
 
-function distributionPath(w: {
-  contentId?: string
-  mediaUrls?: string[]
-  brandId?: string
-}) {
+const KIND_CONFIG: Record<string, { label: string; emoji: string }> = {
+  article: { label: '文章', emoji: '📝' },
+  video: { label: '视频', emoji: '🎬' },
+  image: { label: '图片', emoji: '🖼️' },
+  audio: { label: '音频', emoji: '🎵' },
+}
+
+function distributionPath(w: WorkItem) {
   const q = new URLSearchParams()
-  if (w.contentId) q.set('contentId', w.contentId)
-  if (w.mediaUrls?.length) q.set('mediaUrls', w.mediaUrls.join(','))
-  if (w.brandId) q.set('brandId', w.brandId)
+  if (w.content_id) q.set('contentId', w.content_id)
+  if (w.media_urls?.length) q.set('mediaUrls', w.media_urls.join(','))
+  if (w.brand_id) q.set('brandId', w.brand_id)
+  q.set('publishForm', w.kind === 'article' ? 'article' : w.kind === 'image' ? 'image' : 'video')
   const s = q.toString()
   return s ? `/m/distribution?${s}` : '/m/distribution'
 }
 
 /**
- * 我的作品：真实文章/多媒体产物 + 演示向导产出的统一作品库。
+ * 我的作品：三源聚合的真实作品库（文章 + 多媒体产物 + 发布状态 + 互动数据）。
+ * 无数据空态引导去内容合成；待发布直达发布中心。
  */
 export default function MyWorks() {
   const navigate = useNavigate()
-  const works = useWorksStore((s) => s.works)
-  const markPublished = useWorksStore((s) => s.markPublished)
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
+
+  const { data: works = [], isLoading } = useQuery({
+    queryKey: ['merchant-works'],
+    queryFn: () => businessApi.listWorks().catch((): WorkItem[] => []),
+  })
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -65,75 +75,60 @@ export default function MyWorks() {
           value={filter}
           onChange={(v) => setFilter(v as Filter)}
           options={[
-            { label: '全部', value: 'all' },
-            { label: '草稿', value: 'draft' },
-            { label: '待发布', value: 'ready' },
-            { label: '已发布', value: 'published' },
+            { value: 'all', label: `全部 ${works.length}` },
+            { value: 'draft', label: `草稿 ${works.filter((w) => w.status === 'draft').length}` },
+            { value: 'ready', label: `待发布 ${works.filter((w) => w.status === 'ready').length}` },
+            { value: 'published', label: `已发布 ${works.filter((w) => w.status === 'published').length}` },
           ]}
         />
-        <Input.Search allowClear placeholder="搜索作品标题" style={{ maxWidth: 280 }} value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input.Search allowClear placeholder="搜索作品标题" style={{ maxWidth: 240 }} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {list.length === 0 ? (
-        <Empty description="暂无作品" style={{ padding: 64 }}>
-          <Button type="primary" className="ip-btn-primary" onClick={() => navigate('/m/compose')}>开始创作</Button>
+      {isLoading ? (
+        <Empty description="加载中…" style={{ padding: 60 }} />
+      ) : list.length === 0 ? (
+        <Empty style={{ padding: 60 }} description="还没有作品——去内容合成写第一篇文章或做第一个视频">
+          <Button type="primary" onClick={() => navigate('/m/compose')}>去内容合成</Button>
         </Empty>
       ) : (
-        <div className="ip-works-grid ip-stagger">
+        <div className="ip-works-grid">
           {list.map((w) => {
-            const canRealPublish = !!(w.contentId || (w.mediaUrls && w.mediaUrls.length > 0))
+            const st = STATUS_CONFIG[w.status] || { label: w.status, color: 'default' }
+            const kd = KIND_CONFIG[w.kind] || { label: w.kind, emoji: '📦' }
             return (
-              <article key={w.id} className="ip-work-card">
-                <div className="ip-work-cover" style={{ background: `linear-gradient(155deg,#0b0b10 10%, ${w.coverAccent})` }}>
-                  <Tag className="ip-work-status">{STATUS_LABEL[w.status]}</Tag>
-                  {w.durationSec ? <span className="ip-work-dur">{formatDuration(w.durationSec)}</span> : null}
+              <div key={w.id} className="ip-work-card">
+                <div className="ip-work-cover" style={{
+                  background: w.cover_url
+                    ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.55)), url(${w.cover_url}) center/cover`
+                    : 'linear-gradient(145deg, #12121a, #1f2937)',
+                  display: 'flex', alignItems: 'flex-end', padding: 12,
+                }}>
+                  <Tag color={st.color} style={{ margin: 0 }}>{st.label}</Tag>
+                  {w.status === 'published' && w.platforms?.length ? (
+                    <span className="ip-ratio" style={{ marginLeft: 8 }}>{w.platforms.join(' · ')}</span>
+                  ) : null}
                 </div>
                 <div className="ip-work-body">
-                  <Title level={5} style={{ margin: 0 }}>{w.title}</Title>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {w.source === 'article' ? '文章 · ' : w.source === 'media' ? '多媒体 · ' : w.source === 'wizard' ? '演示向导 · ' : ''}
-                    {w.platform ? `${w.platform} · ` : ''}
-                    {new Date(w.createdAt).toLocaleString('zh-CN', { hour12: false })}
+                  <Text strong style={{ fontSize: 14, display: 'block' }} ellipsis={{ tooltip: w.title }}>
+                    {kd.emoji} {w.title}
                   </Text>
-                  {w.status === 'published' && (
-                    <div className="ip-work-metrics">
-                      <span>播放 {(w.views || 0).toLocaleString()}</span>
-                      <span>互动 {(w.likes || 0).toLocaleString()}</span>
-                      <span>线索 {w.leads || 0}</span>
-                    </div>
-                  )}
-                  <Space style={{ marginTop: 12 }} wrap>
-                    {w.status !== 'published' && canRealPublish && (
-                      <Button
-                        size="small"
-                        type="primary"
-                        className="ip-btn-primary"
-                        icon={<ExportOutlined />}
-                        onClick={() => navigate(distributionPath(w))}
-                      >
-                        去发布中心
+                  <div className="ip-work-metrics">
+                    <span>{kd.label}</span>
+                    {w.views > 0 && <span>播放 {w.views.toLocaleString()}</span>}
+                    {w.likes > 0 && <span>赞 {w.likes.toLocaleString()}</span>}
+                  </div>
+                  <Space style={{ marginTop: 12 }}>
+                    {w.status !== 'published' && (
+                      <Button size="small" type="primary" ghost icon={<SendOutlined />} onClick={() => navigate(distributionPath(w))}>
+                        去发布
                       </Button>
                     )}
-                    {w.status !== 'published' && !canRealPublish && (
-                      <Button
-                        size="small"
-                        type="primary"
-                        className="ip-btn-primary"
-                        icon={<SendOutlined />}
-                        onClick={() => {
-                          markPublished(w.id, w.platform || '抖音')
-                          navigate('/m/analytics')
-                        }}
-                      >
-                        发布（演示）
-                      </Button>
-                    )}
-                    {w.status === 'published' && (
-                      <Button size="small" onClick={() => navigate('/m/analytics')}>查看数据</Button>
+                    {(w.kind === 'video' || w.kind === 'image') && w.media_urls?.[0] && (
+                      <Button size="small" onClick={() => window.open(w.media_urls![0], '_blank', 'noopener')}>预览</Button>
                     )}
                   </Space>
                 </div>
-              </article>
+              </div>
             )
           })}
         </div>

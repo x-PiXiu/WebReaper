@@ -6,8 +6,8 @@ import {
   UserOutlined, VideoCameraOutlined, AppstoreOutlined,
 } from '@ant-design/icons'
 import { useBrands } from '../../hooks/useBrands'
-import { useWorksStore } from '../../store/works'
-import { MOCK_METRICS } from '../../mock/ipAssets'
+import { useQuery } from '@tanstack/react-query'
+import { businessApi } from '../../api/business'
 import PageLoading from '../../components/PageLoading'
 
 const { Text, Title } = Typography
@@ -25,7 +25,9 @@ const JOURNEY = [
 export default function MerchantHome() {
   const navigate = useNavigate()
   const { data: brands = [], isLoading } = useBrands()
-  const works = useWorksStore((s) => s.works)
+  // 真实作品库（三源聚合）+ 作品数据汇总——无数据则相关区块自然隐藏
+  const { data: works = [] } = useQuery({ queryKey: ['merchant-works'], queryFn: () => businessApi.listWorks().catch(() => []) })
+  const { data: summary } = useQuery({ queryKey: ['analytics-summary'], queryFn: () => businessApi.getAnalyticsSummary().catch(() => null), staleTime: 60_000 })
 
   const published = works.filter((w) => w.status === 'published')
   const ready = works.filter((w) => w.status === 'ready')
@@ -43,8 +45,7 @@ export default function MerchantHome() {
     return JOURNEY[5]
   }, [hasPersona, hasWork, ready.length, hasPublished])
 
-  const weekViews = MOCK_METRICS.reduce((s, m) => s + m.views, 0)
-  const weekLeads = MOCK_METRICS.reduce((s, m) => s + m.leads, 0)
+  const weekViews = summary?.totals?.views ?? 0
 
   if (isLoading) return <PageLoading />
 
@@ -95,7 +96,7 @@ export default function MerchantHome() {
           <div className="ip-metric-card">
             <span className="ip-metric-label">近 7 日增长（演示）</span>
             <strong className="ip-metric-value">{weekViews.toLocaleString()}</strong>
-            <Text type="secondary" style={{ fontSize: 12 }}>播放 · 线索 {weekLeads}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>累计播放</Text>
           </div>
         </Col>
       </Row>

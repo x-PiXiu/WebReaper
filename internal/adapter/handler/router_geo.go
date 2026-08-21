@@ -141,6 +141,10 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 	if r.accountFrontendURL != "" {
 		accountHandler.SetFrontendBaseURL(r.accountFrontendURL)
 	}
+	if r.worksUC != nil {
+		accountHandler.SetWorksUC(r.worksUC)
+		api.GET("/merchant/works", accountHandler.HandleListWorks) // 作品库三源聚合
+	}
 	// 抖音 OAuth 授权回调（公开——浏览器从抖音授权页重定向至此，无 JWT；
 	// 安全体在 state HMAC 签名：验签还原租户上下文，伪造/过期 state 一律拒绝）
 	if r.rootGroup != nil {

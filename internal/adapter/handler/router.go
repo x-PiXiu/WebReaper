@@ -16,6 +16,7 @@ import (
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/hotvideo"
+	"webreaper/internal/usecase/works"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/llmconfig"
@@ -95,6 +96,7 @@ type Router struct {
 	apiPrefix          string                  // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
 	rootGroup          *gin.RouterGroup        // Engine() 装配时记录——延迟注册的公开路由用（OAuth 回调等）
 	accountFrontendURL string                  // 账号域 OAuth 回调后 302 跳回的前端地址
+	worksUC            *works.WorksUseCase     // 作品库聚合（可选；未注入则端点不注册）
 	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
@@ -206,6 +208,11 @@ func (r *Router) SetSystemSettings(uc *systemsettings.SystemSettingsUseCase) {
 // SetNotifications 注入站内通知用例（可选；未注入则通知端点返回空）。
 func (r *Router) SetNotifications(uc *notification.NotifyUseCase) {
 	r.notifyUC = uc
+}
+
+// SetWorks 注入作品库聚合用例（可选）。
+func (r *Router) SetWorks(uc *works.WorksUseCase) {
+	r.worksUC = uc
 }
 
 // SetAccount 注入多平台发布账号域用例（可选；未注入则账号/发布端点不注册）。

@@ -393,6 +393,22 @@ func (r *GormOptimizedContentRepository) Save(ctx context.Context, c entity.Opti
 	return r.db.WithContext(ctx).Save(&po).Error
 }
 
+func (r *GormOptimizedContentRepository) ListByTenant(ctx context.Context, tenantID string, limit int) ([]entity.OptimizedContent, error) {
+	var pos []OptimizedContentPO
+	q := applyTenantScope(r.db.WithContext(ctx), tenantID).Order("created_at DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.OptimizedContent, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, optimizedContentFromPO(p))
+	}
+	return out, nil
+}
+
 func (r *GormOptimizedContentRepository) ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.OptimizedContent, error) {
 	var pos []OptimizedContentPO
 	q := applyTenantScope(r.db.WithContext(ctx), tenantID)

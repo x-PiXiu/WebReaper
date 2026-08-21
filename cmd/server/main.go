@@ -55,6 +55,7 @@ import (
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/hotvideo"
+	"webreaper/internal/usecase/works"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/llmconfig"
@@ -567,6 +568,8 @@ func main() {
 			geoPublishUC.SetAccountPool(repository.NewGormAccountPool(accountRepos.account))
 			// 互动数据回读（快照仓储 + 站内详情接口——每日任务/手动刷新）
 			geoPublishUC.SetMetricsStore(accountRepos.metric, socialSearcher)
+			// 作品库三源聚合（文章 + 多媒体产物 + 发布状态 + 互动数据）
+			router.SetWorks(works.NewWorksUseCase(geoRepos.content, repository.NewGormGenerationTaskRepository(geoRepos.db), accountRepos.job, accountRepos.metric))
 
 			// 抖音开放平台官方 OAuth 授权（API 通道——替代浏览器扫码 RPA 绑定；
 			// 内部统一走官方 SDK bytedance/douyin-openapi-sdk-go）

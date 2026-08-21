@@ -77,6 +77,8 @@ type AIRankProbeRepository interface {
 type OptimizedContentRepository interface {
 	Save(ctx context.Context, c entity.OptimizedContent) error
 	ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.OptimizedContent, error)
+	// ListByTenant 租户全量内容（作品库聚合用，不按品牌过滤）。
+	ListByTenant(ctx context.Context, tenantID string, limit int) ([]entity.OptimizedContent, error)
 	FindByID(ctx context.Context, tenantID, id string) (entity.OptimizedContent, error)
 	FindMaxVersion(ctx context.Context, tenantID, brandID, keywordID string) (int, error)
 	// FindPublishedByID 公开查询：按 ID 查已发布内容（公开站点用，不限定租户，

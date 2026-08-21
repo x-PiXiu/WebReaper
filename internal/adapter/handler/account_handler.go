@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/account"
+	"webreaper/internal/usecase/works"
 )
 
 // AccountHandler 多平台发布账号域 HTTP 适配器（账号绑定 + 半自动发布）。
@@ -18,8 +20,12 @@ import (
 type AccountHandler struct {
 	accountUC      *account.AccountUseCase
 	publishUC      *account.PublishUseCase
+	worksUC        *works.WorksUseCase // 可选：作品库聚合
 	frontendBaseURL string // OAuth 回调完成后 302 跳回的前端地址
 }
+
+// SetWorksUC 注入作品库聚合用例（可选）。
+func (h *AccountHandler) SetWorksUC(uc *works.WorksUseCase) { h.worksUC = uc }
 
 func NewAccountHandler(au *account.AccountUseCase, pu *account.PublishUseCase) *AccountHandler {
 	return &AccountHandler{accountUC: au, publishUC: pu, frontendBaseURL: "http://localhost:5173"}
@@ -257,6 +263,20 @@ func (h *AccountHandler) HandleListPublishJobs(c *gin.Context) {
 		return
 	}
 	success(c, publishJobsToView(jobs))
+}
+
+// HandleListWorks GET /api/v1/merchant/works —— 作品库三源聚合（我的作品页）。
+func (h *AccountHandler) HandleListWorks(c *gin.Context) {
+	if h.worksUC == nil {
+		fail(c, fmt.Errorf("作品库未启用"))
+		return
+	}
+	items, err := h.worksUC.ListWorks(c.Request.Context(), middleware.CurrentTenantID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, items)
 }
 
 // HandleAnalyticsSummary GET /api/v1/merchant/works/analytics-summary —— 作品数据页聚合

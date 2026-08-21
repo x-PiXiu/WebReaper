@@ -395,6 +395,24 @@ export interface HotVideo {
   topic: string         // 拍摄同款选题建议（预填创作）
 }
 
+// ---- 作品库三源聚合（我的作品页）----
+export interface WorkItem {
+  id: string
+  kind: string              // article / video / image / audio
+  title: string
+  brand_id?: string
+  content_id?: string       // 文章类跳发布中心关联
+  status: string            // draft / generating / ready / published
+  media_urls?: string[]
+  cover_url?: string
+  platforms?: string[]
+  views: number
+  likes: number
+  comments: number
+  created_at: string
+  published_at?: string
+}
+
 // ---- 作品数据页聚合（/m/analytics 数据源）----
 export interface WorkSummaryItem {
   job_id: string

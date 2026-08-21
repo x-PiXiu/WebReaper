@@ -314,6 +314,21 @@ func (r *MockOptimizedContentRepository) Save(_ context.Context, c entity.Optimi
 	return nil
 }
 
+func (r *MockOptimizedContentRepository) ListByTenant(_ context.Context, tenantID string, limit int) ([]entity.OptimizedContent, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []entity.OptimizedContent
+	for _, c := range r.recs {
+		if c.TenantID == tenantID {
+			out = append(out, c)
+		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (r *MockOptimizedContentRepository) ListByBrand(_ context.Context, tenantID, brandID string) ([]entity.OptimizedContent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

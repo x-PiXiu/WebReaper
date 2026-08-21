@@ -1,11 +1,10 @@
 import { useSearchParams } from 'react-router-dom'
-import { Tabs, Tag } from 'antd'
-import { EditOutlined, VideoCameraOutlined, RocketOutlined } from '@ant-design/icons'
+import { Tabs } from 'antd'
+import { EditOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import Content from '../Content'
 import CreationWorkbench from '../Creation'
-import ComposeWizard from '../compose/ComposeWizard'
 
-const TAB_KEYS = new Set(['media', 'article', 'wizard'])
+const TAB_KEYS = new Set(['media', 'article'])
 
 /**
  * 内容合成中心：写文章 / 做视频图片（真实 API）+ 成片向导（演示）。
@@ -45,16 +44,6 @@ export default function Studio() {
             key: 'article',
             label: <span><EditOutlined /> 写文章</span>,
             children: <Content embedded />,
-          },
-          {
-            key: 'wizard',
-            label: (
-              <span>
-                <RocketOutlined /> 成片向导{' '}
-                <Tag style={{ marginInlineStart: 4, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>演示</Tag>
-              </span>
-            ),
-            children: <ComposeWizard embedded />,
           },
         ]}
       />
