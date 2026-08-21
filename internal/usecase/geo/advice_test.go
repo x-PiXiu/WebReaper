@@ -30,6 +30,9 @@ func (f *fakeContentRepo) Save(ctx context.Context, c entity.OptimizedContent) e
 	f.contents = append(f.contents, c)
 	return nil
 }
+func (f *fakeContentRepo) ListByTenant(ctx context.Context, tenantID string, limit int) ([]entity.OptimizedContent, error) {
+	return f.contents, nil
+}
 func (f *fakeContentRepo) ListByBrand(ctx context.Context, tenantID, brandID string) ([]entity.OptimizedContent, error) {
 	return f.contents, nil
 }
