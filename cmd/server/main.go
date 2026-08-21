@@ -37,6 +37,7 @@ import (
 	"webreaper/internal/adapter/provider/viduendpoint"
 	"webreaper/internal/adapter/publisher"
 	"webreaper/internal/adapter/douyinoauth"
+	"webreaper/internal/adapter/douyinweb"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
@@ -333,6 +334,7 @@ func main() {
 	var geoDistillUCRef *geo.KeywordDistillUseCase
 	var geoNearbyUCRef *geo.NearbyUseCase     // X-01：附近同行配额注入用
 	var geoDiagnoseUCRef *geo.DiagnoseUseCase // X-01：诊断配额注入用
+	var hotVideoUCRef *hotvideo.HotVideoUseCase // 热门同款用例（账号仓储就绪后注入抖音站内搜索）
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
 		geoScorer := ai.NewLLMGEOScorer(aiGenerator)
 		geoBrandUC := geo.NewBrandUseCase(geoRepos.brand, geoRepos.keyword)
@@ -479,7 +481,8 @@ func main() {
 		}
 		router.SetGEOHealth(geoHealthUC)
 		// 热门同款视频发现（人设档案 tab：LLM+搜索 → 拍摄同款选题建议，24h 缓存）
-		router.SetGEOHotVideo(hotvideo.NewHotVideoUseCase(geoRepos.brand, ai.NewWebLinkSearcher(webFetcher), aiGenerator))
+		hotVideoUCRef = hotvideo.NewHotVideoUseCase(geoRepos.brand, ai.NewWebLinkSearcher(webFetcher), aiGenerator)
+		router.SetGEOHotVideo(hotVideoUCRef)
 		// 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）
 		router.SetGEOIndustry(geoIndustryUC)
 
@@ -544,6 +547,11 @@ func main() {
 			}
 
 			geoAccountUC = account.NewAccountUseCase(accountRepos.account, qrSession, vault)
+			// 抖音站内搜索（MediaCrawler 协议复刻：cookie 账号 + 页面内免签 fetch）——
+			// 热门同款 tab 主数据源；数据回读上线后复用 GetVideoDetail
+			if hotVideoUCRef != nil {
+				hotVideoUCRef.SetDouyinSearcher(douyinweb.NewSearcher(accountRepos.account, vault))
+			}
 			// 发布通道注册表（工厂模式，已注册知乎/小红书全自动通道——同时支持半自动+全自动）
 			channelRegistry := publisher.NewChannelRegistry()
 			geoPublishUC = account.NewPublishUseCase(accountRepos.job, channelRegistry, accountRepos.account, vault)

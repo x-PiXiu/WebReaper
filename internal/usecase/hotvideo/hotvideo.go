@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,7 +37,8 @@ type HotVideo struct {
 // HotVideoUseCase 热门视频发现用例。
 type HotVideoUseCase struct {
 	brandRepo port.BrandRepository
-	searcher  port.LinkSearcher
+	searcher  port.LinkSearcher   // 通用搜索引擎（Bing/DDG）——降级数据源
+	douyin    port.DouyinSearcher // 抖音站内搜索——主数据源（真实爆款+数据，需 cookie 账号）
 	aiGen     port.AIGenerator
 
 	mu    sync.Mutex
@@ -49,6 +51,11 @@ type cacheEntry struct {
 }
 
 const cacheTTL = 24 * time.Hour
+
+// SetDouyinSearcher 注入抖音站内搜索（可选；未注入或无 cookie 账号时走通用搜索链路）。
+func (uc *HotVideoUseCase) SetDouyinSearcher(ds port.DouyinSearcher) {
+	uc.douyin = ds
+}
 
 func NewHotVideoUseCase(br port.BrandRepository, searcher port.LinkSearcher, aiGen port.AIGenerator) *HotVideoUseCase {
 	return &HotVideoUseCase{
@@ -73,6 +80,18 @@ func (uc *HotVideoUseCase) ListHotVideos(ctx context.Context, tenantID, brandID 
 	brand, err := uc.brandRepo.FindByID(ctx, tenantID, brandID)
 	if err != nil {
 		return nil, fmt.Errorf("品牌不存在: %w", err)
+	}
+
+	// 主数据源：抖音站内搜索（真实爆款视频+播放/点赞数据）。失败降级通用搜索链路。
+	if uc.douyin != nil {
+		if videos, dErr := uc.searchDouyinHot(ctx, tenantID, brand); dErr == nil && len(videos) > 0 {
+			uc.mu.Lock()
+			uc.cache[brandID] = cacheEntry{videos: videos, expireAt: time.Now().Add(cacheTTL)}
+			uc.mu.Unlock()
+			return videos, nil
+		} else if dErr != nil {
+			log.Printf("[HotVideo] 抖音站内搜索降级（%v），走通用搜索引擎链路", dErr)
+		}
 	}
 
 	// 步骤 1：LLM 生成搜索词（品牌行业+定位+卖点 → 3-4 个"找爆款视频"查询）
@@ -107,6 +126,91 @@ func (uc *HotVideoUseCase) ListHotVideos(ctx context.Context, tenantID, brandID 
 	uc.cache[brandID] = cacheEntry{videos: videos, expireAt: time.Now().Add(cacheTTL)}
 	uc.mu.Unlock()
 	return videos, nil
+}
+
+// searchDouyinHot 主数据源：抖音站内搜索（一周内+最多点赞）→ LLM 生成火爆点与拍摄同款选题。
+// 搜索词用品牌行业/定位直构（站内搜索对短词效果最好，无需 LLM 造句）。
+func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string, brand entity.Brand) ([]HotVideo, error) {
+	keywords := []string{industryOf(brand)}
+	if s := clamp(brand.Positioning, 8); len([]rune(s)) >= 3 && s != industryOf(brand) {
+		keywords = append(keywords, s)
+	}
+
+	seen := make(map[string]bool)
+	var videos []port.DouyinVideo
+	for _, kw := range keywords {
+		list, err := uc.douyin.SearchHotVideos(ctx, tenantID, kw, 10)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range list {
+			if v.AwemeID == "" || seen[v.AwemeID] {
+				continue
+			}
+			seen[v.AwemeID] = true
+			videos = append(videos, v)
+		}
+		time.Sleep(800 * time.Millisecond) // 两次搜索留间隔，降低风控概率
+	}
+	if len(videos) == 0 {
+		return nil, fmt.Errorf("站内搜索无结果")
+	}
+	// 按点赞数排序取前 8（最近很火）
+	sort.Slice(videos, func(i, j int) bool { return videos[i].DiggCount > videos[j].DiggCount })
+	if len(videos) > 8 {
+		videos = videos[:8]
+	}
+	return uc.curateDouyin(ctx, brand, videos), nil
+}
+
+// curateDouyin LLM 为真实爆款视频生成"为什么火 + 拍摄同款选题"（一次调用批量生成）。
+// LLM 失败时降级：数据+链接仍然真实可用，选题用行业兜底文案。
+func (uc *HotVideoUseCase) curateDouyin(ctx context.Context, brand entity.Brand, videos []port.DouyinVideo) []HotVideo {
+	var b strings.Builder
+	for i, v := range videos {
+		fmt.Fprintf(&b, "%d. 标题：%s（@%s，播放%d 赞%d 评%d）\n", i+1,
+			clamp(v.Desc, 40), v.Author, v.PlayCount, v.DiggCount, v.CommentCount)
+	}
+	prompt := fmt.Sprintf(`你是短视频获客专家。以下是抖音上"%s"行业最近一周的爆款视频（真实数据）：
+%s
+为每个视频输出：
+- hot_point：为什么火（一句话，说清商户能抄的点）
+- topic：拍摄同款选题建议（15-30 字，结合行业"%s"，不写具体品牌名和账号名）
+只输出 JSON：{"items": [{"i": 序号, "hot_point": "...", "topic": "..."}]}`,
+		industryOf(brand), b.String(), industryOf(brand))
+
+	hotPoints := make(map[int]string)
+	topics := make(map[int]string)
+	if resp, err := uc.chat(ctx, prompt); err == nil {
+		var out struct {
+			Items []struct {
+				I        int    `json:"i"`
+				HotPoint string `json:"hot_point"`
+				Topic    string `json:"topic"`
+			} `json:"items"`
+		}
+		if jErr := json.Unmarshal([]byte(pkg.ExtractJSONBlock(resp)), &out); jErr == nil {
+			for _, it := range out.Items {
+				hotPoints[it.I] = it.HotPoint
+				topics[it.I] = it.Topic
+			}
+		}
+	}
+
+	result := make([]HotVideo, 0, len(videos))
+	for i, v := range videos {
+		result = append(result, HotVideo{
+			Title:    clamp(v.Desc, 40),
+			URL:      v.URL,
+			Platform: "douyin",
+			HotPoint: hotPoints[i+1],
+			Topic:    topics[i+1],
+		})
+		if result[i].Topic == "" {
+			result[i].Topic = "参考这条爆款的角度，拍一条" + industryOf(brand) + "同款获客视频"
+		}
+	}
+	return result
 }
 
 // genQueries 步骤 1：LLM 生成搜索词。
