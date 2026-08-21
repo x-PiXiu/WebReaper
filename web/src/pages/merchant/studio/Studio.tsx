@@ -14,6 +14,12 @@ const TAB_KEYS = new Set(['media', 'article', 'wizard'])
 export default function Studio() {
   const [searchParams, setSearchParams] = useSearchParams()
   const raw = searchParams.get('tab') || 'media'
+  // 热门同款「拍摄同款」跳转预填：topic=选题文案，refTitle=参考爆款标题（拼进提示词供 AI 参考）
+  const topicParam = searchParams.get('topic') || ''
+  const refTitle = searchParams.get('refTitle') || ''
+  const initialPrompt = topicParam
+    ? `${topicParam}${refTitle ? `（参考爆款思路：「${refTitle}」，拍出同类获客效果）` : ''}`
+    : ''
   const activeTab = TAB_KEYS.has(raw) ? raw : 'media'
 
   return (
@@ -33,7 +39,7 @@ export default function Studio() {
           {
             key: 'media',
             label: <span><VideoCameraOutlined /> 做视频图片</span>,
-            children: <CreationWorkbench embedded />,
+            children: <CreationWorkbench embedded initialPrompt={initialPrompt} />,
           },
           {
             key: 'article',

@@ -10,6 +10,7 @@ import (
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/geo"
+	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/port"
 )
 
@@ -35,6 +36,7 @@ type GEOHandler struct {
 	healthUC   *geo.HealthUseCase        // 健康报告聚合（可选注入，v3 归位：单一事实源）
 	industryUC *geo.IndustryUseCase      // 行业全景聚合（可选注入，v3 P2：admin 看板）
 	inputTipper port.InputTipper         // 地址联想（可选注入，P1；未注入→空列表降级）
+	hotVideoUC  *hotvideo.HotVideoUseCase // 热门同款视频发现（可选注入，人设档案 tab）
 }
 
 func NewGEOHandler(br *geo.BrandUseCase, mo *geo.MonitorUseCase, ra *geo.RankUseCase, co *geo.ContentUseCase, du *geo.DiagnoseUseCase) *GEOHandler {
@@ -74,6 +76,31 @@ func (h *GEOHandler) SetCitationUC(uc *geo.CitationUseCase) {
 // SetHealthUC 注入健康报告聚合用例（可选；未注入则健康报告端点不注册）。
 func (h *GEOHandler) SetHealthUC(uc *geo.HealthUseCase) {
 	h.healthUC = uc
+}
+
+// SetHotVideoUC 注入热门同款视频用例（可选；未注入则热门同款端点不注册）。
+func (h *GEOHandler) SetHotVideoUC(uc *hotvideo.HotVideoUseCase) {
+	h.hotVideoUC = uc
+}
+
+// HandleListHotVideos GET /merchant/brands/:id/hot-videos —— 品牌同赛道热门视频
+// （LLM+搜索发现，24h 缓存；?force=true 跳过缓存重搜）。前端「热门同款」tab 数据源。
+func (h *GEOHandler) HandleListHotVideos(c *gin.Context) {
+	if h.hotVideoUC == nil {
+		fail(c, fmt.Errorf("热门同款视频功能未启用"))
+		return
+	}
+	tenantID := middleware.CurrentTenantID(c)
+	force := c.Query("force") == "true"
+	videos, err := h.hotVideoUC.ListHotVideos(c.Request.Context(), tenantID, c.Param("id"), force)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	if videos == nil {
+		videos = []hotvideo.HotVideo{}
+	}
+	success(c, gin.H{"videos": videos})
 }
 
 // SetIndustryUC 注入行业全景聚合用例（可选；未注入则行业看板端点不注册）。

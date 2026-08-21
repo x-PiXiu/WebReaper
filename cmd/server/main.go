@@ -53,6 +53,7 @@ import (
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
+	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/llmconfig"
@@ -477,6 +478,8 @@ func main() {
 			geoIndustryUC.SetCache(cacheStore)
 		}
 		router.SetGEOHealth(geoHealthUC)
+		// 热门同款视频发现（人设档案 tab：LLM+搜索 → 拍摄同款选题建议，24h 缓存）
+		router.SetGEOHotVideo(hotvideo.NewHotVideoUseCase(geoRepos.brand, ai.NewWebLinkSearcher(webFetcher), aiGenerator))
 		// 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）
 		router.SetGEOIndustry(geoIndustryUC)
 

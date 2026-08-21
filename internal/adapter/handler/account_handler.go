@@ -259,6 +259,18 @@ func (h *AccountHandler) HandleListPublishJobs(c *gin.Context) {
 	success(c, publishJobsToView(jobs))
 }
 
+// HandleAnalyticsSummary GET /api/v1/merchant/works/analytics-summary —— 作品数据页聚合
+// （指标卡 + 近14天趋势 + 已发布作品列表；互动数据由回读上线后填充）。
+func (h *AccountHandler) HandleAnalyticsSummary(c *gin.Context) {
+	tenantID := middleware.CurrentTenantID(c)
+	summary, err := h.publishUC.AnalyticsSummary(c.Request.Context(), tenantID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, summary)
+}
+
 // HandleMarkPublished POST /api/v1/geo/publish-jobs/:id/published —— 标记任务为已发布。
 func (h *AccountHandler) HandleMarkPublished(c *gin.Context) {
 	tenantID := middleware.CurrentTenantID(c)

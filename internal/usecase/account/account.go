@@ -730,6 +730,86 @@ func (uc *PublishUseCase) ListJobs(ctx context.Context, tenantID string, limit i
 	return uc.jobRepo.ListByTenant(ctx, tenantID, limit)
 }
 
+// ---- 作品数据页聚合（/m/analytics 数据源）----
+
+// WorkSummaryItem 已发布作品行（作品数据页表格 + 详情 Drawer 消费）。
+type WorkSummaryItem struct {
+	JobID       string    `json:"job_id"`
+	Title       string    `json:"title"`
+	Platform    string    `json:"platform"`
+	ContentType string    `json:"content_type"` // video/image/article
+	Status      string    `json:"status"`
+	ExternalURL string    `json:"external_url"` // 视频链接（RPA 发布后提取；半自动=预填链接；空=手动发布未追踪）
+	PublishedAt time.Time `json:"published_at"`
+	// 互动数据（数据回读上线后由快照填充；当前恒为 0，前端显示"待回读"态）
+	Views    int64 `json:"views"`
+	Likes    int64 `json:"likes"`
+	Comments int64 `json:"comments"`
+	Shares   int64 `json:"shares"`
+}
+
+// AnalyticsTrendPoint 趋势点（近 14 天按日聚合）。
+type AnalyticsTrendPoint struct {
+	Day       string `json:"day"`     // MM-DD（图表 x 轴）
+	Published int    `json:"published"` // 当日发布数
+	Views     int64  `json:"views"`     // 当日播放（回读上线后接入）
+}
+
+// AnalyticsSummary 作品数据页聚合（指标卡 + 趋势 + 已发布作品列表）。
+type AnalyticsSummary struct {
+	Totals struct {
+		Published int   `json:"published"`
+		Views     int64 `json:"views"`
+		Likes     int64 `json:"likes"`
+		Comments  int64 `json:"comments"`
+	} `json:"totals"`
+	Trend []AnalyticsTrendPoint `json:"trend"`
+	Works []WorkSummaryItem     `json:"works"`
+}
+
+// AnalyticsSummary 聚合租户的作品数据：真实发布记录（PublishJob）+ 互动数据（回读上线后接入）。
+// 趋势在无回读数据阶段为发布数趋势；快照表上线后切换为播放/互动趋势。
+func (uc *PublishUseCase) AnalyticsSummary(ctx context.Context, tenantID string) (*AnalyticsSummary, error) {
+	jobs, err := uc.jobRepo.ListByTenant(ctx, tenantID, 200)
+	if err != nil {
+		return nil, err
+	}
+
+	summary := &AnalyticsSummary{Trend: make([]AnalyticsTrendPoint, 0, 14), Works: make([]WorkSummaryItem, 0, len(jobs))}
+	dayCount := map[string]int{}
+	for _, j := range jobs {
+		if j.Status != entity.PublishStatusPublished {
+			continue
+		}
+		summary.Totals.Published++
+		publishedAt := j.PublishedAt
+		if publishedAt.IsZero() {
+			publishedAt = j.CreatedAt
+		}
+		dayCount[publishedAt.Format("2006-01-02")]++
+		summary.Works = append(summary.Works, WorkSummaryItem{
+			JobID:       j.ID,
+			Title:       j.Title,
+			Platform:    j.Platform,
+			ContentType: j.ContentType,
+			Status:      j.Status,
+			ExternalURL: j.ExternalURL,
+			PublishedAt: publishedAt,
+		})
+	}
+
+	// 近 14 天趋势（补零——无发布的日期也出点，图表连续）
+	for i := 13; i >= 0; i-- {
+		day := time.Now().AddDate(0, 0, -i)
+		key := day.Format("2006-01-02")
+		summary.Trend = append(summary.Trend, AnalyticsTrendPoint{
+			Day:       day.Format("01-02"),
+			Published: dayCount[key],
+		})
+	}
+	return summary, nil
+}
+
 // MarkPublished 用户在平台确认发布后，前端调此方法标记任务为已发布。
 func (uc *PublishUseCase) MarkPublished(ctx context.Context, tenantID, jobID string) error {
 	return uc.jobRepo.UpdateStatus(ctx, tenantID, jobID, entity.PublishStatusPublished, "", "")

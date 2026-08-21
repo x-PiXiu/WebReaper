@@ -386,6 +386,42 @@ export interface OptimizedContent {
   created_at: string
 }
 
+// ---- 热门同款视频（人设档案 tab：LLM+搜索发现）----
+export interface HotVideo {
+  title: string
+  url: string
+  platform: string      // douyin / kuaishou / xiaohongshu / bilibili / web
+  hot_point: string     // 为什么火（可抄的点）
+  topic: string         // 拍摄同款选题建议（预填创作）
+}
+
+// ---- 作品数据页聚合（/m/analytics 数据源）----
+export interface WorkSummaryItem {
+  job_id: string
+  title: string
+  platform: string
+  content_type: string  // video / image / article
+  status: string
+  external_url: string  // 视频链接（空=手动发布未追踪）
+  published_at: string
+  views: number
+  likes: number
+  comments: number
+  shares: number
+}
+
+export interface AnalyticsTrendPoint {
+  day: string           // MM-DD
+  published: number
+  views: number
+}
+
+export interface AnalyticsSummary {
+  totals: { published: number; views: number; likes: number; comments: number }
+  trend: AnalyticsTrendPoint[]
+  works: WorkSummaryItem[]
+}
+
 // ---- GEO：平台账号（扫码绑定 / 官方 OAuth 授权）----
 export interface Account {
   id: string
@@ -410,6 +446,7 @@ export interface PublishJob {
   title: string
   mode: string             // semi-auto / auto
   status: string           // pending / running / published / failed
+  content_type?: string    // video / image / article（详情 Drawer 形态展示）
   external_url: string
   error_msg: string
   created_at: string

@@ -15,6 +15,7 @@ import (
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
+	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/llmconfig"
@@ -62,6 +63,7 @@ type Router struct {
 	geoAdviceUC   *geo.AdviceUseCase         // 行动建议用例（可选，P5-05）
 	geoCitationUC *geo.CitationUseCase       // 内容引用统计用例（可选，P5-02）
 	geoHealthUC   *geo.HealthUseCase         // 健康报告聚合用例（可选，v3 归位：单一事实源）
+	geoHotVideoUC *hotvideo.HotVideoUseCase  // 热门同款视频发现（可选，人设档案 tab）
 	geoIndustryUC *geo.IndustryUseCase       // 行业全景聚合用例（可选，v3 P2：admin 看板）
 	metrics       port.MetricsCollector      // 运营指标采集（可选，R3；nil=不采集）
 	inputTipper   port.InputTipper           // 地址联想（可选，P1；未注入→空列表降级）
@@ -168,6 +170,11 @@ func (r *Router) SetGEO(brand *geo.BrandUseCase, monitor *geo.MonitorUseCase, ra
 // SetGEOHealth 注入健康报告聚合用例（可选；未注入则健康报告端点不注册）。
 func (r *Router) SetGEOHealth(uc *geo.HealthUseCase) {
 	r.geoHealthUC = uc
+}
+
+// SetGEOHotVideo 注入热门同款视频用例（可选；未注入则热门同款端点不注册）。
+func (r *Router) SetGEOHotVideo(uc *hotvideo.HotVideoUseCase) {
+	r.geoHotVideoUC = uc
 }
 
 // SetGEOIndustry 注入行业全景聚合用例（可选；未注入则行业看板端点不注册）。

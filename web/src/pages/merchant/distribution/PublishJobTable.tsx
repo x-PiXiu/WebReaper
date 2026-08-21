@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { Typography, Table, Tag, Space, Button, Empty, message } from 'antd'
 import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
+import WorkDetailDrawer, { type WorkDetailData } from '../../../components/WorkDetailDrawer'
 import type { PublishJob } from '../../../types/api'
 
 const { Text } = Typography
@@ -29,6 +31,7 @@ export default function PublishJobTable({
   onRefresh: () => void
   reMonitorPending: string | null
 }) {
+  const [detailWork, setDetailWork] = useState<WorkDetailData | null>(null)
   const handleMarkPublished = async (jobId: string) => {
     try {
       await businessApi.markPublished(jobId)
@@ -82,12 +85,16 @@ export default function PublishJobTable({
       },
     },
     {
-      title: '操作', key: 'action', width: 160,
+      title: '操作', key: 'action', width: 200,
       render: (_: unknown, r: PublishJob) => (
         <Space>
           {r.external_url && (
             <Button size="small" type="link" icon={<ExportOutlined />} href={r.external_url} target="_blank">跳转</Button>
           )}
+          <Button size="small" type="link" onClick={() => setDetailWork({
+            title: r.title, platform: r.platform, content_type: r.content_type,
+            external_url: r.external_url, published_at: r.published_at, status: r.status,
+          })}>详情</Button>
           {r.status === 'published' && (
             <Button size="small" type="link" loading={reMonitorPending === r.id} onClick={() => handleReMonitor(r.id)}>复测表现</Button>
           )}
@@ -102,5 +109,11 @@ export default function PublishJobTable({
   if (jobs.length === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无发布记录" style={{ padding: 40 }} />
   }
-  return <Table dataSource={jobs} columns={columns} rowKey="id" pagination={{ pageSize: 10 }} size="small" />
+  return (
+    <>
+      <Table dataSource={jobs} columns={columns} rowKey="id" pagination={{ pageSize: 10 }} size="small" />
+      {/* 作品详情 Drawer（与作品数据页共用组件——互动数据回读上线后自动展示趋势） */}
+      <WorkDetailDrawer open={!!detailWork} onClose={() => setDetailWork(null)} work={detailWork} />
+    </>
+  )
 }

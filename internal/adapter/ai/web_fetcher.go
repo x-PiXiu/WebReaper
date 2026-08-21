@@ -75,6 +75,88 @@ func (f *WebFetcher) FetchAndSearch(ctx context.Context, query string, num int) 
 	return docs
 }
 
+// SearchLinksOnly 只搜索不抓正文（标题+URL）——热门同款视频发现等场景用：
+// FetchAndSearch 会因正文抓取失败丢弃大量结果（Bing 重定向页/视频页无正文），
+// 而此类场景只需要链接本身。带一次 DDG 降级和单次重试（Bing 偶发限流）。
+func (f *WebFetcher) SearchLinksOnly(ctx context.Context, query string, num int) []WebDoc {
+	if num <= 0 {
+		num = 5
+	}
+	results := f.parseSearchResults(ctx, query, num, true)
+	if len(results) == 0 {
+		// Bing 偶发限流/空页：直接降级 DDG
+		results = f.parseSearchResults(ctx, query, num, false)
+	}
+	return results
+}
+
+// parseSearchResults 解析搜索引擎结果页为标题+URL（bing=true 用 Bing，否则 DDG）。
+func (f *WebFetcher) parseSearchResults(ctx context.Context, query string, num int, bing bool) []WebDoc {
+	var searchURL string
+	if bing {
+		searchURL = fmt.Sprintf("https://www.bing.com/search?q=%s&mkt=zh-CN&setlang=zh-CN", url.QueryEscape(query))
+	} else {
+		searchURL = fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+
+	resp, err := f.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[WebFetcher] 搜索请求失败(bing=%v): %v", bing, err)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("[WebFetcher] 搜索状态码 %d (bing=%v)", resp.StatusCode, bing)
+		return nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return nil
+	}
+
+	var out []WebDoc
+	if bing {
+		// Bing 有机结果：.b_algo 块（h2 a 标题+链接，.b_caption p 摘要）
+		doc.Find(".b_algo").Each(func(i int, s *goquery.Selection) {
+			if len(out) >= num {
+				return
+			}
+			a := s.Find("h2 a").First()
+			href, exists := a.Attr("href")
+			title := strings.TrimSpace(a.Text())
+			if !exists || !strings.HasPrefix(href, "http") || title == "" {
+				return
+			}
+			summary := strings.TrimSpace(s.Find(".b_caption p").First().Text())
+			out = append(out, WebDoc{URL: href, Title: title, Content: summary})
+		})
+	} else {
+		doc.Find(".result__a").Each(func(i int, s *goquery.Selection) {
+			if len(out) >= num {
+				return
+			}
+			href, _ := s.Attr("href")
+			realURL := extractRealURL(href)
+			title := strings.TrimSpace(s.Text())
+			if realURL != "" && title != "" {
+				out = append(out, WebDoc{URL: realURL, Title: title})
+			}
+		})
+	}
+	log.Printf("[WebFetcher] LinksOnly 搜索到 %d 条(bing=%v), query=%q", len(out), bing, query)
+	return out
+}
+
 // searchBing 用 Bing 搜索（国内可访问，无需 API Key）。
 // Bing 的 HTML 结果页选择器：.b_algo h2 a（有机结果链接）
 func (f *WebFetcher) searchBing(ctx context.Context, query string, maxResults int) []string {

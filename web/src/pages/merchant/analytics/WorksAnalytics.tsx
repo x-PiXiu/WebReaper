@@ -1,43 +1,88 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Col, Row, Table, Tag, Typography } from 'antd'
-import { ArrowUpOutlined, FundOutlined } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
+import { Alert, Button, Col, Drawer, Empty, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd'
+import { ArrowDownOutlined, ArrowUpOutlined, ExperimentOutlined, FundOutlined } from '@ant-design/icons'
 import { LazyColumn, LazyLine } from '../../../components/charts/LazyCharts'
-import { MOCK_METRICS } from '../../../mock/ipAssets'
-import { useWorksStore } from '../../../store/works'
+import WorkDetailDrawer, { type WorkDetailData } from '../../../components/WorkDetailDrawer'
+import { businessApi } from '../../../api/business'
+import { useBrandContext } from '../../../hooks/useBrands'
+import ReportTab from '../checkup/ReportTab'
+import RecordsTab from '../checkup/RecordsTab'
+import { engineLabel } from '../../../utils/geoTerms'
+import type { Keyword, MonitoringResult } from '../../../types/api'
 
 const { Text, Title } = Typography
 
+const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', kuaishou: '快手', zhihu: '知乎', xiaohongshu: '小红书' }
+
+/** 各引擎最新提及率（品牌维度聚合）。 */
+interface EngineStat {
+  name: string
+  rate: number      // 最新提及率（0~1）
+  delta: number     // 较上一条的涨跌（百分点）
+  history: { day: string; rate: number }[] // 迷你趋势（按时间升序）
+}
+
+function engineStats(results: MonitoringResult[]): EngineStat[] {
+  const byEngine = new Map<string, MonitoringResult[]>()
+  for (const r of results) {
+    if (!r.engine_name) continue
+    const list = byEngine.get(r.engine_name) || []
+    list.push(r)
+    byEngine.set(r.engine_name, list)
+  }
+  const stats: EngineStat[] = []
+  for (const [name, list] of byEngine) {
+    list.sort((a, b) => new Date(a.probed_at).getTime() - new Date(b.probed_at).getTime())
+    const latest = list[list.length - 1]
+    const prev = list.length > 1 ? list[list.length - 2] : null
+    stats.push({
+      name,
+      rate: latest.mention_rate,
+      delta: prev ? (latest.mention_rate - prev.mention_rate) * 100 : 0,
+      history: list.map((r) => ({ day: new Date(r.probed_at).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }), rate: +(r.mention_rate * 100).toFixed(1) })),
+    })
+  }
+  return stats.sort((a, b) => b.rate - a.rate)
+}
+
 /**
- * 作品数据：通用播放 / 互动 / 线索指标（演示假数据 + 本地作品库汇总）。
- * 原「AI 效果」入口并入本页。
+ * 作品数据：平台数据（真实发布记录聚合）+ AI 提及（引擎级品牌提及率）+ 作品明细。
+ * 滚动叙事：指标卡 → 趋势图 → AI 提及面板 → 已发布作品表。
+ * 互动数据（播放/点赞/评论）由数据回读上线后填充，当前显示 0 + 待回读提示。
  */
 export default function WorksAnalytics() {
   const navigate = useNavigate()
-  const works = useWorksStore((s) => s.works)
-  const published = works.filter((w) => w.status === 'published')
+  const { brands, brandId, setCurrentBrand } = useBrandContext()
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
+  const [detail, setDetail] = useState<WorkDetailData | null>(null)
 
-  const totals = useMemo(() => {
-    const views = published.reduce((s, w) => s + (w.views || 0), 0)
-      + MOCK_METRICS.reduce((s, m) => s + m.views, 0) / 2
-    const leads = published.reduce((s, w) => s + (w.leads || 0), 0)
-      + MOCK_METRICS.reduce((s, m) => s + m.leads, 0) / 2
-    const likes = published.reduce((s, w) => s + (w.likes || 0), 0)
-    const engage = MOCK_METRICS[MOCK_METRICS.length - 1]?.engage || 0
-    return {
-      views: Math.round(views),
-      leads: Math.round(leads),
-      likes,
-      engage,
-    }
-  }, [published])
+  // 平台数据（真实发布记录聚合）
+  const { data: summary, isLoading: summaryLoading } = useQuery({
+    queryKey: ['analytics-summary'],
+    queryFn: () => businessApi.getAnalyticsSummary(),
+  })
+  // AI 提及（引擎级监测数据，按当前品牌过滤）
+  const { data: monitorResults = [] } = useQuery({
+    queryKey: ['geo-monitor-results'],
+    queryFn: () => businessApi.getAllMonitorResults().catch((): MonitoringResult[] => []),
+  })
+  const { data: keywords = [] } = useQuery({
+    queryKey: ['geo-keywords', brandId],
+    queryFn: () => businessApi.listKeywords(brandId!).catch(() => [] as Keyword[]),
+    enabled: !!brandId,
+  })
 
-  const trend = MOCK_METRICS.flatMap((m) => [
-    { day: m.day, type: '播放', value: m.views },
-    { day: m.day, type: '线索', value: m.leads * 80 },
-  ])
+  const engines = useMemo(
+    () => engineStats(monitorResults.filter((r) => r.brand_id === brandId)),
+    [monitorResults, brandId],
+  )
+  const avgMention = engines.length ? engines.reduce((s, e) => s + e.rate, 0) / engines.length : null
 
-  const engageBars = MOCK_METRICS.map((m) => ({ day: m.day, rate: m.engage }))
+  const works = summary?.works || []
+  const trend = (summary?.trend || []).map((p) => ({ day: p.day, 发布数: p.published }))
+  const totals = summary?.totals
 
   return (
     <div className="wr-page-content ip-page">
@@ -45,23 +90,32 @@ export default function WorksAnalytics() {
         <div>
           <p className="ip-kicker">Growth</p>
           <h1>作品数据</h1>
-          <p className="ip-lead">播放、互动与线索转化——先看通用指标，再下钻单作品</p>
+          <p className="ip-lead">平台数据与 AI 提及一屏看完——发布效果与获客影响同步追踪</p>
         </div>
-        <Button icon={<FundOutlined />} onClick={() => navigate('/m/works')}>回到作品库</Button>
+        <Space>
+          <Select
+            style={{ minWidth: 180 }}
+            placeholder="选择人设"
+            value={brandId}
+            onChange={(v) => setCurrentBrand(v)}
+            options={brands.map((b) => ({ value: b.id, label: b.name }))}
+          />
+          <Button icon={<FundOutlined />} onClick={() => navigate('/m/works')}>回到作品库</Button>
+        </Space>
       </div>
 
       <Row gutter={[16, 16]} className="ip-metric-row ip-stagger">
         {[
-          { label: '近 7 日播放', value: totals.views.toLocaleString(), delta: '+18%' },
-          { label: '互动总量', value: totals.likes.toLocaleString(), delta: '+9%' },
-          { label: '线索数', value: totals.leads.toLocaleString(), delta: '+22%' },
-          { label: '互动率', value: `${totals.engage.toFixed(1)}%`, delta: '+0.6pt' },
+          { label: '已发布作品', value: (totals?.published ?? 0).toLocaleString(), delta: '' },
+          { label: '近 7 日发布', value: (trend.slice(-7).reduce((s, p) => s + p.发布数, 0)).toLocaleString(), delta: '' },
+          { label: 'AI 提及率', value: avgMention !== null ? `${(avgMention * 100).toFixed(1)}%` : '—', delta: '' },
+          { label: '互动总量', value: (totals?.likes ?? 0).toLocaleString(), delta: '待回读' },
         ].map((m) => (
           <Col xs={12} md={6} key={m.label}>
             <div className="ip-metric-card">
               <span className="ip-metric-label">{m.label}</span>
               <strong className="ip-metric-value">{m.value}</strong>
-              <span className="ip-metric-delta"><ArrowUpOutlined /> {m.delta}</span>
+              {m.delta && <span className="ip-metric-delta" style={{ color: 'var(--wr-text-secondary)' }}>{m.delta}</span>}
             </div>
           </Col>
         ))}
@@ -70,66 +124,154 @@ export default function WorksAnalytics() {
       <Row gutter={[16, 16]} style={{ marginTop: 8 }}>
         <Col xs={24} lg={14}>
           <div className="ip-panel">
-            <Title level={5}>播放与线索趋势</Title>
-            <LazyLine
-              data={trend}
-              xField="day"
-              yField="value"
-              seriesField="type"
-              smooth
-              height={260}
-              color={['#5eead4', '#d4a574']}
-            />
+            <Title level={5}>发布节奏（近 14 天）</Title>
+            {summaryLoading ? null : trend.every((p) => p.发布数 === 0) ? (
+              <Empty description="还没有发布记录——去发布中心发出第一条作品" style={{ padding: '40px 0' }} />
+            ) : (
+              <LazyLine data={trend} xField="day" yField="发布数" smooth height={260} color={['#5eead4']} />
+            )}
           </div>
         </Col>
         <Col xs={24} lg={10}>
           <div className="ip-panel">
-            <Title level={5}>互动率（%）</Title>
-            <LazyColumn
-              data={engageBars}
-              xField="day"
-              yField="rate"
-              height={260}
-              style={{ fill: 'l(270) 0:#5eead488 1:#5eead4', radiusTopLeft: 6, radiusTopRight: 6 }}
-            />
+            <Title level={5}>每日发布（条）</Title>
+            <LazyColumn data={trend} xField="day" yField="发布数" height={260} style={{ fill: 'l(270) 0:#5eead488 1:#5eead4', radiusTopLeft: 6, radiusTopRight: 6 }} />
           </div>
         </Col>
       </Row>
 
+      {/* ===== AI 提及面板（同构插入：引擎小卡 + 均值卡，14/10 分栏） ===== */}
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} lg={14}>
+          <div className="ip-panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Space>
+                <ExperimentOutlined style={{ color: 'var(--wr-accent)' }} />
+                <Title level={5} style={{ margin: 0 }}>AI 提及——各大模型怎么推荐你</Title>
+              </Space>
+              <Button size="small" type="link" onClick={() => setAiDrawerOpen(true)}>查看完整 AI 报告 →</Button>
+            </div>
+            {engines.length === 0 ? (
+              <Empty description="暂无监测数据——AI 效果需要先发起监测" style={{ padding: '32px 0' }} />
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+                {engines.slice(0, 6).map((e) => (
+                  <div key={e.name} className="ip-metric-card" style={{ padding: 14, minHeight: 96 }}>
+                    <span className="ip-metric-label" style={{ fontSize: 12 }}>{engineLabel(e.name)}</span>
+                    <strong className="ip-metric-value" style={{ fontSize: 20 }}>{(e.rate * 100).toFixed(0)}%</strong>
+                    {e.delta !== 0 && (
+                      <span className="ip-metric-delta" style={{ color: e.delta > 0 ? 'var(--wr-success)' : 'var(--wr-danger)' }}>
+                        {e.delta > 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />} {Math.abs(e.delta).toFixed(1)}pt
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Col>
+        <Col xs={24} lg={10}>
+          <div className="ip-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>全模型平均提及率</Text>
+            <strong style={{ fontSize: 34, fontFamily: '"Noto Serif SC", serif', color: 'var(--wr-text-primary)' }}>
+              {avgMention !== null ? `${(avgMention * 100).toFixed(1)}%` : '—'}
+            </strong>
+            <Text type="secondary" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>
+              商户问 AI「{brands.find((b) => b.id === brandId)?.industry || '你的行业'}哪家好」时，AI 推荐你的比例
+            </Text>
+            <Button size="small" style={{ marginTop: 12, alignSelf: 'flex-start' }} onClick={() => setAiDrawerOpen(true)}>
+              完整报告与体检记录
+            </Button>
+          </div>
+        </Col>
+      </Row>
+
+      {/* ===== 已发布作品（真实发布记录 + 详情入口） ===== */}
       <div className="ip-panel" style={{ marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <Title level={5} style={{ margin: 0 }}>已发布作品</Title>
-          <Text type="secondary" style={{ fontSize: 12 }}>演示数据 · 发布后自动汇总</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>互动数据回读上线后自动填充</Text>
         </div>
         <Table
-          rowKey="id"
+          rowKey="job_id"
           size="middle"
+          loading={summaryLoading}
           pagination={false}
-          dataSource={published}
-          locale={{ emptyText: '暂无已发布作品——去合成并向导末步发布' }}
+          dataSource={works}
+          locale={{ emptyText: '暂无已发布作品——去发布中心发出第一条' }}
           columns={[
             {
               title: '作品',
               dataIndex: 'title',
-              render: (t: string, r: { platform?: string }) => (
+              render: (t: string, r) => (
                 <div>
                   <Text strong>{t}</Text>
-                  <div><Tag>{r.platform || '—'}</Tag></div>
+                  <div>
+                    <Tag style={{ margin: 0 }}>{PLATFORM_LABEL[r.platform] || r.platform}</Tag>
+                    {r.content_type === 'video' && <Tag style={{ margin: 0 }}>视频</Tag>}
+                  </div>
                 </div>
               ),
             },
             { title: '播放', dataIndex: 'views', render: (v: number) => (v || 0).toLocaleString() },
             { title: '点赞', dataIndex: 'likes', render: (v: number) => (v || 0).toLocaleString() },
             { title: '评论', dataIndex: 'comments', render: (v: number) => (v || 0).toLocaleString() },
-            { title: '线索', dataIndex: 'leads', render: (v: number) => <Text style={{ color: 'var(--wr-accent)' }}>{v || 0}</Text> },
             {
               title: '发布时间',
-              dataIndex: 'publishedAt',
+              dataIndex: 'published_at',
               render: (t?: string) => (t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '—'),
+            },
+            {
+              title: '',
+              key: 'detail',
+              width: 80,
+              render: (_, r) => (
+                <Button size="small" onClick={() => setDetail({ title: r.title, platform: r.platform, content_type: r.content_type, external_url: r.external_url, published_at: r.published_at, status: r.status })}>
+                  详情
+                </Button>
+              ),
             },
           ]}
         />
       </div>
+
+      {/* AI 效果完整报告 Drawer（Y：checkup 报告/记录组件收编，不占页面） */}
+      <Drawer
+        open={aiDrawerOpen}
+        onClose={() => setAiDrawerOpen(false)}
+        width={720}
+        title="AI 效果报告"
+        styles={{ body: { background: 'var(--wr-bg)', paddingTop: 8 } }}
+      >
+        <Tabs
+          defaultActiveKey="report"
+          items={[
+            {
+              key: 'report',
+              label: '效果报告',
+              children: <ReportTab brands={brands} navigate={(p) => { setAiDrawerOpen(false); navigate(p) }} goAsk={() => setAiDrawerOpen(false)} />,
+            },
+            {
+              key: 'records',
+              label: '效果记录',
+              children: <RecordsTab brands={brands} keywords={keywords} monitorResults={monitorResults} />,
+            },
+          ]}
+        />
+      </Drawer>
+
+      {/* 作品详情 Drawer（与发布中心共用） */}
+      <WorkDetailDrawer open={!!detail} onClose={() => setDetail(null)} work={detail} />
+
+      {works.length === 0 && !summaryLoading && (
+        <Alert
+          style={{ marginTop: 16 }}
+          type="info"
+          showIcon
+          message="互动数据（播放/点赞/评论）回读功能即将上线"
+          description="发布记录已实时汇总；数据回读上线后，此处与作品详情将自动展示每日互动趋势。"
+        />
+      )}
     </div>
   )
 }

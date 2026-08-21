@@ -192,14 +192,18 @@ function parseTaskParams(r: GenerationTask): Record<string, any> {
 }
 
 // ---- 创作工作台（即梦式布局：左画布 + 右面板）----
-export default function CreationWorkbench({ embedded }: { embedded?: boolean }) {
+export default function CreationWorkbench({ embedded, initialPrompt }: { embedded?: boolean; initialPrompt?: string }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState('create')
   const [category, setCategory] = useState<string>('video')
   const [model, setModel] = useState<string>('')
   const [subType, setSubType] = useState<string>('')
-  const [params, setParams] = useState<Record<string, any>>({})
+  const [params, setParams] = useState<Record<string, any>>(initialPrompt ? { prompt: initialPrompt } : {})
+  // 热门同款跳转预填（仅一次：挂载时有 initialPrompt 才写入，后续跳转由组件重建触发）
+  useEffect(() => {
+    if (initialPrompt) setParams(prev => (prev.prompt ? prev : { ...prev, prompt: initialPrompt }))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [offPeak, setOffPeak] = useState(false)
   const [watermark, setWatermark] = useState(false)
   const [taskFilter, setTaskFilter] = useState<string>('all')

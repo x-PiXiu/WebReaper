@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -220,6 +220,14 @@ export const businessApi = {
   // 抖音官方 OAuth 授权（新窗口打开授权页扫码；回调由服务端处理并 302 跳回前端）
   getDouyinOAuthURL: () =>
     apiClient.get<unknown, { url: string }>('/api/v1/merchant/accounts/douyin/oauth/url'),
+
+  // 热门同款视频发现（人设档案 tab；force=true 跳过 24h 缓存重搜）
+  listHotVideos: (brandId: string, force?: boolean) =>
+    apiClient.get<unknown, { videos: HotVideo[] }>(`/api/v1/merchant/brands/${brandId}/hot-videos${force ? '?force=true' : ''}`),
+
+  // 作品数据页聚合（指标卡+趋势+已发布作品列表）
+  getAnalyticsSummary: () =>
+    apiClient.get<unknown, AnalyticsSummary>('/api/v1/merchant/works/analytics-summary'),
 
   // ---- GEO 内容发布（半自动）----
   publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string; scheduled_at?: string; content_type?: string; media_urls?: string[]; cover_url?: string }) =>

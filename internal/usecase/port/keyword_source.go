@@ -30,3 +30,17 @@ type KeywordSourceInput struct {
 type WebSearcher interface {
 	SearchByBrand(ctx context.Context, brandName, positioning string, competitors []string) (string, error)
 }
+
+// SearchLink 链接搜索结果（标题 + 可跳转 URL + 内容摘要）。
+type SearchLink struct {
+	Title   string
+	URL     string
+	Content string
+}
+
+// LinkSearcher 链接搜索抽象：按查询词返回带原始链接的结果。
+// 与 WebSearcher（拼成文本摘要供 LLM 参考）不同，本接口保留可跳转的 URL——
+// 热门同款视频发现等"结果要给用户点开"的场景用。
+type LinkSearcher interface {
+	SearchLinks(ctx context.Context, query string, num int) []SearchLink
+}
