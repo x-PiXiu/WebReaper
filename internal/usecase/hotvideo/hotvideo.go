@@ -163,7 +163,7 @@ func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string,
 			seen[v.VideoID] = true
 			videos = append(videos, v)
 		}
-		time.Sleep(800 * time.Millisecond) // 两次搜索留间隔，降低风控概率
+		time.Sleep(5 * time.Second) // 两次搜索留间隔（太短触发抖音 verify_check 频率风控）
 	}
 	if len(videos) == 0 {
 		return nil, fmt.Errorf("站内搜索无结果")

@@ -1,36 +1,33 @@
 // Package douyinweb 实现抖音站内搜索/详情/评论（port.SocialSearcher 的 douyin 平台实现）。
 //
-// 执行模式（MediaCrawler 原版思想的 Go 落地——踩坑后确认的正确姿势）：
-//   浏览器只做两件事：① cookie 会话维持 ② 从 localStorage 提取 msToken
-//   实际数据请求由 Go net/http 直调（cookie + 通用参数 + UA/Referer）——
-//   响应体在 Go 侧解析，完全绕开页面 JS 环境。
+// 执行模式（完整调研后的最终解——搜索页上下文 + 同步 XHR）：
+//   1. chromedp 携 cookie 导航到 /search/{keyword} 页面（页面加载后安全 SDK 自动初始化）
+//   2. 在该页面上下文中执行同步 XMLHttpRequest（不走 fetch/SW 管道，不被安全 SDK 挂起）
+//   3. XHR 响应体从 JS 层直接返回（ReturnByValue）
 //
-// 踩坑记录（为什么不能页面内 fetch）：
-//   - 页面内 fetch 请求确实发出、服务器 200 响应（CDP 网络层确认）
-//   - 但 r.text()/r.arrayBuffer() 的 Promise 被抖音安全 SDK（__security_mc_1_s_sdk_*）
-//     无限期挂起——核心数据接口（搜索/详情）被保护，静态资源不受影响
-//   - 结论：MediaCrawler 的 "Playwright 签名机 + httpx 直调" 模式是唯一可行路径
+// 踩坑记录（为什么这么绕）：
+//   - 页面内 fetch：请求发出但 r.text() 被安全 SDK 无限挂起
+//   - Go 直调（带 cookie+msToken）：被 verify_check 风控拦截（data=[]）
+//   - 首页上下文 XHR：同样 verify_check
+//   - 搜索页上下文 XHR：✅ 成功返回真实数据——搜索页有完整的安全上下文
 //
 // 协议知识来源（MediaCrawler 项目验证过的 web 接口行为，不复制其代码）：
-//   - 搜索：GET /aweme/v1/web/general/search/single/ —— 免 a_bogus 签名，需登录 cookie
-//   - 详情：GET /aweme/v1/web/aweme/detail/?aweme_id=
+//   - 搜索：GET /aweme/v1/web/general/search/single/ —— 搜索页上下文免签
+//   - 详情：GET /aweme/v1/web/aweme/detail/?aweme_id= —— 视频页上下文
 //   - 评论：GET /aweme/v1/web/comment/list/ —— cursor 分页
 package douyinweb
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"math/rand"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 
 	"webreaper/internal/adapter/chromedputil"
@@ -44,25 +41,15 @@ const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 type Searcher struct {
 	accountRepo port.AccountRepository
 	vault       port.CookieVault
-	httpClient  *http.Client
 }
 
 func NewSearcher(ar port.AccountRepository, vault port.CookieVault) *Searcher {
-	return &Searcher{
-		accountRepo: ar,
-		vault:       vault,
-		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-			},
-		},
-	}
+	return &Searcher{accountRepo: ar, vault: vault}
 }
 
 func (s *Searcher) SupportedPlatforms() []string { return []string{platform} }
 
-// pickCookie 选租户下一个健康的抖音 cookie 账号并解密 cookie。
+// pickCookie 选租户下一个健康的抖音 cookie 账号并解密。
 func (s *Searcher) pickCookie(ctx context.Context, tenantID, plat string) (string, error) {
 	accounts, err := s.accountRepo.ListByPlatform(ctx, tenantID, plat)
 	if err != nil {
@@ -80,14 +67,9 @@ func (s *Searcher) pickCookie(ctx context.Context, tenantID, plat string) (strin
 	return "", fmt.Errorf("无可用 %s cookie 账号（需浏览器扫码绑定一个）", plat)
 }
 
-// pageEnv 浏览器页面环境（msToken 从 localStorage 提取）。
-type pageEnv struct {
-	msToken string
-}
-
-// withPageEnv 启动浏览器 → cookie 注入 → 打开 douyin.com → 提取 msToken → 执行 fn。
-// 浏览器只活在这个函数里——数据请求由 fn 内的 Go HTTP 发出。
-func (s *Searcher) withPageEnv(ctx context.Context, tenantID, plat string, fn func(env *pageEnv) error) error {
+// withSearchPage 打开搜索页 → 执行 fn（fn 内发 XHR）。
+// 搜索页上下文是关键——首页/精选页的 XHR 会被 verify_check 拦截。
+func (s *Searcher) withSearchPage(ctx context.Context, tenantID, plat, keyword string, fn func(pctx context.Context) error) error {
 	cookie, err := s.pickCookie(ctx, tenantID, plat)
 	if err != nil {
 		return err
@@ -102,97 +84,113 @@ func (s *Searcher) withPageEnv(ctx context.Context, tenantID, plat string, fn fu
 	defer allocCancel()
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
 	defer browserCancel()
-	sessionCtx, sessionCancel := context.WithTimeout(browserCtx, 30*time.Second)
+	sessionCtx, sessionCancel := context.WithTimeout(browserCtx, 45*time.Second)
 	defer sessionCancel()
 
+	searchURL := "https://www.douyin.com/search/" + keyword + "?type=general"
 	var currentURL string
 	err = chromedp.Run(sessionCtx,
 		network.Enable(),
 		network.SetCookies(parseCookies(cookie, ".douyin.com")),
-		chromedp.Navigate("https://www.douyin.com"),
-		chromedp.Sleep(3*time.Second),
+		chromedp.Navigate(searchURL),
+		chromedp.Sleep(8*time.Second), // 等安全 SDK 完整初始化（搜索页安全上下文需要更长）
 		chromedp.Location(&currentURL),
 	)
 	if err != nil {
-		return fmt.Errorf("打开 %s 失败: %w", plat, err)
+		return fmt.Errorf("打开搜索页失败: %w", err)
 	}
 	if strings.Contains(currentURL, "login") {
 		return fmt.Errorf("cookie 失效（重定向登录页），请重新绑定账号")
 	}
-	log.Printf("[douyinweb] 已导航 %s，提取 msToken…", currentURL)
+	log.Printf("[douyinweb] 搜索页已打开: %s", currentURL)
 
-	// msToken 从 localStorage 提取（同步 JS，无 promise 问题）
-	var msToken string
-	_ = chromedp.Run(sessionCtx, chromedp.Evaluate(`(localStorage.getItem('xmst') || '') + ''`, &msToken))
-	env := &pageEnv{msToken: msToken}
-	log.Printf("[douyinweb] msToken=%d 字符", len(msToken))
-
-	return fn(env)
+	return fn(sessionCtx)
 }
 
-// buildCommonParams 通用参数（MediaCrawler 协议知识：aid=6383 等）。
-func buildCommonParams(keyword string, extra map[string]string) url.Values {
-	q := url.Values{
-		"device_platform": {"webapp"},
-		"aid":             {"6383"},
-		"channel":         {"channel_pc_web"},
-		"cookie_enabled":  {"true"},
-		"browser_language": {"zh-CN"},
-		"browser_platform": {"Win32"},
-		"browser_name":    {"Chrome"},
-		"browser_online":  {"true"},
-		"platform":        {"PC"},
-		"screen_width":    {"1920"},
-		"screen_height":   {"1080"},
-		"webid":           {randWebID()},
+// withVideoPage 打开视频详情页（详情/评论接口的上下文）。
+func (s *Searcher) withVideoPage(ctx context.Context, tenantID, plat, videoID string, fn func(pctx context.Context) error) error {
+	cookie, err := s.pickCookie(ctx, tenantID, plat)
+	if err != nil {
+		return err
 	}
-	if keyword != "" {
-		q.Set("keyword", keyword)
+
+	opts := chromedputil.HeadlessOptions(false)
+	opts = append(opts,
+		chromedp.WindowSize(1280, 800),
+		chromedp.UserAgent(userAgent),
+	)
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	defer browserCancel()
+	sessionCtx, sessionCancel := context.WithTimeout(browserCtx, 45*time.Second)
+	defer sessionCancel()
+
+	videoURL := "https://www.douyin.com/video/" + videoID
+	var currentURL string
+	err = chromedp.Run(sessionCtx,
+		network.Enable(),
+		network.SetCookies(parseCookies(cookie, ".douyin.com")),
+		chromedp.Navigate(videoURL),
+		chromedp.Sleep(4*time.Second),
+		chromedp.Location(&currentURL),
+	)
+	if err != nil {
+		return fmt.Errorf("打开视频页失败: %w", err)
 	}
+	log.Printf("[douyinweb] 视频页已打开: %s", currentURL)
+
+	return fn(sessionCtx)
+}
+
+// xhrSyncJS 生成同步 XHR 调用 JS（在页面上下文中执行，返回响应文本）。
+// 同步 XHR 不走 fetch/SW 管道——响应体不被安全 SDK 挂起。
+func xhrSyncJS(apiPath string, paramsJS string) string {
+	return fmt.Sprintf(`(() => {
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', '%s?' + %s, false);
+    xhr.send();
+    return xhr.responseText;
+  } catch (e) { return JSON.stringify({error: String(e)}); }
+})()`, apiPath, paramsJS)
+}
+
+// evalSync 同步 Evaluate（不需要 awaitPromise——XHR 是同步的）。
+func evalSync(ctx context.Context, js string) (string, error) {
+	var out string
+	err := chromedp.Run(ctx, chromedp.ActionFunc(func(c context.Context) error {
+		res, _, e := runtime.Evaluate(js).WithReturnByValue(true).Do(c)
+		if e != nil {
+			return e
+		}
+		if res != nil && res.Value != nil {
+			return json.Unmarshal([]byte(string(res.Value)), &out)
+		}
+		return fmt.Errorf("空结果")
+	}))
+	return out, err
+}
+
+// buildParamsJS 生成 URLSearchParams 构造 JS。
+func buildParamsJS(extra map[string]string) string {
+	var entries []string
 	for k, v := range extra {
-		q.Set(k, v)
+		kj, _ := json.Marshal(k)
+		vj, _ := json.Marshal(v)
+		entries = append(entries, fmt.Sprintf("%s: %s", kj, vj))
 	}
-	return q
+	return fmt.Sprintf(`new URLSearchParams({
+  device_platform: 'webapp', aid: '6383', channel: 'channel_pc_web',
+  cookie_enabled: 'true', browser_language: navigator.language,
+  browser_platform: navigator.platform, browser_name: 'Chrome',
+  browser_online: 'true', platform: 'PC',
+  screen_width: String(screen.width), screen_height: String(screen.height),
+  %s
+}).toString()`, strings.Join(entries, ",\n  "))
 }
 
-func randWebID() string {
-	const hex = "0123456789abcdef"
-	b := make([]byte, 36)
-	for i := range b {
-		b[i] = hex[rand.Intn(16)]
-	}
-	b[14] = '4'
-	return string(b)
-}
-
-// httpGet Go HTTP 直调抖音 web 接口（带 cookie + UA + Referer）。
-func (s *Searcher) httpGet(ctx context.Context, cookie, apiPath string, params url.Values, referer string) ([]byte, error) {
-	u := "https://www.douyin.com" + apiPath + "?" + params.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Referer", referer)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("请求抖音失败: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
-	if err != nil {
-		return nil, fmt.Errorf("读取响应失败: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %.200s", resp.StatusCode, body)
-	}
-	return body, nil
-}
-
-// SearchHotVideos 站内搜索一周内最多点赞的热门视频（douyin 平台）。
+// SearchHotVideos 站内搜索一周内最多点赞的热门视频。
 func (s *Searcher) SearchHotVideos(ctx context.Context, tenantID, plat, keyword string, limit int) ([]port.SocialVideo, error) {
 	if plat != platform {
 		return nil, fmt.Errorf("douyinweb 不支持平台 %s", plat)
@@ -200,45 +198,46 @@ func (s *Searcher) SearchHotVideos(ctx context.Context, tenantID, plat, keyword 
 	if limit <= 0 || limit > 20 {
 		limit = 10
 	}
-	cookie, err := s.pickCookie(ctx, tenantID, plat)
-	if err != nil {
-		return nil, err
-	}
 
-	params := buildCommonParams(keyword, map[string]string{
-		"search_channel":    "aweme_video_web",
-		"enable_history":    "1",
-		"search_source":     "tab_search",
-		"query_correct_type": "1",
-		"is_filter_search":  "1",
-		"filter_selected":   `{"sort_type":"1","publish_time":"7"}`,
-		"offset":            "0",
-		"count":             fmt.Sprintf("%d", limit),
-		"list_type":         "multi",
-	})
-	referer := "https://www.douyin.com/search/" + url.QueryEscape(keyword) + "?type=general"
-	raw, err := s.httpGet(ctx, cookie, "/aweme/v1/web/general/search/single/", params, referer)
-	if err != nil {
-		return nil, err
-	}
-
-	var sr searchResp
-	if jErr := json.Unmarshal(raw, &sr); jErr != nil {
-		return nil, fmt.Errorf("搜索响应解析失败: %v (首部=%.200s)", jErr, raw)
-	}
-	if sr.StatusCode != 0 {
-		return nil, statusErr(sr.StatusCode, sr.StatusMsg)
-	}
 	var out []port.SocialVideo
-	for _, d := range sr.Data {
-		if d.AwemeInfo.AwemeID == "" {
-			continue
+	err := s.withSearchPage(ctx, tenantID, plat, keyword, func(pctx context.Context) error {
+		paramsJS := buildParamsJS(map[string]string{
+			"keyword":          keyword,
+			"search_channel":   "aweme_video_web",
+			"search_source":    "tab_search",
+			"is_filter_search": "1",
+			"filter_selected":  `{"sort_type":"1","publish_time":"7"}`,
+			"offset":           "0",
+			"count":            fmt.Sprintf("%d", limit),
+			"list_type":        "multi",
+		})
+		js := xhrSyncJS("/aweme/v1/web/general/search/single/", paramsJS)
+		raw, e := evalSync(pctx, js)
+		if e != nil {
+			return fmt.Errorf("XHR 执行失败: %w", e)
 		}
-		out = append(out, toSocialVideo(d.AwemeInfo))
-	}
-	log.Printf("[douyinweb] search %q -> %d items (status=%d)", keyword, len(out), sr.StatusCode)
-	if len(out) == 0 {
-		return nil, fmt.Errorf("搜索无结果 keyword=%q status=%d raw=%.200s", keyword, sr.StatusCode, raw)
+
+		var sr searchResp
+		if jErr := json.Unmarshal([]byte(raw), &sr); jErr != nil {
+			return fmt.Errorf("搜索响应解析失败: %v (首部=%.200s)", jErr, raw)
+		}
+		if sr.StatusCode != 0 {
+			return statusErr(sr.StatusCode, sr.StatusMsg)
+		}
+		for _, d := range sr.Data {
+			if d.AwemeInfo.AwemeID == "" {
+				continue
+			}
+			out = append(out, toSocialVideo(d.AwemeInfo))
+		}
+		log.Printf("[douyinweb] search %q -> %d items (status=%d) raw=%.200s", keyword, len(out), sr.StatusCode, raw)
+		if len(out) == 0 {
+			return fmt.Errorf("搜索无结果 keyword=%q status=%d raw=%.200s", keyword, sr.StatusCode, raw)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -248,25 +247,30 @@ func (s *Searcher) GetVideoDetail(ctx context.Context, tenantID, plat, videoID s
 	if plat != platform {
 		return nil, fmt.Errorf("douyinweb 不支持平台 %s", plat)
 	}
-	cookie, err := s.pickCookie(ctx, tenantID, plat)
+
+	var out *port.SocialVideo
+	err := s.withVideoPage(ctx, tenantID, plat, videoID, func(pctx context.Context) error {
+		paramsJS := buildParamsJS(map[string]string{"aweme_id": videoID})
+		js := xhrSyncJS("/aweme/v1/web/aweme/detail/", paramsJS)
+		raw, e := evalSync(pctx, js)
+		if e != nil {
+			return fmt.Errorf("XHR 执行失败: %w", e)
+		}
+		var dr detailResp
+		if jErr := json.Unmarshal([]byte(raw), &dr); jErr != nil {
+			return fmt.Errorf("详情解析失败: %v", jErr)
+		}
+		if dr.StatusCode != 0 {
+			return statusErr(dr.StatusCode, "")
+		}
+		v := toSocialVideo(dr.AwemeDetail)
+		out = &v
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	params := buildCommonParams("", map[string]string{"aweme_id": videoID})
-	referer := "https://www.douyin.com/video/" + videoID
-	raw, err := s.httpGet(ctx, cookie, "/aweme/v1/web/aweme/detail/", params, referer)
-	if err != nil {
-		return nil, err
-	}
-	var dr detailResp
-	if jErr := json.Unmarshal(raw, &dr); jErr != nil {
-		return nil, fmt.Errorf("详情解析失败: %v", jErr)
-	}
-	if dr.StatusCode != 0 {
-		return nil, statusErr(dr.StatusCode, "")
-	}
-	v := toSocialVideo(dr.AwemeDetail)
-	return &v, nil
+	return out, nil
 }
 
 // GetComments 视频评论（cursor 分页）。
@@ -277,37 +281,40 @@ func (s *Searcher) GetComments(ctx context.Context, tenantID, plat, videoID stri
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	cookie, err := s.pickCookie(ctx, tenantID, plat)
-	if err != nil {
-		return nil, err
-	}
-	params := buildCommonParams("", map[string]string{
-		"aweme_id": videoID,
-		"cursor":   fmt.Sprintf("%d", cursor),
-		"count":    fmt.Sprintf("%d", limit),
-		"item_type": "0",
-	})
-	referer := "https://www.douyin.com/video/" + videoID
-	raw, err := s.httpGet(ctx, cookie, "/aweme/v1/web/comment/list/", params, referer)
-	if err != nil {
-		return nil, err
-	}
-	var cr commentResp
-	if jErr := json.Unmarshal(raw, &cr); jErr != nil {
-		return nil, fmt.Errorf("评论解析失败: %v", jErr)
-	}
-	if cr.StatusCode != 0 {
-		return nil, statusErr(cr.StatusCode, "")
-	}
+
 	var out []port.SocialComment
-	for _, c := range cr.Comments {
-		out = append(out, port.SocialComment{
-			CommentID:  c.CID,
-			Content:    c.Text,
-			User:       c.User.Nickname,
-			DiggCount:  c.DiggCount,
-			CreateTime: c.CreateTime,
+	err := s.withVideoPage(ctx, tenantID, plat, videoID, func(pctx context.Context) error {
+		paramsJS := buildParamsJS(map[string]string{
+			"aweme_id":  videoID,
+			"cursor":    fmt.Sprintf("%d", cursor),
+			"count":     fmt.Sprintf("%d", limit),
+			"item_type": "0",
 		})
+		js := xhrSyncJS("/aweme/v1/web/comment/list/", paramsJS)
+		raw, e := evalSync(pctx, js)
+		if e != nil {
+			return fmt.Errorf("XHR 执行失败: %w", e)
+		}
+		var cr commentResp
+		if jErr := json.Unmarshal([]byte(raw), &cr); jErr != nil {
+			return fmt.Errorf("评论解析失败: %v", jErr)
+		}
+		if cr.StatusCode != 0 {
+			return statusErr(cr.StatusCode, "")
+		}
+		for _, c := range cr.Comments {
+			out = append(out, port.SocialComment{
+				CommentID:  c.CID,
+				Content:    c.Text,
+				User:       c.User.Nickname,
+				DiggCount:  c.DiggCount,
+				CreateTime: c.CreateTime,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -349,7 +356,7 @@ func (s *Searcher) ResolveShortURL(shortURL string) (string, string, error) {
 	return "", "", fmt.Errorf("短链解析失败：%s → %s", shortURL, loc)
 }
 
-// IsAlive 登录态心跳（pong）：GET 我的个人信息接口，200+非 2483 即活。
+// IsAlive 登录态心跳：打开首页检查是否被重定向到登录页。
 func (s *Searcher) IsAlive(ctx context.Context, tenantID, plat string) bool {
 	if plat != platform {
 		return false
@@ -358,18 +365,26 @@ func (s *Searcher) IsAlive(ctx context.Context, tenantID, plat string) bool {
 	if err != nil {
 		return false
 	}
-	params := buildCommonParams("", nil)
-	raw, err := s.httpGet(ctx, cookie, "/aweme/v1/web/im/user/info/", params, "https://www.douyin.com/")
-	if err != nil {
+	opts := chromedputil.HeadlessOptions(false)
+	opts = append(opts, chromedp.WindowSize(1280, 800), chromedp.UserAgent(userAgent))
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+	browserCtx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+	pctx, pcancel := context.WithTimeout(browserCtx, 20*time.Second)
+	defer pcancel()
+
+	var cur string
+	if e := chromedp.Run(pctx,
+		network.Enable(),
+		network.SetCookies(parseCookies(cookie, ".douyin.com")),
+		chromedp.Navigate("https://www.douyin.com"),
+		chromedp.Sleep(3*time.Second),
+		chromedp.Location(&cur),
+	); e != nil {
 		return false
 	}
-	var r struct {
-		StatusCode int `json:"status_code"`
-	}
-	if json.Unmarshal(raw, &r) != nil {
-		return false
-	}
-	return r.StatusCode != 2483 && r.StatusCode != 8
+	return !strings.Contains(cur, "login")
 }
 
 // statusErr 抖音错误码翻译。
