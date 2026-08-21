@@ -34,7 +34,7 @@ func (h *GenerationHandler) HandleSubmit(c *gin.Context) {
 	var req struct {
 		BrandID   string                 `json:"brand_id"`
 		SubType   string                 `json:"sub_type" binding:"required"`
-		Model     string                 `json:"model" binding:"required"`
+		Model     string                 `json:"model"` // subject 端点不需要 model（Vidu 主体 API 无此参数）
 		Params    map[string]any         `json:"params"`
 		Refs      []entity.PromptRef     `json:"refs"` // @引用素材（服务端翻译层按端点映射）
 		OffPeak   bool                   `json:"off_peak"`
