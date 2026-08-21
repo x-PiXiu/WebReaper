@@ -51,6 +51,17 @@ func allocOpts() []chromedp.ExecAllocatorOption {
 }
 
 // parseCookies 将 cookie 字符串解析为 chromedp CookieParam 列表。
+// diagScreenshot 失败诊断截图（RPA 稳定性基建：失败现场留证，改版/风控排查用）。
+func diagScreenshot(ctx context.Context, platform, stage string) {
+	var shot []byte
+	if e := chromedp.Run(ctx, chromedp.CaptureScreenshot(&shot)); e == nil && len(shot) > 0 {
+		name := fmt.Sprintf("debug-%s-fail-%s-%d.png", platform, stage, time.Now().UnixNano())
+		if wErr := os.WriteFile(filepath.Join("data", "media", name), shot, 0o644); wErr == nil {
+			log.Printf("[PublishAuto:%s] 失败诊断截图(%s): /media/%s", platform, stage, name)
+		}
+	}
+}
+
 func parseCookies(cookieStr, domain string) []*network.CookieParam {
 	var cookies []*network.CookieParam
 	for _, part := range strings.Split(cookieStr, "; ") {
@@ -122,12 +133,14 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		chromedp.Location(&currentURL),
 	)
 	if err != nil {
+		diagScreenshot(sessionCtx, "zhihu", "fail")
 		return "", fmt.Errorf("导航到写文章页失败: %w", err)
 	}
 	log.Printf("[PublishAuto:zhihu] cookie已注入，已导航到: %s", currentURL)
 
 	// 如果被重定向到登录页，说明 cookie 失效
 	if strings.Contains(currentURL, "signin") || strings.Contains(currentURL, "login") {
+		diagScreenshot(sessionCtx, "zhihu", "fail")
 		return "", fmt.Errorf("cookie已过期，请重新绑定账号")
 	}
 
@@ -138,6 +151,7 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		chromedp.Sleep(1*time.Second),
 	)
 	if err != nil {
+		diagScreenshot(sessionCtx, "zhihu", "fail")
 		return "", fmt.Errorf("填充标题失败: %w", err)
 	}
 	log.Printf("[PublishAuto:zhihu] 标题已填充")
@@ -180,6 +194,7 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		chromedp.Sleep(1500*time.Millisecond), // 等 DraftJS 状态更新 + 字数计数器刷新
 	)
 	if err != nil {
+		diagScreenshot(sessionCtx, "zhihu", "fail")
 		return "", fmt.Errorf("填充正文失败: %w", err)
 	}
 
@@ -190,6 +205,7 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 	); cerr == nil {
 		trimmed := strings.TrimSpace(contentText)
 		if len([]rune(trimmed)) == 0 {
+			diagScreenshot(sessionCtx, "zhihu", "fail")
 			return "", fmt.Errorf("正文填充校验失败：编辑器内容为空（DraftJS 可能拒绝了输入）")
 		}
 		log.Printf("[PublishAuto:zhihu] 正文已填充（%d 字符）", len([]rune(trimmed)))
@@ -228,6 +244,7 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		}),
 	)
 	if err != nil {
+		diagScreenshot(sessionCtx, "zhihu", "fail")
 		return "", fmt.Errorf("点击发布按钮失败: %w", err)
 	}
 	log.Printf("[PublishAuto:zhihu] 发布按钮已点击")
@@ -239,6 +256,7 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		chromedp.Location(&articleURL),
 	)
 	if err != nil {
+		diagScreenshot(sessionCtx, "zhihu", "fail")
 		return "", fmt.Errorf("获取文章URL失败: %w", err)
 	}
 
@@ -246,6 +264,7 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		log.Printf("[PublishAuto:zhihu] 发布成功！文章URL: %s", articleURL)
 		return articleURL, nil
 	}
+	diagScreenshot(sessionCtx, "zhihu", "fail")
 	return "", fmt.Errorf("发布可能失败，当前URL: %s", articleURL)
 }
 
