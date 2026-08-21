@@ -233,6 +233,13 @@ export const businessApi = {
   getAnalyticsSummary: () =>
     apiClient.get<unknown, AnalyticsSummary>('/api/v1/merchant/works/analytics-summary'),
 
+  // 发布计划硬确认（主 Agent 确认卡片；scheduled_at 可选=定时发布）
+  confirmPublishPlan: (planId: string, scheduledAt?: string) =>
+    apiClient.post<unknown, PublishJob>(`/api/v1/merchant/publish-plans/${planId}/confirm`, { scheduled_at: scheduledAt }),
+
+  cancelPublishPlan: (planId: string) =>
+    apiClient.post<unknown, unknown>(`/api/v1/merchant/publish-plans/${planId}/cancel`),
+
   // 手动回读单作品互动数据（详情 Drawer「立即刷新」）
   refreshJobMetrics: (jobId: string) =>
     apiClient.post<unknown, { job_id: string; views: number; likes: number; comments: number; shares: number; collected_at: string }>(`/api/v1/merchant/publish-jobs/${jobId}/refresh-metrics`),

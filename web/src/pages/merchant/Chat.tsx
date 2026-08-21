@@ -30,6 +30,7 @@ const TOOL_LABELS: Record<string, string> = {
   query_knowledge: '📚 查阅品牌知识库',
   generate_content: '✨ 生成内容',
   api_crawler: '🌐 抓取网页',
+  growth_advisor: '🧭 增长诊断',
 }
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -149,6 +150,10 @@ function ThinkBlock({ content, active }: { content: string; active?: boolean }) 
 function ToolCallBlock({ tool }: { tool: ToolRecord }) {
   const isRunning = !tool.result
   const label = TOOL_LABELS[tool.name] || `🔧 ${tool.name}`
+  // 发布计划 → 硬确认卡片（UI 级强制：确认走 REST，与对话链路分离，模型无法伪造）
+  const planId = !isRunning && tool.name === 'publish_work'
+    ? (String(tool.result || '').match(/plan_id=([a-z0-9.-]+)/) || [])[1] : undefined
+  if (planId) return <PublishConfirmCard planId={planId} raw={String(tool.result || '')} />
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
@@ -158,6 +163,61 @@ function ToolCallBlock({ tool }: { tool: ToolRecord }) {
     }}>
       {isRunning ? <Spin size="small" /> : <CheckCircleOutlined style={{ color: 'var(--wr-success)' }} />}
       <span>{label}{isRunning ? '…' : ''}</span>
+    </div>
+  )
+}
+
+// 发布确认卡片：计划摘要 + 立即确认/定时发布/取消（pending 10 分钟有效）
+function PublishConfirmCard({ planId, raw }: { planId: string; raw: string }) {
+  const [state, setState] = useState<'pending' | 'done' | 'cancelled' | 'error'>('pending')
+  const [jobURL, setJobURL] = useState<string>()
+  const [scheduledAt, setScheduledAt] = useState<string>('')
+  const [confirming, setConfirming] = useState(false)
+
+  const summary = raw.split('请向用户复述')[0].replace('发布计划已生成（plan_id=' + planId + '）：', '').trim()
+
+  const doConfirm = async () => {
+    setConfirming(true)
+    try {
+      const job = await businessApi.confirmPublishPlan(planId, scheduledAt || undefined)
+      setJobURL(job?.external_url)
+      setState('done')
+    } catch (e: any) {
+      setState('error')
+    } finally {
+      setConfirming(false)
+    }
+  }
+  const doCancel = async () => {
+    await businessApi.cancelPublishPlan(planId).catch(() => {})
+    setState('cancelled')
+  }
+
+  return (
+    <div style={{
+      margin: '8px 0', padding: 14, borderRadius: 12,
+      background: 'rgba(212,165,116,0.08)', border: '1px solid rgba(212,165,116,0.3)',
+    }}>
+      <Text strong style={{ fontSize: 13 }}>📤 发布确认</Text>
+      <div style={{ fontSize: 13, margin: '8px 0', whiteSpace: 'pre-wrap' }}>{summary}</div>
+      {state === 'pending' && (
+        <Space wrap>
+          <Button size="small" type="primary" loading={confirming} onClick={doConfirm}>确认发布</Button>
+          <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)}
+            style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--wr-border)', background: 'var(--wr-bg-elevated)', color: 'inherit' }} />
+          {scheduledAt && <Text type="secondary" style={{ fontSize: 12 }}>将定时发布</Text>}
+          <Button size="small" type="text" danger onClick={doCancel}>取消</Button>
+        </Space>
+      )}
+      {state === 'done' && (
+        <Space>
+          <CheckCircleOutlined style={{ color: 'var(--wr-success)' }} />
+          <Text style={{ fontSize: 13 }}>{scheduledAt ? '已设定时发布' : '发布任务已创建'}</Text>
+          {jobURL && <a href={jobURL} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>打开发布页</a>}
+        </Space>
+      )}
+      {state === 'cancelled' && <Text type="secondary" style={{ fontSize: 13 }}>已取消</Text>}
+      {state === 'error' && <Text type="danger" style={{ fontSize: 13 }}>确认失败（计划可能已过期）——请重新发起</Text>}
     </div>
   )
 }

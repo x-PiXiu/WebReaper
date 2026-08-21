@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	authadapter "webreaper/internal/adapter/auth"
+	"webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/agentconfig"
@@ -97,6 +98,7 @@ type Router struct {
 	rootGroup          *gin.RouterGroup        // Engine() 装配时记录——延迟注册的公开路由用（OAuth 回调等）
 	accountFrontendURL string                  // 账号域 OAuth 回调后 302 跳回的前端地址
 	worksUC            *works.WorksUseCase     // 作品库聚合（可选；未注入则端点不注册）
+	pendingPublish     *agent.PendingPublishStore // 发布计划暂存（主 Agent 硬确认；可选）
 	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
@@ -208,6 +210,11 @@ func (r *Router) SetSystemSettings(uc *systemsettings.SystemSettingsUseCase) {
 // SetNotifications 注入站内通知用例（可选；未注入则通知端点返回空）。
 func (r *Router) SetNotifications(uc *notification.NotifyUseCase) {
 	r.notifyUC = uc
+}
+
+// SetPendingPublishStore 注入发布计划暂存（可选；主 Agent 硬确认卡片端点用）。
+func (r *Router) SetPendingPublishStore(ps *agent.PendingPublishStore) {
+	r.pendingPublish = ps
 }
 
 // SetWorks 注入作品库聚合用例（可选）。

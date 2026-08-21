@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"time"
 	"log"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/adapter/agent"
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/works"
 )
@@ -21,11 +23,57 @@ type AccountHandler struct {
 	accountUC      *account.AccountUseCase
 	publishUC      *account.PublishUseCase
 	worksUC        *works.WorksUseCase // 可选：作品库聚合
+	pendingStore   *agent.PendingPublishStore // 可选：发布计划暂存（硬确认）
 	frontendBaseURL string // OAuth 回调完成后 302 跳回的前端地址
 }
 
 // SetWorksUC 注入作品库聚合用例（可选）。
 func (h *AccountHandler) SetWorksUC(uc *works.WorksUseCase) { h.worksUC = uc }
+
+// SetPendingPublishStore 注入发布计划暂存（主 Agent 硬确认卡片用）。
+func (h *AccountHandler) SetPendingPublishStore(ps *agent.PendingPublishStore) { h.pendingStore = ps }
+
+// HandleConfirmPublish POST /merchant/publish-plans/:planID/confirm —— 硬确认执行：
+// 用户在确认卡片点「确认发布」→ 从 pending 取出计划执行（支持 scheduled_at 定时——
+// pending 层同时服务立即确认与定时发布）。确认动作走 REST 与 Agent 对话链路分离。
+func (h *AccountHandler) HandleConfirmPublish(c *gin.Context) {
+	if h.pendingStore == nil {
+		fail(c, fmt.Errorf("发布计划功能未启用"))
+		return
+	}
+	var req struct {
+		ScheduledAt string `json:"scheduled_at"` // ISO 时间（可选=定时发布）
+	}
+	_ = c.ShouldBindJSON(&req)
+	input, title, ok := h.pendingStore.Take(c.Param("planID"))
+	if !ok {
+		fail(c, fmt.Errorf("发布计划不存在或已过期（10 分钟有效），请重新发起"))
+		return
+	}
+	if req.ScheduledAt != "" {
+		t, pErr := time.Parse(time.RFC3339, req.ScheduledAt)
+		if pErr != nil {
+			fail(c, fmt.Errorf("定时时间格式错误"))
+			return
+		}
+		input.ScheduledAt = t
+	}
+	job, err := h.publishUC.Publish(c.Request.Context(), input)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	log.Printf("[PublishPlan] 硬确认执行：plan=%s《%s》→ %s", c.Param("planID"), title, job.Platform)
+	success(c, publishJobToView(job))
+}
+
+// HandleCancelPublish POST /merchant/publish-plans/:planID/cancel —— 取消（取出即丢弃）。
+func (h *AccountHandler) HandleCancelPublish(c *gin.Context) {
+	if h.pendingStore != nil {
+		_, _, _ = h.pendingStore.Take(c.Param("planID")) // 消费掉即取消
+	}
+	success(c, gin.H{"status": "cancelled"})
+}
 
 func NewAccountHandler(au *account.AccountUseCase, pu *account.PublishUseCase) *AccountHandler {
 	return &AccountHandler{accountUC: au, publishUC: pu, frontendBaseURL: "http://localhost:5173"}

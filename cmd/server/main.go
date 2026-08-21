@@ -573,17 +573,21 @@ func main() {
 			worksUC := works.NewWorksUseCase(geoRepos.content, repository.NewGormGenerationTaskRepository(geoRepos.db), accountRepos.job, accountRepos.metric)
 			router.SetWorks(worksUC)
 
-			// 商户主 Agent 工具集（Agent-as-Tool 第一批：8 个新工具——获客管家对话编排）
+			// 商户主 Agent 工具集（Agent-as-Tool：获客管家对话编排；二期+增长子Agent/硬确认）
+			pendingStore := agent.NewPendingPublishStore()
+			router.SetPendingPublishStore(pendingStore)
 			toolRegistry.Register(agent.NewQueryBrandsTool(geoRepos.brand))
 			toolRegistry.Register(agent.NewDiscoverHotVideosTool(hotVideoUCRef))
 			toolRegistry.Register(agent.NewListWorksTool(worksUC))
 			toolRegistry.Register(agent.NewQueryAnalyticsTool(geoPublishUC))
 			toolRegistry.Register(agent.NewTriggerMonitorTool(geoMonitorUCRef))
-			toolRegistry.Register(agent.NewPublishWorkTool(geoPublishUC, worksUC, geoRepos.content))
+			toolRegistry.Register(agent.NewPublishWorkTool(geoPublishUC, worksUC, geoRepos.content, pendingStore))
 			toolRegistry.Register(agent.NewQueryAccountsTool(geoAccountUC))
 			if knowledgeUCRef != nil {
 				toolRegistry.Register(agent.NewQueryKnowledgeTool(knowledgeUCRef))
 			}
+			// 子 Agent 示范：增长顾问（数据组合+领域方法论，主 Agent 只派发任务）
+			toolRegistry.Register(agent.NewGrowthAdvisorTool(geoRepos.brand, worksUC, geoPublishUC, geoAccountUC, aiGenerator))
 
 			// 抖音开放平台官方 OAuth 授权（API 通道——替代浏览器扫码 RPA 绑定；
 			// 内部统一走官方 SDK bytedance/douyin-openapi-sdk-go）

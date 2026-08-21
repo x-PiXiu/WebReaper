@@ -275,10 +275,11 @@ type PublishWorkTool struct {
 	publish     *account.PublishUseCase
 	works       *works.WorksUseCase
 	contentRepo port.OptimizedContentRepository
+	pending     *PendingPublishStore // 硬确认 pending 层
 }
 
-func NewPublishWorkTool(pu *account.PublishUseCase, wu *works.WorksUseCase, cr port.OptimizedContentRepository) *PublishWorkTool {
-	return &PublishWorkTool{publish: pu, works: wu, contentRepo: cr}
+func NewPublishWorkTool(pu *account.PublishUseCase, wu *works.WorksUseCase, cr port.OptimizedContentRepository, ps *PendingPublishStore) *PublishWorkTool {
+	return &PublishWorkTool{publish: pu, works: wu, contentRepo: cr, pending: ps}
 }
 
 func (t *PublishWorkTool) Name() string { return "publish_work" }
@@ -328,29 +329,19 @@ func (t *PublishWorkTool) Execute(ctx context.Context, argsJSON string) (entity.
 		return entity.DataItem{}, fmt.Errorf("作品 %s 不存在（用 list_works 重新查）", args.WorkID)
 	}
 
-	// 软确认：未确认 → 返回发布计划（工具返回值强制，模型拿不到执行结果）
+	// 确认闸：未确认 → 组装完整输入存 pending（plan_id 返回给前端渲染确认卡片）。
+	// 硬确认 = 前端卡片点「确认发布」走 REST 端点取 plan 执行（与对话链路分离，
+	// 模型无法伪造）；confirmed=true 软确认路径保留（对话内明确同意），双保险。
 	if !args.Confirmed {
+		input := t.buildInput(tenantID, args, target)
+		planID := t.pending.Save(input, target.Title)
 		return textItem(fmt.Sprintf("pw-pending-%d", time.Now().UnixNano()), "⚠️ 待用户确认的发布计划",
-			fmt.Sprintf("发布计划：\n- 作品：《%s》（%s，%s）\n- 平台：%s\n- 模式：%s\n请向用户复述以上计划，用户明确同意后，带 confirmed=true 重新调用本工具执行发布。",
-				target.Title, target.Kind, statusLabel(target.Status), platformLabel(args.Platform), args.Mode)), nil
+			fmt.Sprintf("发布计划已生成（plan_id=%s）：\n- 作品：《%s》（%s，%s）\n- 平台：%s\n- 模式：%s\n请向用户复述以上计划；前端已显示确认卡片，用户点「确认发布」即执行，或用户在对话中明确同意后你带 confirmed=true 重新调用。",
+				planID, target.Title, target.Kind, statusLabel(target.Status), platformLabel(args.Platform), args.Mode)), nil
 	}
 
 	// 组装发布输入（文章类从内容库取正文；多媒体带产物 URL）
-	in := account.PublishInput{
-		TenantID:    tenantID,
-		Platform:    args.Platform,
-		Mode:        args.Mode,
-		Title:       target.Title,
-		ContentID:   target.ContentID,
-		BrandID:     target.BrandID,
-		ContentType: target.Kind,
-		MediaURLs:   target.MediaURLs,
-	}
-	if target.Kind == "article" && target.ContentID != "" {
-		if c, cErr := t.contentRepo.FindByID(ctx, tenantID, target.ContentID); cErr == nil {
-			in.Content = c.OptimizedText
-		}
-	}
+	in := t.buildInput(tenantID, args, target)
 	if in.Content == "" && len(in.MediaURLs) == 0 {
 		return entity.DataItem{}, fmt.Errorf("作品无可发布内容（文章无正文/多媒体无产物）")
 	}
@@ -364,6 +355,26 @@ func (t *PublishWorkTool) Execute(ctx context.Context, argsJSON string) (entity.
 		result += "\n半自动模式：请引导用户打开发布链接完成最后一步：" + job.ExternalURL
 	}
 	return textItem(fmt.Sprintf("pw-%d", time.Now().UnixNano()), "发布已执行", result), nil
+}
+
+// buildInput 组装发布输入（文章类从内容库取正文）。
+func (t *PublishWorkTool) buildInput(tenantID string, args publishWorkArgs, target *works.WorkItem) account.PublishInput {
+	in := account.PublishInput{
+		TenantID:    tenantID,
+		Platform:    args.Platform,
+		Mode:        args.Mode,
+		Title:       target.Title,
+		ContentID:   target.ContentID,
+		BrandID:     target.BrandID,
+		ContentType: target.Kind,
+		MediaURLs:   target.MediaURLs,
+	}
+	if target.Kind == "article" && target.ContentID != "" {
+		if c, cErr := t.contentRepo.FindByID(context.Background(), tenantID, target.ContentID); cErr == nil {
+			in.Content = c.OptimizedText
+		}
+	}
+	return in
 }
 
 func platformLabel(p string) string {
@@ -481,6 +492,102 @@ func (t *QueryKnowledgeTool) ToolDeclaration() port.ToolDecl {
 	}
 }
 
+// ---- ⑨ growth_advisor 增长顾问（子 Agent 示范：数据组合 + 领域专家提示词）----
+//
+// Agent-as-Tool 二期：子 Agent 是"特殊工具"——不暴露底层查询给主 Agent 细调，
+// 而是内置领域方法论（增长诊断：感知数据 → 归因 → 建议），主 Agent 只派发任务。
+
+type GrowthAdvisorTool struct {
+	brandRepo port.BrandRepository
+	works     *works.WorksUseCase
+	publish   *account.PublishUseCase
+	accounts  *account.AccountUseCase
+	aiGen     port.AIGenerator
+}
+
+func NewGrowthAdvisorTool(br port.BrandRepository, wu *works.WorksUseCase,
+	pu *account.PublishUseCase, au *account.AccountUseCase, ai port.AIGenerator) *GrowthAdvisorTool {
+	return &GrowthAdvisorTool{brandRepo: br, works: wu, publish: pu, accounts: au, aiGen: ai}
+}
+
+func (t *GrowthAdvisorTool) Name() string { return "growth_advisor" }
+func (t *GrowthAdvisorTool) Description() string {
+	return "增长顾问（子 Agent）：综合分析商户的品牌、作品、发布数据、账号状态，" +
+		"输出增长诊断（现状→问题→下一步动作，一次只建议一件事）。" +
+		"用户说「帮我看看接下来该做什么」「运营得怎么样」「给点建议」时调用。参数：brand_id（可选）。"
+}
+
+type growthAdvisorArgs struct {
+	BrandID string `json:"brand_id"`
+}
+
+func (t *GrowthAdvisorTool) Execute(ctx context.Context, argsJSON string) (entity.DataItem, error) {
+	tenantID, err := tenantOrErr(ctx)
+	if err != nil {
+		return entity.DataItem{}, err
+	}
+	var args growthAdvisorArgs
+	_ = json.Unmarshal([]byte(argsJSON), &args)
+
+	// 感知层：数据组合（主 Agent 无需逐个工具查询）
+	var facts strings.Builder
+	if brands, bErr := t.brandRepo.ListByTenant(ctx, tenantID); bErr == nil {
+		for _, b := range brands {
+			if args.BrandID != "" && b.ID != args.BrandID {
+				continue
+			}
+			fmt.Fprintf(&facts, "【品牌】%s（行业:%s 定位:%s）\\n", b.Name, b.Industry, b.Positioning)
+		}
+	}
+	if items, wErr := t.works.ListWorks(ctx, tenantID); wErr == nil {
+		draft, ready, published := 0, 0, 0
+		for _, w := range items {
+			switch w.Status {
+			case "draft":
+				draft++
+			case "ready":
+				ready++
+			case "published":
+				published++
+			}
+		}
+		fmt.Fprintf(&facts, "【作品】共%d（草稿%d 待发布%d 已发布%d）\n", len(items), draft, ready, published)
+	}
+	if s, sErr := t.publish.AnalyticsSummary(ctx, tenantID); sErr == nil {
+		fmt.Fprintf(&facts, "【数据】累计播放%d 赞%d 评%d\n", s.Totals.Views, s.Totals.Likes, s.Totals.Comments)
+	}
+	if accs, aErr := t.accounts.List(ctx, tenantID); aErr == nil {
+		for _, a := range accs {
+			fmt.Fprintf(&facts, "【账号】%s %s（%s）\n", platformLabel(a.Platform), a.DisplayName, a.Health)
+		}
+	}
+
+	// 方法论层：领域专家提示词
+	prompt := fmt.Sprintf(`你是本地商户的增长顾问。基于以下真实经营数据做诊断：
+
+%s
+
+输出（口语化、老板能懂、总共不超过 150 字）：
+1. 现状一句话（有数字说数字）
+2. 最关键的一个问题
+3. 下一步最该做的一件事（具体到点什么按钮/拍什么内容）`, facts.String())
+
+	resp, err := t.aiGen.ChatStream(ctx, "", "", []port.ChatMessage{{Role: "user", Content: prompt}}, nil)
+	if err != nil {
+		return entity.DataItem{}, fmt.Errorf("增长诊断生成失败: %w", err)
+	}
+	return textItem(fmt.Sprintf("ga-%d", time.Now().UnixNano()), "增长诊断", resp), nil
+}
+
+func (t *GrowthAdvisorTool) ToolDeclaration() port.ToolDecl {
+	return port.ToolDecl{
+		Name: "growth_advisor", Description: t.Description(),
+		Properties: map[string]port.PropSpec{
+			"brand_id": {Type: "string", Description: "品牌 ID（可选，不传分析全店）"},
+		},
+	}
+}
+
 // 编译期断言：全部实现 port.CrawlerTool。
 var (
 	_ port.CrawlerTool = (*QueryBrandsTool)(nil)
@@ -491,4 +598,5 @@ var (
 	_ port.CrawlerTool = (*PublishWorkTool)(nil)
 	_ port.CrawlerTool = (*QueryAccountsTool)(nil)
 	_ port.CrawlerTool = (*QueryKnowledgeTool)(nil)
+	_ port.CrawlerTool = (*GrowthAdvisorTool)(nil)
 )
