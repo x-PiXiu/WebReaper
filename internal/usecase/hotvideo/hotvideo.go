@@ -131,9 +131,22 @@ func (uc *HotVideoUseCase) ListHotVideos(ctx context.Context, tenantID, brandID 
 // searchDouyinHot 主数据源：抖音站内搜索（一周内+最多点赞）→ LLM 生成火爆点与拍摄同款选题。
 // 搜索词用品牌行业/定位直构（站内搜索对短词效果最好，无需 LLM 造句）。
 func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string, brand entity.Brand) ([]HotVideo, error) {
-	keywords := []string{industryOf(brand)}
-	if s := clamp(brand.Positioning, 8); len([]rune(s)) >= 3 && s != industryOf(brand) {
-		keywords = append(keywords, s)
+	// 站内搜索对短词（2-6 字）效果最好——优先用行业词，其次从定位中拆分短词
+	var keywords []string
+	if brand.Industry != "" {
+		keywords = append(keywords, brand.Industry)
+	}
+	if brand.Positioning != "" {
+		for _, seg := range strings.FieldsFunc(brand.Positioning, func(r rune) bool { return r == '，' || r == '。' || r == ' ' }) {
+			if 2 <= len([]rune(seg)) && len([]rune(seg)) <= 8 {
+				keywords = append(keywords, seg)
+			}
+		}
+	}
+	if len(keywords) == 0 {
+		keywords = append(keywords, clamp(brand.Positioning, 6))
+	} else if len(keywords) > 3 {
+		keywords = keywords[:3] // 最多搜 3 个词
 	}
 
 	seen := make(map[string]bool)
