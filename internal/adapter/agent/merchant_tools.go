@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/hotvideo"
@@ -576,7 +577,8 @@ func (t *GrowthAdvisorTool) Execute(ctx context.Context, argsJSON string) (entit
 	if err != nil {
 		return entity.DataItem{}, fmt.Errorf("增长诊断生成失败: %w", err)
 	}
-	return textItem(fmt.Sprintf("ga-%d", time.Now().UnixNano()), "增长诊断", resp), nil
+	// 剥离思考块——工具结果给主 Agent 的必须是干净结论（think 噪音会污染上级上下文）
+	return textItem(fmt.Sprintf("ga-%d", time.Now().UnixNano()), "增长诊断", pkg.StripThinkTags(resp)), nil
 }
 
 func (t *GrowthAdvisorTool) ToolDeclaration() port.ToolDecl {
