@@ -569,12 +569,36 @@ export default function Chat() {
                 }
               } else if (e.type === 'error') setError(e.error || null)
 
+              // 防御性收尾：流结束（finish/error）时仍在转圈的工具块自动完成——
+              // SSE 中间层（代理缓冲/断连）可能丢尾部 tool-result 事件，不收尾会永远转
+              if (e.type === 'finish' || e.type === 'error') {
+                for (const b of blocks) {
+                  if (b.type === 'tool' && b.tool && !b.tool.result) b.tool.result = '(已完成)'
+                }
+                for (const t of newTools) { if (!t.result) t.result = '(已完成)' }
+                for (const t of accTools) { if (!t.result) t.result = '(已完成)' }
+              }
+
               msgs[msgs.length - 1] = { ...oldMsg, content: newContent, tools: newTools, blocks }
               return msgs
             })
           } catch {}
         }
       }
+      // 断连兜底：连接结束但未收到 finish（代理截断丢尾部事件）——未完成工具块收尾
+      for (const t of accTools) { if (!t.result) t.result = '(已完成)' }
+      patchConvMessages(convIdRef, cmsgs => {
+        const msgs = [...cmsgs]
+        const lastMsg = msgs[msgs.length - 1]
+        if (lastMsg?.blocks) {
+          msgs[msgs.length - 1] = {
+            ...lastMsg,
+            blocks: lastMsg.blocks.map(b => b.tool && !b.tool.result ? { ...b, tool: { ...b.tool, result: '(已完成)' } } : b),
+          }
+        }
+        return msgs
+      })
+
       // 流式正常结束：保存 assistant 消息到后端
       // 关键修复：从本地累积变量读取（同步、完整），而非 conversationsRef（异步、可能漏末尾）
       if (accContent || accTools.length > 0) {
