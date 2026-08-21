@@ -62,6 +62,9 @@ func NewRegistry() *Registry {
 	r.defaultCaps["sound_effect"] = soundEffectCaps
 	r.defaultCaps["tts"] = ttsCaps
 	r.defaultCaps["voice_clone"] = voiceCloneCaps
+	// subject 端点无模型概念（Vidu 主体 API 不需要 model 参数）——注册单条默认能力，
+	// model="" 时自动匹配；不传或传 "default" 均通过
+	r.defaultCaps["subject"] = []entity.ModelCapability{{Model: "default"}}
 	return r
 }
 
@@ -174,6 +177,11 @@ func (r *Registry) Capability(ctx context.Context, subType, model string) (entit
 		if c.Model == model {
 			return c, nil
 		}
+	}
+	// model 为空且端点只有一条默认能力（如 subject 的"default"）——自动匹配。
+	// 设计：subject 等无模型概念的端点，前端不传 model 也能工作
+	if model == "" && len(r.defaultCaps[subType]) == 1 {
+		return r.defaultCaps[subType][0], nil
 	}
 	return entity.ModelCapability{}, fmt.Errorf("模型 %q 未在该端点注册（可在管理后台新增）", model)
 }
