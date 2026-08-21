@@ -5,7 +5,7 @@ import { Button, Input, Space, Typography, message, Alert } from 'antd'
 import { PictureOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
-import { MOCK_COVERS } from '../../../../mock/ipAssets'
+import { COVER_STYLES } from '../../../../data/coverStyles'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
 
@@ -79,7 +79,7 @@ export default function CoverModule() {
         <Input style={{ marginTop: 8, marginBottom: 16 }} value={title} onChange={(e) => draft.patch({ selectedTitle: e.target.value })} />
         <Text strong>模板</Text>
         <div className="ip-pick-grid" style={{ marginTop: 8 }}>
-          {MOCK_COVERS.map((c) => (
+          {COVER_STYLES.map((c) => (
             <button
               key={c.id}
               type="button"

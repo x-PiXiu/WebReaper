@@ -5,7 +5,7 @@ import { PictureOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
-import { MOCK_COVERS } from '../../../../mock/ipAssets'
+import { COVER_STYLES } from '../../../../data/coverStyles'
 
 /** Step 2 发视频：配音 / 形象 / 封面 */
 export function VideoAssetsStep() {
@@ -173,7 +173,7 @@ export function VideoAssetsStep() {
       <section className="cf-asset-block">
         <div className="cf-asset-title"><PictureOutlined /> 视频封面</div>
         <div className="ip-pick-grid" style={{ marginTop: 8 }}>
-          {MOCK_COVERS.map((c) => (
+          {COVER_STYLES.map((c) => (
             <button
               key={c.id}
               type="button"

@@ -5,7 +5,7 @@ import { PictureOutlined, PlusOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
-import { MOCK_COVERS } from '../../../../mock/ipAssets'
+import { COVER_STYLES } from '../../../../data/coverStyles'
 
 /** Step 2 发图文：配图 + 封面 */
 export function GraphicAssetsStep() {
@@ -110,7 +110,7 @@ export function GraphicAssetsStep() {
       <section className="cf-asset-block">
         <div className="cf-asset-title">图文封面风格</div>
         <div className="ip-pick-grid">
-          {MOCK_COVERS.map((c) => (
+          {COVER_STYLES.map((c) => (
             <button
               key={c.id}
               type="button"
