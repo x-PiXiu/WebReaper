@@ -399,7 +399,7 @@ export const businessApi = {
   uploadAsset: (file: File) => {
     const form = new FormData()
     form.append('file', file)
-    return apiClient.post<unknown, { asset: MediaAsset }>('/api/v1/media/assets', form)
+    return apiClient.post<unknown, { id: string; url: string; mime: string; size_bytes: number; owner_type: string }>('/api/v1/media/assets', form)
   },
   listAssets: () =>
     apiClient.get<unknown, { assets: MediaAsset[] }>('/api/v1/media/assets'),

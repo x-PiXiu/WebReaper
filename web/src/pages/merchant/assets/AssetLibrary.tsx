@@ -265,12 +265,12 @@ function CreateSubjectModal({ open, onClose, onCreated }: { open: boolean; onClo
           customRequest={async ({ file, onSuccess, onError }) => {
             try {
               const r = await businessApi.uploadAsset(file as File)
-              setImageUrls(prev => [...prev, r.asset.url])
+              setImageUrls(prev => [...prev, r.url])
               onSuccess?.(r)
             } catch (e) { onError?.(e as Error) }
           }}
           onRemove={(file) => {
-            const url = (file.response as any)?.asset?.url
+            const url = (file.response as any)?.url
             if (url) setImageUrls(prev => prev.filter(u => u !== url))
           }}
         >
