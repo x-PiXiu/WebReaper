@@ -41,9 +41,16 @@ type HotVideoUseCase struct {
 	douyin    port.SocialSearcher // 站内搜索——主数据源（真实爆款+数据，需 cookie 账号；多平台泛化）
 	aiGen     port.AIGenerator
 
-	mu    sync.Mutex
-	cache map[string]cacheEntry // brandID → 结果缓存（24h）
+	mu               sync.Mutex
+	cache            map[string]cacheEntry // brandID → 结果缓存（24h）
+	lastDouyinSearch time.Time             // 上次站内搜索时间（全局频率限制——保护商户账号）
 }
+
+// douyinSearchCooldown 站内搜索全局冷却时间。
+// 原因：每次搜索 = 开Chrome→cookie注入→搜索页→XHR→关Chrome，
+// 短时间反复触发会被抖音风控标记（verify_check→账号标记→极端情况封号）。
+// 24h 缓存是主防线；force=true（换一批）也受此冷却限制。
+const douyinSearchCooldown = 10 * time.Minute
 
 type cacheEntry struct {
 	videos   []HotVideo
@@ -148,6 +155,16 @@ func (uc *HotVideoUseCase) searchDouyinHot(ctx context.Context, tenantID string,
 	} else if len(keywords) > 3 {
 		keywords = keywords[:3] // 最多搜 3 个词
 	}
+
+	// 全局频率限制：保护商户账号（短时间反复搜索触发抖音风控→账号标记）
+	uc.mu.Lock()
+	if time.Since(uc.lastDouyinSearch) < douyinSearchCooldown {
+		remaining := int(douyinSearchCooldown/time.Minute) - int(time.Since(uc.lastDouyinSearch)/time.Minute)
+		uc.mu.Unlock()
+		return nil, fmt.Errorf("站内搜索冷却中（约 %d 分钟后恢复）——频繁搜索有账号风控风险", remaining)
+	}
+	uc.lastDouyinSearch = time.Now()
+	uc.mu.Unlock()
 
 	// 单个关键词失败不放弃——太具体的词（"20年老店"）返回空是正常的，
 	// 只要其他词有结果就继续；全部失败才降级到通用搜索引擎
