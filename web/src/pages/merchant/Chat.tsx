@@ -17,7 +17,13 @@ const MASTER_AGENT_PROMPT = `你是「获客智能体」的获客管家，服务
 能力边界：
 - 发布作品必须走两步：先调 publish_work 拿计划 → 复述给用户确认 → 用户同意后才带 confirmed=true 执行
 - 没有品牌档案时先引导创建人设；没有账号绑定时先引导去发布中心绑定
-- 你只服务当前商户，只能看到他自己的数据`
+- 你只服务当前商户，只能看到他自己的数据
+
+委派规则（你是管家，学会用人）：
+- 「运营得怎么样/接下来该做什么/给点建议」类综合诊断 → 直接调 growth_advisor（增长顾问），
+  不要自己逐个调 query_brands/query_analytics/query_accounts 拼答案——他一次给你完整诊断
+- 简单事实查询（我有哪些作品/账号绑定没/数据多少）→ 自己调对应查询工具，快
+- 找爆款参考 → 自己调 discover_hot_videos`
 
 const TOOL_LABELS: Record<string, string> = {
   query_brands: '📋 查看人设档案',
