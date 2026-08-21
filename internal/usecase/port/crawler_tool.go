@@ -7,6 +7,21 @@ import (
 	"webreaper/internal/domain/entity"
 )
 
+// toolTenantKey ctx 键（工具执行的租户注入——商户主 Agent 工具的租户隔离）。
+type toolTenantKey struct{}
+
+// WithToolTenant 把当前商户租户注入 ctx（chat handler 调用；工具执行链全程透传）。
+// 工具不得信任 LLM 传来的租户参数——租户一律从 ctx 取（安全边界）。
+func WithToolTenant(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, toolTenantKey{}, tenantID)
+}
+
+// ToolTenantFrom 从 ctx 取工具执行租户（空=未注入，工具应拒绝执行写操作）。
+func ToolTenantFrom(ctx context.Context) string {
+	v, _ := ctx.Value(toolTenantKey{}).(string)
+	return v
+}
+
 // CrawlerTool 是爬虫工具的业务接口（边界）。
 //
 // 这是 port 层的抽象，不依赖 trpc-agent-go 的 tool 包。

@@ -83,6 +83,9 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 
 	// 计量挂钩：注入租户 + 场景到 ctx，trpc_agent 的 RecordUsage 据此落库 usages 表。
 	ctx = port.WithUsageContext(ctx, tenantID, "chat")
+	// 工具租户注入：商户主 Agent 的工具（query_brands/publish_work…）从 ctx 取租户，
+	// 不信任 LLM 参数——多租户隔离的安全边界。
+	ctx = port.WithToolTenant(ctx, tenantID)
 
 	// 获取最后一条 user 消息（作为 Agent 任务输入）
 	lastUser := ""

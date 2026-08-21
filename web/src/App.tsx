@@ -10,7 +10,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 const Login = lazy(() => import('./pages/Login'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
-const Chat = lazy(() => import('./pages/admin/Chat'))
+const Chat = lazy(() => import('./pages/merchant/Chat'))
 const AgentConfigs = lazy(() => import('./pages/admin/AgentConfigs'))
 const MerchantHome = lazy(() => import('./pages/merchant/Home'))
 const Brands = lazy(() => import('./pages/merchant/Brands'))

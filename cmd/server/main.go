@@ -17,6 +17,7 @@ import (
 
 	milvusclient "github.com/milvus-io/milvus-sdk-go/v2/client"
 
+	agent "webreaper/internal/adapter/agent"
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
 	"webreaper/internal/adapter/cache"
@@ -193,7 +194,7 @@ func main() {
 			[]string{"static_crawler", "search_crawler", "dynamic_crawler"}, // scout 探查文档用的爬虫
 			logger,
 		)
-		toolRegistry.Register(agentadapter.NewContentGenerationTool(graphOrchestrator))
+		toolRegistry.Register(agent.NewContentGenerationTool(graphOrchestrator))
 		log.Info("内容生成工具已注册（图编排模式，结果直接返回 LLM 不落库）")
 	} else {
 		log.Info("未配置 LLM，内容生成工具降级禁用")
@@ -569,7 +570,20 @@ func main() {
 			// 互动数据回读（快照仓储 + 站内详情接口——每日任务/手动刷新）
 			geoPublishUC.SetMetricsStore(accountRepos.metric, socialSearcher)
 			// 作品库三源聚合（文章 + 多媒体产物 + 发布状态 + 互动数据）
-			router.SetWorks(works.NewWorksUseCase(geoRepos.content, repository.NewGormGenerationTaskRepository(geoRepos.db), accountRepos.job, accountRepos.metric))
+			worksUC := works.NewWorksUseCase(geoRepos.content, repository.NewGormGenerationTaskRepository(geoRepos.db), accountRepos.job, accountRepos.metric)
+			router.SetWorks(worksUC)
+
+			// 商户主 Agent 工具集（Agent-as-Tool 第一批：8 个新工具——获客管家对话编排）
+			toolRegistry.Register(agent.NewQueryBrandsTool(geoRepos.brand))
+			toolRegistry.Register(agent.NewDiscoverHotVideosTool(hotVideoUCRef))
+			toolRegistry.Register(agent.NewListWorksTool(worksUC))
+			toolRegistry.Register(agent.NewQueryAnalyticsTool(geoPublishUC))
+			toolRegistry.Register(agent.NewTriggerMonitorTool(geoMonitorUCRef))
+			toolRegistry.Register(agent.NewPublishWorkTool(geoPublishUC, worksUC, geoRepos.content))
+			toolRegistry.Register(agent.NewQueryAccountsTool(geoAccountUC))
+			if knowledgeUCRef != nil {
+				toolRegistry.Register(agent.NewQueryKnowledgeTool(knowledgeUCRef))
+			}
 
 			// 抖音开放平台官方 OAuth 授权（API 通道——替代浏览器扫码 RPA 绑定；
 			// 内部统一走官方 SDK bytedance/douyin-openapi-sdk-go）
