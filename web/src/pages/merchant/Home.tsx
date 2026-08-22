@@ -8,6 +8,7 @@ import {
 import { useBrands } from '../../hooks/useBrands'
 import { businessApi } from '../../api/business'
 import { useComposeDraft } from '../../store/composeDraft'
+import { composeProgressLabel, hasComposeDraft } from '../../utils/composeProgress'
 import PageLoading from '../../components/PageLoading'
 import ChinaHotMap from '../../components/ChinaHotMap'
 import { PRODUCT } from '../../config/product'
@@ -40,7 +41,9 @@ export default function MerchantHome() {
 
   const published = works.filter((w) => w.status === 'published')
   const ready = works.filter((w) => w.status === 'ready')
-  const hasDraft = !!(draft.script || draft.transcript)
+  const hasDraft = hasComposeDraft(draft)
+  const draftProgress = hasDraft ? composeProgressLabel(draft, draft.track) : ''
+  const draftResumePath = draft.track === 'graphic' ? '/m/compose/graphic' : '/m/compose/video'
   const weekViews = summary?.totals?.views ?? 0
   const hasHeatData = PROVINCE_HEAT.length > 0 || CITY_HOTSPOTS.length > 0
 
@@ -138,7 +141,7 @@ export default function MerchantHome() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '4px 8px 8px' }}>
               <Space size={8}>
                 <FireOutlined style={{ color: 'var(--wr-accent)' }} />
-                <Text strong>中国获客热力图</Text>
+                <Text strong>获客热力图</Text>
                 <Tag style={{ margin: 0 }}>可缩放拖拽</Tag>
               </Space>
               {CITY_HOTSPOTS.length > 0 && (
@@ -262,7 +265,12 @@ export default function MerchantHome() {
                 {brands.length === 0 ? (
                   <Button type="link" style={{ padding: 0 }} onClick={() => navigate('/m/brands')}>还没有人设，先去建档案 →</Button>
                 ) : hasDraft ? (
-                  <Button type="link" style={{ padding: 0 }} onClick={() => navigate('/m/compose/video')}>草稿未完成，继续发视频 →</Button>
+                  <>
+                    <Text style={{ display: 'block', marginBottom: 4 }}>{draftProgress}</Text>
+                    <Button type="link" style={{ padding: 0 }} onClick={() => navigate(draftResumePath)}>
+                      草稿未完成，继续{draft.track === 'graphic' ? '发图文' : '发视频'} →
+                    </Button>
+                  </>
                 ) : null}
               </div>
             </div>

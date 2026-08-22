@@ -5,7 +5,6 @@ import {
   FundOutlined,
   MessageOutlined,
   CrownOutlined,
-  BellOutlined,
   DatabaseOutlined,
   FolderOpenOutlined,
   AppstoreAddOutlined,
@@ -15,45 +14,20 @@ import {
 import { PRODUCT } from '../config/product'
 
 /**
- * 老板向精简导航：灵感广场发现爆款 → 爆款获客双轨复刻。
+ * 商户侧栏：一级扁平；文案对齐「账号 IP 获客智能体」闭环。
+ * 建人设 → 找爆款 → 创作 → 作品 → 发出去 → 看线索 → 问管家
  */
 const menu: NavItem[] = [
-  {
-    key: 'overview', label: '拓客',
-    children: [
-      { key: '/m/dashboard', label: '工作台', icon: <DashboardOutlined /> },
-    ],
-  },
-  {
-    key: 'ip', label: '我的 IP',
-    children: [
-      { key: '/m/brands', label: '人设档案', icon: <UserOutlined /> },
-      { key: '/m/assets', label: '数字分身', icon: <DatabaseOutlined /> },
-    ],
-  },
-  {
-    key: 'create', label: '内容获客',
-    children: [
-      { key: '/m/inspire', label: '灵感广场', icon: <FireOutlined /> },
-      { key: '/m/compose', label: '爆款获客', icon: <AppstoreAddOutlined /> },
-      { key: '/m/works', label: '我的作品', icon: <FolderOpenOutlined /> },
-    ],
-  },
-  {
-    key: 'growth', label: '增长',
-    children: [
-      { key: '/m/distribution', label: '一键发布', icon: <ExportOutlined /> },
-      { key: '/m/analytics', label: '获客数据', icon: <FundOutlined /> },
-    ],
-  },
-  {
-    key: 'ops', label: '助理',
-    children: [
-      { key: '/m/chat', label: 'AI 助手', icon: <MessageOutlined /> },
-      { key: '/m/notifications', label: '通知', icon: <BellOutlined /> },
-      { key: '/m/my-plan', label: '套餐额度', icon: <CrownOutlined /> },
-    ],
-  },
+  { key: '/m/dashboard', label: '工作台', icon: <DashboardOutlined /> },
+  { key: '/m/brands', label: '账号人设', icon: <UserOutlined /> },
+  { key: '/m/assets', label: '素材库', icon: <DatabaseOutlined /> },
+  { key: '/m/inspire', label: '灵感广场', icon: <FireOutlined /> },
+  { key: '/m/compose', label: '创作台', icon: <AppstoreAddOutlined /> },
+  { key: '/m/works', label: '我的作品', icon: <FolderOpenOutlined /> },
+  { key: '/m/distribution', label: '一键发布', icon: <ExportOutlined /> },
+  { key: '/m/analytics', label: '获客复盘', icon: <FundOutlined /> },
+  { key: '/m/chat', label: '获客管家', icon: <MessageOutlined /> },
+  { key: '/m/my-plan', label: '套餐额度', icon: <CrownOutlined /> },
 ]
 
 export default function MerchantLayout() {
@@ -61,8 +35,10 @@ export default function MerchantLayout() {
     <AppShell
       menuItems={menu}
       brandName={PRODUCT.name}
+      brandTagline={PRODUCT.tagline}
       brandIcon="获"
-      noPaddingKeys={['/m/chat']}
+      siderWidth={300}
+      noPaddingKeys={['/m/chat', '/m/compose/video', '/m/compose/graphic']}
     />
   )
 }

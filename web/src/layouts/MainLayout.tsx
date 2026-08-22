@@ -75,13 +75,19 @@ function findSelectedKey(items: NavItem[], pathname: string): string | undefined
 export function AppShell({
   menuItems,
   brandName = PRODUCT.name,
+  brandTagline,
   brandIcon = 'G',
+  siderWidth = 300,
   noPaddingKeys = [],
   banner,
 }: {
   menuItems: NavItem[]
   brandName?: string
+  /** 侧栏品牌副标题（产品定位短句） */
+  brandTagline?: string
   brandIcon?: string
+  /** 侧栏展开宽度 */
+  siderWidth?: number
   noPaddingKeys?: string[] // 这些路由对应的页面不要外层 padding（如 Chat 自带布局）
   banner?: React.ReactNode // 内容区顶部横幅插槽（F1-5：admin 默认口令提醒等全局告示）
 }) {
@@ -107,7 +113,9 @@ export function AppShell({
     || menuItems.find(m => !m.children)?.key
     || '/'
 
-  const noPadding = noPaddingKeys.includes(selectedKey)
+  const noPadding = noPaddingKeys.some(
+    (k) => location.pathname === k || location.pathname.startsWith(k + '/'),
+  )
   const pageTitle = findMenuLabel(menuItems, selectedKey) || '控制台'
 
   useEffect(() => {
@@ -153,12 +161,14 @@ export function AppShell({
     })),
     ...(searchReady ? [
       { value: '快捷 · 灵感广场', label: '快捷 · 灵感广场', target: '/m/inspire' },
-      { value: '快捷 · 爆款获客', label: '快捷 · 爆款获客', target: '/m/compose' },
+      { value: '快捷 · 创作台', label: '快捷 · 创作台', target: '/m/compose' },
       { value: '快捷 · 爆款对标', label: '快捷 · 爆款对标', target: '/m/compose/benchmark' },
       { value: '快捷 · 口播数字人', label: '快捷 · 口播数字人', target: '/m/compose/avatar' },
       { value: '快捷 · 一键发布', label: '快捷 · 一键发布', target: '/m/distribution' },
-      { value: '快捷 · 数字分身', label: '快捷 · 数字分身', target: '/m/assets' },
-      { value: '快捷 · 获客数据', label: '快捷 · 获客数据', target: '/m/analytics' },
+      { value: '快捷 · 素材库', label: '快捷 · 素材库', target: '/m/assets' },
+      { value: '快捷 · 获客复盘', label: '快捷 · 获客复盘', target: '/m/analytics' },
+      { value: '快捷 · 获客管家', label: '快捷 · 获客管家', target: '/m/chat' },
+      { value: '快捷 · 账号人设', label: '快捷 · 账号人设', target: '/m/brands' },
     ] : []),
   ]
 
@@ -172,9 +182,9 @@ export function AppShell({
       {/* 侧边栏 */}
       <Sider
         className="wr-app-sider"
-        width={220}
+        width={siderWidth}
         breakpoint="lg"
-        collapsedWidth={64}
+        collapsedWidth={72}
         style={{
           position: 'sticky',
           top: 0,
@@ -186,23 +196,37 @@ export function AppShell({
       >
         {/* Logo 区 */}
         <div className="wr-app-brand" style={{
-          height: 64,
+          minHeight: brandTagline ? 72 : 64,
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          padding: '0 18px',
+          gap: 12,
+          padding: '12px 20px',
           borderBottom: '1px solid var(--wr-border)',
         }}>
           <div className="wr-app-brand-mark" style={{
-            width: 34, height: 34, borderRadius: 11,
+            width: 38, height: 38, borderRadius: 12,
             background: 'linear-gradient(135deg, var(--wr-primary), var(--wr-accent))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 16, fontWeight: 800, color: '#fff', flexShrink: 0,
+            fontSize: 17, fontWeight: 800, color: '#fff', flexShrink: 0,
             boxShadow: 'var(--wr-shadow-glow)',
           }}>{brandIcon}</div>
-          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--wr-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-            {brandName}
-          </span>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{
+              fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em',
+              color: 'var(--wr-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {brandName}
+            </div>
+            {brandTagline ? (
+              <div style={{
+                fontSize: 11, lineHeight: 1.35, marginTop: 2,
+                color: 'var(--wr-text-muted)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                {brandTagline}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <Menu
@@ -210,7 +234,7 @@ export function AppShell({
           mode="inline"
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
-          style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 12, padding: '0 10px' }}
+          style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 14, padding: '0 12px' }}
           items={toMenuItems(menuItems)}
         />
       </Sider>
@@ -319,14 +343,15 @@ export function AppShell({
               <Outlet />
             </div>
             <div style={{
-              marginTop: 40,
-              paddingTop: 16,
-              borderTop: '1px solid var(--wr-border)',
+              marginTop: noPadding ? 0 : 40,
+              paddingTop: noPadding ? 0 : 16,
+              borderTop: noPadding ? 'none' : '1px solid var(--wr-border)',
               fontSize: 11,
               color: 'var(--wr-text-muted)',
               textAlign: 'center',
-              opacity: 0.72,
+              opacity: noPadding ? 0 : 0.72,
               letterSpacing: '0.08em',
+              display: noPadding ? 'none' : 'block',
             }}>
               {PRODUCT.name} · IP 营销拓客
             </div>

@@ -5,18 +5,10 @@ import { Button, Empty, Input, Modal, Space, Spin, Tag, Typography, message } fr
 import { PlayCircleOutlined, SyncOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { useComposeDraft } from '../../../store/composeDraft'
+import { PlatformBadge } from '../../../components/PlatformBadge'
 import type { HotVideo } from '../../../types/api'
 
 const { Text, Paragraph } = Typography
-
-const PLATFORM_LABEL: Record<string, string> = {
-  douyin: '抖音',
-  kuaishou: '快手',
-  xiaohongshu: '小红书',
-  bilibili: 'B站',
-  weishi: '微视',
-  web: '网页',
-}
 
 /**
  * 热门同款（人设档案 Tab）：同赛道爆款短视频入口；完整广场见「灵感广场」。
@@ -112,7 +104,7 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                 <Text strong style={{ fontSize: 13.5, lineHeight: 1.5 }} ellipsis={{ tooltip: v.title }}>{v.title}</Text>
-                <Tag color="cyan" style={{ margin: 0, flexShrink: 0 }}>{PLATFORM_LABEL[v.platform] || v.platform}</Tag>
+                <PlatformBadge platform={v.platform} size={14} />
               </div>
               {v.hot_point && (
                 <Paragraph type="secondary" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6 }}>

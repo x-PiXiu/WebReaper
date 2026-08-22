@@ -7,6 +7,7 @@ import { businessApi } from '../../api/business'
 import { scoreColor } from '../../utils/geo'
 import { useBrandContext } from '../../hooks/useBrands'
 import AssetPicker from '../../components/AssetPicker'
+import { PlatformBadge } from '../../components/PlatformBadge'
 import QRLoginModal from './distribution/QRLoginModal'
 import PublishJobTable from './distribution/PublishJobTable'
 import type { Brand, OptimizedContent, Account, PublishJob } from '../../types/api'
@@ -20,7 +21,6 @@ const PLATFORMS = [
   { key: 'xiaohongshu', name: '小红书', color: 'var(--wr-danger)', desc: '种草社区，本地生活/装修类精准触达' },
   { key: 'zhihu', name: '知乎', color: 'var(--wr-primary)', desc: '知识问答社区，长文 SEO 效果好' },
 ]
-const PLATFORM_NAMES: Record<string, string> = { douyin: '抖音', kuaishou: '快手', zhihu: '知乎', xiaohongshu: '小红书' }
 
 // 健康度 → 显示配置（账号池表格用）
 function healthConfig(health: string) {
@@ -278,7 +278,7 @@ export default function Distribution() {
   const accountColumns = [
     {
       title: '平台', dataIndex: 'platform', key: 'platform', width: 110,
-      render: (p: string) => <Tag color={PLATFORMS.find(x => x.key === p)?.color}>{PLATFORM_NAMES[p] || p}</Tag>,
+      render: (p: string) => <PlatformBadge platform={p} size={14} />,
     },
     { title: '账号', dataIndex: 'display_name', key: 'name', render: (n: string) => <Text strong>{n || '-'}</Text> },
     {
@@ -364,8 +364,7 @@ export default function Distribution() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: pf.color, display: 'inline-block' }} />
-                        <Text strong style={{ fontSize: 17 }}>{pf.name}</Text>
+                        <PlatformBadge platform={pf.key} size={18} />
                       </div>
                       <Text type="secondary" style={{ fontSize: 12 }}>{pf.desc}</Text>
                     </div>
@@ -522,13 +521,12 @@ export default function Distribution() {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {healthyAccounts.map((a) => {
                   const selected = selectedAccountIds.includes(a.id)
-                  const ch = channelByPlatform.get(a.platform)
                   return (
                     <div key={a.id} onClick={() => setSelectedAccountIds(prev => selected ? prev.filter(x => x !== a.id) : [...prev, a.id])}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 20, cursor: 'pointer',
                         border: selected ? '2px solid var(--wr-primary)' : '1px solid var(--wr-border)',
                         background: selected ? 'var(--wr-primary-bg)' : 'var(--wr-bg-surface)', transition: 'all 200ms ease' }}>
-                      <Text style={{ fontSize: 13 }}>{ch?.name || PLATFORM_NAMES[a.platform] || a.platform}</Text>
+                      <PlatformBadge platform={a.platform} size={14} />
                       <Text type="secondary" style={{ fontSize: 11 }}>{a.display_name}</Text>
                       {selected && <CheckCircleOutlined style={{ color: 'var(--wr-primary)', fontSize: 14 }} />}
                     </div>
@@ -682,7 +680,7 @@ export default function Distribution() {
           {publishLinks.map((job) => (
             <div key={job.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
               <Space>
-                <Tag>{PLATFORM_NAMES[job.platform] || job.platform}</Tag>
+                <PlatformBadge platform={job.platform} size={14} />
                 <Text type="secondary" style={{ fontSize: 12 }}>待确认</Text>
               </Space>
               <Space>

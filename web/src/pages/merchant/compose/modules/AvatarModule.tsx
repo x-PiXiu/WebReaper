@@ -7,6 +7,7 @@ import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { useMediaAssets } from '../../../../hooks/useMediaAssets'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -30,10 +31,7 @@ export default function AvatarModule() {
     queryKey: ['generation-types'],
     queryFn: () => businessApi.listGenerationTypes().then((r) => r.types),
   })
-  const { data: assets = [] } = useQuery({
-    queryKey: ['media-assets'],
-    queryFn: () => businessApi.listAssets().then((r) => r.assets),
-  })
+  const { data: assets = [] } = useMediaAssets()
 
   const dhModels = useMemo(() => {
     const t = types.find((x) => x.sub_type === 'digital_human')

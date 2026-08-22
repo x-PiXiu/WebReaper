@@ -3,6 +3,7 @@ import { Button, Input, Space, message } from 'antd'
 import { ThunderboltOutlined, HighlightOutlined } from '@ant-design/icons'
 import { useComposeDraft, type ComposeTrack } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
+import { useComposeWorkSync } from '../../../../hooks/useComposeWorkSync'
 import { businessApi } from '../../../../api/business'
 
 const { TextArea } = Input
@@ -11,11 +12,12 @@ const { TextArea } = Input
 export function ScriptStep({ track }: { track: ComposeTrack }) {
   const { brandId, brands } = useBrandContext()
   const draft = useComposeDraft()
+  const { rememberContentId } = useComposeWorkSync()
   const [busy, setBusy] = useState(false)
   const isGraphic = track === 'graphic'
   const format = isGraphic ? 'xiaohongshu' : 'script'
   const text = draft.script || draft.rewritten || draft.transcript || ''
-  const setText = (v: string) => draft.patch({ script: v, rewritten: v })
+  const setText = (v: string) => draft.patch({ script: v, rewritten: v, lastUpdatedAt: new Date().toISOString() })
 
   const polish = async () => {
     if (!brandId) {
@@ -36,7 +38,8 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
         format,
       })
       const out = res.optimized_text || ''
-      draft.patch({ rewritten: out, script: out, brandId })
+      draft.patch({ rewritten: out, script: out, brandId, lastUpdatedAt: new Date().toISOString() })
+      if (res.id) rememberContentId(res.id, res.title)
       message.success('文案已润色')
     } catch {
       /* */
@@ -67,7 +70,14 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
         format,
       })
       const out = res.optimized_text || ''
-      draft.patch({ rewritten: out, script: out, brandId })
+      draft.patch({
+        rewritten: out,
+        script: out,
+        brandId,
+        selectedTitle: draft.selectedTitle || res.title,
+        lastUpdatedAt: new Date().toISOString(),
+      })
+      if (res.id) rememberContentId(res.id, res.title)
       message.success('已按主题生成')
     } catch {
       /* */

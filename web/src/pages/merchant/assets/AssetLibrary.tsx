@@ -8,7 +8,8 @@ import {
   PlusOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
-import type { MediaAsset, GenerationTask } from '../../../types/api'
+import { useMediaAssets, MEDIA_ASSETS_QUERY_KEY } from '../../../hooks/useMediaAssets'
+import type { GenerationTask } from '../../../types/api'
 
 const { Text } = Typography
 
@@ -57,11 +58,7 @@ export default function AssetLibrary() {
   const [createOpen, setCreateOpen] = useState(false)
   const queryClient = useQueryClient()
 
-  const { data: res, isLoading } = useQuery({
-    queryKey: ['media-assets'],
-    queryFn: () => businessApi.listAssets().catch(() => ({ assets: [] as MediaAsset[] })),
-  })
-  const assets = res?.assets || []
+  const { data: assets = [], isLoading } = useMediaAssets()
 
   const { data: genTasks = [], refetch: refetchSubjects } = useQuery({
     queryKey: ['generation-tasks'],
@@ -106,9 +103,9 @@ export default function AssetLibrary() {
     <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
-          <p className="ip-kicker">Assets</p>
-          <h1>资产库</h1>
-          <p className="ip-lead">{hint}</p>
+          <p className="ip-kicker">Digital Twin</p>
+          <h1>素材库</h1>
+          <p className="ip-lead">{hint}——形象、音色与封面素材，供口播数字人与成片取用</p>
         </div>
         {tab === 'digital_human' && (
           <Button type="primary" size="large" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
@@ -211,7 +208,7 @@ export default function AssetLibrary() {
                       {a.mime.startsWith('image/') ? '查看' : '播放'}
                     </Button>
                     <Button size="small" type="text" danger onClick={async () => {
-                      try { await businessApi.deleteAsset(a.id); message.success('已删除'); queryClient.invalidateQueries({ queryKey: ['media-assets'] }) } catch { }
+                      try { await businessApi.deleteAsset(a.id); message.success('已删除'); queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY }) } catch { }
                     }}>删除</Button>
                   </Space>
                 </div>

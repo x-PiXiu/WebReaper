@@ -4,16 +4,9 @@ import { Button, Drawer, Space, Tag, Typography, message } from 'antd'
 import { LinkOutlined, ReloadOutlined, SoundOutlined } from '@ant-design/icons'
 import { LazyLine } from './charts/LazyCharts'
 import { businessApi } from '../api/business'
+import { PlatformBadge } from './PlatformBadge'
 
 const { Text, Title } = Typography
-
-const PLATFORM_LABEL: Record<string, string> = {
-  douyin: '抖音',
-  kuaishou: '快手',
-  zhihu: '知乎',
-  xiaohongshu: '小红书',
-  gongzhonghao: '公众号',
-}
 
 const TYPE_LABEL: Record<string, string> = { video: '视频', image: '图文', article: '文章', audio: '音频' }
 
@@ -89,7 +82,7 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
         {/* 基本信息 */}
         <div className="ip-panel" style={{ padding: 16 }}>
           <Space wrap>
-            <Tag color="cyan">{PLATFORM_LABEL[work.platform] || work.platform}</Tag>
+            <PlatformBadge platform={work.platform} size={14} />
             {work.content_type && <Tag>{TYPE_LABEL[work.content_type] || work.content_type}</Tag>}
             {work.status === 'published' && <Tag color="green">已发布</Tag>}
           </Space>

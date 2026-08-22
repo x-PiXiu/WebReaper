@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Button, Empty, Modal, Popconfirm, Typography, Upload, message } from 'antd'
 import { UploadOutlined, SoundOutlined, DeleteOutlined } from '@ant-design/icons'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
+import { MEDIA_ASSETS_QUERY_KEY, normalizeMediaAssets, useMediaAssets } from '../hooks/useMediaAssets'
 import type { MediaAsset } from '../types/api'
 
 const { Dragger } = Upload
@@ -31,15 +32,12 @@ export default function AssetPicker(props: {
   const [selected, setSelected] = useState<MediaAsset[]>([])
   const [uploading, setUploading] = useState(false)
 
-  const { data: assets = [] } = useQuery({
-    queryKey: ['media-assets'],
-    queryFn: () => businessApi.listAssets().then(r => r.assets),
-    enabled: open,
-  })
+  const { data: assets = [] } = useMediaAssets(open)
 
   const filtered = useMemo(() => {
+    const list = normalizeMediaAssets(assets)
     const kinds = accept === 'any' ? ['image', 'audio'] : [accept]
-    return assets.filter(a => kinds.some(k => a.mime.startsWith(k)))
+    return list.filter(a => kinds.some(k => a.mime.startsWith(k)))
   }, [assets, accept])
 
   const uploadProps = {
@@ -50,7 +48,7 @@ export default function AssetPicker(props: {
       try {
         await businessApi.uploadAsset(file)
         message.success('上传成功')
-        queryClient.invalidateQueries({ queryKey: ['media-assets'] })
+        queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY })
       } catch {
         // 错误已由拦截器提示
       } finally {

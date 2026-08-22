@@ -29,6 +29,15 @@ export type ComposeDraft = {
   coverAccent?: string
   /** 图文配图 URL 列表 */
   imageUrls: string[]
+  /** 当前步骤（0-based，持久化续写） */
+  stepIndex?: number
+  /** 关联 OptimizedContent ID（AI 生成/润色后落作品库） */
+  contentId?: string
+  /** 封面生成任务 ID */
+  coverTaskId?: string
+  /** 配图生成任务 ID 列表（待回填） */
+  imageTaskIds: string[]
+  lastUpdatedAt?: string
 }
 
 type ComposeDraftState = ComposeDraft & {
@@ -42,6 +51,7 @@ const empty: ComposeDraft = {
   titles: [],
   topics: [],
   imageUrls: [],
+  imageTaskIds: [],
 }
 
 export const useComposeDraft = create<ComposeDraftState>()(
@@ -52,7 +62,14 @@ export const useComposeDraft = create<ComposeDraftState>()(
       setTrack: (track) => set((s) => ({ ...s, track })),
       reset: () => set({ ...empty }),
     }),
-    { name: 'compose-draft-v2' },
+    {
+      name: 'compose-draft-v2',
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as object),
+        imageTaskIds: (persisted as ComposeDraft)?.imageTaskIds ?? [],
+      }),
+    },
   ),
 )
 

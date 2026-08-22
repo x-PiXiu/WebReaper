@@ -32,7 +32,6 @@ const AssetLibrary = lazy(() => import('./pages/merchant/assets/AssetLibrary'))
 const MyWorks = lazy(() => import('./pages/merchant/works/MyWorks'))
 const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
 const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
-const Notifications = lazy(() => import('./pages/merchant/Notifications'))
 const AdminUsers = lazy(() => import('./pages/admin/Users'))
 const Indexing = lazy(() => import('./pages/admin/Indexing'))
 const Knowledge = lazy(() => import('./pages/admin/Knowledge'))
@@ -121,7 +120,7 @@ export default function App() {
           <Route path="/m/distribution" element={<LazyPage><Distribution /></LazyPage>} />
           <Route path="/m/my-plan" element={<LazyPage><MyPlan /></LazyPage>} />
           <Route path="/m/chat" element={<LazyPage><Chat /></LazyPage>} />
-          <Route path="/m/notifications" element={<LazyPage><Notifications /></LazyPage>} />
+          <Route path="/m/notifications" element={<Navigate to="/m/dashboard" replace />} />
         </Route>
 
         <Route element={<ProtectedRoute role="admin"><AdminLayout /></ProtectedRoute>}>

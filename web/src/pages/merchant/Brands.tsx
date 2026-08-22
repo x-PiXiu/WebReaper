@@ -353,7 +353,7 @@ export default function Brands() {
       <div className="ip-page-hero" style={{ alignItems: 'flex-end' }}>
         <div>
           <p className="ip-kicker">Persona</p>
-          <h1>人设档案</h1>
+          <h1>账号人设</h1>
           <p className="ip-lead">人设资料 · 竞品对照——先把「你是谁」讲清楚，内容合成才贴合账号调性</p>
         </div>
         <Button type="primary" size="large" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => setBrandModalOpen(true)}>

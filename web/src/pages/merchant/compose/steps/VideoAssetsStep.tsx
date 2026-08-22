@@ -1,20 +1,28 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Input, Select, Space, Upload, message } from 'antd'
+import { Button, Segmented, Select, Space, Upload, message } from 'antd'
 import { PictureOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
 import { COVER_STYLES } from '../../../../data/coverStyles'
+import { AssetPicker } from '../../../../components/compose/AssetPicker'
+import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
+import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
+import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
 
-/** Step 2 发视频：配音 / 形象 / 封面 */
+type AssetTab = 'voice' | 'avatar' | 'cover'
+
+/** Step 2 发视频：配音 / 形象 / 封面（Tab 聚焦） */
 export function VideoAssetsStep() {
   const { brandId } = useBrandContext()
   const draft = useComposeDraft()
+  const [tab, setTab] = useState<AssetTab>('voice')
   const [busy, setBusy] = useState(false)
   const [ttsModel, setTtsModel] = useState<string>()
   const [dhModel, setDhModel] = useState<string>()
   const [avatarImage, setAvatarImage] = useState('')
+  const [pickerOpen, setPickerOpen] = useState(false)
   const text = draft.rewritten || draft.script || ''
 
   const { data: types = [] } = useQuery({
@@ -48,8 +56,8 @@ export function VideoAssetsStep() {
         model,
         params: { text },
       })
-      draft.patch({ voiceTaskId: res.id, track: 'video' })
-      message.success('配音任务已提交')
+      draft.patch({ voiceTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
+      message.success('配音任务已提交，完成后自动填入')
     } catch {
       /* */
     } finally {
@@ -75,8 +83,8 @@ export function VideoAssetsStep() {
           audio_url: draft.voiceUrl || undefined,
         },
       })
-      draft.patch({ avatarTaskId: res.id, track: 'video' })
-      message.success('数字人口播任务已提交')
+      draft.patch({ avatarTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
+      message.success('数字人口播任务已提交，完成后自动填入成片')
     } catch {
       /* */
     } finally {
@@ -92,7 +100,7 @@ export function VideoAssetsStep() {
     const title = draft.selectedTitle || '短视频封面'
     setBusy(true)
     try {
-      await businessApi.submitGenerationTask({
+      const res = await businessApi.submitGenerationTask({
         brand_id: brandId || draft.brandId,
         sub_type: 'text2image',
         model: imgModel,
@@ -100,7 +108,8 @@ export function VideoAssetsStep() {
           prompt: `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目`,
         },
       })
-      message.success('封面生成任务已提交，完成后把 URL 填到下方')
+      draft.patch({ coverTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
+      message.success('封面生成任务已提交，完成后自动填入')
     } catch {
       /* */
     } finally {
@@ -110,91 +119,163 @@ export function VideoAssetsStep() {
 
   return (
     <div className="cf-panel cf-assets">
-      <section className="cf-asset-block">
-        <div className="cf-asset-title"><SoundOutlined /> 爆款配音</div>
-        <Space wrap style={{ width: '100%' }}>
-          <Select
-            style={{ minWidth: 200 }}
-            placeholder="选择 TTS 模型"
-            value={ttsModel || ttsModels[0]}
-            onChange={setTtsModel}
-            options={ttsModels.map((m) => ({ value: m, label: m }))}
-          />
-          <Button type="primary" className="ip-btn-primary" loading={busy} onClick={runTts}>
-            生成配音
-          </Button>
-        </Space>
-        <Input
-          style={{ marginTop: 10 }}
-          placeholder="配音结果 URL（可选回填）"
-          value={draft.voiceUrl || ''}
-          onChange={(e) => draft.patch({ voiceUrl: e.target.value })}
-        />
-        {draft.voiceTaskId && <p className="cf-muted">任务 ID：{draft.voiceTaskId}</p>}
-      </section>
+      <Segmented
+        className="cf-asset-tabs"
+        value={tab}
+        onChange={(v) => setTab(v as AssetTab)}
+        options={[
+          { label: '配音', value: 'voice', icon: <SoundOutlined /> },
+          { label: '数字人', value: 'avatar', icon: <UserOutlined /> },
+          { label: '封面', value: 'cover', icon: <PictureOutlined /> },
+        ]}
+      />
 
-      <section className="cf-asset-block">
-        <div className="cf-asset-title"><UserOutlined /> 数字人形象</div>
-        <Space wrap style={{ width: '100%' }}>
-          <Select
-            style={{ minWidth: 200 }}
-            placeholder="数字人模型"
-            value={dhModel || dhModels[0]}
-            onChange={setDhModel}
-            options={dhModels.map((m) => ({ value: m, label: m }))}
+      {tab === 'voice' && (
+        <section className="cf-asset-block">
+          <TaskStatusBar
+            pending={!!draft.voiceTaskId && !draft.voiceUrl}
+            done={!!draft.voiceUrl}
+            pendingLabel="配音生成中，完成后自动填入"
+            doneLabel="配音已就绪"
           />
-          <Button loading={busy} onClick={runAvatar}>提交口播成片</Button>
-        </Space>
-        <Input
-          style={{ marginTop: 10 }}
-          placeholder="形象图 URL"
-          value={avatarImage}
-          onChange={(e) => setAvatarImage(e.target.value)}
-        />
-        <Upload
-          accept="image/*"
-          showUploadList={false}
-          beforeUpload={async (file) => {
-            try {
-              const asset = await businessApi.uploadAsset(file)
-              setAvatarImage(asset.url)
-              message.success('形象已上传')
-            } catch {
-              /* */
-            }
-            return false
-          }}
-        >
-          <Button style={{ marginTop: 8 }} size="small">上传形象图</Button>
-        </Upload>
-        {draft.avatarTaskId && <p className="cf-muted">任务 ID：{draft.avatarTaskId}</p>}
-      </section>
+          {draft.voiceUrl ? (
+            <MediaResultCard
+              kind="audio"
+              url={draft.voiceUrl}
+              onClear={() => draft.patch({ voiceUrl: undefined, voiceTaskId: undefined })}
+            />
+          ) : (
+            <Space wrap style={{ width: '100%' }}>
+              <Select
+                style={{ minWidth: 200 }}
+                placeholder="选择 TTS 模型"
+                value={ttsModel || ttsModels[0]}
+                onChange={setTtsModel}
+                options={ttsModels.map((m) => ({ value: m, label: m }))}
+              />
+              <Button type="primary" className="ip-btn-primary" loading={busy} onClick={runTts}>
+                生成配音
+              </Button>
+            </Space>
+          )}
+          <ManualUrlField
+            value={draft.voiceUrl || ''}
+            placeholder="配音 URL"
+            onChange={(v) => draft.patch({ voiceUrl: v || undefined })}
+          />
+        </section>
+      )}
 
-      <section className="cf-asset-block">
-        <div className="cf-asset-title"><PictureOutlined /> 视频封面</div>
-        <div className="ip-pick-grid" style={{ marginTop: 8 }}>
-          {COVER_STYLES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`ip-pick-card${draft.coverAccent === c.accent ? ' is-active' : ''}`}
-              onClick={() => draft.patch({ coverAccent: c.accent })}
-            >
-              <span className="ip-pick-swatch" style={{ background: `linear-gradient(160deg,#111,${c.accent})` }} />
-              <strong>{c.name}</strong>
-            </button>
-          ))}
-        </div>
-        <Space wrap style={{ marginTop: 10 }}>
-          <Button loading={busy} onClick={genCover}>AI 生成封面</Button>
-        </Space>
-        <Input
-          style={{ marginTop: 10 }}
-          placeholder="封面图 URL"
-          value={draft.coverUrl || ''}
-          onChange={(e) => draft.patch({ coverUrl: e.target.value })}
-        />
-      </section>
+      {tab === 'avatar' && (
+        <section className="cf-asset-block">
+          <TaskStatusBar
+            pending={!!draft.avatarTaskId && !draft.avatarVideoUrl}
+            done={!!draft.avatarVideoUrl}
+            pendingLabel="口播成片生成中，完成后自动填入"
+            doneLabel="成片已就绪"
+          />
+          {draft.avatarVideoUrl ? (
+            <MediaResultCard
+              kind="video"
+              url={draft.avatarVideoUrl}
+              label="数字人口播成片"
+              onClear={() => draft.patch({ avatarVideoUrl: undefined, editedVideoUrl: undefined, avatarTaskId: undefined })}
+            />
+          ) : (
+            <>
+              <Space wrap style={{ width: '100%' }}>
+                <Select
+                  style={{ minWidth: 200 }}
+                  placeholder="数字人模型"
+                  value={dhModel || dhModels[0]}
+                  onChange={setDhModel}
+                  options={dhModels.map((m) => ({ value: m, label: m }))}
+                />
+                <Button type="primary" className="ip-btn-primary" loading={busy} onClick={runAvatar}>
+                  提交口播成片
+                </Button>
+              </Space>
+              <div className="cf-avatar-pick">
+                {avatarImage ? (
+                  <div className="cf-media-thumb" style={{ backgroundImage: `url(${avatarImage})` }} />
+                ) : (
+                  <div className="cf-media-thumb cf-media-thumb-empty">形象预览</div>
+                )}
+                <Space wrap>
+                  <Upload
+                    accept="image/*"
+                    showUploadList={false}
+                    beforeUpload={async (file) => {
+                      try {
+                        const asset = await businessApi.uploadAsset(file)
+                        setAvatarImage(asset.url)
+                        message.success('形象已上传')
+                      } catch {
+                        /* */
+                      }
+                      return false
+                    }}
+                  >
+                    <Button size="small">上传形象</Button>
+                  </Upload>
+                  <Button size="small" onClick={() => setPickerOpen(true)}>素材库</Button>
+                </Space>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {tab === 'cover' && (
+        <section className="cf-asset-block">
+          <TaskStatusBar
+            pending={!!draft.coverTaskId && !draft.coverUrl}
+            done={!!draft.coverUrl}
+            pendingLabel="封面生成中，完成后自动填入"
+            doneLabel="封面已就绪"
+          />
+          {draft.coverUrl ? (
+            <MediaResultCard
+              kind="image"
+              url={draft.coverUrl}
+              label="视频封面"
+              onClear={() => draft.patch({ coverUrl: undefined, coverTaskId: undefined })}
+            />
+          ) : (
+            <>
+              <div className="ip-pick-grid">
+                {COVER_STYLES.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`ip-pick-card${draft.coverAccent === c.accent ? ' is-active' : ''}`}
+                    onClick={() => draft.patch({ coverAccent: c.accent })}
+                  >
+                    <span className="ip-pick-swatch" style={{ background: `linear-gradient(160deg,#111,${c.accent})` }} />
+                    <strong>{c.name}</strong>
+                  </button>
+                ))}
+              </div>
+              <Button loading={busy} onClick={genCover} style={{ marginTop: 12 }}>
+                AI 生成封面
+              </Button>
+            </>
+          )}
+          <ManualUrlField
+            value={draft.coverUrl || ''}
+            placeholder="封面图 URL"
+            onChange={(v) => draft.patch({ coverUrl: v || undefined })}
+          />
+        </section>
+      )}
+
+      <AssetPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        kind="image"
+        title="选择数字人形象图"
+        onPick={(url) => setAvatarImage(url)}
+      />
     </div>
   )
 }

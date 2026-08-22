@@ -28,7 +28,7 @@ export function ComposeModuleHeader({
       <div className="ip-page-hero" style={{ marginBottom: 12 }}>
         <div>
           <p className="ip-kicker">
-            <Link to="/m/compose" style={{ color: 'inherit' }}>爆款获客</Link>
+            <Link to="/m/compose" style={{ color: 'inherit' }}>创作台</Link>
             {' · '}
             <Link to={trackHome} style={{ color: 'inherit' }}>{trackLabel}</Link>
           </p>

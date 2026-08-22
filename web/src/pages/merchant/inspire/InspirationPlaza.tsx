@@ -11,19 +11,13 @@ import { businessApi } from '../../../api/business'
 import { useBrandContext } from '../../../hooks/useBrands'
 import { useComposeDraft } from '../../../store/composeDraft'
 import { PRODUCT } from '../../../config/product'
+import { PlatformBadge } from '../../../components/PlatformBadge'
+import { PlatformIcon } from '../../../components/PlatformIcon'
+import { getPlatformLabel } from '../../../data/platforms'
 import type { HotVideo } from '../../../types/api'
 import PageLoading from '../../../components/PageLoading'
 
 const { Text, Paragraph } = Typography
-
-const PLATFORM_LABEL: Record<string, string> = {
-  douyin: '抖音',
-  kuaishou: '快手',
-  xiaohongshu: '小红书',
-  bilibili: 'B站',
-  weishi: '微视',
-  web: '网页',
-}
 
 const GRAPHIC_PLATFORMS = new Set(['xiaohongshu', 'web'])
 
@@ -183,8 +177,27 @@ export default function InspirationPlaza() {
                 onChange={setPlatform}
                 options={[
                   { value: 'all', label: '全部平台' },
-                  ...platforms.map((p) => ({ value: p, label: PLATFORM_LABEL[p] || p })),
+                  ...platforms.map((p) => ({ value: p, label: getPlatformLabel(p) })),
                 ]}
+                labelRender={(props) => {
+                  if (props.value === 'all') return <span>全部平台</span>
+                  return (
+                    <span className="platform-option">
+                      <PlatformIcon platform={String(props.value)} size={16} />
+                      <span>{getPlatformLabel(String(props.value))}</span>
+                    </span>
+                  )
+                }}
+                optionRender={(opt) => (
+                  opt.value === 'all' ? (
+                    <span>{opt.label}</span>
+                  ) : (
+                    <span className="platform-option">
+                      <PlatformIcon platform={String(opt.value)} size={16} />
+                      <span>{opt.label}</span>
+                    </span>
+                  )
+                )}
               />
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {filtered.length} 条灵感 · 约每日更新
@@ -209,9 +222,7 @@ export default function InspirationPlaza() {
                 return (
                   <article key={(v.url || v.title) + i} className="inspire-card">
                     <div className="inspire-card-top">
-                      <Tag color={mode === 'graphic' ? 'gold' : 'cyan'} style={{ margin: 0 }}>
-                        {PLATFORM_LABEL[v.platform] || v.platform || '社交'}
-                      </Tag>
+                      <PlatformBadge platform={v.platform} size={16} />
                       <Tag style={{ margin: 0 }}>{mode === 'graphic' ? '图文向' : '短视频'}</Tag>
                     </div>
                     <Text strong className="inspire-card-title" ellipsis={{ tooltip: v.title }}>
