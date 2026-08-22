@@ -102,6 +102,8 @@ func llmConfigToView(cfg entity.LLMConfig) gin.H {
 		"base_url":       cfg.BaseURL,
 		"model":          cfg.Model,
 		"cost_per_mtok":  cfg.CostPerMTok,
+		"usage":          cfg.Usage,
+		"is_default":     cfg.IsDefault,
 	}
 }
 
@@ -169,6 +171,17 @@ func (r *Router) handleDeleteLLMConfig(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"deleted": name})
+}
+
+// handleSetDefaultLLMConfig PUT /admin/llm-configs/:name/default —— 设置默认模型。
+// 同 Usage 下互斥：先清除其他默认，再设置目标。
+func (r *Router) handleSetDefaultLLMConfig(c *gin.Context) {
+	name := c.Param("name")
+	if err := r.llmCfgUC.SetDefault(c.Request.Context(), name); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"default": name})
 }
 
 func (r *Router) handleUpdateLLMConfig(c *gin.Context) {

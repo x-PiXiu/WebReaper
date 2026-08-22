@@ -131,6 +131,16 @@ type MediaAsset struct {
 	ExpiresAt *time.Time
 }
 
+// GenerationVoice 官方音色（Vidu 语音合成音色表——静态参考数据）。
+// 启动 seed 进 generation_voices 表，客户端查询/筛选（TTS 的
+// voice_setting_voice_id、主体的 voice_id、数字人 voice_id 均可引用）。
+type GenerationVoice struct {
+	VoiceID   string `json:"voice_id"`   // 音色 ID（提交参数的取值）
+	Language  string `json:"language"`   // 语言（中文 (普通话)/英文/日文…分组用）
+	Name      string `json:"name"`       // 音色名称（展示用）
+	SampleURL string `json:"sample_url"` // 试听示例音频 URL
+}
+
 // PromptRef 提示词 @引用（客户端从素材库选择，提交给服务端统一翻译）。
 //
 // 设计：客户端只表达"引用了哪个素材 + 什么类型"，服务端提示词翻译层

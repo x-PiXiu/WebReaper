@@ -27,7 +27,7 @@ func NewMockGenerationProvider() *MockGenerationProvider {
 
 func (m *MockGenerationProvider) Name() string { return "mock" }
 
-func (m *MockGenerationProvider) Submit(ctx context.Context, endpoint string, body map[string]any) (string, int, error) {
+func (m *MockGenerationProvider) Submit(ctx context.Context, endpoint string, body map[string]any) (port.SubmitResult, error) {
 	id := fmt.Sprintf("mock-%d", time.Now().UnixNano())
 	m.mu.Lock()
 	m.tasks[id] = time.Now()
@@ -36,7 +36,8 @@ func (m *MockGenerationProvider) Submit(ctx context.Context, endpoint string, bo
 	if v, ok := body["duration"].(int); ok && v > 8 {
 		credits = 8
 	}
-	return id, credits, nil
+	// mock 走异步语义（State 空 → 轮询推进 created→processing→success）
+	return port.SubmitResult{TaskID: id, Credits: credits}, nil
 }
 
 func (m *MockGenerationProvider) Poll(ctx context.Context, taskID string) (port.GenerationStatus, error) {

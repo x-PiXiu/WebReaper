@@ -139,6 +139,20 @@ export default function ComposeHub() {
             <span className="ch-mode-cta">开始制作</span>
           </div>
         </button>
+
+        {/* 口播视频向导（08 计划 D2——傻瓜式主链路） */}
+        <button type="button" className="ch-mode ch-mode-lipsync" onClick={() => navigate('/m/compose/lipsync')}>
+          <div className="ch-mode-preview" aria-hidden>
+            <div className="ch-mode-phone">
+              <span>口播成片 · 五步向导</span>
+            </div>
+          </div>
+          <div className="ch-mode-copy">
+            <h2>拍同款口播</h2>
+            <p>提取爆款文案 → 选谁出镜 → 配音色 → 一键成片</p>
+            <span className="ch-mode-cta">开始向导</span>
+          </div>
+        </button>
       </div>
 
       <div className="ch-panels">

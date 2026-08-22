@@ -16,6 +16,7 @@ type text2imageAdapter struct{}
 func (text2imageAdapter) Type() string     { return "text2image" }
 func (text2imageAdapter) Category() string { return entity.GenerationTypeImage }
 func (text2imageAdapter) Endpoint() string { return "/ent/v2/reference2image" }
+func (text2imageAdapter) SupportsCallback() bool { return true } // 文档声明 callback_url
 
 func (text2imageAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if len(getString(p, "prompt")) == 0 {
@@ -57,6 +58,7 @@ type text2audioAdapter struct{}
 func (text2audioAdapter) Type() string     { return "text2audio" }
 func (text2audioAdapter) Category() string { return entity.GenerationTypeAudio }
 func (text2audioAdapter) Endpoint() string { return "/ent/v2/text2audio" }
+func (text2audioAdapter) SupportsCallback() bool { return true } // 文档声明 callback_url
 
 func (text2audioAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	if len(getString(p, "prompt")) == 0 {
@@ -69,6 +71,7 @@ func (text2audioAdapter) Validate(ctx context.Context, cap entity.ModelCapabilit
 }
 
 func (text2audioAdapter) BuildRequest(ctx context.Context, model string, p entity.GenerationParams, payload string) (map[string]any, error) {
+	// 注意：不注入 payload——文生音频参数表未声明该字段（严格校验会 400）
 	body := map[string]any{
 		"model":  model,
 		"prompt": getString(p, "prompt"),
@@ -78,9 +81,6 @@ func (text2audioAdapter) BuildRequest(ctx context.Context, model string, p entit
 	}
 	if v := getInt(p, "seed"); v > 0 {
 		body["seed"] = v
-	}
-	if payload != "" {
-		body["payload"] = payload
 	}
 	return body, nil
 }
@@ -93,6 +93,7 @@ type soundEffectAdapter struct{}
 func (soundEffectAdapter) Type() string     { return "sound_effect" }
 func (soundEffectAdapter) Category() string { return entity.GenerationTypeAudio }
 func (soundEffectAdapter) Endpoint() string { return "/ent/v2/timing2audio" }
+func (soundEffectAdapter) SupportsCallback() bool { return true } // 文档声明 callback_url
 
 func (soundEffectAdapter) Validate(ctx context.Context, cap entity.ModelCapability, p entity.GenerationParams) error {
 	events := getTimingPrompts(p)
@@ -117,15 +118,13 @@ func (soundEffectAdapter) Validate(ctx context.Context, cap entity.ModelCapabili
 }
 
 func (soundEffectAdapter) BuildRequest(ctx context.Context, model string, p entity.GenerationParams, payload string) (map[string]any, error) {
+	// 注意：不注入 payload——可控文生音效参数表未声明该字段（严格校验会 400）
 	body := map[string]any{
 		"model":          model,
 		"timing_prompts": getTimingPrompts(p),
 	}
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
-	}
-	if payload != "" {
-		body["payload"] = payload
 	}
 	return body, nil
 }
@@ -308,4 +307,9 @@ var ttsCaps = []entity.ModelCapability{
 
 var voiceCloneCaps = []entity.ModelCapability{
 	{Model: "default", Family: "voice", MaxPromptLen: 1000}, // 无 model 参数——统一默认
+}
+
+// lipSyncCaps 对口型无 model 参数（文档未声明）——统一默认能力。
+var lipSyncCaps = []entity.ModelCapability{
+	{Model: "default", Family: "lipsync", MaxPromptLen: 2000},
 }

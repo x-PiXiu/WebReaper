@@ -18,6 +18,7 @@ const Distribution = lazy(() => import('./pages/merchant/Distribution'))
 const Checkup = lazy(() => import('./pages/merchant/checkup/Checkup'))
 const Studio = lazy(() => import('./pages/merchant/studio/Studio'))
 const ComposeHub = lazy(() => import('./pages/merchant/compose/ComposeHub'))
+const LipSyncWizard = lazy(() => import('./pages/merchant/compose/LipSyncWizard'))
 const ComposeTrackPage = lazy(() => import('./pages/merchant/compose/ComposeTrackPage'))
 const BenchmarkModule = lazy(() => import('./pages/merchant/compose/modules/BenchmarkModule'))
 const CopyModule = lazy(() => import('./pages/merchant/compose/modules/CopyModule'))
@@ -39,8 +40,7 @@ const AdminBrands = lazy(() => import('./pages/admin/Brands'))
 const AdminContents = lazy(() => import('./pages/admin/Contents'))
 const AdminSettings = lazy(() => import('./pages/admin/Settings'))
 const AdminBilling = lazy(() => import('./pages/admin/Billing'))
-const GenerationSpecs = lazy(() => import('./pages/admin/GenerationSpecs'))
-const Providers = lazy(() => import('./pages/admin/Providers'))
+const Integrations = lazy(() => import('./pages/admin/Integrations'))
 const AdminPromptTemplates = lazy(() => import('./pages/admin/PromptTemplates'))
 
 function PageFallback() {
@@ -91,6 +91,7 @@ export default function App() {
           <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
           <Route path="/m/inspire" element={<LazyPage><InspirationPlaza /></LazyPage>} />
           <Route path="/m/compose" element={<LazyPage><ComposeHub /></LazyPage>} />
+          <Route path="/m/compose/lipsync" element={<LazyPage><LipSyncWizard /></LazyPage>} />
           <Route path="/m/compose/video" element={<LazyPage><ComposeTrackPage track="video" /></LazyPage>} />
           <Route path="/m/compose/graphic" element={<LazyPage><ComposeTrackPage track="graphic" /></LazyPage>} />
           <Route path="/m/compose/benchmark" element={<LazyPage><BenchmarkModule /></LazyPage>} />
@@ -132,8 +133,10 @@ export default function App() {
           <Route path="/admin/agent-configs" element={<LazyPage><AgentConfigs /></LazyPage>} />
           <Route path="/admin/indexing" element={<LazyPage><Indexing /></LazyPage>} />
           <Route path="/admin/knowledge" element={<LazyPage><Knowledge /></LazyPage>} />
-          <Route path="/admin/generation-specs" element={<LazyPage><GenerationSpecs /></LazyPage>} />
-          <Route path="/admin/providers" element={<LazyPage><Providers /></LazyPage>} />
+          <Route path="/admin/generation-specs" element={<Navigate to="/admin/integrations" replace />} />
+          <Route path="/admin/providers" element={<Navigate to="/admin/integrations" replace />} />
+          <Route path="/admin/integrations" element={<LazyPage><Integrations /></LazyPage>} />
+          <Route path="/admin/integrations/:id" element={<LazyPage><Integrations /></LazyPage>} />
           <Route path="/admin/prompt-templates" element={<LazyPage><AdminPromptTemplates /></LazyPage>} />
           <Route path="/admin/billing" element={<LazyPage><AdminBilling /></LazyPage>} />
           <Route path="/admin/chat" element={<LazyPage><Chat /></LazyPage>} />

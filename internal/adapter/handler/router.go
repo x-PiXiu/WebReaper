@@ -27,6 +27,7 @@ import (
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
 	"webreaper/internal/usecase/systemsettings"
+	"webreaper/internal/usecase/videotranscript"
 )
 
 // Router 组装所有 HTTP 路由。
@@ -91,8 +92,11 @@ type Router struct {
 	generationProvider port.GenerationProvider
 	generationRegistry port.EndpointRegistry // 规格管理（管理后台矩阵）
 	generationSpecRepo port.GenerationSpecRepository
+	integrationRepo    integrationRepo // 能力路由新表（vendor + capability）
+	generationVoices   port.VoiceLibrary      // 官方音色库（TTS/主体音色选择用；可选）
 	providerConfigUC   *providerconfig.UseCase // 厂商配置（管理后台）
 	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
+	transcriptUC       *videotranscript.UseCase // 视频文案提取（可选；08 计划 D4）
 	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
 	apiPrefix          string                  // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
 	rootGroup          *gin.RouterGroup        // Engine() 装配时记录——延迟注册的公开路由用（OAuth 回调等）
@@ -244,6 +248,21 @@ func (r *Router) SetGeneration(uc *generation.GenerationUseCase, provider port.G
 	r.generationProvider = provider
 	r.generationRegistry = registry
 	r.generationSpecRepo = specRepo
+}
+
+// SetGenerationVoices 注入官方音色库（可选——未注入则 /generation/voices 不返回数据）。
+func (r *Router) SetGenerationVoices(v port.VoiceLibrary) {
+	r.generationVoices = v
+}
+
+// SetTranscript 注入视频文案提取用例（可选——未注入则提取端点不注册）。
+func (r *Router) SetTranscript(uc *videotranscript.UseCase) {
+	r.transcriptUC = uc
+}
+
+// SetIntegrationRepo 注入能力路由仓储（可选——未注入则集成中心 vendor/capability 管理端点不注册）。
+func (r *Router) SetIntegrationRepo(repo integrationRepo) {
+	r.integrationRepo = repo
 }
 
 // SetProviderConfig 注入厂商配置用例（可选；管理后台按厂商设置 API Key——未注入则端点不注册）。

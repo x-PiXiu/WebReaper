@@ -13,6 +13,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,35 +103,75 @@ func (p *ViduProvider) Name() string { return "vidu" }
 var _ port.ConfigurableProvider = (*ViduProvider)(nil)
 
 // Submit 提交生成任务（endpoint 由端点策略提供，body 为组装后的请求体）。
-func (p *ViduProvider) Submit(ctx context.Context, endpoint string, body map[string]any) (string, int, error) {
+func (p *ViduProvider) Submit(ctx context.Context, endpoint string, body map[string]any) (port.SubmitResult, error) {
 	payload, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return "", 0, err
+		return port.SubmitResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Token "+p.apiKeyNow())
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("Vidu 创建任务请求失败: %w", err)
+		return port.SubmitResult{}, fmt.Errorf("Vidu 创建任务请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("Vidu 创建任务失败 HTTP %d: %s", resp.StatusCode, truncate(string(raw), 300))
+		// reason 字段走错误码翻译表（如 CreditInsufficient → "积分不足，请充值后重试"）
+		// ——原始 JSON 对商户不可读；翻译表数据源：Docs/第三方/Vidu/任务管理/错误码.md
+		var eb struct {
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(raw, &eb)
+		prefix := "Vidu 创建任务失败 HTTP " + strconv.Itoa(resp.StatusCode)
+		if friendly := p.TranslateError(eb.Reason); friendly != "" && friendly != "生成失败（"+eb.Reason+"）" {
+			prefix += ": " + friendly + "（" + truncate(eb.Reason+": "+eb.Message, 80) + "）"
+		} else {
+			prefix += ": " + truncate(string(raw), 200)
+		}
+		// 附请求体摘要（base64 折叠）——Vidu 的 400 只报 "bad request" 不说哪个
+		// 字段的问题，摘要让排查不再靠猜（ErrMsg 列 512 上限，双重截断保护）
+		return port.SubmitResult{}, fmt.Errorf("%s（请求: %s）", prefix, truncate(compactBody(body), 200))
 	}
 	var parsed struct {
-		TaskID  string `json:"task_id"`
-		Credits int    `json:"credits"`
+		TaskID    string `json:"task_id"`
+		ID        string `json:"id"` // 同步端点（主体 API）返回资源 id 而非 task_id
+		State     string `json:"state"`
+		Credits   int    `json:"credits"`
+		FileURL   string `json:"file_url"`   // 语音合成同步成功的音频 URL
+		DemoAudio string `json:"demo_audio"` // 声音复刻同步成功的试听音频 URL
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", 0, fmt.Errorf("解析 Vidu 创建响应失败: %w", err)
+		return port.SubmitResult{}, fmt.Errorf("解析 Vidu 创建响应失败: %w", err)
 	}
-	if parsed.TaskID == "" {
-		return "", 0, fmt.Errorf("Vidu 响应缺少 task_id: %s", truncate(string(raw), 300))
+	// task_id 优先（异步任务端点）；同步端点（主体 API）用资源 id 顶替——
+	// usecase 对 SyncSubmitter 端点拿到 ID 即终态，不再进入轮询
+	taskID := parsed.TaskID
+	if taskID == "" {
+		taskID = parsed.ID
 	}
-	return parsed.TaskID, parsed.Credits, nil
+	if taskID == "" {
+		return port.SubmitResult{}, fmt.Errorf("Vidu 响应缺少 task_id: %s", truncate(string(raw), 300))
+	}
+	res := port.SubmitResult{TaskID: taskID, Credits: parsed.Credits}
+	// 同步接口（语音合成/声音复刻——"不需要回调"）：创建响应即终态，产物直接
+	// 携带（file_url/demo_audio）。queueing/created/processing/空 → State 留空走轮询。
+	switch parsed.State {
+	case entity.TaskStateSuccess:
+		res.State = entity.TaskStateSuccess
+		if parsed.FileURL != "" {
+			res.Creations = append(res.Creations, entity.CreationItem{ID: taskID, URL: parsed.FileURL})
+		}
+		if parsed.DemoAudio != "" {
+			res.Creations = append(res.Creations, entity.CreationItem{ID: "demo_audio", URL: parsed.DemoAudio})
+		}
+	case entity.TaskStateFailed:
+		res.State = entity.TaskStateFailed
+	}
+	return res, nil
 }
 
 // Poll 轮询任务状态（GET /ent/v2/tasks/{id}/creations）。
@@ -264,4 +307,20 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// base64URIRe 匹配内联的 data URI（64 字符以上 base64 段——短小数据不折叠）。
+var base64URIRe = regexp.MustCompile(`data:([a-z0-9]+/[a-z0-9.+-]+);base64,[A-Za-z0-9+/=]{64,}`)
+
+// compactBody 请求体摘要：折叠 base64 data URI 为 "<N字符省略>"——内联素材后
+// 请求体可达数 MB，不折叠会把错误信息（ErrMsg 列 512 上限）撑爆。
+func compactBody(body map[string]any) string {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return ""
+	}
+	return base64URIRe.ReplaceAllStringFunc(string(b), func(m string) string {
+		parts := strings.SplitN(m, ";base64,", 2)
+		return parts[0] + ";base64,<" + strconv.Itoa(len(parts[1])) + "字符省略>"
+	})
 }

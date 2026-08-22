@@ -191,11 +191,22 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 		return
 	}
 	gh := NewGenerationHandler(r.generationUC)
+	if r.generationVoices != nil {
+		gh.SetVoiceLibrary(r.generationVoices)
+	}
 	api.POST("/generation/tasks", gh.HandleSubmit)
 	api.GET("/generation/tasks/:id", gh.HandleGet)
 	api.GET("/generation/tasks", gh.HandleList)
 	api.GET("/generation/types", gh.HandleTypes)
 	api.POST("/generation/tasks/:id/cancel", gh.HandleCancel)
+	api.DELETE("/generation/tasks/:id", gh.HandleDelete)
+	api.GET("/generation/voices", gh.HandleVoices)
+	// 视频文案提取（08 计划 D4——向导第①步：链接/上传 → 说话内容 → 双产出台词）
+	if r.transcriptUC != nil {
+		th := NewTranscriptHandler(r.transcriptUC, r.mediaStore)
+		api.POST("/generation/transcript/extract", th.HandleExtract)
+		api.POST("/generation/transcript/rewrite", th.HandleRewrite)
+	}
 }
 
 // registerMediaRoutes 素材库（上传 + 列表 + 删除——用户图片/音频 → 本地 → URL 供 Vidu 引用）。

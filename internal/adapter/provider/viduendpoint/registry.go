@@ -44,6 +44,7 @@ func NewRegistry() *Registry {
 	r.register(multiframeAdapter{})
 	r.register(digitalHumanAdapter{})
 	r.register(subjectAdapter{})
+	r.register(lipSyncAdapter{})
 	// 媒体端点（P1：图片+音频全端点）
 	r.register(text2imageAdapter{})
 	r.register(text2audioAdapter{})
@@ -62,6 +63,8 @@ func NewRegistry() *Registry {
 	r.defaultCaps["sound_effect"] = soundEffectCaps
 	r.defaultCaps["tts"] = ttsCaps
 	r.defaultCaps["voice_clone"] = voiceCloneCaps
+	r.defaultCaps["lip_sync"] = lipSyncCaps
+	r.defaultCaps["lip_sync"] = lipSyncCaps
 	// subject 端点无模型概念（Vidu 主体 API 不需要 model 参数）——注册单条默认能力，
 	// model="" 时自动匹配；不传或传 "default" 均通过
 	r.defaultCaps["subject"] = []entity.ModelCapability{{Model: "default"}}
@@ -74,6 +77,15 @@ func (r *Registry) SetSpecRepo(repo port.GenerationSpecRepository) {
 	r.mu.Lock()
 	r.cacheList = nil // 清缓存
 	r.mu.Unlock()
+}
+
+// ClosedDefaultModes 收敛后默认关闭的模式（08 计划 D1：傻瓜式定位只保留
+// subject/reference2video/lip_sync/tts/voice_clone 五个端点）。
+// seed 写 Enabled=false；存量部署经管理后台"应用推荐档位"一键收敛
+//（HandleApplyRecommendedModes）——不启动时偷偷改运营已配置的状态。
+var ClosedDefaultModes = map[string]bool{
+	"text2video": true, "img2video": true, "start_end2video": true, "multiframe": true,
+	"digital_human": true, "text2image": true, "text2audio": true, "sound_effect": true,
 }
 
 // SeedDefaults 首次启动 seed：DB 为空时写入代码默认能力（保留运营已有修改）。
@@ -95,7 +107,8 @@ func (r *Registry) SeedDefaults(ctx context.Context) error {
 			capsJSON, _ := json.Marshal(c)
 			specs = append(specs, entity.GenerationSpec{
 				SubType: subType, Model: c.Model, Endpoint: endpointOf(subType),
-				Enabled: true, CapabilitiesJSON: string(capsJSON),
+				// D1 收敛：关闭清单内模式 seed 即 disabled（admin 可 reopen）
+				Enabled: !ClosedDefaultModes[subType], CapabilitiesJSON: string(capsJSON),
 			})
 		}
 	}
@@ -228,7 +241,7 @@ func (r *Registry) AllSpecs(ctx context.Context) []entity.GenerationSpec {
 				capsJSON, _ := json.Marshal(c)
 				out = append(out, entity.GenerationSpec{
 					SubType: subType, Model: c.Model, Endpoint: endpointOf(subType),
-					Enabled: true, CapabilitiesJSON: string(capsJSON),
+					Enabled: !ClosedDefaultModes[subType], CapabilitiesJSON: string(capsJSON),
 				})
 			}
 		}
@@ -268,4 +281,5 @@ var registryAdapterPaths = map[string]string{
 	"sound_effect":    "/ent/v2/timing2audio",
 	"tts":             "/ent/v2/audio-tts",
 	"voice_clone":     "/ent/v2/audio-clone",
+	"lip_sync":        "/ent/v2/lip-sync",
 }

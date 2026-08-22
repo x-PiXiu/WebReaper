@@ -36,6 +36,13 @@ func (f *fakeRepo) FindByUsage(_ context.Context, _ string) (entity.LLMConfig, e
 	}
 	return entity.LLMConfig{}, pkg.ErrNotFound
 }
+func (f *fakeRepo) SetDefault(_ context.Context, name string) error {
+	for k, cfg := range f.saved {
+		cfg.IsDefault = (k == name)
+		f.saved[k] = cfg
+	}
+	return nil
+}
 
 // TestCreate_RejectsMissingAPIKey 验证领域校验（IsValid：name/api_key/model 非空）。
 func TestCreate_RejectsMissingAPIKey(t *testing.T) {

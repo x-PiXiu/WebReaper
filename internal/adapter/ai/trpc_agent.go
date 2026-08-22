@@ -52,6 +52,7 @@ const llmCacheTTL = 30 * time.Second
 
 type TrpcAgentGenerator struct {
 	llmCfgRepo   port.LLMConfigRepository
+	capResolver  port.CapabilityResolver  // 能力路由（新表优先，旧表兜底）
 	mu           sync.RWMutex
 	runners      map[string]runner.Runner
 	sessionSvc   *inmemory.SessionService
@@ -111,8 +112,14 @@ func (g *TrpcAgentGenerator) SetUsageRecorder(r port.UsageRecorder) {
 	g.usage = r
 }
 
+// SetCapResolver 注入能力路由解析器（可选——未注入时 LLM 配置只走旧表 llm_configs）。
+func (g *TrpcAgentGenerator) SetCapResolver(r port.CapabilityResolver) {
+	g.capResolver = r
+}
+
 // resolveLLM 按 llmConfigName 解析并（带 TTL 缓存地）构建 LLM 客户端。
-// 空名回退到 "default"；找不到配置时返回错误。
+// 空名回退到 CapabilityResolver 的 llm-chat 能力路由（新表优先），
+// 再回退到 llm_configs 表的 "default" 配置。
 // 缓存 TTL 30s：用户改了 LLM 配置后，最多 30s 内旧客户端被淘汰、新配置生效。
 func (g *TrpcAgentGenerator) resolveLLM(ctx context.Context, llmConfigName string) (*openai.Model, error) {
 	name := llmConfigName
@@ -128,7 +135,21 @@ func (g *TrpcAgentGenerator) resolveLLM(ctx context.Context, llmConfigName strin
 		// 过期：删除旧条目，走重建
 		g.llmCache.Delete(name)
 	}
+	// ① 旧表：按 llmConfigName 查 llm_configs
 	cfg, err := g.llmCfgRepo.FindByName(ctx, name)
+	if err != nil && llmConfigName == "" && g.capResolver != nil {
+		// ② 新表兜底：llmConfigName 为空时走 CapabilityResolver（能力路由）
+		if cap, capErr := g.capResolver.Resolve(ctx, "llm-chat"); capErr == nil && cap.APIKey != "" {
+			cfg = entity.LLMConfig{
+				Name:    "auto",
+				Provider: cap.VendorID,
+				APIKey:  cap.APIKey,
+				BaseURL: cap.BaseURL,
+				Model:   cap.Model,
+			}
+			err = nil
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("LLM 配置 %q 不存在: %w", name, err)
 	}

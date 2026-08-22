@@ -15,8 +15,14 @@ var (
 	errKeyFramesRange      = errors.New("关键帧 image_settings 需 2-9 个")
 	errDigitalHumanImageRequired = errors.New("数字人图片 image 必填（1 张）")
 	errPromptTooLong       = errors.New("提示词超过 2000 字符上限")
-	errSubjectNameRequired = errors.New("主体名称 name 必填")
-	errSubjectImagesRange  = errors.New("主体图片需 1-3 张")
+	errSubjectNameRequired  = errors.New("主体名称 name 必填")
+	errSubjectMediaRequired = errors.New("主体需上传 1-3 张形象照或 1 个视频（5 秒内，仅 q2-pro 参考生支持）")
+	errSubjectImagesRange   = errors.New("主体图片最多 3 张")
+	errSubjectVideosRange   = errors.New("主体视频最多 1 个（5 秒内，仅 q2-pro 参考生支持）")
+
+	errLipSyncVideoRequired      = errors.New("原视频 video_url 必填（mp4/mov/avi，1-600 秒）")
+	errLipSyncAudioOrTextRequired = errors.New("音频 audio_url 或文本 text 至少提供一项")
+	errLipSyncTextRange          = errors.New("文本 text 需 4-2000 字符")
 )
 
 // getSubjects 提取 subjects 数组（reference2video 主体模式）。

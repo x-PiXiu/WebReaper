@@ -73,3 +73,24 @@ func (r *GormLLMConfigRepository) FindByUsage(ctx context.Context, usage string)
 	}
 	return llmConfigFromPO(po), nil
 }
+
+// SetDefault 设置默认模型（同 Usage 下互斥——先清除同 Usage 的其他默认，再设置目标）。
+func (r *GormLLMConfigRepository) SetDefault(ctx context.Context, name string) error {
+	// 先找到目标配置的 Usage
+	target, err := r.FindByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	// 清除同 Usage 下所有默认标记
+	clearQ := r.db.WithContext(ctx).Model(&LLMConfigPO{}).Where("is_default = 1")
+	if target.Usage == "" {
+		clearQ = clearQ.Where("usage = '' OR usage IS NULL")
+	} else {
+		clearQ = clearQ.Where("usage = ?", target.Usage)
+	}
+	if err := clearQ.Update("is_default", false).Error; err != nil {
+		return err
+	}
+	// 设置目标为默认
+	return r.db.WithContext(ctx).Model(&LLMConfigPO{}).Where("name = ?", name).Update("is_default", true).Error
+}

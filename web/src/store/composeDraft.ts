@@ -2,10 +2,13 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 /** 爆款获客双轨：发视频 / 发图文 */
-export type ComposeTrack = 'video' | 'graphic'
+export type ComposeTrack = 'video' | 'graphic' | 'lipsync'
 
 /**
- * 多模块共享草稿（非向导）：各模块读写同一份状态。
+ * 多模块共享草稿（含向导）：各模块读写同一份状态。
+ *
+ * 08 计划 R7：向导链路的步骤游标与各步 taskId 挂在 draft 里——
+ * 刷新/关闭页面后可恢复进度（TTS→参考生→对口型各自的 taskId + 当前步骤）。
  */
 export type ComposeDraft = {
   /** 当前创作轨道 */
@@ -38,6 +41,21 @@ export type ComposeDraft = {
   /** 配图生成任务 ID 列表（待回填） */
   imageTaskIds: string[]
   lastUpdatedAt?: string
+
+  // ---- 向导链路状态（08 R7——刷新不丢）----
+  wizardStep?: number          // 当前步骤游标（0-4）
+  wizardPresence?: 'real' | 'avatar'
+  wizardTopic?: string         // 一句话主题
+  wizardScript?: string        // 编辑框文案
+  wizardCleanText?: string     // 清洗版原文
+  wizardVoiceId?: string       // 选定音色
+  wizardRealVideoUrl?: string  // 真人出镜视频 URL
+  wizardSubjectId?: string     // 分身 server_id
+  wizardIntent?: string        // 分身场景意图
+  wizardTtsTaskId?: string     // TTS 任务 ID
+  wizardRefTaskId?: string     // 参考生任务 ID
+  wizardLipsyncTaskId?: string // 对口型任务 ID
+  wizardResultUrl?: string     // 成片 URL
 }
 
 type ComposeDraftState = ComposeDraft & {

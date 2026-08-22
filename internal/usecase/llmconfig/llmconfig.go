@@ -114,3 +114,9 @@ func (uc *LLMConfigUseCase) EnsureDefault(ctx context.Context, cfg entity.LLMCon
 	}
 	return uc.repo.Save(ctx, cfg)
 }
+
+// SetDefault 设置默认模型（同 Usage 下互斥——先清除再设置）。
+// 管理后台调用：切换默认模型后，未指定 llmConfigName 的用例自动使用新默认。
+func (uc *LLMConfigUseCase) SetDefault(ctx context.Context, name string) error {
+	return uc.repo.SetDefault(ctx, name)
+}

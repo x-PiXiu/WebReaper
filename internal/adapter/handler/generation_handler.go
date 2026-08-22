@@ -17,12 +17,36 @@ import (
 
 // GenerationHandler 统一生成任务 API。
 type GenerationHandler struct {
-	uc *generation.GenerationUseCase
+	uc     *generation.GenerationUseCase
+	voices port.VoiceLibrary // 可选；nil=音色端点不注册
 }
 
 // NewGenerationHandler 创建生成任务 handler。
 func NewGenerationHandler(uc *generation.GenerationUseCase) *GenerationHandler {
 	return &GenerationHandler{uc: uc}
+}
+
+// SetVoiceLibrary 注入官方音色库（可选——main 装配 seed 完成后传入）。
+func (h *GenerationHandler) SetVoiceLibrary(v port.VoiceLibrary) {
+	h.voices = v
+}
+
+// HandleVoices GET /api/v1/generation/voices?language=&q= —— 官方音色库
+//（TTS voice_setting_voice_id / 主体与数字人 voice_id 的取值来源）。
+func (h *GenerationHandler) HandleVoices(c *gin.Context) {
+	if h.voices == nil {
+		fail(c, fmt.Errorf("音色库未配置"))
+		return
+	}
+	list, err := h.voices.List(c.Request.Context(), c.Query("language"), c.Query("q"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	if list == nil {
+		list = []entity.GenerationVoice{}
+	}
+	success(c, gin.H{"voices": list})
 }
 
 // HandleSubmit POST /api/v1/generation/tasks —— 提交生成任务（任何端点）。
@@ -137,6 +161,20 @@ func (h *GenerationHandler) HandleCancel(c *gin.Context) {
 	success(c, gin.H{"cancelled": c.Param("id")})
 }
 
+// HandleDelete DELETE /api/v1/generation/tasks/:id —— 删除本地产任务记录
+//（资产库"删除数字人"；非终态先尽力取消上游。Vidu 无删主体 API，仅移除本地展示）。
+func (h *GenerationHandler) HandleDelete(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	if err := h.uc.DeleteTask(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id")); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"deleted": c.Param("id")})
+}
+
 // HandleCallback POST /api/v1/generation/callback —— Vidu 回调入口（验签 + 幂等推进）。
 // 签名头在 X-HMAC-*；验签由注入的 provider 完成（mock 放行）。
 func (h *GenerationHandler) HandleCallback(c *gin.Context, provider port.GenerationProvider) {
@@ -156,8 +194,9 @@ func (h *GenerationHandler) HandleCallback(c *gin.Context, provider port.Generat
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "签名校验失败"})
 		return
 	}
-	// ③ 解析回调体（状态 + payload + 生成物）
+	// ③ 解析回调体（状态 + payload/id + 生成物——结构同查询任务 API 返回体）
 	var payload struct {
+		ID        string `json:"id"` // 服务商任务 ID（payload 未透传端点的定位兜底）
 		State     string `json:"state"`
 		ErrCode   string `json:"err_code"`
 		Payload   string `json:"payload"`
@@ -178,8 +217,8 @@ func (h *GenerationHandler) HandleCallback(c *gin.Context, provider port.Generat
 			ID: cr.ID, URL: cr.URL, CoverURL: cr.CoverURL, WatermarkedURL: cr.WatermarkedURL,
 		})
 	}
-	// ④ 幂等推进（payload 关联本地任务；兜底按 provider_task_id）
-	_, err := h.uc.HandleCallback(c.Request.Context(), payload.Payload, status)
+	// ④ 幂等推进（payload 优先关联本地任务；兜底按回调体 id → provider_task_id）
+	_, err := h.uc.HandleCallback(c.Request.Context(), payload.Payload, payload.ID, status)
 	if err != nil {
 		// 任务不存在：先按 provider_task_id 兜底再失败
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

@@ -24,6 +24,8 @@ type LLMConfig struct {
 	// 两套模型独立配置互不影响：聊天模型坏了浏览器 Agent 不受影响，反之亦然。
 	// 管理后台按用途筛选，视觉模型默认显示 Agnes 等支持视觉的模型。
 	Usage string
+	// IsDefault 是否为该用途的默认模型（管理后台切换默认时互斥——同 Usage 下只有一条 true）。
+	IsDefault bool
 }
 
 // IsValid 领域规则：有效的 LLM 配置必须有名称、API Key 和模型名。

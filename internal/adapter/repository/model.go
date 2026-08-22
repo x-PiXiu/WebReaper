@@ -63,6 +63,8 @@ type LLMConfigPO struct {
 	CostPerMTok int    `gorm:"column:cost_per_mtok;default:100"`
 	// Usage 用途标签："" = 聊天/内容（默认）；"vision" = 视觉模型。
 	Usage     string `gorm:"size:32;default:''"`
+	// IsDefault 是否为该用途的默认模型（同 Usage 下互斥——SetDefault 时清除其他）。
+	IsDefault bool   `gorm:"column:is_default;default:false"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

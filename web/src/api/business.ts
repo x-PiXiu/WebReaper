@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary, WorkItem } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -395,6 +395,23 @@ export const businessApi = {
   cancelGenerationTask: (id: string) =>
     apiClient.post<unknown, { cancelled: string }>(`/api/v1/generation/tasks/${id}/cancel`),
 
+  // 删除任务本地产记录（资产库"删除数字人"等；上游主体不受影响）
+  deleteGenerationTask: (id: string) =>
+    apiClient.delete<unknown, { deleted: string }>(`/api/v1/generation/tasks/${id}`),
+
+  // 官方音色库（TTS voice_setting_voice_id / 主体与数字人 voice_id 的取值来源）
+  listGenerationVoices: (params?: { language?: string; q?: string }) =>
+    apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/generation/voices', { params }),
+
+  // ---- 视频文案提取（向导第①②步）----
+  // 提取说话内容：三选一 video_url 直链 / share_url 分享链 / asset_url 本站上传资产
+  extractTranscript: (data: { video_url?: string; share_url?: string; asset_url?: string; title?: string }) =>
+    apiClient.post<unknown, { raw_text: string; title: string; method: string }>('/api/v1/generation/transcript/extract', data),
+
+  // 原文 → 双产出（clean=用原文按钮 / rewrite=默认填入）
+  rewriteScript: (data: { raw_text: string; topic?: string }) =>
+    apiClient.post<unknown, { clean: string; rewrite: string }>('/api/v1/generation/transcript/rewrite', data),
+
   // 素材库（上传/列表/删除——本地托管，P2 换 OSS 前端零改动）
   uploadAsset: (file: File) => {
     const form = new FormData()
@@ -409,8 +426,11 @@ export const businessApi = {
   // 厂商配置（管理后台：按厂商设置 API Key / 启用开关——保存后热生效）
   listProviderConfigs: () =>
     apiClient.get<unknown, { providers: ProviderConfig[] }>('/api/v1/admin/provider-configs'),
-  saveProviderConfig: (provider: string, data: { api_key?: string; base_url?: string; enabled?: boolean }) =>
+  saveProviderConfig: (provider: string, data: { api_key?: string; base_url?: string; enabled?: boolean; extra_json?: string }) =>
     apiClient.put<unknown, { providers: ProviderConfig[] }>(`/api/v1/admin/provider-configs/${provider}`, data),
+  // 厂商剩余积分（排查 CreditInsufficient；mock 模式返回演示值）
+  getProviderCredits: (provider: string) =>
+    apiClient.get<unknown, { provider: string; credits: number }>(`/api/v1/admin/provider-configs/${provider}/credits`),
 
   // 生成规格（管理后台：Vidu 端点×模型矩阵——DB 驱动 30s 热生效）
   // 品牌知识库（获客智能体转型：商户上传品牌文档，内容生成自动引用）
@@ -437,6 +457,52 @@ export const businessApi = {
     apiClient.put<unknown, { saved: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`, body),
   adminDeleteGenerationSpec: (subType: string, model: string) =>
     apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`),
+
+  // ---- LLM 默认模型切换 ----
+  setLLMDefault: (name: string) =>
+    apiClient.put<unknown, { default: string }>(`/api/v1/admin/llm-configs/${name}/default`),
+
+  // ---- 第三方集成中心（08 计划 D7——能力路由模型）----
+  // 列表（view=vendor 按厂商 / view=capability 按能力）
+  listIntegrations: (view?: 'vendor' | 'capability') =>
+    apiClient.get<unknown, { integrations: IntegrationEntry[]; groups: IntegrationGroup[]; view: string }>('/api/v1/admin/integrations', { params: { view } }),
+
+  // 厂商详情（聚合所有区块数据）
+  getIntegrationDetail: (id: string) =>
+    apiClient.get<unknown, { meta: IntegrationMeta; sections: Record<string, any> }>(`/api/v1/admin/integrations/${id}`),
+
+  // 厂商健康检查
+  getIntegrationHealth: (id: string) =>
+    apiClient.get<unknown, { id: string; status: string; detail: string; checked_at: string }>(`/api/v1/admin/integrations/${id}/health`),
+
+  // Vidu 首选模型配置（D3 自动切换可配化）
+  setViduPreferredModel: (data: { image_subject?: string; video_subject?: string }) =>
+    apiClient.put<unknown, { saved: boolean }>('/api/v1/admin/integrations/vidu/preferred-model', data),
+
+  // ---- 能力路由管理（新表 integration_vendors + integration_capabilities）----
+  // 全部厂商（含能力条目）
+  listIntegrationVendors: () =>
+    apiClient.get<unknown, { vendors: Array<IntegrationVendor & { capabilities: IntegrationCapability[] }> }>('/api/v1/admin/integrations/vendors'),
+
+  // 保存厂商（启停/改 Key/改端点）
+  saveIntegrationVendor: (id: string, data: { name?: string; base_url?: string; api_key?: string; protocol?: string; enabled?: boolean }) =>
+    apiClient.put<unknown, { saved: string }>(`/api/v1/admin/integrations/vendors/${id}`, data),
+
+  // 全部能力路由
+  listIntegrationCapabilities: () =>
+    apiClient.get<unknown, { capabilities: IntegrationCapability[] }>('/api/v1/admin/integrations/capabilities'),
+
+  // 设置某能力的默认厂商（同 capId 下互斥）
+  setCapabilityDefault: (capId: string, vendorId: string) =>
+    apiClient.put<unknown, { cap_id: string; default_vendor: string }>(`/api/v1/admin/integrations/capabilities/${capId}/default`, { cap_id: capId, vendor_id: vendorId }),
+
+  // 保存能力条目（新增/编辑——id 传完整复合 ID 如 "asr#siliconflow"）
+  saveIntegrationCapability: (id: string, data: { cap_id?: string; vendor_id?: string; model?: string; endpoint?: string; extra_json?: string; enabled?: boolean; is_default?: boolean }) =>
+    apiClient.put<unknown, { saved: string }>('/api/v1/admin/integrations/capabilities/save', { id, ...data }),
+
+  // 删除能力条目（id 传完整复合 ID 如 "asr#siliconflow"）
+  deleteIntegrationCapability: (id: string) =>
+    apiClient.delete<unknown, { deleted: string }>('/api/v1/admin/integrations/capabilities/delete', { data: { id } }),
 
   // ---- 经济系统（套餐/订阅/订单/用量）----
 

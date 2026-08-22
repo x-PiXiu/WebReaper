@@ -135,6 +135,9 @@ export default function Providers() {
                 <Descriptions.Item label="更新时间">{cfg?.updated_at ? cfg.updated_at.replace('T', ' ').slice(0, 19) : '—'}</Descriptions.Item>
               </Descriptions>
 
+              {/* Vidu 剩余积分（排查 CreditInsufficient——充值后点刷新） */}
+              {p === 'vidu' && <ViduCredits enabled={!!cfg?.enabled} />}
+
               <Button
                 type="primary" icon={<SaveOutlined />} loading={saveMutation.isPending}
                 onClick={() => cfg ? save(cfg) : save({ provider: p, api_key: '', has_key: false, base_url: '', enabled: true, updated_at: '' })}
@@ -152,6 +155,31 @@ export default function Providers() {
 
       {/* ZPAY 支付网关 */}
       <PaymentSection />
+    </div>
+  )
+}
+
+// Vidu 剩余积分（GET /admin/provider-configs/vidu/credits——积分不足导致任务被拒时先看这里）。
+function ViduCredits({ enabled }: { enabled: boolean }) {
+  const { data, isLoading, refetch, isFetching, error } = useQuery({
+    queryKey: ['vidu-credits'],
+    queryFn: () => businessApi.getProviderCredits('vidu'),
+    enabled,
+    staleTime: 60_000,
+  })
+  if (!enabled) return null
+  return (
+    <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <Text style={{ fontSize: 13 }}>剩余积分：</Text>
+      {isLoading ? <Text type="secondary">查询中…</Text> : error ? (
+        <Text type="danger" style={{ fontSize: 12 }}>查询失败（{(error as Error).message || '服务不可用'}）</Text>
+      ) : (
+        <Tag color={(data?.credits ?? 0) > 0 ? 'green' : 'red'} style={{ fontSize: 13 }}>{data?.credits ?? 0}</Tag>
+      )}
+      <Button size="small" loading={isFetching} onClick={() => refetch()}>刷新</Button>
+      {(data?.credits ?? 0) === 0 && !isLoading && !error && (
+        <Text type="warning" style={{ fontSize: 12 }}>积分为 0——生成任务会被拒（CreditInsufficient），请到 platform.vidu.cn 充值</Text>
+      )}
     </div>
   )
 }

@@ -69,6 +69,25 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
     navigate('/m/compose/video')
   }
 
+  // 提取文案并导航到向导（08 计划 D4——灵感广场「提取文案」入口）
+  const extractAndGo = async (video: HotVideo) => {
+    try {
+      const result = await businessApi.extractTranscript({
+        video_url: video.url, // 或 share_url，根据 HotVideo 结构
+        title: video.title
+      })
+      navigate('/m/compose/lipsync', {
+        state: {
+          rawText: result.raw_text,
+          title: result.title,
+          method: result.method
+        }
+      })
+    } catch (e: any) {
+      message.error(e?.response?.data?.msg || e?.message || '提取失败')
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="wr-glass-card" style={{ padding: 48, textAlign: 'center' }}>
@@ -119,6 +138,7 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
               <Space style={{ marginTop: 'auto' }}>
                 <Button size="small" icon={<PlayCircleOutlined />} onClick={() => window.open(v.url, '_blank', 'noopener')}>播放</Button>
                 <Button size="small" type="primary" onClick={() => openShoot(v)}>复刻视频</Button>
+                <Button size="small" onClick={() => extractAndGo(v)}>提取文案</Button>
               </Space>
             </div>
           ))}

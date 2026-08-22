@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,7 +21,10 @@ import (
 	agent "webreaper/internal/adapter/agent"
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
+	"webreaper/internal/adapter/asropenai"
 	"webreaper/internal/adapter/cache"
+	"webreaper/internal/adapter/integration"
+	"webreaper/internal/adapter/mediaav"
 	"webreaper/internal/adapter/metrics"
 	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/bing"
@@ -69,6 +73,7 @@ import (
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
 	"webreaper/internal/usecase/systemsettings"
+	"webreaper/internal/usecase/videotranscript"
 )
 
 func main() {
@@ -521,6 +526,7 @@ func main() {
 	var geoAccountUC *account.AccountUseCase
 	var geoPublishUC *account.PublishUseCase
 	var accountRepos *accountRepos // 提升到外层：平台总览统计需要发布任务计数
+	var socialSearcher *douyinweb.Searcher // 提升到外层：生成域提取管线复用（分享链解析）
 	if geoRepos != nil {
 		accountRepos = initAccountRepositories(cfg.DB)
 		if accountRepos != nil {
@@ -791,29 +797,35 @@ func main() {
 	// 配额（generation 场景）在 P1 随计费场景扩展注入；当前 mock 模式无真实成本。
 	if geoRepos != nil {
 		genRegistry := viduendpoint.NewRegistry()
-		// 厂商配置 DB 优先（管理后台可设置 Vidu API Key），环境变量兜底
+		// 厂商配置 DB 优先（管理后台可设置 Vidu API Key / 启停），环境变量兜底。
+		// SwitchingProvider 按调用期 Key 热切换 mock↔真实（修复：此前启动时一次性
+		// 选定，后配的 Key 对运行中的 mock 无效——热更新接口只有 ViduProvider 实现，
+		// 对 mock 断言静默失败，唯一出路是重启；Enabled 开关此前也无人消费）。
 		providerCfgRepo := repository.NewGormProviderConfigRepository(geoRepos.db)
-		viduAPIKey := cfg.Server.ViduAPIKey
-		if dbCfg, cfgErr := providerCfgRepo.Get(context.Background(), "vidu"); cfgErr == nil && dbCfg.APIKey != "" {
-			viduAPIKey = dbCfg.APIKey
-			log.Info("统一生成使用厂商配置（管理后台 DB 设置 Vidu API Key）")
+		resolveViduKey := func() (string, bool) {
+			if dbCfg, cfgErr := providerCfgRepo.Get(context.Background(), "vidu"); cfgErr == nil && dbCfg.Provider != "" {
+				return dbCfg.APIKey, dbCfg.Enabled
+			}
+			return cfg.Server.ViduAPIKey, true // 无 DB 行（未在后台配置）→ 环境变量，视为启用
 		}
-		var genProvider port.GenerationProvider = provider.NewMockGenerationProvider()
-		if viduAPIKey != "" {
-			vp := vidu.NewViduProvider(viduAPIKey)
-			// R2 修复多实例 Key 漂移：管理后台改 Key 后各实例 ≤30s 从 DB 对齐
-			//（此前 UpdateAPIKey 只更新收到请求的那个实例——其他实例持旧 Key 直到重启）
-			vp.SetKeySource(func(ctx context.Context) (string, error) {
-				cfgRow, err := providerCfgRepo.Get(ctx, "vidu")
-				if err != nil || cfgRow.APIKey == "" {
-					return "", err
-				}
-				return cfgRow.APIKey, nil
-			})
-			genProvider = vp
-			log.Info("统一生成已接入 Vidu（真实 API + Key TTL 刷新防多实例漂移）")
+		bootKey, bootEnabled := resolveViduKey()
+		vp := vidu.NewViduProvider(bootKey)
+		// R2 修复多实例 Key 漂移：管理后台改 Key 后各实例 ≤30s 从 DB 对齐
+		//（此前 UpdateAPIKey 只更新收到请求的那个实例——其他实例持旧 Key 直到重启）
+		vp.SetKeySource(func(ctx context.Context) (string, error) {
+			cfgRow, err := providerCfgRepo.Get(ctx, "vidu")
+			if err != nil || cfgRow.APIKey == "" {
+				return "", err
+			}
+			return cfgRow.APIKey, nil
+		})
+		var genProvider port.GenerationProvider = provider.NewSwitchingProvider(vp, provider.NewMockGenerationProvider(), resolveViduKey)
+		if bootKey != "" && bootEnabled {
+			log.Info("统一生成已接入 Vidu（真实 API；后台改 Key/停用 ≤10s 热切换，无需重启）")
+		} else if bootKey != "" {
+			log.Info("统一生成运行在 mock 模式（Vidu 已配置 Key 但已被停用——后台启用后 ≤10s 生效）")
 		} else {
-			log.Info("统一生成运行在 mock 模式（未配置 VIDU_API_KEY）")
+			log.Info("统一生成运行在 mock 模式（未配置 VIDU_API_KEY——后台保存 Key 后 ≤10s 自动切真实，无需重启）")
 		}
 		router.SetProviderConfig(providerconfig.NewUseCase(providerCfgRepo))
 		// 生成规格 DB 驱动（全局掌控）：首次启动 seed 出厂默认 → 管理后台全量可编辑，
@@ -823,7 +835,96 @@ func main() {
 		if seedErr := genRegistry.SeedDefaults(context.Background()); seedErr != nil {
 			log.Warn("seed 生成规格默认值失败", port.Err(seedErr))
 		}
+		// 官方音色库（Vidu 语音合成音色表 302 条）：表空则 seed，客户端经
+		// /api/v1/generation/voices 查询（TTS/主体/数字人的音色选择数据源）
+		voiceRepo := repository.NewGormVoiceRepository(geoRepos.db)
+		if n, seedErr := voiceRepo.SeedIfEmpty(context.Background(), viduendpoint.DefaultVoices()); seedErr != nil {
+			log.Warn("seed 官方音色库失败", port.Err(seedErr))
+		} else if n > 0 {
+			log.Info("官方音色库已 seed", port.Int("voices", n))
+		}
+		router.SetGenerationVoices(voiceRepo)
+		// 视频文案提取管线（08 计划 D4）：ffmpeg 字幕/音轨 + 云 ASR（动态配置，
+		// provider=asr：base_url=endpoint / api_key=key / extra_json={model,response_style}）
+		// + LLM 双产出。分享链解析复用账号域的抖音搜索器（RPA 详情接口拿播放直链）。
+		avTool := mediaav.NewFFmpegTool(cfg.Server.FFMPEGPath)
+		if avTool.Available() {
+			log.Info("ffmpeg 可用（字幕轨/音轨抽取已启用）")
+		} else {
+			log.Warn("ffmpeg 不可用——提取走降级路径（≤25MB 视频直传 ASR）")
+		}
+		// 能力路由（08 架构重构）：统一配置查询路径——新表 integration_vendors +
+		// integration_capabilities 优先，旧表（provider_configs/llm_configs）兜底。
+		// 10s TTL 缓存，切换 is_default ≤10s 全链路生效，无需重启。
+		integrationRepo := repository.NewGormIntegrationRepository(geoRepos.db)
+		if n, seedErr := integrationRepo.SeedIfEmpty(context.Background(),
+			integration.DefaultVendors, integration.DefaultCapabilities); seedErr != nil {
+			log.Warn("seed 能力路由失败", port.Err(seedErr))
+		} else if n > 0 {
+			log.Info("能力路由已 seed（小米 MiMo + 硅基流动 + OpenAI）", port.Int("vendors", n))
+		}
+		capResolver := integration.NewResolver(integrationRepo, providerCfgRepo, llmConfigRepo)
+		// LLM 配置解析也走能力路由（llmConfigName 为空时新表优先，旧表兜底）
+		if gen, ok := aiGenerator.(*ai.TrpcAgentGenerator); ok {
+			gen.SetCapResolver(capResolver)
+		}
+		var transcriptResolver port.VideoLinkResolver
+		if socialSearcher != nil {
+			transcriptResolver = douyinweb.NewLinkResolver(socialSearcher)
+		}
+		asrClient := asropenai.NewTranscriber(func() asropenai.ASRConfig {
+			// 优先走 CapabilityResolver（新表+旧表统一查询）
+			if cap, err := capResolver.Resolve(context.Background(), "asr"); err == nil && cap.APIKey != "" {
+				ac := asropenai.ASRConfig{
+					Endpoint:      cap.Endpoint,
+					APIKey:        cap.APIKey,
+					Model:         cap.Model,
+					ResponseStyle: extractResponseStyle(cap.ExtraJSON),
+					Protocol:      cap.Protocol,
+					ASRLanguage:   extractExtraField(cap.ExtraJSON, "asr_options_language"),
+				}
+				return ac
+			}
+			// 兜底：直接读旧表（兼容 CapabilityResolver 未装配场景）
+			if cfgRow, cfgErr := providerCfgRepo.Get(context.Background(), "asr"); cfgErr == nil && cfgRow.APIKey != "" {
+				var ac asropenai.ASRConfig
+				_ = json.Unmarshal([]byte(cfgRow.ExtraJSON), &ac)
+				ac.APIKey = cfgRow.APIKey
+				if ac.Endpoint == "" {
+					ac.Endpoint = cfgRow.BaseURL
+				}
+				return ac
+			}
+			return asropenai.ASRConfig{}
+		})
+		if aiGenerator != nil {
+			router.SetTranscript(videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, aiGenerator))
+		} else {
+			log.Warn("AI 生成器未装配——文案双产出不可用（提取仍可用）")
+			router.SetTranscript(videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, nil))
+		}
 		genUC := generation.NewGenerationUseCase(genProvider, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
+		// 任务终态站内通知（异步任务完成/失败主动唤醒——此前静默完成，商户不留
+		// 在页面上就看不到结果）。notifyUC 未装配（DB 缺失等）则静默跳过。
+		if notifyUC != nil {
+			genUC.SetTaskNotifier(genTaskNotifier{notifyUC})
+		}
+		// 回调通道激活（双通道：回调秒级推送 + 20s 轮询兜底，幂等合并）。
+		// 仅公网可达地址注入——localhost 对 Vidu 不可达，注入只会产生 3 次
+		// 失败投递；本地开发自动保持纯轮询。显式 VIDU_CALLBACK_URL 优先。
+		callbackURL := os.Getenv("VIDU_CALLBACK_URL")
+		if callbackURL == "" {
+			base := strings.TrimRight(cfg.Server.PublicBaseURL, "/")
+			if base != "" && !strings.Contains(base, "localhost") && !strings.Contains(base, "127.0.0.1") {
+				callbackURL = base + cfg.Server.APIPrefix + "/api/v1/generation/callback"
+			}
+		}
+		if callbackURL != "" {
+			genUC.SetCallbackURL(callbackURL)
+			log.Info("生成任务回调已启用（文档声明 callback_url 的端点秒级推送，其余纯轮询）", port.String("callback", callbackURL))
+		} else {
+			log.Info("生成任务回调未启用（PUBLIC_BASE_URL 非公网且未设 VIDU_CALLBACK_URL）——全端点纯轮询（20s）")
+		}
 		// 生成域计费接线（F-fix：quotaGate/usageRec 端口此前声明未装配——
 		// generation 场景按次限额（超限 402）+ usages 计量（成本分析/配额核对数据源）。
 		// Gate/Recorder 均为无状态计算，与 billing 块各持实例无副作用）
@@ -872,6 +973,7 @@ func main() {
 			router.SetMedia(mediaStore, mediaDir)
 		}
 		router.SetGeneration(genUC, genProvider, genRegistry, genSpecRepo)
+		router.SetIntegrationRepo(integrationRepo) // 能力路由新表（集成中心 vendor/capability 管理）
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429
 		genUC.SetConcurrency(5)
 		// 轮询驱动：20s 周期扫描未终态任务（回调到达后幂等跳过；双通道合并）
@@ -951,6 +1053,72 @@ type geoRepos struct {
 	result  port.MonitoringResultRepository
 	content port.OptimizedContentRepository
 	store   port.StoreLocationRepository // 门店档案（本地生活 GEO 地基）
+}
+
+// genTaskNotifier 生成任务终态 → 站内通知（port.TaskNotifier 适配 NotifyUseCase）。
+type genTaskNotifier struct{ uc *notification.NotifyUseCase }
+
+// genSubTypeLabels 端点中文名（通知标题用；未列出的直接展示 sub_type）。
+var genSubTypeLabels = map[string]string{
+	"text2video": "文生视频", "img2video": "图生视频", "start_end2video": "首尾帧视频",
+	"reference2video": "参考生视频", "multiframe": "智能多帧", "digital_human": "数字人口播",
+	"subject": "数字分身", "text2image": "图片生成", "text2audio": "文生音频",
+	"sound_effect": "音效", "tts": "语音合成", "voice_clone": "声音克隆",
+}
+
+func (n genTaskNotifier) NotifyTaskTerminal(ctx context.Context, t entity.GenerationTask) {
+	label := genSubTypeLabels[t.SubType]
+	if label == "" {
+		label = t.SubType
+	}
+	var title, content, link string
+	switch t.State {
+	case entity.TaskStateSuccess:
+		title = label + "已完成"
+		content = "生成成功，点击查看产物"
+	default:
+		title = label + "生成失败"
+		msg := t.ErrMsg
+		if msg == "" {
+			msg = "请检查参数后重新生成"
+		}
+		content = msg
+	}
+	// 结果入口：主体在资产库；其余产物在创作工作台
+	if t.SubType == "subject" {
+		link = "/m/assets"
+	} else {
+		link = "/m/compose/tools?tab=media"
+	}
+	_ = n.uc.Push(ctx, t.TenantID, "generation", title, content, link)
+}
+
+// extractResponseStyle 从 extra_json 提取 response_style 字段（小米 MiMo ASR 用 "chat"）。
+func extractResponseStyle(extraJSON string) string {
+	if extraJSON == "" {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(extraJSON), &m) == nil {
+		if v, ok := m["response_style"].(string); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// extractExtraField 从 extra_json 提取指定字段的字符串值。
+func extractExtraField(extraJSON, key string) string {
+	if extraJSON == "" {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(extraJSON), &m) == nil {
+		if v, ok := m[key].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // seedPromptTemplates 首次启动写入内置默认提示词模板（已存在则跳过，保留运营修改）。

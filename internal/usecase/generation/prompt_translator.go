@@ -102,13 +102,29 @@ func translateRefs(subType string, cap entity.ModelCapability, params entity.Gen
 		if len(audios) > 0 || len(videos) > 0 {
 			return params, fmt.Errorf("智能多帧仅支持图片引用")
 		}
+	case subType == "lip_sync":
+		// 对口型：视频 → video_url（未指定时）；音频 → audio_url（未指定时）；
+		// 图 → ref_photo_url（多脸时指定目标人物）
+		if len(videos) > 0 && !has("video_url") {
+			params["video_url"] = videos[0]
+		}
+		if len(audios) > 0 && !has("audio_url") {
+			params["audio_url"] = audios[0]
+		}
+		if len(imgs) > 0 && !has("ref_photo_url") {
+			params["ref_photo_url"] = imgs[0]
+		}
 	case subType == "subject":
-		// 主体创建：图 → images（未指定时）
+		// 主体创建：图 → images；视频 → videos（1 个 5 秒内，仅 q2-pro 参考生支持；
+		// 与图片同时存在时上游仅视频生效）
 		if len(imgs) > 0 && !has("images") {
 			params["images"] = imgs
 		}
-		if len(audios) > 0 || len(videos) > 0 {
-			return params, fmt.Errorf("主体创建仅支持图片引用")
+		if len(videos) > 0 && !has("videos") {
+			params["videos"] = videos
+		}
+		if len(audios) > 0 {
+			return params, fmt.Errorf("主体创建不支持音频引用（音色请用 voice_id 参数）")
 		}
 	case subType == "reference2video" && cap.VideoSlots > 0:
 		// 参考生视频（q2-pro）：视频 → videos；图 → images

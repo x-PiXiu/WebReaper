@@ -25,7 +25,7 @@ const adminMenu: NavItem[] = [
     key: 'system', label: '系统配置',
     children: [
       { key: '/admin/settings', label: '平台设置' },
-      { key: '/admin/providers', label: '厂商配置' },
+      { key: '/admin/integrations', label: '第三方集成' },
     ],
   },
   {
@@ -36,7 +36,6 @@ const adminMenu: NavItem[] = [
       { key: '/admin/prompt-templates', label: '提示词模板' },
       { key: '/admin/indexing', label: '提交渠道' },
       { key: '/admin/knowledge', label: '知识库' },
-      { key: '/admin/generation-specs', label: '生成规格' },
     ],
   },
 ]

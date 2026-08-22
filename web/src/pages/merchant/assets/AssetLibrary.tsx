@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Button, Empty, Input, Modal, Segmented, Space, Tag, Typography, Upload, message,
+  Button, Empty, Input, Modal, Popconfirm, Segmented, Space, Tag, Typography, Upload, message,
 } from 'antd'
 import {
   SoundOutlined, PictureOutlined, VideoCameraOutlined, FileTextOutlined, UserOutlined,
-  PlusOutlined,
+  PlusOutlined, DeleteOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { useMediaAssets, MEDIA_ASSETS_QUERY_KEY } from '../../../hooks/useMediaAssets'
 import type { GenerationTask } from '../../../types/api'
+import VoicePicker from '../../../components/VoicePicker'
 
 const { Text } = Typography
 
@@ -44,7 +45,22 @@ interface ViduSubject {
   taskId: string
   state: string
   name: string
+  serverId: string
+  voiceId: string
+  kind: string
+  hasVideo: boolean
+  imageCount: number
+  errMsg: string
   createdAt: string
+}
+
+/** 解析任务 params（后端存的是 JSON 字符串） */
+function taskParams(t: GenerationTask): Record<string, any> {
+  if (t.params && typeof t.params === 'object') return t.params as Record<string, any>
+  if (typeof t.params === 'string' && t.params) {
+    try { return JSON.parse(t.params) } catch { return {} }
+  }
+  return {}
 }
 
 /**
@@ -68,12 +84,32 @@ export default function AssetLibrary() {
   const subjects: ViduSubject[] = useMemo(() => {
     return (genTasks || [])
       .filter((t: GenerationTask) => t.sub_type === 'subject')
-      .map((t: GenerationTask) => ({
-        taskId: t.id,
-        state: t.state,
-        name: ((t.params as any)?.name as string) || t.id.slice(0, 12),
-        createdAt: t.created_at,
-      }))
+      .map((t: GenerationTask) => {
+        const p = taskParams(t)
+        return {
+          taskId: t.id,
+          state: t.state,
+          name: (p?.name as string) || t.id.slice(0, 12),
+          serverId: t.provider_task_id || '',
+          voiceId: (p?.voice_id as string) || '',
+          kind: (p?.kind as string) === 'scene' ? 'scene' : 'person',
+          hasVideo: Array.isArray(p?.videos) && p.videos.length > 0,
+          imageCount: Array.isArray(p?.images) ? p.images.length : 0,
+          errMsg: t.err_msg || '',
+          createdAt: t.created_at,
+        }
+      })
+  }, [genTasks])
+
+  // 我的音色库：声音克隆成功的 voice_id（创建数字人可直接绑定）
+  const myVoices = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of genTasks || []) {
+      if (t.sub_type !== 'voice_clone' || t.state !== 'success') continue
+      const vid = taskParams(t).voice_id
+      if (typeof vid === 'string' && vid) ids.add(vid)
+    }
+    return Array.from(ids)
   }, [genTasks])
 
   const filtered = useMemo(() => {
@@ -92,7 +128,7 @@ export default function AssetLibrary() {
   const articles = useMemo(() => works.filter(w => w.kind === 'article'), [works])
 
   const hint = {
-    digital_human: '通过 Vidu 主体 API 创建数字分身——上传形象照后可在视频生成中用 @名称 引用',
+    digital_human: '通过 Vidu 主体 API 创建数字分身——上传形象照/主体视频并绑定音色，视频生成中用 server_id 引用',
     video: 'AI 生成的视频产物（Vidu 视频/数字人视频）',
     image: 'AI 生成的图片 / 上传的素材图（封面/图文创作引用源）',
     audio: '配音/音效素材（视频创作的音频引用源）',
@@ -123,7 +159,7 @@ export default function AssetLibrary() {
 
       {tab === 'digital_human' && (
         subjects.length === 0 ? (
-          <Empty style={{ padding: 60 }} description="还没有数字人——点击「创建数字人」上传形象照开始">
+          <Empty style={{ padding: 60 }} description="还没有数字人——点击「创建数字人」上传形象照/视频开始">
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>创建数字人</Button>
           </Empty>
         ) : (
@@ -135,17 +171,69 @@ export default function AssetLibrary() {
                 </div>
                 <div className="ip-asset-body">
                   <Text strong style={{ fontSize: 14 }}>{s.name}</Text>
-                  <div style={{ marginTop: 6, fontSize: 12 }}>
+                  <div style={{ marginTop: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <Tag color={s.state === 'success' ? 'green' : s.state === 'failed' ? 'red' : 'processing'}>
                       {s.state === 'success' ? '就绪' : s.state === 'failed' ? '失败' : '创建中'}
                     </Tag>
-                    <span style={{ color: 'var(--wr-text-secondary)', marginLeft: 8 }}>{timeAgo(s.createdAt)}</span>
+                    <Tag style={{ margin: 0 }} color={s.kind === 'scene' ? 'cyan' : undefined}>
+                      {s.kind === 'scene' ? '场景' : s.hasVideo ? `视频主体${s.imageCount > 0 ? '（仅视频生效）' : ''}` : `${s.imageCount} 张图`}
+                    </Tag>
+                    {s.voiceId && <Tag style={{ margin: 0 }} color="purple">音色 {s.voiceId}</Tag>}
+                    <span style={{ color: 'var(--wr-text-secondary)' }}>{timeAgo(s.createdAt)}</span>
                   </div>
+                  {s.state === 'failed' && s.errMsg && (
+                    <Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 6 }} ellipsis={{ tooltip: s.errMsg }}>{s.errMsg}</Text>
+                  )}
+                  {s.state === 'success' && s.serverId && (
+                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Text type="secondary" style={{ fontSize: 12 }} copyable={{ text: s.serverId, tooltips: ['复制 server_id', '已复制'] }}>
+                        {s.serverId.slice(0, 16)}{s.serverId.length > 16 ? '…' : ''}
+                      </Text>
+                    </div>
+                  )}
                   {s.state === 'success' && (
-                    <Button size="small" style={{ marginTop: 10 }}
-                      onClick={() => message.info('去内容合成 → 做视频图片 → 参考生模式，在提示词中用 @名称 引用')}>
-                      用于视频生成
-                    </Button>
+                    <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                      {s.kind === 'person' && (
+                        <Button size="small" type="primary"
+                          onClick={() => { window.location.href = `/m/compose/lipsync?subject=${encodeURIComponent(s.serverId)}` }}>
+                          去生成口播
+                        </Button>
+                      )}
+                      <Button size="small"
+                        onClick={() => message.info(`server_id 已复制——创作页参考生模式主体引用粘贴：${s.serverId.slice(0, 20)}…`)}>
+                        用于参考生
+                      </Button>
+                      <Popconfirm
+                        title="删除这个数字人？"
+                        description="仅移除本地记录，Vidu 侧主体不受影响（官方无删除 API）"
+                        okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
+                        onConfirm={async () => {
+                          try {
+                            await businessApi.deleteGenerationTask(s.taskId)
+                            message.success('已删除')
+                            refetchSubjects()
+                          } catch { /* 拦截器已提示 */ }
+                        }}
+                      >
+                        <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                      </Popconfirm>
+                    </div>
+                  )}
+                  {s.state !== 'success' && (
+                    <Popconfirm
+                      title="删除这条记录？"
+                      description={s.state === 'failed' ? '失败记录删除后不可恢复' : '任务仍在创建中，删除前会尝试取消'}
+                      okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
+                      onConfirm={async () => {
+                        try {
+                          await businessApi.deleteGenerationTask(s.taskId)
+                          message.success('已删除')
+                          refetchSubjects()
+                        } catch { /* 拦截器已提示 */ }
+                      }}
+                    >
+                      <Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ marginTop: 8 }} />
+                    </Popconfirm>
                   )}
                 </div>
               </div>
@@ -218,30 +306,61 @@ export default function AssetLibrary() {
         )
       )}
 
-      <CreateSubjectModal open={createOpen} onClose={() => setCreateOpen(false)}
-        onCreated={() => { refetchSubjects(); message.success('数字人创建任务已提交') }} />
+      <CreateSubjectModal open={createOpen} voices={myVoices} onClose={() => setCreateOpen(false)}
+        onCreated={() => { refetchSubjects(); message.success('数字人创建成功') }} />
     </div>
   )
 }
 
-function CreateSubjectModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+/** 客户端预检主体视频时长（≤5s；元数据读不出的容器放行，由上游兜底校验） */
+function checkVideoDuration(file: File): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const v = document.createElement('video')
+    v.preload = 'metadata'
+    v.onloadedmetadata = () => {
+      URL.revokeObjectURL(url)
+      if (v.duration > 5.5) {
+        message.error('主体视频不能超过 5 秒')
+        reject(new Error('视频超过 5 秒'))
+      } else {
+        resolve()
+      }
+    }
+    v.onerror = () => { URL.revokeObjectURL(url); resolve() }
+    v.src = url
+  })
+}
+
+function CreateSubjectModal({ open, voices, onClose, onCreated }: {
+  open: boolean
+  voices: string[]
+  onClose: () => void
+  onCreated: () => void
+}) {
   const [name, setName] = useState('')
+  const [kind, setKind] = useState<'person' | 'scene'>('person')
   const [imageUrls, setImageUrls] = useState<string[]>([])
+  const [videoUrl, setVideoUrl] = useState('')
+  const [voiceId, setVoiceId] = useState('')
   const [creating, setCreating] = useState(false)
   const queryClient = useQueryClient()
 
   const handleCreate = async () => {
-    if (!name.trim()) { message.warning('请输入数字人名称'); return }
-    if (imageUrls.length === 0) { message.warning('请至少上传 1 张形象照'); return }
+    if (!name.trim()) { message.warning(kind === 'scene' ? '请输入场景名称' : '请输入数字人名称'); return }
+    if (imageUrls.length === 0 && !videoUrl) {
+      message.warning(kind === 'scene' ? '请上传 1-3 张场景照片' : '请至少上传 1 张形象照或 1 个主体视频'); return
+    }
     setCreating(true)
     try {
-      await businessApi.submitGenerationTask({
-        sub_type: 'subject', model: '',
-        params: { name: name.trim(), images: imageUrls },
-      })
+      const params: Record<string, unknown> = { name: name.trim(), kind }
+      if (imageUrls.length > 0) params.images = imageUrls
+      if (videoUrl) params.videos = [videoUrl]
+      if (kind === 'person' && voiceId.trim()) params.voice_id = voiceId.trim()
+      await businessApi.submitGenerationTask({ sub_type: 'subject', model: '', params })
       onCreated()
       onClose()
-      setName(''); setImageUrls([])
+      setName(''); setImageUrls([]); setVideoUrl(''); setVoiceId(''); setKind('person')
       queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
     } catch (e: any) {
       message.error(e?.response?.data?.msg || '创建失败')
@@ -249,30 +368,81 @@ function CreateSubjectModal({ open, onClose, onCreated }: { open: boolean; onClo
   }
 
   return (
-    <Modal open={open} title="创建数字人" okText="创建" cancelText="取消" onOk={handleCreate} onCancel={onClose} confirmLoading={creating}>
+    <Modal open={open} title="创建主体" okText="创建" cancelText="取消" onOk={handleCreate} onCancel={onClose} confirmLoading={creating}>
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <Segmented
+          value={kind} onChange={v => setKind(v as 'person' | 'scene')}
+          options={[
+            { value: 'person', label: '人物分身', icon: <UserOutlined /> },
+            { value: 'scene', label: '场景主体', icon: <VideoCameraOutlined /> },
+          ]}
+        />
         <Text type="secondary" style={{ fontSize: 12 }}>
-          上传 1-3 张形象照，Vidu 将创建可复用的数字分身——后续视频生成中用 @名称 引用
+          {kind === 'person'
+            ? '上传 1-3 张形象照或 1 个 5 秒内的主体视频——创建后可生成口播/参考生视频'
+            : '上传 2-3 张场景照片（厨房/门店/工作室）——生成视频时场景可复用，画面一致'}
         </Text>
-        <Input placeholder="数字人名称（如：张师傅、李老板）" value={name} onChange={e => setName(e.target.value)} maxLength={64} />
-        <Upload
-          listType="picture-card"
-          maxCount={3}
-          accept="image/png,image/jpeg,image/jpg,image/webp"
-          customRequest={async ({ file, onSuccess, onError }) => {
-            try {
-              const r = await businessApi.uploadAsset(file as File)
-              setImageUrls(prev => [...prev, r.url])
-              onSuccess?.(r)
-            } catch (e) { onError?.(e as Error) }
-          }}
-          onRemove={(file) => {
-            const url = (file.response as any)?.url
-            if (url) setImageUrls(prev => prev.filter(u => u !== url))
-          }}
-        >
-          {imageUrls.length < 3 && <div><PlusOutlined /><div style={{ fontSize: 12, marginTop: 4 }}>上传形象照</div></div>}
-        </Upload>
+        <Input
+          placeholder={kind === 'scene' ? '场景名称（如：主厨房、门店前台）' : '数字人名称（如：张师傅、李老板）'}
+          value={name} onChange={e => setName(e.target.value)} maxLength={64}
+        />
+        <div>
+          <Text strong style={{ fontSize: 13 }}>{kind === 'scene' ? '场景照片（1-3 张）' : '形象照（1-3 张）'}</Text>
+          <Upload
+            listType="picture-card"
+            maxCount={3}
+            accept="image/png,image/jpeg,image/jpg,image/webp"
+            customRequest={async ({ file, onSuccess, onError }) => {
+              try {
+                const r = await businessApi.uploadAsset(file as File)
+                setImageUrls(prev => [...prev, r.url])
+                onSuccess?.(r)
+              } catch (e) { onError?.(e as Error) }
+            }}
+            onRemove={(file) => {
+              const url = (file.response as any)?.url
+              if (url) setImageUrls(prev => prev.filter(u => u !== url))
+            }}
+          >
+            {imageUrls.length < 3 && <div><PlusOutlined /><div style={{ fontSize: 12, marginTop: 4 }}>上传形象照</div></div>}
+          </Upload>
+        </div>
+        {kind === 'person' && (
+          <div>
+            <Text strong style={{ fontSize: 13 }}>主体视频（可选，1 个 ≤5 秒）</Text>
+          <Upload
+            maxCount={1}
+            accept="video/mp4,video/x-msvideo,video/quicktime"
+            beforeUpload={checkVideoDuration}
+            customRequest={async ({ file, onSuccess, onError }) => {
+              try {
+                const r = await businessApi.uploadAsset(file as File)
+                setVideoUrl(r.url)
+                onSuccess?.(r)
+              } catch (e) { onError?.(e as Error) }
+            }}
+            onRemove={() => setVideoUrl('')}
+          >
+            <Button icon={<VideoCameraOutlined />}>{videoUrl ? '重新上传' : '上传视频（mp4/avi/mov）'}</Button>
+          </Upload>
+        </div>
+        )}
+        {kind === 'person' && (
+        <div>
+          <Text strong style={{ fontSize: 13 }}>绑定音色（可选）</Text>
+          <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+            音视频直出时使用；q2-pro 及 q3 系列模型不支持音色
+          </Text>
+          <div style={{ marginTop: 4 }}>
+            <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={voices} />
+          </div>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+            官方音色可试听后选择；想要自己的声音？
+            <a href="/m/compose/tools?tab=media" target="_blank" rel="noreferrer">去声音克隆</a>
+            （复刻音色 7 天内在语音合成中调用一次即永久保留）
+          </Text>
+        </div>
+        )}
       </Space>
     </Modal>
   )

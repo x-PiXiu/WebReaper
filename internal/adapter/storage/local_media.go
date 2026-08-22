@@ -241,6 +241,28 @@ func (s *LocalMediaStore) CleanupBefore(ctx context.Context, before time.Time, e
 	return n, nil
 }
 
+// ReadLocal 读取本站托管 URL 对应的本地文件（URL 前缀 {baseURL}/media/ 判定归属；
+// 兼容只有路径的旧格式 /media/...）。非本站托管返回 ok=false（外部图床/OSS）。
+func (s *LocalMediaStore) ReadLocal(ctx context.Context, url string) ([]byte, string, bool) {
+	if url == "" || strings.Contains(url, "..") {
+		return nil, "", false
+	}
+	var rel string
+	switch {
+	case strings.HasPrefix(url, s.baseURL+"/media/"):
+		rel = strings.TrimPrefix(url, s.baseURL+"/media/")
+	case strings.HasPrefix(url, "/media/"):
+		rel = strings.TrimPrefix(url, "/media/")
+	default:
+		return nil, "", false
+	}
+	data, err := os.ReadFile(filepath.Join(s.dir, filepath.FromSlash(rel)))
+	if err != nil {
+		return nil, "", false
+	}
+	return data, mimeFromExt(filepath.Ext(rel)), true
+}
+
 var _ port.MediaAssetStore = (*LocalMediaStore)(nil)
 
 // 保持 import 稳定（json 备用）。

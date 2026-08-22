@@ -1,0 +1,75 @@
+package repository
+
+import (
+	"context"
+
+	"gorm.io/gorm"
+
+	"webreaper/internal/domain/entity"
+)
+
+// GenerationVoicePO 官方音色表映射（seed 自 Vidu 音色表——静态参考数据）。
+type GenerationVoicePO struct {
+	VoiceID   string `gorm:"primaryKey;size:128"`
+	Language  string `gorm:"size:64;index"`
+	Name      string `gorm:"size:128"`
+	SampleURL string `gorm:"size:512"`
+}
+
+func (GenerationVoicePO) TableName() string { return "generation_voices" }
+
+// GormVoiceRepository 是 port.VoiceLibrary 的 GORM 实现。
+type GormVoiceRepository struct {
+	db *gorm.DB
+}
+
+func NewGormVoiceRepository(db *gorm.DB) *GormVoiceRepository {
+	return &GormVoiceRepository{db: db}
+}
+
+func (r *GormVoiceRepository) List(ctx context.Context, language, keyword string) ([]entity.GenerationVoice, error) {
+	q := r.db.WithContext(ctx).Model(&GenerationVoicePO{})
+	if language != "" {
+		q = q.Where("language = ?", language)
+	}
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("voice_id LIKE ? OR name LIKE ?", like, like)
+	}
+	var pos []GenerationVoicePO
+	// 全量 300 条级——一次取回由前端分组/搜索，不分页
+	if err := q.Order("language, voice_id").Limit(1000).Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.GenerationVoice, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, entity.GenerationVoice{
+			VoiceID: p.VoiceID, Language: p.Language, Name: p.Name, SampleURL: p.SampleURL,
+		})
+	}
+	return out, nil
+}
+
+// SeedIfEmpty 表空时批量写入（voice_id 主键幂等——Save 覆盖同键行）。
+func (r *GormVoiceRepository) SeedIfEmpty(ctx context.Context, voices []entity.GenerationVoice) (int, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Model(&GenerationVoicePO{}).Count(&n).Error; err != nil {
+		return 0, err
+	}
+	if n > 0 || len(voices) == 0 {
+		return 0, nil
+	}
+	pos := make([]GenerationVoicePO, 0, len(voices))
+	for _, v := range voices {
+		pos = append(pos, GenerationVoicePO{VoiceID: v.VoiceID, Language: v.Language, Name: v.Name, SampleURL: v.SampleURL})
+	}
+	// 分批插入（单条 SQL 上千占位符在部分 MySQL 配置下超限）
+	const batchSize = 100
+	for i := 0; i < len(pos); i += batchSize {
+		end := min(i+batchSize, len(pos))
+		if err := r.db.WithContext(ctx).Create(pos[i:end]).Error; err != nil {
+			return 0, err
+		}
+	}
+	return len(pos), nil
+}

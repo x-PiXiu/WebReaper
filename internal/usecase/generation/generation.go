@@ -9,6 +9,7 @@ package generation
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"regexp"
 	"encoding/hex"
 	"encoding/json"
@@ -35,6 +36,11 @@ type GenerationUseCase struct {
 	// nonceStore 回调防重放（R2 无状态化：内存实现多实例失效——Redis 实现
 	// SETNX+EX 原子判重；构造默认内存，main 按 Redis 可用性切换）
 	nonceStore port.CallbackNonceStore
+	// notifier 任务终态通知（可选；nil=不通知——异步任务完成主动唤醒商户）
+	notifier port.TaskNotifier
+	// callbackURL 公网回调地址（可选；空=纯轮询。注入到支持回调的端点请求体——
+	// Vidu 任务状态变化时主动 POST，轮询降级为兜底通道，双通道幂等合并）
+	callbackURL string
 }
 
 // NewGenerationUseCase 创建统一生成用例。
@@ -74,6 +80,95 @@ func (uc *GenerationUseCase) SetNonceStore(s port.CallbackNonceStore) {
 	if s != nil {
 		uc.nonceStore = s
 	}
+}
+
+// SetTaskNotifier 注入任务终态通知（可选；异步任务完成/失败时站内信唤醒商户）。
+func (uc *GenerationUseCase) SetTaskNotifier(n port.TaskNotifier) {
+	if n != nil {
+		uc.notifier = n
+	}
+}
+
+// SetCallbackURL 注入公网回调地址（可选；空=纯轮询）。
+// 需为 Vidu 可达的公网 URL（含路由前缀），如 https://x.com/webreaper/api/v1/generation/callback。
+func (uc *GenerationUseCase) SetCallbackURL(u string) {
+	uc.callbackURL = strings.TrimRight(u, "/")
+}
+
+// injectCallbackURL 回调地址注入：仅文档声明 callback_url 的端点（CallbackEndpoint），
+// 其余端点注入未声明参数有被上游拒绝的风险——不注入，走纯轮询。
+func (uc *GenerationUseCase) injectCallbackURL(adapter port.EndpointAdapter, body map[string]any) {
+	if uc.callbackURL == "" {
+		return
+	}
+	if cb, ok := adapter.(port.CallbackEndpoint); ok && cb.SupportsCallback() {
+		body["callback_url"] = uc.callbackURL
+	}
+}
+
+// pickModelFor 聚合端点全部启用模型的能力向量，交给端点策略挑选（傻瓜式：
+// 客户端不传 model）。单默认能力端点（subject/tts 等）由 Registry 的
+// "model 空 + 单条默认"匹配规则处理，不走此路径。
+func (uc *GenerationUseCase) pickModelFor(ctx context.Context, subType string, sel port.ModelAutoSelector, params entity.GenerationParams) string {
+	names, err := uc.registry.Models(ctx, subType)
+	if err != nil {
+		return ""
+	}
+	caps := make([]entity.ModelCapability, 0, len(names))
+	for _, n := range names {
+		if c, cErr := uc.registry.Capability(ctx, subType, n); cErr == nil {
+			caps = append(caps, c)
+		}
+	}
+	return sel.PickModel(caps, params)
+}
+
+// inlineMediaKeys 请求体中承载媒体 URL 的字段（数组与单值两种形态）。
+var inlineMediaKeys = [2][]string{
+	{"images", "videos"},                        // 数组字段
+	{"image", "start_image", "audio_url"},       // 单值字段
+}
+
+// inlineLocalMedia 本站托管素材 → base64 data URI 内联（body 级——ParamsJSON/
+// 防重哈希仍记原 URL）。Vidu 拉不到 localhost/内网 URL：同步端点（主体创建）
+// 创建即拉素材，不可达直接 400 BadRequest；异步端点也会在任务内失败。
+// 仅替换本地存储能读到的 URL；外部 URL（图床/OSS，本身公网可达）不动。
+// 超 15MB 的文件保留 URL（Vidu 上限为 decode 后 20M，超限交给上游报可读错误）。
+func (uc *GenerationUseCase) inlineLocalMedia(ctx context.Context, body map[string]any) {
+	if uc.asset == nil {
+		return
+	}
+	for _, key := range inlineMediaKeys[0] {
+		if arr, ok := body[key].([]string); ok {
+			for i, u := range arr {
+				arr[i] = uc.inlineOneMedia(ctx, u)
+			}
+		}
+	}
+	for _, key := range inlineMediaKeys[1] {
+		if u, ok := body[key].(string); ok {
+			body[key] = uc.inlineOneMedia(ctx, u)
+		}
+	}
+}
+
+func (uc *GenerationUseCase) inlineOneMedia(ctx context.Context, u string) string {
+	if u == "" || strings.HasPrefix(u, "data:") {
+		return u // 已是 data URI 或空值
+	}
+	data, mime, ok := uc.asset.ReadLocal(ctx, u)
+	if !ok || len(data) == 0 || len(data) > 15<<20 {
+		return u
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+// notifyTerminal 终态通知（fire-and-forget——通知失败不影响状态机）。
+func (uc *GenerationUseCase) notifyTerminal(ctx context.Context, task entity.GenerationTask) {
+	if uc.notifier == nil {
+		return
+	}
+	uc.notifier.NotifyTaskTerminal(ctx, task)
 }
 
 // SetAssetStore 注入媒体资产存储（可选；nil=产物不转存）。
@@ -132,8 +227,17 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if err != nil {
 		return entity.GenerationTask{}, err
 	}
+	// 模型自动选择（傻瓜式端点）：model 传空时由端点策略按原始参数挑选
+	//（如 reference2video：图片主体→q3 / 视频主体→q2-pro）。须在翻译层之前——
+	// 翻译层按选定模型的能力向量决定视频引用的映射。
+	model := in.Model
+	if model == "" {
+		if sel, ok := adapter.(port.ModelAutoSelector); ok {
+			model = uc.pickModelFor(ctx, in.SubType, sel, in.Params)
+		}
+	}
 	// 能力唯一来源：Registry（DB 驱动，管理后台可热改）——策略不持有能力表
-	cap, err := uc.registry.Capability(ctx, in.SubType, in.Model)
+	cap, err := uc.registry.Capability(ctx, in.SubType, model)
 	if err != nil {
 		return entity.GenerationTask{}, err
 	}
@@ -151,7 +255,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	}
 
 	// 防重复提交：同租户同参数哈希的未终态任务直接复用
-	hash := paramsHash(in.SubType, in.Model, params)
+	hash := paramsHash(in.SubType, model, params)
 	if pending, pErr := uc.repo.FindPendingByHash(ctx, in.TenantID, hash); pErr == nil && len(pending) > 0 {
 		return pending[0], nil
 	}
@@ -163,7 +267,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		BrandID:   in.BrandID,
 		Type:      adapter.Category(),
 		SubType:   in.SubType,
-		Model:     in.Model,
+		Model:     model,
 		Provider:  uc.provider.Name(),
 		State:     entity.TaskStateCreated,
 		ParamsHash: hash,
@@ -180,7 +284,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if err := uc.repo.Save(ctx, task); err != nil {
 		return entity.GenerationTask{}, fmt.Errorf("任务保存失败: %w", err)
 	}
-	body, bErr := adapter.BuildRequest(ctx, in.Model, params, task.Payload)
+	body, bErr := adapter.BuildRequest(ctx, model, params, task.Payload)
 	if bErr != nil {
 		task.State = entity.TaskStateFailed
 		task.ErrMsg = "参数组装失败: " + bErr.Error()
@@ -188,6 +292,8 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		_ = uc.repo.Save(ctx, task)
 		return task, bErr
 	}
+	uc.injectCallbackURL(adapter, body)
+	uc.inlineLocalMedia(ctx, body)
 	// 并发节流：信号量限流提交到上游（防瞬时高峰触发 Vidu QuotaExceeded/429）
 	if uc.submitSem != nil {
 		select {
@@ -197,7 +303,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 			return task, ctx.Err()
 		}
 	}
-	taskID, credits, err := uc.provider.Submit(ctx, adapter.Endpoint(), body)
+	res, err := uc.provider.Submit(ctx, adapter.Endpoint(), body)
 	if err != nil {
 		// 提交失败：标记失败（可人工重试），保留任务供前端"重新生成"
 		task.State = entity.TaskStateFailed
@@ -206,13 +312,44 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		_ = uc.repo.Save(ctx, task)
 		return task, fmt.Errorf("提交失败: %w", err)
 	}
-	task.ProviderTaskID = taskID
-	task.Credits = credits
-	task.State = entity.TaskStateQueueing
+	task.ProviderTaskID = res.TaskID
+	task.Credits = res.Credits
+	uc.applySubmitResult(ctx, &task, adapter, res)
 	_ = uc.repo.Save(ctx, task)
 	// 计量（F3：generation 场景按次计费的数据地基——失败仅忽略，不影响主流程）
-	uc.recordUsage(ctx, task.TenantID, task.Model, credits)
+	uc.recordUsage(ctx, task.TenantID, task.Model, res.Credits)
 	return task, nil
+}
+
+// applySubmitResult 提交结果落任务状态（三类语义归一）：
+//   - SyncSubmitter 端点（主体 API）：响应即终态、无轮询语义——产物为资源 ID
+//   - SubmitResult.State 终态（同步接口：语音合成/声音复刻）：创建响应已携带
+//     产物（file_url/demo_audio）——复用 applyStatus 落终态并触发 24h URL 转存
+//   - 其余（queueing/无 state 字段）：进轮询（PollDue 推进）
+func (uc *GenerationUseCase) applySubmitResult(ctx context.Context, task *entity.GenerationTask, adapter port.EndpointAdapter, res port.SubmitResult) {
+	if sync, ok := adapter.(port.SyncSubmitter); ok && sync.IsSync() {
+		task.State = entity.TaskStateSuccess
+		task.FinishedAt = nowPtr(time.Now())
+		task.UpdatedAt = time.Now()
+		// 主体无媒体产物：creations[0].id = 服务商资源 ID（主体 server_id，
+		// reference2video 的 subjects[].server_id 引用值）
+		creationsJSON, _ := json.Marshal([]entity.CreationItem{{ID: res.TaskID}})
+		task.CreationsJSON = string(creationsJSON)
+		uc.notifyTerminal(ctx, *task)
+		return
+	}
+	switch res.State {
+	case entity.TaskStateSuccess, entity.TaskStateFailed:
+		// 同步接口创建即终态——防"success 但响应未携带产物"卡住 applyStatus
+		// 的"成功无生成物"校验，兜底一条 ID 型产物
+		if res.State == entity.TaskStateSuccess && len(res.Creations) == 0 {
+			res.Creations = []entity.CreationItem{{ID: res.TaskID}}
+		}
+		_ = uc.applyStatus(ctx, task, port.GenerationStatus{State: res.State, Creations: res.Creations})
+	default:
+		task.State = entity.TaskStateQueueing
+		task.UpdatedAt = time.Now()
+	}
 }
 
 // recordUsage 记一次生成用量（usages 表——成本分析/配额核对的唯一数据源；
@@ -234,14 +371,22 @@ func (uc *GenerationUseCase) recordUsage(ctx context.Context, tenantID, model st
 }
 
 // HandleCallback 处理回调（验签由 handler 完成——本方法只做幂等状态推进）。
-func (uc *GenerationUseCase) HandleCallback(ctx context.Context, payload string, status port.GenerationStatus) (entity.GenerationTask, error) {
-	// payload 透传关联：本地 task_id 直接定位（O(1) 免查表）
+// 任务定位双路径：payload 透传（声明了 payload 参数的端点——本地 task_id 直达）
+// → provider_task_id 兜底（回调体的 id 字段——payload 未声明的端点如文生音频）。
+func (uc *GenerationUseCase) HandleCallback(ctx context.Context, payload, providerTaskID string, status port.GenerationStatus) (entity.GenerationTask, error) {
 	task, err := uc.repo.FindByID(ctx, "", payload)
 	if err != nil {
-		// 兜底：按 provider_task_id 查（老任务/无透传场景）
-		task, err = uc.repo.FindByProviderTaskID(ctx, payload)
-		if err != nil {
-			return entity.GenerationTask{}, fmt.Errorf("回调任务不存在: %w", err)
+		if providerTaskID != "" {
+			// 兜底：按回调体 id（服务商任务 ID）定位
+			if task, err = uc.repo.FindByProviderTaskID(ctx, providerTaskID); err != nil {
+				return entity.GenerationTask{}, fmt.Errorf("回调任务不存在: %w", err)
+			}
+		} else {
+			// 老任务/无透传场景：payload 字段也可能是服务商任务 ID
+			task, err = uc.repo.FindByProviderTaskID(ctx, payload)
+			if err != nil {
+				return entity.GenerationTask{}, fmt.Errorf("回调任务不存在: %w", err)
+			}
 		}
 	}
 	if entity.IsTerminal(task.State) {
@@ -349,6 +494,8 @@ func (uc *GenerationUseCase) retrySubmit(ctx context.Context, task *entity.Gener
 	if err != nil {
 		return false
 	}
+	uc.injectCallbackURL(adapter, body)
+	uc.inlineLocalMedia(ctx, body)
 	// 复用提交信号量：自动重试不侵占商户提交的即时配额之外的上游并发
 	if uc.submitSem != nil {
 		select {
@@ -358,7 +505,7 @@ func (uc *GenerationUseCase) retrySubmit(ctx context.Context, task *entity.Gener
 			return false
 		}
 	}
-	taskID, credits, err := uc.provider.Submit(ctx, adapter.Endpoint(), body)
+	res, err := uc.provider.Submit(ctx, adapter.Endpoint(), body)
 	task.RetryCount++
 	task.UpdatedAt = time.Now()
 	if err != nil {
@@ -366,14 +513,15 @@ func (uc *GenerationUseCase) retrySubmit(ctx context.Context, task *entity.Gener
 		_ = uc.repo.Save(ctx, *task)
 		return false
 	}
-	task.ProviderTaskID = taskID
-	task.Credits = credits
+	task.ProviderTaskID = res.TaskID
+	task.Credits = res.Credits
 	task.State = entity.TaskStateQueueing
 	task.ErrCode = ""
 	task.ErrMsg = ""
 	task.FinishedAt = nil
+	uc.applySubmitResult(ctx, task, adapter, res)
 	_ = uc.repo.Save(ctx, *task)
-	uc.recordUsage(ctx, task.TenantID, task.Model, credits)
+	uc.recordUsage(ctx, task.TenantID, task.Model, res.Credits)
 	return true
 }
 
@@ -393,6 +541,20 @@ func (uc *GenerationUseCase) Cancel(ctx context.Context, tenantID, taskID string
 	now := time.Now()
 	task.FinishedAt = &now
 	return uc.repo.Save(ctx, task)
+}
+
+// DeleteTask 删除任务的本地产记录（资产库"删除数字人"等场景）。
+// 非终态任务先尽力取消上游（失败不阻断——本地记录仍删除，避免卡死任务删不掉）；
+// Vidu 无删除主体 API，主体类删除仅移除本地展示记录。
+func (uc *GenerationUseCase) DeleteTask(ctx context.Context, tenantID, taskID string) error {
+	task, err := uc.repo.FindByID(ctx, tenantID, taskID)
+	if err != nil {
+		return err
+	}
+	if !entity.IsTerminal(task.State) && task.ProviderTaskID != "" {
+		_ = uc.provider.Cancel(ctx, task.ProviderTaskID)
+	}
+	return uc.repo.Delete(ctx, tenantID, taskID)
 }
 
 // Get / List 查询（任务列表页）。
@@ -510,7 +672,13 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 		task.State = st.State
 	}
 	task.UpdatedAt = time.Now()
-	return uc.repo.Save(ctx, *task)
+	if err := uc.repo.Save(ctx, *task); err != nil {
+		return err
+	}
+	// 终态转换恰好一次（PollDue/HandleCallback 均有 IsTerminal 幂等护栏）——
+	// 在此通知不会重复；异步任务的完成感知差距（不留在页面就不知道结果）由此闭合
+	uc.notifyTerminal(ctx, *task)
+	return nil
 }
 
 // ---- 纯函数辅助（可单测）----

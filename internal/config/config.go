@@ -131,6 +131,9 @@ type ServerConfig struct {
 	// ViduAPIKey Vidu 视频生成 API Key（可选）。未配置时视频工作台走 mock 模拟进度。
 	// 运行时以 DB 厂商配置（provider_configs.vidu）优先，env 仅作启动兜底。
 	ViduAPIKey string
+	// FFMPEGPath ffmpeg 二进制目录（可选，FFMPEG_PATH）。空=PATH 查找；
+	// 不可用时视频文案提取走降级路径（≤25MB 直传 ASR）。
+	FFMPEGPath string
 	// AutoMonitorEnabled 是否启用每日自动监测（AUTO_MONITOR_ENABLED=true）。
 	// 启用后调度器每天对全平台品牌执行一次监测，趋势图自动生长。
 	AutoMonitorEnabled bool
@@ -293,6 +296,7 @@ func Load() Config {
 			BingAPIKey:         os.Getenv("BING_API_KEY"),
 			BingSiteURL:        os.Getenv("BING_SITE_URL"),
 			ViduAPIKey:         os.Getenv("VIDU_API_KEY"),
+			FFMPEGPath:         os.Getenv("FFMPEG_PATH"),
 			AutoMonitorEnabled: os.Getenv("AUTO_MONITOR_ENABLED") == "true",
 		},
 		DB: DBConfig{

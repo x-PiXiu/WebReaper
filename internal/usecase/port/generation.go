@@ -17,7 +17,11 @@ import (
 type GenerationProvider interface {
 	Name() string // "vidu" / "mock" / "kling"…
 	// Submit 提交生成任务（endpoint 由端点策略提供；body 为组装后的请求体）。
-	Submit(ctx context.Context, endpoint string, body map[string]any) (taskID string, credits int, err error)
+	// 同步端点（Vidu 语音合成/声音复刻——"该接口是同步接口"）创建响应直接
+	// 携带终态与产物：SubmitResult.State=success/failed 时不进轮询，
+	// Creations 已含产物（file_url/demo_audio）；State 空（queueing/无该字段）
+	// 为异步语义，由 Poll 推进。
+	Submit(ctx context.Context, endpoint string, body map[string]any) (SubmitResult, error)
 	// Poll 轮询任务状态（state/错误码/生成物）。
 	Poll(ctx context.Context, taskID string) (GenerationStatus, error)
 	// Cancel 取消任务。
@@ -31,6 +35,14 @@ type GenerationProvider interface {
 	QueryCredits(ctx context.Context) (int, error)
 	// TranslateError 错误码 → 产品级消息（可读 + 可重试分类）。
 	TranslateError(code string) string
+}
+
+// SubmitResult 提交结果（同步/异步统一承载）。
+type SubmitResult struct {
+	TaskID    string           // 服务商任务 ID（主体 API 等资源型端点为资源 id）
+	Credits   int              // 本次消耗积分
+	State     string           // 空=异步（进轮询）；entity.TaskStateSuccess/Failed=提交即终态
+	Creations []entity.CreationItem // 终态时的产物（TTS file_url / 复刻 demo_audio）
 }
 
 // GenerationStatus 任务轮询结果。
@@ -57,6 +69,43 @@ type EndpointAdapter interface {
 	Validate(ctx context.Context, cap entity.ModelCapability, params entity.GenerationParams) error
 	// BuildRequest 组装请求体——参数映射/图片引用/payload 透传。
 	BuildRequest(ctx context.Context, model string, params entity.GenerationParams, payload string) (map[string]any, error)
+}
+
+// ModelAutoSelector 模型自动选择（可选能力——傻瓜式端点不暴露模型选择，
+// 客户端 model 传空时由端点策略按参数挑选）。
+// 典型：reference2video 按主体类型自动切换——图片主体→q3（效果最好）、
+// 视频主体→q2-pro（Vidu 约束视频主体仅 q2-pro 支持）。模型差异知识归
+// 端点策略，用例层零改动（开闭原则）。
+type ModelAutoSelector interface {
+	EndpointAdapter
+	// PickModel 从该端点全部启用模型（含能力向量）中挑选默认模型；空=不选。
+	PickModel(models []entity.ModelCapability, params entity.GenerationParams) string
+}
+
+// SyncSubmitter 同步端点（可选能力——EndpointAdapter 类型断言获得）：
+// 提交响应即终态，没有 task_id 轮询语义。
+// 典型：Vidu 主体 API（POST /ent/v2/subjects）同步返回主体对象
+//（id=server_id），既无 task_id 也无 state——若按异步任务轮询
+// /ent/v2/tasks/{id}/creations 必然 404，任务永远停在 queueing。
+// usecase 对此类端点：提交成功 → 直接终态 success，服务商资源 ID
+// 存 ProviderTaskID 且以 creations[0].id 暴露给前端引用。
+type SyncSubmitter interface {
+	EndpointAdapter
+	// IsSync 是否同步端点（提交即结果）。
+	IsSync() bool
+}
+
+// CallbackEndpoint 支持回调的异步端点（可选能力——EndpointAdapter 类型断言获得）。
+//
+// Vidu 约定：创建任务时传入 callback_url，任务状态变化时主动 POST 回调
+//（结构同查询任务 API 返回体；HMAC-SHA256 验签 + Date/nonce 防重放）。
+// 仅文档声明了 callback_url 参数的端点实现本接口（text2video/reference2video/
+// text2image/multiframe）——对其余端点注入未声明参数有被拒风险。
+// 未实现/未配置公网回调地址时自动退化为纯轮询（20s 周期，双通道幂等合并）。
+type CallbackEndpoint interface {
+	EndpointAdapter
+	// SupportsCallback 是否支持 callback_url 注入。
+	SupportsCallback() bool
 }
 
 // EndpointRegistry 端点策略注册表。
@@ -89,6 +138,9 @@ type GenerationTaskRepository interface {
 	ListFailed(ctx context.Context, limit int) ([]entity.GenerationTask, error)
 	// DeleteTerminalOlderThan 清理早于 before 的终态任务（P3 任务清理）。
 	DeleteTerminalOlderThan(ctx context.Context, before time.Time) (int64, error)
+	// Delete 删除单条任务（本地产记录删除——资产库"删除数字人"等场景；
+	// 上游取消/删除由用例层决定，仓储只做数据访问）。
+	Delete(ctx context.Context, tenantID, taskID string) error
 }
 
 // GenerationSpecRepository 端点/模型规格仓储（DB 为唯一事实源——全局掌控）。
@@ -116,6 +168,65 @@ type MediaAssetStore interface {
 	// CleanupBefore 清理过期资产（定时任务）。excludeURLs 为仍被任务引用的资产
 	// 公网 URL 集合（R1：防止删掉商户还在用的产物——引用关系来自任务 creations/params）。
 	CleanupBefore(ctx context.Context, before time.Time, excludeURLs map[string]bool) (int, error)
+	// ReadLocal 若 URL 为本站托管素材且文件在本地磁盘（Local 模式），读取文件内容——
+	// 用于把 Vidu 拉不到的 URL（localhost/内网）内联为 base64 data URI（Vidu 文档
+	// 支持："支持传入 Base64 编码或图片URL（确保可访问）"；同步端点创建即拉素材，
+	// 不可达 URL 直接 400 BadRequest）。ok=false：非本站托管或本地无文件
+	//（OSS 模式 URL 本身公网可达，无需内联）。
+	ReadLocal(ctx context.Context, url string) (data []byte, mime string, ok bool)
+}
+
+// VoiceLibrary 官方音色库（只读查询——seed 进 DB 的静态参考数据）。
+// handler 直接依赖（同 MediaAssetStore 模式）：无任务语义，不需用例封装。
+type VoiceLibrary interface {
+	// List 音色列表（language 为空=全部；keyword 模糊匹配 voice_id/名称）。
+	List(ctx context.Context, language, keyword string) ([]entity.GenerationVoice, error)
+	// SeedIfEmpty 表空时写入种子数据（返回写入条数；已非空返回 0）。
+	SeedIfEmpty(ctx context.Context, voices []entity.GenerationVoice) (int, error)
+}
+
+// TaskNotifier 生成任务终态通知（可选注入——站内信主动唤醒）。
+//
+// 差距修复：异步任务（视频/图片）在轮询周期内完成，商户不留在页面上就永远
+// 不知道结果；同步任务（主体/TTS）提交即终态但用户可能在后台运行。终态
+//（success/failed）转换恰好发生一次（IsTerminal 幂等护栏），在此处通知不会重复。
+type TaskNotifier interface {
+	// NotifyTaskTerminal 任务进入终态时回调（同步执行，实现应快速失败不影响主流程）。
+	NotifyTaskTerminal(ctx context.Context, task entity.GenerationTask)
+}
+
+// AudioSynthesizer 同步音频合成（文本→音频字节，无需轮询）。
+//
+// 与 GenerationProvider 的 TTS 端点互补：
+//   - Vidu TTS：异步任务（Submit → task_id → Poll → 音频 URL），走 generation_tasks 链路
+//   - 小米 MiMo TTS：同步接口（chat/completions + audio 输出），直接返回 base64 音频字节
+//
+// 三种模式：
+//   - Synthesize：标准 TTS（文本 + 预置音色 ID → 音频）
+//   - SynthesizeDesign：音色设计（自然语言描述风格 → 音频，小米 voicedesign 模型）
+//   - SynthesizeClone：声音克隆（音频样本 + 文本 → 克隆音色音频，小米 voiceclone 模型）
+//
+// 向导第④步使用：用户选音色后直接拿音频字节，无需提交任务轮询。
+type AudioSynthesizer interface {
+	// Synthesize 标准 TTS（预置音色）。voiceID 为空时用默认音色。
+	Synthesize(ctx context.Context, text string, voiceID string) (audio []byte, format string, err error)
+	// SynthesizeDesign 音色设计（自然语言描述音色风格）。小米 voicedesign 模型专用。
+	SynthesizeDesign(ctx context.Context, text string, styleDesc string) (audio []byte, format string, err error)
+	// SynthesizeClone 声音克隆（传入音频样本 base64 + 合成文本）。
+	SynthesizeClone(ctx context.Context, sampleBase64 string, text string) (audio []byte, format string, err error)
+}
+
+// CapabilityResolver 统一能力配置查询（能力路由模型——"我需要 ASR 用谁"的答案）。
+//
+// 设计动机：用例层已经是能力优先（SpeechTranscriber/AIGenerator 等 port 接口），
+// 但配置层散落在多张表（provider_configs/llm_configs），adapter 各自实现 resolve
+// 逻辑。本接口统一配置查询路径：adapter 注入本接口，按能力 ID 取当前生效配置。
+//
+// 实现层读 integration_capabilities + integration_vendors（新表），
+// 同时兼容旧表（provider_configs/llm_configs）——渐进迁移，旧表最终下线。
+type CapabilityResolver interface {
+	// Resolve 按能力 ID 取当前生效配置（IsDefault=true + Enabled=true）。
+	Resolve(ctx context.Context, capID string) (entity.ResolvedCap, error)
 }
 
 // ProviderConfigRepository 厂商配置仓储（管理后台按厂商管理）。

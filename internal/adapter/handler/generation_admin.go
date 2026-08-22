@@ -118,15 +118,16 @@ func existingEndpoint(registry port.EndpointRegistry, subType string) string {
 // ---- 模式开关（傻瓜化：商户端生成模式按 sub_type 批量启停）----
 
 // modeTier 推荐模式分层（admin 开关的建议档位；tier 仅作展示分组，实际状态以 DB 为准）。
+// 08 计划 D1 收敛：傻瓜式定位只保留口播主链五端点（reference2video/subject/
+// lip_sync/tts/voice_clone）为 default 档；其余专业创作模式默认关闭（admin 可开）。
 var modeTier = map[string]string{
-	// 默认集：两类商户（实体店/线上运营）都用得上的核心创作能力
-	"text2image": "default", "text2video": "default", "img2video": "default",
-	"tts": "default", "digital_human": "default", "reference2video": "default",
-	// 进阶折叠：参考生视频的配套（音色互通 voice_id / 主体库 server_id 复用）
-	"voice_clone": "advanced", "subject": "advanced",
+	// 默认集：口播视频主链路（向导/资产库/创作页）
+	"reference2video": "default", "subject": "default", "lip_sync": "default",
+	"tts": "default", "voice_clone": "default",
 	// 默认关闭：专业创作者功能（admin 可开）
-	"start_end2video": "closed", "multiframe": "closed", "text2audio": "closed",
-	"sound_effect": "closed", "template": "closed",
+	"text2video": "closed", "img2video": "closed", "start_end2video": "closed",
+	"multiframe": "closed", "digital_human": "closed", "text2image": "closed",
+	"text2audio": "closed", "sound_effect": "closed", "template": "closed",
 }
 
 // HandleListModes GET /admin/generation/modes —— 模式开关状态（按 sub_type 聚合）。
@@ -165,6 +166,38 @@ func (h *GenerationAdminHandler) HandleListModes(c *gin.Context) {
 		out = append(out, *mv)
 	}
 	success(c, gin.H{"modes": out})
+}
+
+// HandleApplyRecommendedModes POST /admin/generation/modes/apply-recommended ——
+// 一键应用推荐档位（08 计划 D1 收敛）：default 档全开、closed 档全关。
+// 存量部署的收敛入口（新部署 seed 已收敛）；运营 reopen 的模式会被此操作覆盖——
+// 按钮文案需明示"将覆盖手动调整"。
+func (h *GenerationAdminHandler) HandleApplyRecommendedModes(c *gin.Context) {
+	if h.specRepo == nil || h.registry == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	specs := h.registry.AllSpecs(c.Request.Context())
+	enabled, disabled := 0, 0
+	for _, s := range specs {
+		want := modeTier[s.SubType] != "closed" // default/advanced 档开
+		if s.Enabled == want {
+			continue // 已符合
+		}
+		if err := h.specRepo.Upsert(c.Request.Context(), entity.GenerationSpec{
+			SubType: s.SubType, Model: s.Model, Endpoint: s.Endpoint,
+			Enabled: want, CapabilitiesJSON: s.CapabilitiesJSON,
+		}); err != nil {
+			fail(c, fmt.Errorf("保存 %s/%s 失败: %w", s.SubType, s.Model, err))
+			return
+		}
+		if want {
+			enabled++
+		} else {
+			disabled++
+		}
+	}
+	success(c, gin.H{"enabled": enabled, "disabled": disabled})
 }
 
 // HandleSetMode PUT /admin/generation/modes/:subType —— 模式开关（批量启停该模式全部模型）。

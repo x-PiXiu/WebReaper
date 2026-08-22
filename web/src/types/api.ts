@@ -45,6 +45,7 @@ export interface LLMConfig {
   model: string      // 如 MiniMax-M2.5
   cost_per_mtok: number // 每百万 tokens 参考成本（分；成本分析按引擎细分）
   usage?: string     // 用途：""=聊天模型（默认），"vision"=视觉模型（浏览器截图分析）
+  is_default?: boolean // 是否为该用途的默认模型（同 usage 下互斥）
 }
 
 // ---- 引擎名单（商户端可见——仅展示字段，不含厂商密钥）----
@@ -593,6 +594,64 @@ export interface GenerationTask {
   retry_count: number
   created_at: string
   finished_at: string | null
+}
+
+// 官方音色（Vidu 语音合成音色表——TTS/主体/数字人音色选择的取值来源）
+export interface GenerationVoice {
+  voice_id: string
+  language: string
+  name: string
+  sample_url: string
+}
+
+// 第三方集成中心（08 计划 D7——能力路由模型）
+export interface IntegrationMeta {
+  id: string
+  name: string
+  icon: string
+  desc: string
+  capabilities: string[]
+  sections: string[]
+  vendor: string
+}
+
+export interface IntegrationEntry {
+  meta: IntegrationMeta
+  configured: boolean
+  enabled: boolean
+  has_key: boolean
+  health_status: 'ok' | 'degraded' | 'down' | 'unknown'
+  health_detail: string
+  updated_at: string
+}
+
+export interface IntegrationGroup {
+  label: string
+  entries: IntegrationEntry[]
+}
+
+// 能力路由：厂商（一套凭据）
+export interface IntegrationVendor {
+  id: string
+  name: string
+  base_url: string
+  api_key: string
+  protocol: string
+  enabled: boolean
+  updated_at: string
+}
+
+// 能力路由：能力条目（同一厂商可出现在多条 capability）
+export interface IntegrationCapability {
+  id: string
+  cap_id: string
+  vendor_id: string
+  endpoint: string
+  model: string
+  is_default: boolean
+  enabled: boolean
+  extra_json: string
+  updated_at: string
 }
 
 // 媒体资产（素材上传 + 产物转存）

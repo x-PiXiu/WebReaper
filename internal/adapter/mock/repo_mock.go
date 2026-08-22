@@ -177,6 +177,22 @@ func (r *MockLLMConfigRepository) FindByUsage(_ context.Context, usage string) (
 	return entity.LLMConfig{}, pkg.ErrNotFound
 }
 
+func (r *MockLLMConfigRepository) SetDefault(_ context.Context, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for k, cfg := range r.byName {
+		if cfg.IsDefault {
+			cfg.IsDefault = false
+			r.byName[k] = cfg
+		}
+	}
+	if cfg, ok := r.byName[name]; ok {
+		cfg.IsDefault = true
+		r.byName[name] = cfg
+	}
+	return nil
+}
+
 // ---- Conversation 仓储 ----
 
 type MockConversationRepository struct {

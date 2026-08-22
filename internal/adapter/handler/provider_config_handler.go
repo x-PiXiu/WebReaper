@@ -49,28 +49,35 @@ func (h *ProviderConfigHandler) HandleSave(c *gin.Context) {
 	}
 	provider := c.Param("provider")
 	var req struct {
-		APIKey  string `json:"api_key"`
-		BaseURL string `json:"base_url"`
-		Enabled *bool  `json:"enabled"`
+		APIKey    string `json:"api_key"`
+		BaseURL   string `json:"base_url"`
+		Enabled   *bool  `json:"enabled"`
+		ExtraJSON string `json:"extra_json"` // 扩展字段（JSON 文本；如 ASR 的 model/response_style）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
 	cfg := entity.ProviderConfig{
-		Provider: provider,
-		APIKey:   req.APIKey,
-		BaseURL:  req.BaseURL,
+		Provider:  provider,
+		APIKey:    req.APIKey,
+		BaseURL:   req.BaseURL,
+		ExtraJSON: req.ExtraJSON,
 	}
 	if req.Enabled != nil {
 		cfg.Enabled = *req.Enabled
 	}
-	// 读现有配置：APIKey 为空 = 保留原 Key（掩码语义）
-	if cfg.APIKey == "" {
+	// 读现有配置：APIKey 为空 = 保留原 Key（掩码语义）；ExtraJSON 为空 = 保留原值
+	if cfg.APIKey == "" || cfg.ExtraJSON == "" {
 		if existing, err := h.uc.List(c.Request.Context()); err == nil {
 			for _, e := range existing {
 				if e.Provider == provider {
-					cfg.APIKey = e.APIKey
+					if cfg.APIKey == "" {
+						cfg.APIKey = e.APIKey
+					}
+					if cfg.ExtraJSON == "" {
+						cfg.ExtraJSON = e.ExtraJSON
+					}
 					break
 				}
 			}
@@ -90,6 +97,21 @@ func (h *ProviderConfigHandler) HandleSave(c *gin.Context) {
 		out = append(out, providerConfigToView(cfg, true))
 	}
 	success(c, gin.H{"providers": out})
+}
+
+// HandleGetCredits GET /api/v1/admin/provider-configs/:provider/credits —— 查询厂商
+// 剩余积分（对账/排查 CreditInsufficient 用；mock 模式返回演示值）。
+func (h *ProviderConfigHandler) HandleGetCredits(c *gin.Context) {
+	if h.provider == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	credits, err := h.provider.QueryCredits(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"provider": c.Param("provider"), "credits": credits})
 }
 
 // updateProviderAPIKey 若厂商实现了 ConfigurableProvider 则热更新 Key。

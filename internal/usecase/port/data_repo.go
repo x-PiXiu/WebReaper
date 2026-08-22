@@ -24,6 +24,8 @@ type LLMConfigRepository interface {
 	FindByUsage(ctx context.Context, usage string) (entity.LLMConfig, error)
 	List(ctx context.Context) ([]entity.LLMConfig, error)
 	Delete(ctx context.Context, name string) error
+	// SetDefault 设置默认模型（同 Usage 下互斥——先清除再设置）。
+	SetDefault(ctx context.Context, name string) error
 }
 
 // ConversationRepository 聊天会话持久化接口（按 UserID 隔离）。

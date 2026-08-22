@@ -72,3 +72,27 @@ func TestSaveFileAndPublicURL(t *testing.T) {
 		t.Errorf("URL 格式不对: %s", asset.SourceURL)
 	}
 }
+
+func TestReadLocal(t *testing.T) {
+	s, err := NewLocalMediaStore(t.TempDir(), "http://localhost:8082")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, err := s.SaveFile(context.Background(), "t1", "", "material", []byte("pngdata"), "image/png", ".png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 本站托管 URL → 读到内容与 MIME
+	data, mime, ok := s.ReadLocal(context.Background(), asset.SourceURL)
+	if !ok || string(data) != "pngdata" || mime != "image/png" {
+		t.Errorf("本站 URL 应读到本地文件，得到 ok=%v data=%q mime=%q", ok, data, mime)
+	}
+	// 外部 URL → 不处理
+	if _, _, ok := s.ReadLocal(context.Background(), "https://cdn.example.com/x.png"); ok {
+		t.Error("外部 URL 不应读取")
+	}
+	// 路径穿越 → 拒绝
+	if _, _, ok := s.ReadLocal(context.Background(), "http://localhost:8082/media/../secret"); ok {
+		t.Error("路径穿越应被拒绝")
+	}
+}

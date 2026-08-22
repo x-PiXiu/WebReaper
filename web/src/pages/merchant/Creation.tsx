@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import AssetPicker from '../../components/AssetPicker'
+import VoicePicker from '../../components/VoicePicker'
 import { useBrandContext } from '../../hooks/useBrands'
 import type { GenerationTask, GenerationType, ModelCapability, MediaAsset, PromptRef } from '../../types/api'
 
@@ -32,6 +33,7 @@ const SUBTYPE_META: Record<string, { category: string; label: string; desc: stri
   sound_effect: { category: 'audio', label: '音效生成', desc: '时间轴事件驱动生成音效' },
   tts: { category: 'audio', label: '语音合成', desc: '文本合成语音（语速/音量/情绪可控）' },
   voice_clone: { category: 'audio', label: '声音克隆', desc: '引用音频复刻音色（voice_id 永久复用）' },
+  lip_sync: { category: 'video', label: '对口型', desc: '出镜视频 + 音频/文本生成口型匹配成片' },
   digital_human: { category: 'digital_human', label: '数字人', desc: '人像图 + 文本/音频生成口播视频' },
   subject: { category: 'other', label: '主体创建', desc: '创建主体素材，供参考生视频复用' },
 }
@@ -44,12 +46,10 @@ const CATEGORIES = [
   { key: 'other', label: '其他', icon: <AppstoreOutlined /> },
 ]
 
-// 傻瓜化三档分层（与 admin 模式开关同口径——此处只决定"出现顺序与分组"，
-// 是否出现由服务端 Enabled 过滤决定：admin 关掉的模式不会出现在 types 里）：
-//   默认集（快捷卡片区）：实体店/线上运营都用得上的核心创作
-//   进阶折叠：参考生视频的配套（音色互通 voice_id / 主体库 server_id 复用）+ admin 开启的其他模式
-const TIER_DEFAULT = ['text2image', 'text2video', 'img2video', 'tts', 'digital_human', 'reference2video']
-const TIER_ADVANCED = ['voice_clone', 'subject']
+// 傻瓜化分层（08 计划 D1 收敛后口径——与 admin 模式开关同源，是否出现由服务端
+// Enabled 过滤决定）：口播主链五端点为默认集；其余模式服务端默认关闭（admin 可开）
+const TIER_DEFAULT = ['reference2video', 'tts', 'lip_sync', 'voice_clone', 'subject']
+const TIER_ADVANCED: string[] = []
 
 const STATE_META: Record<string, { color: string; label: string }> = {
   created: { color: 'default', label: '排队中' },
@@ -292,8 +292,9 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     if (cap.image_slots !== 0 || ['digital_human', 'multiframe', 'subject', 'reference2video', 'text2image', 'img2video', 'start_end2video'].includes(subType)) {
       kinds.push('image')
     }
-    if (['voice_clone', 'digital_human'].includes(subType)) kinds.push('audio')
+    if (['voice_clone', 'digital_human', 'lip_sync'].includes(subType)) kinds.push('audio')
     if (subType === 'reference2video' && (cap.video_slots ?? 0) > 0) kinds.push('video')
+    if (subType === 'lip_sync') { kinds.push('video'); kinds.push('image') }
     return kinds
   }, [cap, subType])
 
@@ -391,7 +392,13 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     if (subType === 'voice_clone' && !submitRefs.some(r => r.kind === 'audio') && !clean.audio_url) { message.warning('请引用音频素材（声音克隆的原料）'); return }
     if (subType === 'digital_human' && !submitRefs.some(r => r.kind === 'image') && !clean.image) { message.warning('请引用人像图片'); return }
     if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { message.warning('请至少添加一个音效事件'); return }
-    if (!clean.prompt && !clean.text && subType !== 'subject' && subType !== 'multiframe') {
+    if (subType === 'lip_sync') {
+      const hasVideo = submitRefs.some(r => r.kind === 'video') || clean.video_url
+      if (!hasVideo) { message.warning('请引用一个出镜视频（@视频）'); return }
+      const hasAudio = submitRefs.some(r => r.kind === 'audio') || clean.audio_url || clean.text
+      if (!hasAudio) { message.warning('请引用语音音频或在上方输入正文文本'); return }
+    }
+    if (!clean.prompt && !clean.text && subType !== 'subject' && subType !== 'multiframe' && subType !== 'lip_sync') {
       if (subType !== 'tts' && subType !== 'voice_clone' && subType !== 'sound_effect') {
         message.warning('请输入提示词/文本'); return
       }
@@ -546,23 +553,38 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
             <Select size="small" style={{ width: 140, marginLeft: 10 }} value={get('movement_amplitude') || 'auto'} onChange={v => set('movement_amplitude', v)} options={MOVEMENT_OPTIONS} />
           </div>
         )
-      case 'voice_id':
+      case 'voice_id': {
+        // 声音克隆：键入自定义音色名（字母开头的唯一 ID），不选官方音色
+        if (subType === 'voice_clone') {
+          return (
+            <div key="voice_id" style={{ marginBottom: 12 }}>
+              <Text strong style={{ fontSize: 13 }}>音色名称</Text>
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                {clonedVoices.length > 0 ? '沿用我的音色名，或输入新名称' : '字母开头，如 my-voice-001，克隆后可反复用'}
+              </Text>
+              <AutoComplete
+                style={{ marginTop: 4, maxWidth: 300 }}
+                value={get('voice_id')}
+                onChange={(v) => set('voice_id', v)}
+                options={clonedVoices.map(v => ({ value: v, label: v }))}
+                filterOption={(input, option) => String(option?.value ?? '').toLowerCase().includes(String(input).toLowerCase())}
+                placeholder={clonedVoices.length > 0 ? '我的音色 / 新名称' : '如 my-voice-001'}
+              />
+            </div>
+          )
+        }
+        // TTS 端点参数是 voice_setting_voice_id，其余端点（digital_human/subject）是 voice_id
+        const key = subType === 'tts' ? 'voice_setting_voice_id' : 'voice_id'
         return (
           <div key="voice_id" style={{ marginBottom: 12 }}>
             <Text strong style={{ fontSize: 13 }}>音色</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-              {clonedVoices.length > 0 ? '从我的音色中选择，或输入新名称' : '给音色起个名（字母开头，如 my-voice-001），克隆后可反复用'}
-            </Text>
-            <AutoComplete
-              style={{ marginTop: 4, maxWidth: 300 }}
-              value={get('voice_id')}
-              onChange={(v) => set('voice_id', v)}
-              options={clonedVoices.map(v => ({ value: v, label: v }))}
-              filterOption={(input, option) => String(option?.value ?? '').toLowerCase().includes(String(input).toLowerCase())}
-              placeholder={clonedVoices.length > 0 ? '我的音色 / 新名称' : '如 my-voice-001'}
-            />
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>官方音色可试听；也可用「声音克隆」的自定义音色</Text>
+            <div style={{ marginTop: 4, maxWidth: 360 }}>
+              <VoicePicker value={get(key)} onChange={(v) => set(key, v)} myVoices={clonedVoices} />
+            </div>
           </div>
         )
+      }
       case 'voice_settings':
         return (
           <div key="voice_settings" style={{ marginBottom: 12 }}>
@@ -668,6 +690,18 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
           </div>
         )
       }
+      case 'lipsync_media':
+        return (
+          <div key="lipsync_media" style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 13 }}>素材（@引用）</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+              出镜视频（必需）+ 语音音频或正文文本（二选一）；多人脸可加一张人物正脸照
+            </Text>
+            <div style={{ marginTop: 6 }}>
+              <Button size="small" icon={<PlusOutlined />} onClick={() => setPicker({ mode: 'multi', accept: 'any', key: 'refs', title: '引用素材（视频/音频/图片）', max: 3 })}>@ 引用素材</Button>
+            </div>
+          </div>
+        )
       case 'subject_name':
         return (
           <div key="subject_name" style={{ marginBottom: 12 }}>
@@ -693,6 +727,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       case 'sound_effect': return ['timing', 'duration', 'seed']
       case 'tts': return ['voice_settings', 'voice_id']
       case 'voice_clone': return ['voice_id']
+      case 'lip_sync': return ['lipsync_media', 'voice_id']
       case 'digital_human': return ['voice_id', 'resolution']
       case 'subject': return ['subject_name', 'voice_id']
       default: return []
@@ -701,7 +736,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
 
   // 该模式主输入类型（画布/提示词引导）
   const mainInputKind = useMemo(() => {
-    if (subType === 'tts' || subType === 'voice_clone') return 'text' as const
+    if (subType === 'tts' || subType === 'voice_clone' || subType === 'lip_sync') return 'text' as const
     if (subType === 'sound_effect') return 'events' as const
     return 'prompt' as const
   }, [subType])
@@ -759,14 +794,26 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       )}
       {cap && mainInputKind === 'text' && (
         <div style={{ marginBottom: 14 }}>
+          {subType === 'voice_clone' && (
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+              试听文本（≤1000 字）：复刻完成后用新音色朗读这段话返回试听音频——按字符计费
+            </Text>
+          )}
           <TextArea
             rows={4} value={(params.text as string) || ''}
             onChange={e => setParams(prev => ({ ...prev, text: e.target.value }))}
-            showCount maxLength={cap.max_prompt_len || 10000}
-            placeholder="输入要合成/复刻的文本…"
+            showCount maxLength={subType === 'voice_clone' ? 1000 : (cap.max_prompt_len || 10000)}
+            placeholder={subType === 'voice_clone' ? '如：你好，欢迎使用我们的产品…（这段话会被克隆音色朗读）' : '输入要合成/复刻的文本…'}
             style={{ fontSize: 14, borderRadius: 10 }}
           />
         </div>
+      )}
+
+      {cap && subType === 'voice_clone' && (
+        <Alert type="info" showIcon style={{ marginBottom: 14 }}
+          message="声音克隆：@引用 一段人声做原料（mp3/m4a/wav，10 秒-5 分钟，≤20MB），起一个音色名即可"
+          description="复刻音色为临时音色——7 天内在语音合成中调用一次即可永久保留，逾期自动删除且积分不退。"
+        />
       )}
 
       {/* 参考素材（引用）——即梦式横排 */}

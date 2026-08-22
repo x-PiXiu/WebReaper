@@ -205,3 +205,8 @@ func extFromContentType(ct string) string {
 		return ".bin"
 	}
 }
+
+// ReadLocal OSS 素材无本地文件——URL 本身公网可达，调用方保持原 URL 即可。
+func (s *OSSMediaStore) ReadLocal(ctx context.Context, url string) ([]byte, string, bool) {
+	return nil, "", false
+}

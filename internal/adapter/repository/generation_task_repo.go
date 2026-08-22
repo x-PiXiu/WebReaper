@@ -172,3 +172,12 @@ func (r *GormGenerationTaskRepository) DeleteTerminalOlderThan(ctx context.Conte
 		Delete(&GenerationTaskPO{})
 	return res.RowsAffected, res.Error
 }
+
+// Delete 删除单条任务（tenantID 非空时校验归属——租户只能删自己的）。
+func (r *GormGenerationTaskRepository) Delete(ctx context.Context, tenantID, taskID string) error {
+	q := r.db.WithContext(ctx).Where("id = ?", taskID)
+	if tenantID != "" {
+		q = q.Where("tenant_id = ?", tenantID)
+	}
+	return q.Delete(&GenerationTaskPO{}).Error
+}

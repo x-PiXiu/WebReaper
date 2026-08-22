@@ -262,9 +262,18 @@ func (s *Searcher) GetVideoDetail(ctx context.Context, tenantID, plat, videoID s
 	if plat != platform {
 		return nil, fmt.Errorf("douyinweb 不支持平台 %s", plat)
 	}
+	info, err := s.getAwemeDetail(ctx, tenantID, videoID)
+	if err != nil {
+		return nil, err
+	}
+	v := toSocialVideo(*info)
+	return &v, nil
+}
 
-	var out *port.SocialVideo
-	err := s.withVideoPage(ctx, tenantID, plat, videoID, func(pctx context.Context) error {
+// getAwemeDetail 视频页上下文调详情接口（LinkResolver 复用——拿 play_addr 原始数据）。
+func (s *Searcher) getAwemeDetail(ctx context.Context, tenantID, videoID string) (*awemeInfo, error) {
+	var out *awemeInfo
+	err := s.withVideoPage(ctx, tenantID, platform, videoID, func(pctx context.Context) error {
 		paramsJS := buildParamsJS(map[string]string{"aweme_id": videoID})
 		js := xhrSyncJS("/aweme/v1/web/aweme/detail/", paramsJS)
 		raw, e := evalSync(pctx, js)
@@ -278,8 +287,7 @@ func (s *Searcher) GetVideoDetail(ctx context.Context, tenantID, plat, videoID s
 		if dr.StatusCode != 0 {
 			return statusErr(dr.StatusCode, "")
 		}
-		v := toSocialVideo(dr.AwemeDetail)
-		out = &v
+		out = &dr.AwemeDetail
 		return nil
 	})
 	if err != nil {
@@ -440,6 +448,12 @@ type awemeInfo struct {
 	} `json:"author"`
 	Statistics videoStats `json:"statistics"`
 	CreateTime int64      `json:"create_time"`
+	// Video 播放地址（文案提取管线的下载源——replaceDomain 后可直接 GET）
+	Video struct {
+		PlayAddr struct {
+			URLList []string `json:"url_list"`
+		} `json:"play_addr"`
+	} `json:"video"`
 }
 
 type searchResp struct {
