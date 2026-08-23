@@ -22,9 +22,9 @@ type GenerationTaskPO struct {
 	State            string    `gorm:"size:16;index"`
 	ErrCode          string    `gorm:"size:64"`
 	ErrMsg           string    `gorm:"size:512"`
-	ParamsJSON       string    `gorm:"type:text"`
+	ParamsJSON       string    `gorm:"type:json"`
 	Payload          string    `gorm:"size:512"`
-	CreationsJSON    string    `gorm:"type:text"`
+	CreationsJSON    string    `gorm:"type:json"`
 	Credits          int
 	OffPeak          bool
 	Watermark        bool

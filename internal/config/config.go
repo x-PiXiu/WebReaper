@@ -152,7 +152,7 @@ type DBConfig struct {
 // DSN 构造 GORM/MySQL 驱动所需的 DSN。
 // WSL 下 MySQL 绑定 IPv6 [::1]，host 用 localhost 时驱动会自动解析。
 func (c DBConfig) DSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&collation=utf8mb4_unicode_ci&parseTime=True&loc=Local",
 		c.User, c.Password, c.Host, c.Port, c.Name)
 }
 

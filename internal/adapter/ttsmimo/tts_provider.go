@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"webreaper/internal/usecase/port"
@@ -105,7 +106,16 @@ func (p *MiMoTTSProvider) SynthesizeDesign(ctx context.Context, text string, sty
 }
 
 // SynthesizeClone 声音克隆（传入音频样本base64 + 合成文本）。
+//
+// 小米MiMo声音克隆API要求 voice 字段为 DataURL 格式（data:audio/mpeg;base64,...）。
 func (p *MiMoTTSProvider) SynthesizeClone(ctx context.Context, sampleBase64 string, text string) (audio []byte, format string, err error) {
+	// 确保 sampleBase64 是 DataURL 格式
+	voiceDataURI := sampleBase64
+	if !strings.HasPrefix(sampleBase64, "data:") {
+		// 转换为 DataURL 格式
+		voiceDataURI = "data:audio/mpeg;base64," + sampleBase64
+	}
+
 	// 构建请求
 	req := map[string]any{
 		"model": "mimo-v2.5-tts-voiceclone",
@@ -114,7 +124,7 @@ func (p *MiMoTTSProvider) SynthesizeClone(ctx context.Context, sampleBase64 stri
 		},
 		"audio": map[string]any{
 			"format": "mp3",
-			"voice":  sampleBase64,
+			"voice":  voiceDataURI,
 		},
 	}
 

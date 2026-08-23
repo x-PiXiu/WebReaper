@@ -74,6 +74,7 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 		Text      string   `json:"text"`
 		Materials []string `json:"materials"`
 		Template  string   `json:"template"`
+		Type      string   `json:"type"`      // 生成类型：video/image/audio/voice
 		Duration  int      `json:"duration"`
 		Quality   string   `json:"quality"`
 	}
@@ -88,6 +89,7 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 		Text:      req.Text,
 		Materials: req.Materials,
 		Template:  req.Template,
+		Type:      req.Type,
 		Duration:  req.Duration,
 		Quality:   req.Quality,
 	})

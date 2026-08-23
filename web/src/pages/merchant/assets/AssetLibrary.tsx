@@ -72,6 +72,8 @@ export default function AssetLibrary() {
   const [tab, setTab] = useState<TabKey>('digital_human')
   const [q, setQ] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [generateOpen, setGenerateOpen] = useState(false)
+  const [generateType, setGenerateType] = useState<'image' | 'video' | 'audio' | 'voice'>('image')
   const queryClient = useQueryClient()
 
   const { data: assets = [], isLoading } = useMediaAssets()
@@ -152,9 +154,32 @@ export default function AssetLibrary() {
 
       <div className="ip-toolbar">
         <Segmented value={tab} onChange={v => setTab(v as TabKey)} options={TABS.map(t => ({ ...t }))} />
-        {(tab === 'video' || tab === 'image' || tab === 'audio') && (
-          <Input.Search allowClear placeholder="搜索" style={{ maxWidth: 240 }} value={q} onChange={e => setQ(e.target.value)} />
-        )}
+        <Space>
+          {(tab === 'video' || tab === 'image' || tab === 'audio') && (
+            <Input.Search allowClear placeholder="搜索" style={{ maxWidth: 240 }} value={q} onChange={e => setQ(e.target.value)} />
+          )}
+          {/* 生成按钮 */}
+          {tab === 'image' && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => { setGenerateType('image'); setGenerateOpen(true) }}>
+              生成图片
+            </Button>
+          )}
+          {tab === 'video' && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => { setGenerateType('video'); setGenerateOpen(true) }}>
+              生成视频
+            </Button>
+          )}
+          {tab === 'audio' && (
+            <Space>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => { setGenerateType('audio'); setGenerateOpen(true) }}>
+                生成音频
+              </Button>
+              <Button icon={<SoundOutlined />} onClick={() => { setGenerateType('voice'); setGenerateOpen(true) }}>
+                克隆音色
+              </Button>
+            </Space>
+          )}
+        </Space>
       </div>
 
       {tab === 'digital_human' && (
@@ -308,6 +333,18 @@ export default function AssetLibrary() {
 
       <CreateSubjectModal open={createOpen} voices={myVoices} onClose={() => setCreateOpen(false)}
         onCreated={() => { refetchSubjects(); message.success('数字人创建成功') }} />
+
+      {/* 生成素材模态框 */}
+      <GenerateAssetModal
+        open={generateOpen}
+        type={generateType}
+        onClose={() => setGenerateOpen(false)}
+        onGenerated={() => {
+          setGenerateOpen(false)
+          queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY })
+          message.success('素材生成成功')
+        }}
+      />
     </div>
   )
 }
@@ -443,6 +480,238 @@ function CreateSubjectModal({ open, voices, onClose, onCreated }: {
           </Text>
         </div>
         )}
+      </Space>
+    </Modal>
+  )
+}
+
+/** 生成素材模态框 */
+function GenerateAssetModal({ open, type, onClose, onGenerated }: {
+  open: boolean
+  type: 'image' | 'video' | 'audio' | 'voice'
+  onClose: () => void
+  onGenerated: () => void
+}) {
+  const [text, setText] = useState('')
+  const [voiceId, setVoiceId] = useState('')
+  const [audioFile, setAudioFile] = useState<File | null>(null)
+  const [generating, setGenerating] = useState(false)
+  const [taskId, setTaskId] = useState<string | null>(null)
+  const [taskState, setTaskState] = useState<string | null>(null)
+
+  const { data: voices = [] } = useQuery({
+    queryKey: ['generation-voices'],
+    queryFn: () => businessApi.listGenerationVoices().then(r => r.voices),
+    enabled: open && type === 'audio',
+  })
+
+  const handleGenerate = async () => {
+    if (!text.trim()) {
+      message.warning('请输入描述文本')
+      return
+    }
+
+    setGenerating(true)
+    try {
+      let result: any
+
+      switch (type) {
+        case 'image':
+          result = await businessApi.submitGenerationTask({
+            sub_type: 'text2image',
+            model: '',
+            params: { prompt: text },
+          })
+          break
+
+        case 'video':
+          result = await businessApi.submitGenerationTask({
+            sub_type: 'text2video',
+            model: '',
+            params: { prompt: text },
+          })
+          break
+
+        case 'audio':
+          if (!voiceId) {
+            message.warning('请选择音色')
+            setGenerating(false)
+            return
+          }
+          result = await businessApi.submitGenerationTask({
+            sub_type: 'tts',
+            model: '',
+            params: {
+              text: text,
+              voice_setting_voice_id: voiceId,
+            },
+          })
+          break
+
+        case 'voice':
+          if (!audioFile) {
+            message.warning('请上传参考音频')
+            setGenerating(false)
+            return
+          }
+          // 先上传音频
+          const uploadResult = await businessApi.uploadAsset(audioFile)
+          result = await businessApi.submitGenerationTask({
+            sub_type: 'voice_clone',
+            model: '',
+            params: {
+              text: text,
+              audio_url: uploadResult.url,
+            },
+          })
+          break
+      }
+
+      setTaskId(result.id)
+      setTaskState(result.state)
+      message.success('生成任务已提交')
+
+      // 轮询任务状态
+      if (result.state !== 'success') {
+        pollTask(result.id)
+      } else {
+        onGenerated()
+      }
+    } catch (error) {
+      message.error('生成失败')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const pollTask = async (id: string) => {
+    const poll = async () => {
+      try {
+        const task = await businessApi.listGenerationTasks().then(r => r.tasks.find(t => t.id === id))
+        if (task) {
+          setTaskState(task.state)
+          if (task.state === 'success') {
+            message.success('生成完成')
+            onGenerated()
+            return
+          } else if (task.state === 'failed') {
+            message.error('生成失败: ' + (task.err_msg || '未知错误'))
+            return
+          }
+        }
+        setTimeout(poll, 3000)
+      } catch {
+        setTimeout(poll, 3000)
+      }
+    }
+    setTimeout(poll, 3000)
+  }
+
+  const getTitle = () => {
+    switch (type) {
+      case 'image': return '生成图片'
+      case 'video': return '生成视频'
+      case 'audio': return '生成音频'
+      case 'voice': return '克隆音色'
+    }
+  }
+
+  const getPlaceholder = () => {
+    switch (type) {
+      case 'image': return '描述你想要的图片，如：一个现代化的品牌Logo，简约风格'
+      case 'video': return '描述你想要的视频，如：品牌Logo缓慢旋转，背景渐变'
+      case 'audio': return '输入要合成的文本，如：欢迎来到我们的品牌'
+      case 'voice': return '输入克隆音色后要朗读的文本'
+    }
+  }
+
+  return (
+    <Modal
+      title={getTitle()}
+      open={open}
+      onCancel={onClose}
+      width={600}
+      footer={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button
+            type="primary"
+            loading={generating}
+            disabled={generating || !!taskId}
+            onClick={handleGenerate}
+          >
+            {generating ? '生成中...' : taskId ? '已提交' : '生成'}
+          </Button>
+        </Space>
+      }
+    >
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        {/* 文本输入 */}
+        <div>
+          <Text strong>{type === 'audio' ? '合成文本' : type === 'voice' ? '朗读文本' : '描述'}</Text>
+          <Input.TextArea
+            style={{ marginTop: 8 }}
+            placeholder={getPlaceholder()}
+            autoSize={{ minRows: 3, maxRows: 6 }}
+            value={text}
+            onChange={e => setText(e.target.value)}
+            disabled={generating || !!taskId}
+          />
+        </div>
+
+        {/* 音色选择（仅音频） */}
+        {type === 'audio' && (
+          <div>
+            <Text strong>选择音色</Text>
+            <div style={{ marginTop: 8 }}>
+              <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={[]} />
+            </div>
+          </div>
+        )}
+
+        {/* 参考音频上传（仅声音克隆） */}
+        {type === 'voice' && (
+          <div>
+            <Text strong>参考音频</Text>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+              上传一段音频（10秒-5分钟），系统将克隆这个音色
+            </Text>
+            <Upload
+              maxCount={1}
+              accept="audio/mp3,audio/wav,audio/m4a"
+              beforeUpload={(file) => {
+                setAudioFile(file)
+                return false
+              }}
+              onRemove={() => setAudioFile(null)}
+              disabled={generating || !!taskId}
+            >
+              <Button icon={<SoundOutlined />} style={{ marginTop: 8 }}>
+                {audioFile ? '重新上传' : '上传参考音频'}
+              </Button>
+            </Upload>
+          </div>
+        )}
+
+        {/* 任务状态 */}
+        {taskId && (
+          <div style={{ padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
+            <Space>
+              <Tag color={taskState === 'success' ? 'green' : taskState === 'failed' ? 'red' : 'processing'}>
+                {taskState === 'success' ? '已完成' : taskState === 'failed' ? '失败' : '生成中'}
+              </Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>任务ID: {taskId}</Text>
+            </Space>
+          </div>
+        )}
+
+        {/* 说明 */}
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {type === 'image' && '生成的图片将自动保存到素材库'}
+          {type === 'video' && '生成的视频将自动保存到素材库，生成过程需要几分钟'}
+          {type === 'audio' && '生成的音频将自动保存到素材库'}
+          {type === 'voice' && '克隆的音色将保存到音色库，可在TTS中使用'}
+        </Text>
       </Space>
     </Modal>
   )

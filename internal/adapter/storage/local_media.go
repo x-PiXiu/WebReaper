@@ -115,10 +115,12 @@ func (s *LocalMediaStore) List(ctx context.Context, tenantID, ownerType string) 
 		}
 		rel, _ := filepath.Rel(s.dir, path) // {tenantID}/{date}/{name}
 		id := filepath.ToSlash(rel)
+		mime := mimeFromExt(filepath.Ext(name))
 		out = append(out, entity.MediaAsset{
 			ID: id, TenantID: tenantID, OwnerType: fileOwnerType(name),
+			Type: entity.InferTypeFromMime(mime), // 新增：自动推断素材类型
 			SourceURL: s.publicURL(id), StoredURL: s.publicURL(id),
-			Mime: mimeFromExt(filepath.Ext(name)), SizeBytes: info.Size(),
+			Mime: mime, SizeBytes: info.Size(),
 			CreatedAt: info.ModTime(),
 		})
 		return nil

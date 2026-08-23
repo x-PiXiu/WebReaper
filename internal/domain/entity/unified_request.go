@@ -11,6 +11,7 @@ package entity
 //   - 用户上传1张品牌Logo + 输入"品牌宣传视频" → 系统自动选择img2video端点
 //   - 用户上传1张图片 + 1个音频 → 系统自动选择digital_human端点
 //   - 用户只输入文本 → 系统自动选择text2video端点
+//   - 用户输入文本 + 指定type=audio → 系统选择tts端点
 type UnifiedGenerationRequest struct {
 	// 基础信息（从JWT/上下文获取，不需要客户端传）
 	// TenantID  string `json:"tenant_id"`  // 从JWT获取
@@ -23,6 +24,7 @@ type UnifiedGenerationRequest struct {
 
 	// 用户选择（可选，有默认值）
 	Template  string   `json:"template"`   // 模板ID（可选，管理后台配置）
+	Type      string   `json:"type"`       // 生成类型（可选：video/image/audio/voice）
 	Duration  int      `json:"duration"`   // 时长秒数（可选，默认根据模板）
 	Quality   string   `json:"quality"`    // 质量（可选，默认720p）
 

@@ -31,6 +31,7 @@ import (
 	"webreaper/internal/adapter/crawler"
 	"webreaper/internal/adapter/crypto"
 	geoadapter "webreaper/internal/adapter/geo"
+	"webreaper/internal/adapter/ttsmimo"
 	"webreaper/internal/adapter/handler"
 	kbretriever "webreaper/internal/adapter/knowledge"
 	"webreaper/internal/adapter/lock"
@@ -911,16 +912,16 @@ func main() {
 			log.Warn("AI 生成器未装配——文案双产出不可用（提取仍可用）")
 			router.SetTranscript(videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, nil))
 		}
-		// 多厂商 provider 注册（视频/图片生成）
+		// 多厂商 provider 注册
 		providers := map[string]port.GenerationProvider{
 			"vidu": viduProvider,
 		}
-		// TODO: 当接入新的视频/图片生成厂商时，在这里添加
-		// 示例：
-		// if klingKey := os.Getenv("KLING_API_KEY"); klingKey != "" {
-		//     klingProvider := kling.NewKlingProvider(klingKey)
-		//     providers["kling"] = klingProvider
-		// }
+		// 小米MiMo TTS provider（音频/TTS/声音克隆走小米MiMo）
+		if mimoKey := os.Getenv("MIMO_API_KEY"); mimoKey != "" {
+			mimoTTS := ttsmimo.NewMiMoTTSProvider(mimoKey, "")
+			providers["xiaomi-mimo"] = ttsmimo.NewMiMoAsGenerationProvider(mimoTTS)
+			log.Info("小米MiMo TTS provider 已注册（音频/TTS/声音克隆）")
+		}
 
 		genUC := generation.NewGenerationUseCase(providers, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
 		// 注入能力路由解析器
@@ -995,6 +996,9 @@ func main() {
 			genUC.SetAssetStore(mediaStore)
 			router.SetMedia(mediaStore, mediaDir)
 		}
+		// 注入端点选择器（统一提交API需要）
+		endpointSelector := generation.NewEndpointSelector(mediaStore, nil)
+		genUC.SetEndpointSelector(endpointSelector)
 		router.SetGeneration(genUC, viduProvider, genRegistry, genSpecRepo)
 		router.SetIntegrationRepo(integrationRepo) // 能力路由新表（集成中心 vendor/capability 管理）
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429

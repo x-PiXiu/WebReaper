@@ -130,47 +130,132 @@ func (s *EndpointSelectorImpl) analyzeMaterials(materials []entity.MediaAsset) M
 
 // selectEndpoint 根据素材组合选择端点。
 func (s *EndpointSelectorImpl) selectEndpoint(req entity.UnifiedGenerationRequest, stats MaterialStats, hasText bool) (string, entity.GenerationParams, error) {
+	// 如果用户明确指定了类型，直接使用
+	if req.Type != "" {
+		return s.selectByType(req, stats, hasText)
+	}
+
 	// 情况1: 有视频+音频 → 对口型
 	if stats.VideoCount > 0 && stats.AudioCount > 0 {
-		return "lip_sync", s.buildLipSyncParams(req, stats), nil
+		params := s.buildLipSyncParams(req, stats)
+		params["__sub_type"] = "lip_sync"
+		return "lip_sync", params, nil
 	}
 
 	// 情况2: 有视频+文本 → 对口型（文本驱动）
 	if stats.VideoCount > 0 && hasText {
-		return "lip_sync", s.buildLipSyncTextParams(req, stats), nil
+		params := s.buildLipSyncTextParams(req, stats)
+		params["__sub_type"] = "lip_sync"
+		return "lip_sync", params, nil
 	}
 
 	// 情况3: 单张图片+音频 → 数字人口播
 	if stats.ImageCount == 1 && stats.AudioCount > 0 {
-		return "digital_human", s.buildDigitalHumanParams(req, stats), nil
+		params := s.buildDigitalHumanParams(req, stats)
+		params["__sub_type"] = "digital_human"
+		return "digital_human", params, nil
 	}
 
 	// 情况4: 单张图片+文本 → 图生视频
 	if stats.ImageCount == 1 && hasText {
-		return "img2video", s.buildImg2VideoParams(req, stats), nil
+		params := s.buildImg2VideoParams(req, stats)
+		params["__sub_type"] = "img2video"
+		return "img2video", params, nil
 	}
 
 	// 情况5: 恰好2张图片 → 首尾帧视频
 	if stats.ImageCount == 2 {
-		return "start_end2video", s.buildStartEndParams(req, stats), nil
+		params := s.buildStartEndParams(req, stats)
+		params["__sub_type"] = "start_end2video"
+		return "start_end2video", params, nil
 	}
 
 	// 情况6: 3-7张图片 → 参考生视频
 	if stats.ImageCount >= 3 && stats.ImageCount <= 7 {
-		return "reference2video", s.buildReference2VideoParams(req, stats), nil
+		params := s.buildReference2VideoParams(req, stats)
+		params["__sub_type"] = "reference2video"
+		return "reference2video", params, nil
 	}
 
 	// 情况7: 只有音频 → 语音合成
 	if stats.AudioCount > 0 && stats.ImageCount == 0 && stats.VideoCount == 0 {
-		return "tts", s.buildTTSParams(req, stats), nil
+		params := s.buildTTSParams(req, stats)
+		params["__sub_type"] = "tts"
+		return "tts", params, nil
 	}
 
 	// 情况8: 只有文本 → 文生视频
 	if hasText && stats.ImageCount == 0 && stats.VideoCount == 0 && stats.AudioCount == 0 {
-		return "text2video", s.buildText2VideoParams(req), nil
+		params := s.buildText2VideoParams(req)
+		params["__sub_type"] = "text2video"
+		return "text2video", params, nil
 	}
 
 	return "", nil, fmt.Errorf("无法根据素材组合确定端点类型")
+}
+
+// selectByType 根据用户指定的类型选择端点。
+func (s *EndpointSelectorImpl) selectByType(req entity.UnifiedGenerationRequest, stats MaterialStats, hasText bool) (string, entity.GenerationParams, error) {
+	switch req.Type {
+	case "video":
+		// 视频类型：根据素材选择具体端点
+		if stats.ImageCount == 1 {
+			params := s.buildImg2VideoParams(req, stats)
+			params["__sub_type"] = "img2video"
+			return "img2video", params, nil
+		} else if stats.ImageCount == 2 {
+			params := s.buildStartEndParams(req, stats)
+			params["__sub_type"] = "start_end2video"
+			return "start_end2video", params, nil
+		} else if stats.ImageCount >= 3 {
+			params := s.buildReference2VideoParams(req, stats)
+			params["__sub_type"] = "reference2video"
+			return "reference2video", params, nil
+		} else {
+			params := s.buildText2VideoParams(req)
+			params["__sub_type"] = "text2video"
+			return "text2video", params, nil
+		}
+	case "image":
+		params := s.buildText2ImageParams(req)
+		params["__sub_type"] = "text2image"
+		return "text2image", params, nil
+	case "audio":
+		params := s.buildTTSParams(req, stats)
+		params["__sub_type"] = "tts"
+		return "tts", params, nil
+	case "voice":
+		params := s.buildVoiceCloneParams(req, stats)
+		params["__sub_type"] = "voice_clone"
+		return "voice_clone", params, nil
+	default:
+		return "", nil, fmt.Errorf("不支持的生成类型: %s", req.Type)
+	}
+}
+
+// buildText2ImageParams 构建文生图参数。
+func (s *EndpointSelectorImpl) buildText2ImageParams(req entity.UnifiedGenerationRequest) entity.GenerationParams {
+	return entity.GenerationParams{
+		"prompt": req.Text,
+	}
+}
+
+// buildVoiceCloneParams 构建声音克隆参数。
+func (s *EndpointSelectorImpl) buildVoiceCloneParams(req entity.UnifiedGenerationRequest, stats MaterialStats) entity.GenerationParams {
+	// 生成唯一的 voice_id（8-256位，字母/数字/横线/下划线，首字符必须为英文字母）
+	voiceID := fmt.Sprintf("voice-clone-%d", len(req.Text))
+	if len(voiceID) < 8 {
+		voiceID = voiceID + "-default"
+	}
+	
+	params := entity.GenerationParams{
+		"text":     req.Text,
+		"voice_id": voiceID,
+	}
+	if len(stats.Audios) > 0 {
+		params["audio_url"] = stats.Audios[0].SourceURL
+	}
+	return params
 }
 
 // buildText2VideoParams 构建文生视频参数。
@@ -248,18 +333,23 @@ func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.
 		params["duration"] = req.Duration
 	}
 
-	// 如果用户指定了质量，使用用户指定的
-	if req.Quality != "" {
-		params["resolution"] = req.Quality
-	} else {
-		params["resolution"] = "720p" // 默认720p
-	}
+	// 根据端点类型决定是否添加分辨率和比例
+	// TTS、voice_clone、text2audio 等音频端点不需要分辨率
+	subType, _ := params["__sub_type"].(string)
+	if subType != "tts" && subType != "voice_clone" && subType != "text2audio" {
+		// 如果用户指定了质量，使用用户指定的
+		if req.Quality != "" {
+			params["resolution"] = req.Quality
+		} else {
+			params["resolution"] = "720p" // 默认720p
+		}
 
-	// 如果用户指定了比例，使用用户指定的
-	if req.AspectRatio != "" {
-		params["aspect_ratio"] = req.AspectRatio
-	} else {
-		params["aspect_ratio"] = "16:9" // 默认16:9
+		// 如果用户指定了比例，使用用户指定的
+		if req.AspectRatio != "" {
+			params["aspect_ratio"] = req.AspectRatio
+		} else {
+			params["aspect_ratio"] = "16:9" // 默认16:9
+		}
 	}
 
 	return params

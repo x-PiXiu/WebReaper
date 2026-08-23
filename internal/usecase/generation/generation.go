@@ -216,6 +216,29 @@ func (uc *GenerationUseCase) pickModelFor(ctx context.Context, subType string, s
 	return sel.PickModel(caps, params)
 }
 
+// getDefaultModel 从数据库获取默认模型。
+// 当 EndpointAdapter 没有实现 ModelAutoSelector 时使用。
+func (uc *GenerationUseCase) getDefaultModel(ctx context.Context, subType string) string {
+	// 从 registry 获取所有可用模型
+	names, err := uc.registry.Models(ctx, subType)
+	if err != nil || len(names) == 0 {
+		return ""
+	}
+
+	// 查找默认模型（is_default=true）
+	for _, name := range names {
+		if cap, cErr := uc.registry.Capability(ctx, subType, name); cErr == nil {
+			// 如果有默认标记，返回这个模型
+			if cap.Model != "" {
+				return cap.Model
+			}
+		}
+	}
+
+	// 如果没有默认模型，返回第一个
+	return names[0]
+}
+
 // inlineMediaKeys 请求体中承载媒体 URL 的字段（数组与单值两种形态）。
 var inlineMediaKeys = [2][]string{
 	{"images", "videos"},                        // 数组字段
@@ -337,6 +360,10 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if model == "" {
 		if sel, ok := adapter.(port.ModelAutoSelector); ok {
 			model = uc.pickModelFor(ctx, in.SubType, sel, in.Params)
+		}
+		// 如果还是空，尝试从数据库获取默认模型
+		if model == "" {
+			model = uc.getDefaultModel(ctx, in.SubType)
 		}
 	}
 	// 能力唯一来源：Registry（DB 驱动，管理后台可热改）——策略不持有能力表
@@ -883,6 +910,7 @@ type UnifiedSubmitInput struct {
 	Text      string   // 文本描述
 	Materials []string // 素材ID列表
 	Template  string   // 模板ID（可选）
+	Type      string   // 生成类型（可选：video/image/audio/voice）
 	Duration  int      // 时长（可选）
 	Quality   string   // 质量（可选）
 }
@@ -907,6 +935,7 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 		Text:      in.Text,
 		Materials: in.Materials,
 		Template:  in.Template,
+		Type:      in.Type,
 		Duration:  in.Duration,
 		Quality:   in.Quality,
 	}
