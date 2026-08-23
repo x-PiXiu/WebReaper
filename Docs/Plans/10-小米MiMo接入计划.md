@@ -510,5 +510,101 @@ audioData, err := base64.StdEncoding.DecodeString(result.Choices[0].Message.Audi
 
 ---
 
+## 七、架构缺陷修复（已完成）
+
+### 7.1 问题描述
+
+原有架构存在一个关键缺陷：
+
+```go
+// 原有设计：GenerationUseCase 只有一个 provider
+type GenerationUseCase struct {
+    provider port.GenerationProvider  // 单一厂商
+    // ...
+}
+```
+
+**问题**：
+1. `provider` 是单一的，不支持多厂商
+2. 没有使用 `CapabilityResolver` 动态选择厂商
+3. 不同业务（视频/TTS/图片）都用同一个厂商
+
+### 7.2 解决方案（已实施）
+
+**修改 GenerationUseCase，支持多厂商动态选择**：
+
+```go
+// 修改后的设计
+type GenerationUseCase struct {
+    providers map[string]port.GenerationProvider  // 多厂商
+    resolver  port.CapabilityResolver            // 能力路由
+    registry  port.EndpointRegistry
+    repo      port.GenerationTaskRepository
+    // ...
+}
+
+// subType → capID 映射
+var subTypeToCapID = map[string]string{
+    "text2video":      "video",
+    "img2video":       "video",
+    "tts":             "tts",
+    "voice_clone":     "voice-clone",
+    // ...
+}
+
+// 根据 subType 动态选择 provider
+func (uc *GenerationUseCase) getProvider(ctx context.Context, subType string) (port.GenerationProvider, error) {
+    // 1. 查询能力路由
+    capID := subTypeToCapID[subType]
+    cap, err := uc.resolver.Resolve(ctx, capID)
+    if err == nil && cap.VendorID != "" {
+        if provider, ok := uc.providers[cap.VendorID]; ok {
+            return provider, nil
+        }
+    }
+    
+    // 2. 使用默认 provider
+    return uc.providers[uc.defaultProvider], nil
+}
+```
+
+### 7.3 实施进度
+
+| 任务 | 状态 | 说明 |
+|------|------|------|
+| 7.3.1 | ✅ 完成 | 修改 GenerationUseCase 支持多 provider |
+| 7.3.2 | ✅ 完成 | 注入 CapabilityResolver |
+| 7.3.3 | ✅ 完成 | 实现 subType → capID 映射 |
+| 7.3.4 | ✅ 完成 | 在 main.go 中注册多个 provider |
+| 7.3.5 | ✅ 完成 | 测试验证（单元测试通过） |
+
+### 7.4 配置示例
+
+**能力路由配置**：
+```sql
+-- 音频相关能力 → 小米MiMo
+INSERT INTO integration_capabilities (id, cap_id, vendor_id, endpoint, model, is_default, enabled)
+VALUES 
+('tts#xiaomi-mimo', 'tts', 'xiaomi-mimo', '/v1/chat/completions', 'mimo-v2.5-tts', 1, 1),
+('voice-clone#xiaomi-mimo', 'voice-clone', 'xiaomi-mimo', '/v1/chat/completions', 'mimo-v2.5-tts-voiceclone', 1, 1);
+
+-- 视频/图片能力 → Vidu
+INSERT INTO integration_capabilities (id, cap_id, vendor_id, endpoint, model, is_default, enabled)
+VALUES 
+('video#vidu', 'video', 'vidu', '/ent/v2/text2video', 'viduq3-pro', 1, 1),
+('image#vidu', 'image', 'vidu', '/ent/v2/reference2image', 'viduq2', 1, 1);
+```
+
+**环境变量配置**：
+```bash
+# Vidu API Key
+VIDU_API_KEY=your-vidu-key
+
+# 小米MiMo API Key（可选）
+MIMO_API_KEY=your-mimo-key
+```
+
+---
+
 *文档生成时间：2026-08-23*
 *基于获客智能体统一生成架构方案*

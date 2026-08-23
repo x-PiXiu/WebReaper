@@ -827,7 +827,7 @@ func main() {
 			}
 			return cfgRow.APIKey, nil
 		})
-		var genProvider port.GenerationProvider = provider.NewSwitchingProvider(vp, provider.NewMockGenerationProvider(), resolveViduKey)
+		var viduProvider port.GenerationProvider = provider.NewSwitchingProvider(vp, provider.NewMockGenerationProvider(), resolveViduKey)
 		if bootKey != "" && bootEnabled {
 			log.Info("统一生成已接入 Vidu（真实 API；后台改 Key/停用 ≤10s 热切换，无需重启）")
 		} else if bootKey != "" {
@@ -911,7 +911,22 @@ func main() {
 			log.Warn("AI 生成器未装配——文案双产出不可用（提取仍可用）")
 			router.SetTranscript(videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, nil))
 		}
-		genUC := generation.NewGenerationUseCase(genProvider, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
+		// 多厂商 provider 注册（视频/图片生成）
+		providers := map[string]port.GenerationProvider{
+			"vidu": viduProvider,
+		}
+		// TODO: 当接入新的视频/图片生成厂商时，在这里添加
+		// 示例：
+		// if klingKey := os.Getenv("KLING_API_KEY"); klingKey != "" {
+		//     klingProvider := kling.NewKlingProvider(klingKey)
+		//     providers["kling"] = klingProvider
+		// }
+
+		genUC := generation.NewGenerationUseCase(providers, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
+		// 注入能力路由解析器
+		if capResolver != nil {
+			genUC.SetCapabilityResolver(capResolver)
+		}
 		// 任务终态站内通知（异步任务完成/失败主动唤醒——此前静默完成，商户不留
 		// 在页面上就看不到结果）。notifyUC 未装配（DB 缺失等）则静默跳过。
 		if notifyUC != nil {
@@ -980,7 +995,7 @@ func main() {
 			genUC.SetAssetStore(mediaStore)
 			router.SetMedia(mediaStore, mediaDir)
 		}
-		router.SetGeneration(genUC, genProvider, genRegistry, genSpecRepo)
+		router.SetGeneration(genUC, viduProvider, genRegistry, genSpecRepo)
 		router.SetIntegrationRepo(integrationRepo) // 能力路由新表（集成中心 vendor/capability 管理）
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429
 		genUC.SetConcurrency(5)

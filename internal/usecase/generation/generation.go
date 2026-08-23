@@ -22,12 +22,36 @@ import (
 	"webreaper/internal/usecase/port"
 )
 
+// subTypeToCapID 端点类型 → 能力ID映射。
+// 用于从 CapabilityResolver 查询该端点应该使用哪个厂商。
+var subTypeToCapID = map[string]string{
+	"text2video":      "video",
+	"img2video":       "video",
+	"start_end2video": "video",
+	"reference2video": "video",
+	"multiframe":      "video",
+	"digital_human":   "digital-human",
+	"lip_sync":        "video",
+	"subject":         "video",
+	"text2image":      "image",
+	"tts":             "tts",
+	"voice_clone":     "voice-clone",
+	"text2audio":      "audio",
+	"sound_effect":    "audio",
+}
+
 // GenerationUseCase 统一生成用例。
+//
+// 设计（多厂商动态选择）：
+//   - providers：多个厂商的 provider 实现（vidu/xiaomi-mimo/kling/...）
+//   - resolver：能力路由解析器，根据端点类型查询应该使用哪个厂商
+//   - getProvider()：根据 subType 动态选择 provider
 type GenerationUseCase struct {
-	provider port.GenerationProvider
-	registry port.EndpointRegistry
-	repo     port.GenerationTaskRepository
-	asset    port.MediaAssetStore // 可选；nil=不转存（产物仅保留 24h URL）
+	providers map[string]port.GenerationProvider // 多厂商 provider
+	resolver  port.CapabilityResolver           // 能力路由解析器（可选；nil=使用默认provider）
+	registry  port.EndpointRegistry
+	repo      port.GenerationTaskRepository
+	asset     port.MediaAssetStore // 可选；nil=不转存（产物仅保留 24h URL）
 	quotaGate port.QuotaStore     // 可选；generation 场景配额
 	usageRec  port.UsageRecorder  // 可选；generation 场景计量
 	// submitSem 并发节流（P3）：限制同时提交到上游的请求数，防瞬时高峰触发
@@ -43,14 +67,74 @@ type GenerationUseCase struct {
 	callbackURL string
 	// endpointSelector 端点选择器（可选；nil=不支持统一提交）
 	endpointSelector port.EndpointSelector
+	// defaultProvider 默认厂商（当 resolver 未配置或查询失败时使用）
+	defaultProvider string
 }
 
-// NewGenerationUseCase 创建统一生成用例。
-func NewGenerationUseCase(provider port.GenerationProvider, registry port.EndpointRegistry, repo port.GenerationTaskRepository) *GenerationUseCase {
-	return &GenerationUseCase{
-		provider: provider, registry: registry, repo: repo,
-		nonceStore: newMemoryNonceStore(),
+// NewGenerationUseCase 创建统一生成用例（支持多厂商）。
+func NewGenerationUseCase(providers map[string]port.GenerationProvider, registry port.EndpointRegistry, repo port.GenerationTaskRepository) *GenerationUseCase {
+	// 确定默认厂商（第一个非nil的provider）
+	defaultProvider := ""
+	for name, p := range providers {
+		if p != nil {
+			defaultProvider = name
+			break
+		}
 	}
+
+	return &GenerationUseCase{
+		providers:       providers,
+		registry:        registry,
+		repo:            repo,
+		nonceStore:      newMemoryNonceStore(),
+		defaultProvider: defaultProvider,
+	}
+}
+
+// SetCapabilityResolver 注入能力路由解析器（可选；nil=使用默认provider）。
+func (uc *GenerationUseCase) SetCapabilityResolver(r port.CapabilityResolver) {
+	if r != nil {
+		uc.resolver = r
+	}
+}
+
+// getProvider 根据端点类型动态选择 provider。
+//
+// 选择逻辑：
+//  1. 如果配置了 resolver，根据能力路由查询应该使用哪个厂商
+//  2. 如果 resolver 未配置或查询失败，使用默认 provider
+//  3. 如果默认 provider 也不可用，返回错误
+func (uc *GenerationUseCase) getProvider(ctx context.Context, subType string) (port.GenerationProvider, error) {
+	// 1. 尝试通过 resolver 查询
+	if uc.resolver != nil {
+		capID, ok := subTypeToCapID[subType]
+		if !ok {
+			capID = "video" // 默认为视频能力
+		}
+
+		cap, err := uc.resolver.Resolve(ctx, capID)
+		if err == nil && cap.VendorID != "" {
+			if provider, ok := uc.providers[cap.VendorID]; ok && provider != nil {
+				return provider, nil
+			}
+		}
+	}
+
+	// 2. 使用默认 provider
+	if uc.defaultProvider != "" {
+		if provider, ok := uc.providers[uc.defaultProvider]; ok && provider != nil {
+			return provider, nil
+		}
+	}
+
+	// 3. 遍历 providers，返回第一个可用的
+	for _, provider := range uc.providers {
+		if provider != nil {
+			return provider, nil
+		}
+	}
+
+	return nil, fmt.Errorf("没有可用的生成服务提供商")
 }
 
 // memoryNonceStore 包内默认（单机；与 adapter/cache.MemoryNonceStore 同语义——
@@ -222,10 +306,20 @@ type SubmitInput struct {
 }
 
 // Submit 提交生成任务：校验（能力向量+端点策略）→ 防重 → 提交 → 落库。
+//
+// 多厂商动态选择：根据 subType 通过 CapabilityResolver 查询应该使用哪个厂商，
+// 然后从 providers 中获取对应的 provider 进行调用。
 func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity.GenerationTask, error) {
-	if uc.provider == nil || uc.registry == nil || uc.repo == nil {
-		return entity.GenerationTask{}, fmt.Errorf("生成服务未配置（需 VIDU_API_KEY）")
+	if uc.registry == nil || uc.repo == nil {
+		return entity.GenerationTask{}, fmt.Errorf("生成服务未配置")
 	}
+
+	// 动态选择 provider
+	provider, err := uc.getProvider(ctx, in.SubType)
+	if err != nil {
+		return entity.GenerationTask{}, fmt.Errorf("获取生成服务提供商失败: %w", err)
+	}
+
 	if uc.quotaGate != nil {
 		if err := uc.quotaGate.Check(ctx, in.TenantID, "generation"); err != nil {
 			return entity.GenerationTask{}, err
@@ -277,7 +371,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		Type:      adapter.Category(),
 		SubType:   in.SubType,
 		Model:     model,
-		Provider:  uc.provider.Name(),
+		Provider:  provider.Name(),  // 使用动态选择的 provider
 		State:     entity.TaskStateCreated,
 		ParamsHash: hash,
 		OffPeak:   in.OffPeak,
@@ -303,7 +397,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	}
 	uc.injectCallbackURL(adapter, body)
 	uc.inlineLocalMedia(ctx, body)
-	// 并发节流：信号量限流提交到上游（防瞬时高峰触发 Vidu QuotaExceeded/429）
+	// 并发节流：信号量限流提交到上游（防瞬时高峰触发 QuotaExceeded/429）
 	if uc.submitSem != nil {
 		select {
 		case uc.submitSem <- struct{}{}:
@@ -312,7 +406,8 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 			return task, ctx.Err()
 		}
 	}
-	res, err := uc.provider.Submit(ctx, adapter.Endpoint(), body)
+	// 使用动态选择的 provider 提交
+	res, err := provider.Submit(ctx, adapter.Endpoint(), body)
 	if err != nil {
 		// 提交失败：标记失败（可人工重试），保留任务供前端"重新生成"
 		task.State = entity.TaskStateFailed
@@ -326,7 +421,7 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	uc.applySubmitResult(ctx, &task, adapter, res)
 	_ = uc.repo.Save(ctx, task)
 	// 计量（F3：generation 场景按次计费的数据地基——失败仅忽略，不影响主流程）
-	uc.recordUsage(ctx, task.TenantID, task.Model, res.Credits)
+	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, res.Credits)
 	return task, nil
 }
 
@@ -363,14 +458,14 @@ func (uc *GenerationUseCase) applySubmitResult(ctx context.Context, task *entity
 
 // recordUsage 记一次生成用量（usages 表——成本分析/配额核对的唯一数据源；
 // 此前 usageRec 字段注入了也从不被调用，属于死代码，本方法补齐调用链）。
-func (uc *GenerationUseCase) recordUsage(ctx context.Context, tenantID, model string, credits int) {
+func (uc *GenerationUseCase) recordUsage(ctx context.Context, tenantID, providerName, model string, credits int) {
 	if uc.usageRec == nil {
 		return
 	}
 	_ = uc.usageRec.RecordUsage(ctx, entity.UsageRecord{
 		TenantID:    tenantID,
 		Scene:       "generation",
-		LLMConfigName: uc.provider.Name(),
+		LLMConfigName: providerName,  // 使用传入的 provider 名称
 		Model:       model,
 		// Vidu 无 token 概念：LLMCalls=1 按次计数；credits 记入 CompletionTokens
 		// 供成本分析按积分核算（字段语义在 usages 侧按 scene 解释）
@@ -445,7 +540,12 @@ func (uc *GenerationUseCase) PollDue(ctx context.Context, limit int) (int, error
 			// 提交后未知状态（超时）：先查询对齐——provider_task_id 未知则跳过等重试
 			continue
 		}
-		status, pErr := uc.provider.Poll(ctx, t.ProviderTaskID)
+		// 动态选择 provider
+		provider, pErr := uc.getProvider(ctx, t.SubType)
+		if pErr != nil {
+			continue
+		}
+		status, pErr := provider.Poll(ctx, t.ProviderTaskID)
 		if pErr != nil {
 			continue // 单任务轮询失败不中断
 		}
@@ -463,7 +563,7 @@ var retryBackoff = []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minut
 // 无任何调用方——本方法由 generation-poll 驱动，补齐"限流/内部错误自动退避重提"闭环）。
 // 流程：取 failed 任务 → 过滤可自动重试（分类+次数+退避窗口）→ 重提上游 → 回到 queueing。
 func (uc *GenerationUseCase) RetryDue(ctx context.Context, limit int) (int, error) {
-	if uc.provider == nil || uc.registry == nil || uc.repo == nil {
+	if uc.registry == nil || uc.repo == nil {
 		return 0, nil
 	}
 	failed, err := uc.repo.ListFailed(ctx, limit)
@@ -514,7 +614,14 @@ func (uc *GenerationUseCase) retrySubmit(ctx context.Context, task *entity.Gener
 			return false
 		}
 	}
-	res, err := uc.provider.Submit(ctx, adapter.Endpoint(), body)
+	// 动态选择 provider
+	provider, pErr := uc.getProvider(ctx, task.SubType)
+	if pErr != nil {
+		task.ErrMsg = "自动重试失败: " + pErr.Error()
+		_ = uc.repo.Save(ctx, *task)
+		return false
+	}
+	res, err := provider.Submit(ctx, adapter.Endpoint(), body)
 	task.RetryCount++
 	task.UpdatedAt = time.Now()
 	if err != nil {
@@ -530,7 +637,7 @@ func (uc *GenerationUseCase) retrySubmit(ctx context.Context, task *entity.Gener
 	task.FinishedAt = nil
 	uc.applySubmitResult(ctx, task, adapter, res)
 	_ = uc.repo.Save(ctx, *task)
-	uc.recordUsage(ctx, task.TenantID, task.Model, res.Credits)
+	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, res.Credits)
 	return true
 }
 
@@ -544,7 +651,11 @@ func (uc *GenerationUseCase) Cancel(ctx context.Context, tenantID, taskID string
 		return nil
 	}
 	if task.ProviderTaskID != "" {
-		_ = uc.provider.Cancel(ctx, task.ProviderTaskID)
+		// 动态选择 provider
+		provider, pErr := uc.getProvider(ctx, task.SubType)
+		if pErr == nil {
+			_ = provider.Cancel(ctx, task.ProviderTaskID)
+		}
 	}
 	task.State = entity.TaskStateCancelled
 	now := time.Now()
@@ -561,7 +672,11 @@ func (uc *GenerationUseCase) DeleteTask(ctx context.Context, tenantID, taskID st
 		return err
 	}
 	if !entity.IsTerminal(task.State) && task.ProviderTaskID != "" {
-		_ = uc.provider.Cancel(ctx, task.ProviderTaskID)
+		// 动态选择 provider
+		provider, pErr := uc.getProvider(ctx, task.SubType)
+		if pErr == nil {
+			_ = provider.Cancel(ctx, task.ProviderTaskID)
+		}
 	}
 	return uc.repo.Delete(ctx, tenantID, taskID)
 }
@@ -669,13 +784,17 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 			creationsJSON, _ = json.Marshal(st.Creations)
 			task.CreationsJSON = string(creationsJSON)
 		}
-	case entity.TaskStateFailed:
-		task.State = entity.TaskStateFailed
-		task.ErrCode = st.ErrCode
-		task.ErrMsg = uc.provider.TranslateError(st.ErrCode)
-		if task.ErrMsg == "" {
-			task.ErrMsg = "生成失败"
-		}
+		case entity.TaskStateFailed:
+			task.State = entity.TaskStateFailed
+			task.ErrCode = st.ErrCode
+			// 动态选择 provider 翻译错误
+			provider, pErr := uc.getProvider(ctx, task.SubType)
+			if pErr == nil {
+				task.ErrMsg = provider.TranslateError(st.ErrCode)
+			}
+			if task.ErrMsg == "" {
+				task.ErrMsg = "生成失败"
+			}
 		task.FinishedAt = nowPtr(time.Now())
 	default: // created/queueing/processing
 		task.State = st.State

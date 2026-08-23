@@ -148,7 +148,7 @@ func (r *fakeRepo) DeleteTerminalOlderThan(context.Context, time.Time) (int64, e
 func (r *fakeRepo) Delete(context.Context, string, string) error                       { return nil }
 
 func TestSubmitSyncEndpointImmediateSuccess(t *testing.T) {
-	uc := NewGenerationUseCase(fakeProvider{}, fakeRegistry{}, &fakeRepo{})
+	uc := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": fakeProvider{}}, fakeRegistry{}, &fakeRepo{})
 	task, err := uc.Submit(context.Background(), SubmitInput{
 		TenantID: "t1", SubType: "subject",
 		Params: entity.GenerationParams{"name": "主体A", "images": []string{"a"}},
@@ -181,7 +181,7 @@ func (syncAudioProvider) Submit(context.Context, string, map[string]any) (port.S
 }
 
 func TestSubmitSyncAudioImmediateResult(t *testing.T) {
-	uc := NewGenerationUseCase(syncAudioProvider{}, fakeRegistry{}, &fakeRepo{})
+	uc := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": syncAudioProvider{}}, fakeRegistry{}, &fakeRepo{})
 	task, err := uc.Submit(context.Background(), SubmitInput{
 		TenantID: "t1", SubType: "tts",
 		Params: entity.GenerationParams{"text": "你好", "voice_setting_voice_id": "female-shaonv"},
@@ -210,7 +210,7 @@ func (n *fakeNotifier) NotifyTaskTerminal(_ context.Context, t entity.Generation
 }
 
 func TestSubmitSyncEndpointNotifiesOnce(t *testing.T) {
-	uc := NewGenerationUseCase(fakeProvider{}, fakeRegistry{}, &fakeRepo{})
+	uc := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": fakeProvider{}}, fakeRegistry{}, &fakeRepo{})
 	notif := &fakeNotifier{}
 	uc.SetTaskNotifier(notif)
 	_, err := uc.Submit(context.Background(), SubmitInput{
@@ -254,7 +254,7 @@ func (r callbackRegistry) Get(_ context.Context, subType string) (port.EndpointA
 func TestCallbackURLInjection(t *testing.T) {
 	cbAd := &callbackAdapter{supports: true}
 	otherAd := &callbackAdapter{supports: false}
-	uc := NewGenerationUseCase(fakeProvider{}, callbackRegistry{cb: cbAd, other: otherAd}, &fakeRepo{})
+	uc := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": fakeProvider{}}, callbackRegistry{cb: cbAd, other: otherAd}, &fakeRepo{})
 	uc.SetCallbackURL("https://pub.example.com/api/v1/generation/callback")
 
 	// 支持回调的端点：注入
@@ -279,7 +279,7 @@ func TestCallbackURLInjection(t *testing.T) {
 
 	// 未配置回调地址：支持回调的端点也不注入（纯轮询）
 	cbAd2 := &callbackAdapter{supports: true}
-	uc2 := NewGenerationUseCase(fakeProvider{}, callbackRegistry{cb: cbAd2, other: otherAd}, &fakeRepo{})
+	uc2 := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": fakeProvider{}}, callbackRegistry{cb: cbAd2, other: otherAd}, &fakeRepo{})
 	if _, err := uc2.Submit(context.Background(), SubmitInput{
 		TenantID: "t1", SubType: "text2video", Params: entity.GenerationParams{"prompt": "x"},
 	}); err != nil {
@@ -338,9 +338,9 @@ func (inlineRegistry) Get(context.Context, string) (port.EndpointAdapter, error)
 }
 
 func TestInlineLocalMedia(t *testing.T) {
-	uc := NewGenerationUseCase(&recordingProvider{}, inlineRegistry{}, &fakeRepo{})
+	rp := &recordingProvider{}
+	uc := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": rp}, inlineRegistry{}, &fakeRepo{})
 	uc.SetAssetStore(inlineStore{})
-	rp := uc.provider.(*recordingProvider)
 
 	_, err := uc.Submit(context.Background(), SubmitInput{
 		TenantID: "t1", SubType: "subject",
@@ -380,7 +380,7 @@ func (autoPickRegistry) Get(_ context.Context, subType string) (port.EndpointAda
 }
 
 func TestSubmitModelAutoPick(t *testing.T) {
-	uc := NewGenerationUseCase(fakeProvider{}, autoPickRegistry{}, &fakeRepo{})
+	uc := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": fakeProvider{}}, autoPickRegistry{}, &fakeRepo{})
 	task, err := uc.Submit(context.Background(), SubmitInput{
 		TenantID: "t1", SubType: "reference2video", Model: "", // 傻瓜式：不传模型
 		Params:   entity.GenerationParams{"prompt": "做菜"},
