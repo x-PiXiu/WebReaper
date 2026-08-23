@@ -917,10 +917,27 @@ func main() {
 			"vidu": viduProvider,
 		}
 		// 小米MiMo TTS provider（音频/TTS/声音克隆走小米MiMo）
-		if mimoKey := os.Getenv("MIMO_API_KEY"); mimoKey != "" {
+		// API Key 优先从 capability resolver（管理后台配置的 integration_vendors 表）读取，
+		// 未配置则降级到环境变量 MIMO_API_KEY。
+		mimoKey := os.Getenv("MIMO_API_KEY")
+		if mimoKey == "" && capResolver != nil {
+			if cap, capErr := capResolver.Resolve(context.Background(), "tts"); capErr == nil && cap.VendorID == "xiaomi-mimo" && cap.APIKey != "" {
+				mimoKey = cap.APIKey
+				log.Info("小米MiMo API Key 从能力路由配置读取（管理后台配置）")
+			}
+		}
+		if mimoKey == "" && capResolver != nil {
+			if cap, capErr := capResolver.Resolve(context.Background(), "voice-clone"); capErr == nil && cap.VendorID == "xiaomi-mimo" && cap.APIKey != "" {
+				mimoKey = cap.APIKey
+				log.Info("小米MiMo API Key 从声音克隆能力路由配置读取")
+			}
+		}
+		if mimoKey != "" {
 			mimoTTS := ttsmimo.NewMiMoTTSProvider(mimoKey, "")
 			providers["xiaomi-mimo"] = ttsmimo.NewMiMoAsGenerationProvider(mimoTTS)
 			log.Info("小米MiMo TTS provider 已注册（音频/TTS/声音克隆）")
+		} else {
+			log.Warn("小米MiMo TTS 未启用（MIMO_API_KEY 未配置且管理后台未设置 API Key）")
 		}
 
 		genUC := generation.NewGenerationUseCase(providers, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
