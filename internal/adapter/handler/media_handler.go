@@ -24,7 +24,7 @@ func NewMediaHandler(store port.MediaAssetStore) *MediaHandler {
 }
 
 // HandleUpload POST /api/v1/media/assets —— multipart 上传素材（图片/音频）。
-// 返回 {id, url, mime, size_bytes}——url 直接可用于生成任务的 images/audio_url 参数。
+// 返回 {id, url, mime, size_bytes, type, name}——url 直接可用于生成任务的 images/audio_url 参数。
 func (h *MediaHandler) HandleUpload(c *gin.Context) {
 	if h.store == nil {
 		fail(c, fmt.Errorf("素材存储未配置"))
@@ -59,9 +59,14 @@ func (h *MediaHandler) HandleUpload(c *gin.Context) {
 		fail(c, err)
 		return
 	}
+
+	// 从文件名提取素材名称（去掉扩展名）
+	assetName := strings.TrimSuffix(header.Filename, ext)
+
 	success(c, gin.H{
 		"id": asset.ID, "url": asset.SourceURL, "mime": mime,
 		"size_bytes": len(data), "owner_type": asset.OwnerType,
+		"type": asset.Type, "name": assetName, // 新增：素材类型和名称
 	})
 }
 
@@ -81,6 +86,7 @@ func (h *MediaHandler) HandleList(c *gin.Context) {
 		out = append(out, gin.H{
 			"id": a.ID, "owner_type": a.OwnerType, "url": a.SourceURL,
 			"mime": a.Mime, "size_bytes": a.SizeBytes, "created_at": a.CreatedAt,
+			"type": a.Type, "name": a.Name, // 新增：素材类型和名称
 		})
 	}
 	success(c, gin.H{"assets": out})

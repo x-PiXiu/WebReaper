@@ -221,9 +221,9 @@ export const businessApi = {
   getDouyinOAuthURL: () =>
     apiClient.get<unknown, { url: string }>('/api/v1/merchant/accounts/douyin/oauth/url'),
 
-  // 热门同款视频发现（人设档案 tab；force=true 跳过 24h 缓存重搜）
-  listHotVideos: (brandId: string, force?: boolean) =>
-    apiClient.get<unknown, { videos: HotVideo[] }>(`/api/v1/merchant/brands/${brandId}/hot-videos${force ? '?force=true' : ''}`),
+  // 热门同款视频发现（支持 DB 筛选/排序/分页 + 实时搜索）
+  listHotVideos: (brandId: string, params?: { force?: boolean; platform?: string; q?: string; sort_by?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, { videos: HotVideo[]; total?: number }>(`/api/v1/merchant/brands/${brandId}/hot-videos`, { params }),
 
   // 作品库三源聚合（我的作品页）
   listWorks: () =>
@@ -379,12 +379,23 @@ export const businessApi = {
   listGenerationTypes: () =>
     apiClient.get<unknown, { types: GenerationType[] }>('/api/v1/generation/types'),
 
+  // 统一提交API（傻瓜式：客户端不需要选择端点/模型）
+  submitGeneration: (data: {
+    brand_id: string
+    text: string
+    materials?: string[]
+    template?: string
+    duration?: number
+    quality?: string
+  }) => apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', data),
+
+  // 原有高级提交API（保留兼容）
   submitGenerationTask: (data: {
     brand_id?: string
     sub_type: string
     model: string
     params: Record<string, unknown>
-    refs?: PromptRef[]             // @引用素材（服务端翻译层按端点映射）
+    refs?: PromptRef[]
     off_peak?: boolean
     watermark?: boolean
   }) => apiClient.post<unknown, GenerationTask>('/api/v1/generation/tasks', data),
@@ -395,13 +406,28 @@ export const businessApi = {
   cancelGenerationTask: (id: string) =>
     apiClient.post<unknown, { cancelled: string }>(`/api/v1/generation/tasks/${id}/cancel`),
 
-  // 删除任务本地产记录（资产库"删除数字人"等；上游主体不受影响）
   deleteGenerationTask: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/generation/tasks/${id}`),
 
-  // 官方音色库（TTS voice_setting_voice_id / 主体与数字人 voice_id 的取值来源）
+  // 官方音色库
   listGenerationVoices: (params?: { language?: string; q?: string }) =>
     apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/generation/voices', { params }),
+
+  // ---- 模板管理 ----
+
+  // 查询可用模板（客户端）
+  listTemplates: () =>
+    apiClient.get<unknown, { templates: GenerationTemplate[] }>('/api/v1/generation/templates'),
+
+  // 查询单个模板
+  getTemplate: (id: string) =>
+    apiClient.get<unknown, GenerationTemplate>(`/api/v1/generation/templates/${id}`),
+
+  // ---- 智能体 ----
+
+  // 智能体对话
+  agentChat: (data: { message: string; permission_level?: string }) =>
+    apiClient.post<unknown, { reply: string }>('/api/v1/agent/chat', data),
 
   // ---- 视频文案提取（向导第①②步）----
   // 提取说话内容：三选一 video_url 直链 / share_url 分享链 / asset_url 本站上传资产
@@ -547,4 +573,24 @@ export const businessApi = {
     apiClient.get<unknown, { templates: { key: string; version: number; content: string; updated_at: string }[] }>('/api/v1/admin/prompt-templates').then((r) => r.templates),
   adminUpdatePromptTemplate: (key: string, content: string) =>
     apiClient.put<unknown, { key: string }>(`/api/v1/admin/prompt-templates/${key}`, { content }),
+
+  // admin 生成模板管理
+  adminListGenerationTemplates: () =>
+    apiClient.get<unknown, { templates: GenerationTemplate[] }>('/api/v1/admin/templates').then((r) => r.templates),
+  adminCreateGenerationTemplate: (data: Partial<GenerationTemplate>) =>
+    apiClient.post<unknown, GenerationTemplate>('/api/v1/admin/templates', data),
+  adminUpdateGenerationTemplate: (id: string, data: Partial<GenerationTemplate>) =>
+    apiClient.put<unknown, GenerationTemplate>(`/api/v1/admin/templates/${id}`, data),
+  adminDeleteGenerationTemplate: (id: string) =>
+    apiClient.delete<unknown, { deleted: string }>(`/api/v1/admin/templates/${id}`),
+
+  // admin 模型配置管理
+  adminListGenerationSpecs: () =>
+    apiClient.get<unknown, { specs: GenerationSpec[] }>('/api/v1/admin/generation/specs'),
+  adminSaveGenerationSpec: (subType: string, model: string, body: Partial<GenerationSpec>) =>
+    apiClient.put<unknown, { saved: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`, body),
+  adminDeleteGenerationSpec: (subType: string, model: string) =>
+    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`),
+  adminSetDefaultModel: (subType: string, model: string, provider?: string) =>
+    apiClient.put<unknown, { default: string }>(`/api/v1/admin/generation/specs/${subType}/${model}/default`, null, { params: { provider } }),
 }

@@ -112,6 +112,8 @@ type Router struct {
 	billingUC *billing.BillingUseCase
 	// 配额检查门（注入到 ChatHandler 等无独立 usecase 的端点）——通过 SetQuotaGate 注入，可选
 	quotaGate port.QuotaStore
+	// 模板管理用例（管理后台可动态配置生成模板）——通过 SetTemplate 注入，可选
+	templateUC *generation.TemplateUseCase
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -248,6 +250,11 @@ func (r *Router) SetGeneration(uc *generation.GenerationUseCase, provider port.G
 	r.generationProvider = provider
 	r.generationRegistry = registry
 	r.generationSpecRepo = specRepo
+}
+
+// SetTemplate 注入模板管理用例（可选；未注入则模板端点不注册）。
+func (r *Router) SetTemplate(uc *generation.TemplateUseCase) {
+	r.templateUC = uc
 }
 
 // SetGenerationVoices 注入官方音色库（可选——未注入则 /generation/voices 不返回数据）。
@@ -437,6 +444,7 @@ func (r *Router) Engine() *gin.Engine {
 	r.registerAccountRoutes(api)
 	r.registerGenerationRoutes(api)
 	r.registerMediaRoutes(api)
+	r.registerAgentRoutes(api)
 	r.registerMerchantBillingRoutes(api)
 	r.registerAdminRoutes(api, geoHandler)
 	return e

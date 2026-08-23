@@ -53,6 +53,11 @@ func (s *LocalMediaStore) relPath(filename string) string {
 
 // SaveFile 保存素材文件（handler 上传后调用；返回可访问 URL 与资产信息）。
 // 资产 ID = {tenantID}/{shortID}.ext（租户子目录隔离 + 短 ID 文件名）
+//
+// 整洁架构设计：
+//   - Type 字段根据 MIME 类型自动推断（image/video/audio）
+//   - Name 字段从文件名提取（去掉扩展名）
+//   - Width/Height/Duration 字段由调用方填充（图片/视频解析在 handler 层）
 func (s *LocalMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerType string, data []byte, mime, ext string) (entity.MediaAsset, error) {
 	name := shortID() + ext
 	relPath := filepath.Join(tenantID, datePath(), name)
@@ -65,11 +70,16 @@ func (s *LocalMediaStore) SaveFile(ctx context.Context, tenantID, brandID, owner
 		return entity.MediaAsset{}, fmt.Errorf("素材保存失败: %w", err)
 	}
 	id := filepath.ToSlash(relPath) // ID 用 / 分隔（跨平台 URL 友好）
+
+	// 自动推断素材类型（image/video/audio）
+	materialType := entity.InferTypeFromMime(mime)
+
 	asset := entity.MediaAsset{
 		ID:        id,
 		TenantID:  tenantID,
 		BrandID:   brandID,
 		OwnerType: ownerType,
+		Type:      materialType, // 新增：素材类型
 		SourceURL: s.publicURL(id),
 		StoredURL: s.publicURL(id),
 		Mime:      mime,

@@ -70,8 +70,13 @@ func (s *OSSMediaStore) SaveFile(ctx context.Context, tenantID, brandID, ownerTy
 		return entity.MediaAsset{}, fmt.Errorf("OSS 上传失败: %w", err)
 	}
 	url := s.publicURL(key)
+
+	// 自动推断素材类型（image/video/audio）
+	materialType := entity.InferTypeFromMime(mime)
+
 	return entity.MediaAsset{
 		ID: key, TenantID: tenantID, BrandID: brandID, OwnerType: ownerType,
+		Type: materialType, // 新增：素材类型
 		SourceURL: url, StoredURL: url, Mime: mime, SizeBytes: int64(len(data)),
 		CreatedAt: time.Now(),
 	}, nil

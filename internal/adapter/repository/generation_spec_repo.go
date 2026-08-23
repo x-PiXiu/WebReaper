@@ -13,8 +13,11 @@ import (
 type GenerationSpecPO struct {
 	SubType          string    `gorm:"primaryKey;size:64"`
 	Model            string    `gorm:"primaryKey;size:64"`
+	Provider         string    `gorm:"size:50;default:vidu"`
 	Endpoint         string    `gorm:"size:128"`
 	Enabled          bool      `gorm:"default:1"`
+	IsDefault        bool      `gorm:"default:0"`
+	SortOrder        int       `gorm:"default:0"`
 	CapabilitiesJSON string    `gorm:"type:text"`
 	UpdatedAt        time.Time
 }
@@ -52,8 +55,9 @@ func (r *GormGenerationSpecRepository) Find(ctx context.Context, subType, model 
 
 func (r *GormGenerationSpecRepository) Upsert(ctx context.Context, spec entity.GenerationSpec) error {
 	po := GenerationSpecPO{
-		SubType: spec.SubType, Model: spec.Model, Endpoint: spec.Endpoint,
-		Enabled: spec.Enabled, CapabilitiesJSON: spec.CapabilitiesJSON,
+		SubType: spec.SubType, Model: spec.Model, Provider: spec.Provider,
+		Endpoint: spec.Endpoint, Enabled: spec.Enabled, IsDefault: spec.IsDefault,
+		SortOrder: spec.SortOrder, CapabilitiesJSON: spec.CapabilitiesJSON,
 		UpdatedAt: time.Now(),
 	}
 	return r.db.WithContext(ctx).Save(&po).Error
@@ -63,9 +67,51 @@ func (r *GormGenerationSpecRepository) Delete(ctx context.Context, subType, mode
 	return r.db.WithContext(ctx).Where("sub_type = ? AND model = ?", subType, model).Delete(&GenerationSpecPO{}).Error
 }
 
+// FindDefaultModel 查找默认模型（按厂商+端点）。
+func (r *GormGenerationSpecRepository) FindDefaultModel(ctx context.Context, provider, subType string) (entity.GenerationSpec, error) {
+	var po GenerationSpecPO
+	err := r.db.WithContext(ctx).
+		Where("provider = ? AND sub_type = ? AND is_default = ? AND enabled = ?", provider, subType, true, true).
+		First(&po).Error
+	if err != nil {
+		return entity.GenerationSpec{}, err
+	}
+	return generationSpecFromPO(po), nil
+}
+
+// ListByProvider 按厂商查询（管理后台用）。
+func (r *GormGenerationSpecRepository) ListByProvider(ctx context.Context, provider string) ([]entity.GenerationSpec, error) {
+	var pos []GenerationSpecPO
+	if err := r.db.WithContext(ctx).Where("provider = ?", provider).Order("sub_type, sort_order, model").Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.GenerationSpec, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, generationSpecFromPO(p))
+	}
+	return out, nil
+}
+
+// SetDefault 设置默认模型（取消同端点其他模型的默认标记）。
+func (r *GormGenerationSpecRepository) SetDefault(ctx context.Context, provider, subType, model string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 取消同端点其他模型的默认标记
+		if err := tx.Model(&GenerationSpecPO{}).
+			Where("provider = ? AND sub_type = ?", provider, subType).
+			Update("is_default", false).Error; err != nil {
+			return err
+		}
+		// 2. 设置目标模型为默认
+		return tx.Model(&GenerationSpecPO{}).
+			Where("provider = ? AND sub_type = ? AND model = ?", provider, subType, model).
+			Update("is_default", true).Error
+	})
+}
+
 func generationSpecFromPO(p GenerationSpecPO) entity.GenerationSpec {
 	return entity.GenerationSpec{
-		SubType: p.SubType, Model: p.Model, Endpoint: p.Endpoint,
-		Enabled: p.Enabled, CapabilitiesJSON: p.CapabilitiesJSON, UpdatedAt: p.UpdatedAt,
+		SubType: p.SubType, Model: p.Model, Provider: p.Provider,
+		Endpoint: p.Endpoint, Enabled: p.Enabled, IsDefault: p.IsDefault,
+		SortOrder: p.SortOrder, CapabilitiesJSON: p.CapabilitiesJSON, UpdatedAt: p.UpdatedAt,
 	}
 }

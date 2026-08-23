@@ -102,6 +102,14 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.GET("/prompt-templates", r.HandleListPromptTemplates)
 			adminGroup.PUT("/prompt-templates/:key", r.HandleUpdatePromptTemplate)
 		}
+		// 生成模板管理（管理后台可动态配置生成模板）
+		if r.templateUC != nil {
+			th := NewTemplateHandler(r.templateUC)
+			adminGroup.GET("/templates", th.HandleList)
+			adminGroup.POST("/templates", th.HandleCreate)
+			adminGroup.PUT("/templates/:id", th.HandleUpdate)
+			adminGroup.DELETE("/templates/:id", th.HandleDelete)
+		}
 		// LLM 配置管理（含厂商 api_key 明文——仅 admin 可达；商户端引擎选择走 /geo/engines 名单端点）
 		if r.llmCfgUC != nil {
 			adminGroup.GET("/llm-configs", r.handleListLLMConfigs)
@@ -119,6 +127,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.POST("/generation/modes/apply-recommended", gh.HandleApplyRecommendedModes) // 一键收敛到推荐档位
 			adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
 			adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
+			adminGroup.PUT("/generation/specs/:subType/:model/default", gh.HandleSetDefault) // 设置默认模型
 		}
 		// 第三方集成中心（08 计划 D7——能力路由模型：统一视图/双分组/厂商详情/健康检查）
 		if r.providerConfigUC != nil {

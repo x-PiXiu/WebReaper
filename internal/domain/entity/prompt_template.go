@@ -26,4 +26,10 @@ const (
 	// 格式模板键前缀（geo_format_<key>——如 geo_format_xiaohongshu）。
 	// admin 可在管理后台编辑各格式的输出指令（字数/风格/结构），热更新无需发版。
 	PromptKeyFormatPrefix = "geo_format_"
+
+	// 智能体系统提示词键（获客智能体专用）。
+	// 管理后台可动态配置，热更新无需发版。
+	PromptKeyAgentPrefix = "agent-prefix"  // 智能体前缀（在硬编码之前）
+	PromptKeyAgentSuffix = "agent-suffix"  // 智能体后缀（在硬编码之后）
+	PromptKeyAgentRules  = "agent-rules"   // 智能体补充规则
 )

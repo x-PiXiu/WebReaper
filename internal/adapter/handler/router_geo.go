@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/agent"
 	"webreaper/internal/usecase/structured"
 )
 
@@ -194,7 +195,9 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	if r.generationVoices != nil {
 		gh.SetVoiceLibrary(r.generationVoices)
 	}
-	api.POST("/generation/tasks", gh.HandleSubmit)
+	// 统一提交API（傻瓜式：客户端不需要选择端点/模型）
+	// 注意：原有 POST /generation/tasks 已删除，只保留统一提交API
+	api.POST("/generation/submit", gh.HandleUnifiedSubmit)
 	api.GET("/generation/tasks/:id", gh.HandleGet)
 	api.GET("/generation/tasks", gh.HandleList)
 	api.GET("/generation/types", gh.HandleTypes)
@@ -206,6 +209,12 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 		th := NewTranscriptHandler(r.transcriptUC, r.mediaStore)
 		api.POST("/generation/transcript/extract", th.HandleExtract)
 		api.POST("/generation/transcript/rewrite", th.HandleRewrite)
+	}
+	// 模板管理（客户端查询可用模板）
+	if r.templateUC != nil {
+		th := NewTemplateHandler(r.templateUC)
+		api.GET("/generation/templates", th.HandleList)
+		api.GET("/generation/templates/:id", th.HandleGet)
 	}
 }
 
@@ -295,4 +304,24 @@ func (r *Router) handleGenerateLLMSTxt(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"llms_txt": txt})
+}
+
+// registerAgentRoutes 智能体路由（获客智能体专用）。
+func (r *Router) registerAgentRoutes(api *gin.RouterGroup) {
+	// 智能体需要 AI 生成器
+	if r.ai == nil {
+		return
+	}
+
+	// 创建 PromptBuilder
+	promptBuilder := agent.NewPromptBuilder(r.promptTemplateRepo)
+
+	// 创建 AgentOrchestrator（不依赖ToolRegistry，智能体工具独立管理）
+	orchestrator := agent.NewAgentOrchestrator(r.ai, nil, promptBuilder)
+
+	// 创建 AgentHandler
+	ah := NewAgentHandler(orchestrator)
+
+	// 注册路由
+	api.POST("/agent/chat", ah.HandleChat)
 }

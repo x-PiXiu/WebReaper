@@ -41,6 +41,8 @@ type GenerationUseCase struct {
 	// callbackURL 公网回调地址（可选；空=纯轮询。注入到支持回调的端点请求体——
 	// Vidu 任务状态变化时主动 POST，轮询降级为兜底通道，双通道幂等合并）
 	callbackURL string
+	// endpointSelector 端点选择器（可选；nil=不支持统一提交）
+	endpointSelector port.EndpointSelector
 }
 
 // NewGenerationUseCase 创建统一生成用例。
@@ -93,6 +95,13 @@ func (uc *GenerationUseCase) SetTaskNotifier(n port.TaskNotifier) {
 // 需为 Vidu 可达的公网 URL（含路由前缀），如 https://x.com/webreaper/api/v1/generation/callback。
 func (uc *GenerationUseCase) SetCallbackURL(u string) {
 	uc.callbackURL = strings.TrimRight(u, "/")
+}
+
+// SetEndpointSelector 注入端点选择器（可选；未注入则不支持统一提交）。
+func (uc *GenerationUseCase) SetEndpointSelector(s port.EndpointSelector) {
+	if s != nil {
+		uc.endpointSelector = s
+	}
 }
 
 // injectCallbackURL 回调地址注入：仅文档声明 callback_url 的端点（CallbackEndpoint），
@@ -747,3 +756,54 @@ func getPrompt(p entity.GenerationParams) string {
 }
 
 func nowPtr(t time.Time) *time.Time { return &t }
+
+// UnifiedSubmitInput 统一提交输入（客户端不需要选择端点/模型）。
+type UnifiedSubmitInput struct {
+	TenantID  string   // 租户ID（从JWT获取）
+	BrandID   string   // 品牌ID
+	Text      string   // 文本描述
+	Materials []string // 素材ID列表
+	Template  string   // 模板ID（可选）
+	Duration  int      // 时长（可选）
+	Quality   string   // 质量（可选）
+}
+
+// UnifiedSubmit 统一提交（傻瓜式：客户端不需要选择端点/模型）。
+//
+// 流程：
+//  1. EndpointSelector根据素材自动选择端点
+//  2. 调用原有的Submit方法
+//
+// 使用场景：
+//   - 客户端只需要上传素材、输入文本
+//   - 系统自动选择端点、模型、参数
+func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmitInput) (entity.GenerationTask, error) {
+	if uc.endpointSelector == nil {
+		return entity.GenerationTask{}, fmt.Errorf("端点选择器未配置")
+	}
+
+	// 1. 构建统一请求
+	req := entity.UnifiedGenerationRequest{
+		BrandID:   in.BrandID,
+		Text:      in.Text,
+		Materials: in.Materials,
+		Template:  in.Template,
+		Duration:  in.Duration,
+		Quality:   in.Quality,
+	}
+
+	// 2. 端点自动选择
+	selectResult, err := uc.endpointSelector.Select(ctx, req)
+	if err != nil {
+		return entity.GenerationTask{}, fmt.Errorf("端点选择失败: %w", err)
+	}
+
+	// 3. 调用原有的Submit方法
+	return uc.Submit(ctx, SubmitInput{
+		TenantID: in.TenantID,
+		BrandID:  in.BrandID,
+		SubType:  selectResult.SubType,
+		Model:    "", // 空=自动选择
+		Params:   selectResult.Params,
+	})
+}

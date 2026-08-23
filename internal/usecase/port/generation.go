@@ -153,6 +153,12 @@ type GenerationSpecRepository interface {
 	Upsert(ctx context.Context, spec entity.GenerationSpec) error
 	// Delete 删除行（= 恢复出厂默认——查询回退代码默认值）。
 	Delete(ctx context.Context, subType, model string) error
+	// FindDefaultModel 查找默认模型（按厂商+端点）。
+	FindDefaultModel(ctx context.Context, provider, subType string) (entity.GenerationSpec, error)
+	// ListByProvider 按厂商查询（管理后台用）。
+	ListByProvider(ctx context.Context, provider string) ([]entity.GenerationSpec, error)
+	// SetDefault 设置默认模型（取消同端点其他模型的默认标记）。
+	SetDefault(ctx context.Context, provider, subType, model string) error
 }
 
 // MediaAssetStore 媒体资产存储（素材托管 + 产物转存适配器）。

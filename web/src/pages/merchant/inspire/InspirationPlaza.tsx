@@ -75,7 +75,7 @@ export default function InspirationPlaza() {
     setRefreshing(true)
     message.loading({ content: '正在拉取社交平台最新爆款…', key: 'inspire', duration: 0 })
     try {
-      await businessApi.listHotVideos(brandId, true)
+      await businessApi.listHotVideos(brandId, { force: true })
       await queryClient.invalidateQueries({ queryKey: ['hot-videos', brandId] })
       message.success({ content: '灵感已更新', key: 'inspire' })
     } catch {

@@ -42,6 +42,7 @@ const AdminSettings = lazy(() => import('./pages/admin/Settings'))
 const AdminBilling = lazy(() => import('./pages/admin/Billing'))
 const Integrations = lazy(() => import('./pages/admin/Integrations'))
 const AdminPromptTemplates = lazy(() => import('./pages/admin/PromptTemplates'))
+const UnifiedSubmit = lazy(() => import('./pages/merchant/UnifiedSubmit'))
 
 function PageFallback() {
   return (
@@ -91,6 +92,7 @@ export default function App() {
           <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
           <Route path="/m/inspire" element={<LazyPage><InspirationPlaza /></LazyPage>} />
           <Route path="/m/compose" element={<LazyPage><ComposeHub /></LazyPage>} />
+          <Route path="/m/compose/submit" element={<LazyPage><UnifiedSubmit /></LazyPage>} />
           <Route path="/m/compose/lipsync" element={<LazyPage><LipSyncWizard /></LazyPage>} />
           <Route path="/m/compose/video" element={<LazyPage><ComposeTrackPage track="video" /></LazyPage>} />
           <Route path="/m/compose/graphic" element={<LazyPage><ComposeTrackPage track="graphic" /></LazyPage>} />

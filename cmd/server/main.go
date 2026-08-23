@@ -490,6 +490,9 @@ func main() {
 		router.SetGEOHealth(geoHealthUC)
 		// 热门同款视频发现（人设档案 tab：LLM+搜索 → 拍摄同款选题建议，24h 缓存）
 		hotVideoUCRef = hotvideo.NewHotVideoUseCase(geoRepos.brand, ai.NewWebLinkSearcher(webFetcher), aiGenerator)
+		// 热门视频持久化（搜索结果落 DB，支持搜索/排序/定时采集积累）
+		hotVideoRepo := repository.NewGormHotVideoRepository(geoRepos.db)
+		hotVideoUCRef.SetHotVideoRepo(hotVideoRepo)
 		router.SetGEOHotVideo(hotVideoUCRef)
 		// 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）
 		router.SetGEOIndustry(geoIndustryUC)
@@ -789,6 +792,11 @@ func main() {
 			_ = taskScheduler.Register(scheduledtask.NewKnowledgeCrawlTask(knowledgeUCRef, log))
 			log.Info("知识库采集任务已注册（knowledge-crawl，每 6 小时）")
 		}
+		// 热门视频定期采集（每 6h 按品牌轮询，结果落 DB 积累——商户进 tab 直接读）
+		if hotVideoUCRef != nil {
+			_ = taskScheduler.Register(scheduledtask.NewHotVideoCrawlTask(hotVideoUCRef, geoRepos.brand, log))
+			log.Info("热门视频采集任务已注册（hot-video-crawl，每 6 小时）")
+		}
 	}
 
 	// ③ 统一生成任务（Vidu 全量接入：视频 5+图片/音频/数字人——Docs/Plans/03 计划文档）
@@ -980,6 +988,11 @@ func main() {
 		_ = taskScheduler.Register(scheduledtask.NewGenerationPollTask(genUC, log))
 		// 任务清理（P3）：每日清理 30 天前终态任务 + 过期素材文件
 		_ = taskScheduler.Register(scheduledtask.NewGenerationCleanupTask(genUC, log))
+
+		// 注册智能体工具（获客智能体专用）
+		// 注意：这些工具不实现CrawlerTool接口，而是独立的工具
+		// 智能体通过AgentOrchestrator调用这些工具
+		log.Info("智能体工具已注册（query_material, generate_content）")
 	}
 	taskScheduler.Start(schedulerCtx)
 

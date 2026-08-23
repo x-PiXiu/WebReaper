@@ -54,8 +54,11 @@ func (h *GenerationAdminHandler) HandleSaveSpec(c *gin.Context) {
 	subType := c.Param("subType")
 	model := c.Param("model")
 	var req struct {
-		Endpoint string `json:"endpoint"`
-		Enabled  *bool  `json:"enabled"`
+		Provider   string `json:"provider"`
+		Endpoint   string `json:"endpoint"`
+		Enabled    *bool  `json:"enabled"`
+		IsDefault  *bool  `json:"is_default"`
+		SortOrder  *int   `json:"sort_order"`
 		Capability *entity.ModelCapability `json:"capability"` // 能力向量（结构化编辑）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -77,13 +80,25 @@ func (h *GenerationAdminHandler) HandleSaveSpec(c *gin.Context) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	isDefault := false
+	if req.IsDefault != nil {
+		isDefault = *req.IsDefault
+	}
+	sortOrder := 0
+	if req.SortOrder != nil {
+		sortOrder = *req.SortOrder
+	}
+	provider := req.Provider
+	if provider == "" {
+		provider = "vidu" // 默认厂商
+	}
 	endpoint := req.Endpoint
 	if endpoint == "" {
 		endpoint = existingEndpoint(h.registry, subType)
 	}
 	if err := h.specRepo.Upsert(c.Request.Context(), entity.GenerationSpec{
-		SubType: subType, Model: model, Endpoint: endpoint,
-		Enabled: enabled, CapabilitiesJSON: capsJSON,
+		SubType: subType, Model: model, Provider: provider, Endpoint: endpoint,
+		Enabled: enabled, IsDefault: isDefault, SortOrder: sortOrder, CapabilitiesJSON: capsJSON,
 	}); err != nil {
 		fail(c, err)
 		return
@@ -102,6 +117,23 @@ func (h *GenerationAdminHandler) HandleDeleteSpec(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"deleted": c.Param("subType") + "/" + c.Param("model")})
+}
+
+// HandleSetDefault PUT /admin/generation/specs/:subType/:model/default —— 设置默认模型。
+func (h *GenerationAdminHandler) HandleSetDefault(c *gin.Context) {
+	if h.specRepo == nil {
+		fail(c, fmt.Errorf("规格仓储未注入"))
+		return
+	}
+	subType := c.Param("subType")
+	model := c.Param("model")
+	provider := c.DefaultQuery("provider", "vidu")
+
+	if err := h.specRepo.SetDefault(c.Request.Context(), provider, subType, model); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"default": subType + "/" + model})
 }
 
 // existingEndpoint 取端点默认路径（新模型未填 endpoint 时用端点默认）。
@@ -209,12 +241,17 @@ func (h *GenerationAdminHandler) HandleSetMode(c *gin.Context) {
 	}
 	subType := c.Param("subType")
 	var req struct {
-		Enabled bool `json:"enabled" binding:"required"`
+		Enabled *bool `json:"enabled"` // 使用指针类型，避免 false 被当作零值
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
+	if req.Enabled == nil {
+		fail(c, fmt.Errorf("enabled 参数必填"))
+		return
+	}
+	enabled := *req.Enabled
 	specs := h.registry.AllSpecs(c.Request.Context())
 	saved := 0
 	for _, s := range specs {
@@ -223,7 +260,7 @@ func (h *GenerationAdminHandler) HandleSetMode(c *gin.Context) {
 		}
 		if err := h.specRepo.Upsert(c.Request.Context(), entity.GenerationSpec{
 			SubType: s.SubType, Model: s.Model, Endpoint: s.Endpoint,
-			Enabled: req.Enabled, CapabilitiesJSON: s.CapabilitiesJSON,
+			Enabled: enabled, CapabilitiesJSON: s.CapabilitiesJSON,
 		}); err != nil {
 			fail(c, fmt.Errorf("保存 %s/%s 失败: %w", s.SubType, s.Model, err))
 			return

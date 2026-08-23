@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Empty, Input, Modal, Space, Spin, Tag, Typography, message } from 'antd'
-import { PlayCircleOutlined, SyncOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
+import { Button, Empty, Input, Modal, Select, Space, Spin, Tag, Typography, message } from 'antd'
+import { PlayCircleOutlined, SyncOutlined, VideoCameraAddOutlined, SearchOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { useComposeDraft } from '../../../store/composeDraft'
 import { PlatformBadge } from '../../../components/PlatformBadge'
@@ -10,8 +10,26 @@ import type { HotVideo } from '../../../types/api'
 
 const { Text, Paragraph } = Typography
 
+const SORT_OPTIONS = [
+  { value: '', label: '最新入库' },
+  { value: 'publish_time', label: '发布时间' },
+  { value: 'digg_count', label: '点赞最多' },
+  { value: 'play_count', label: '播放最多' },
+  { value: 'comment_count', label: '评论最多' },
+]
+
+const PLATFORM_OPTIONS = [
+  { value: '', label: '全部平台' },
+  { value: 'douyin', label: '抖音' },
+  { value: 'kuaishou', label: '快手' },
+  { value: 'xiaohongshu', label: '小红书' },
+  { value: 'bilibili', label: 'B站' },
+  { value: 'web', label: '网页' },
+]
+
 /**
  * 热门同款（人设档案 Tab）：同赛道爆款短视频入口；完整广场见「灵感广场」。
+ * 支持：关键词搜索 / 平台筛选 / 排序（DB 持久化数据，定时采集积累）。
  */
 export default function HotVideosTab({ brandId }: { brandId: string }) {
   const navigate = useNavigate()
@@ -20,20 +38,30 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
   const [shooting, setShooting] = useState<HotVideo | null>(null)
   const [topicDraft, setTopicDraft] = useState('')
 
+  // 筛选/排序状态
+  const [keyword, setKeyword] = useState('')
+  const [platform, setPlatform] = useState('')
+  const [sortBy, setSortBy] = useState('')
+
+  const hasFilter = !!(keyword || platform || sortBy)
+
   const { data, isLoading } = useQuery({
-    queryKey: ['hot-videos', brandId],
-    queryFn: () => businessApi.listHotVideos(brandId),
+    queryKey: ['hot-videos', brandId, { keyword, platform, sortBy }],
+    queryFn: () => businessApi.listHotVideos(brandId, {
+      ...(hasFilter ? { platform: platform || undefined, q: keyword || undefined, sort_by: sortBy || undefined } : {}),
+    }),
     enabled: !!brandId,
-    staleTime: 24 * 3600_000,
+    staleTime: hasFilter ? 0 : 24 * 3600_000,
   })
   const videos = data?.videos || []
+  const total = data?.total
 
   const refresh = async () => {
     message.loading({ content: '正在搜索最新热门视频…', key: 'hv', duration: 0 })
     try {
-      await businessApi.listHotVideos(brandId, true)
+      await businessApi.listHotVideos(brandId, { force: true })
       queryClient.invalidateQueries({ queryKey: ['hot-videos', brandId] })
-      message.success({ content: '已更新', key: 'hv' })
+      message.success({ content: '已更新（搜索结果自动入库积累）', key: 'hv' })
     } catch {
       message.error({ content: '搜索失败，稍后再试', key: 'hv' })
     }
@@ -106,9 +134,31 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
         </Space>
         <Space>
           <Button type="link" size="small" onClick={() => navigate('/m/inspire')}>灵感广场 →</Button>
-          <Text type="secondary" style={{ fontSize: 12 }}>同赛道爆款 · 每天更新</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {hasFilter ? `筛选结果：${videos.length}${total != null ? `/${total}` : ''} 个` : `同赛道爆款 · 每天更新 · ${videos.length} 个`}
+          </Text>
           <Button size="small" icon={<SyncOutlined />} onClick={refresh}>换一批</Button>
         </Space>
+      </div>
+
+      {/* 筛选/排序工具栏 */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Input
+          size="small"
+          placeholder="搜索标题/作者/火爆点"
+          prefix={<SearchOutlined />}
+          value={keyword}
+          onChange={e => setKeyword(e.target.value)}
+          style={{ width: 200 }}
+          allowClear
+        />
+        <Select size="small" value={platform} onChange={setPlatform} options={PLATFORM_OPTIONS} style={{ width: 110 }} />
+        <Select size="small" value={sortBy} onChange={setSortBy} options={SORT_OPTIONS} style={{ width: 120 }} />
+        {hasFilter && (
+          <Button size="small" type="link" onClick={() => { setKeyword(''); setPlatform(''); setSortBy('') }}>
+            清除筛选
+          </Button>
+        )}
       </div>
 
       {videos.length === 0 ? (
@@ -125,6 +175,15 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
                 <Text strong style={{ fontSize: 13.5, lineHeight: 1.5 }} ellipsis={{ tooltip: v.title }}>{v.title}</Text>
                 <PlatformBadge platform={v.platform} size={14} />
               </div>
+              {/* 互动数据 */}
+              {(v.digg_count || v.play_count || v.comment_count) ? (
+                <div style={{ display: 'flex', gap: 10, fontSize: 11, color: 'var(--wr-text-secondary)' }}>
+                  {v.play_count ? <span>👁 {v.play_count > 10000 ? `${(v.play_count / 10000).toFixed(1)}万` : v.play_count}</span> : null}
+                  {v.digg_count ? <span>❤ {v.digg_count > 10000 ? `${(v.digg_count / 10000).toFixed(1)}万` : v.digg_count}</span> : null}
+                  {v.comment_count ? <span>💬 {v.comment_count}</span> : null}
+                  {v.author ? <span style={{ marginLeft: 'auto' }}>@{v.author}</span> : null}
+                </div>
+              ) : null}
               {v.hot_point && (
                 <Paragraph type="secondary" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6 }}>
                   🔥 {v.hot_point}

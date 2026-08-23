@@ -25,25 +25,28 @@ import (
 	"webreaper/internal/usecase/port"
 )
 
-// HotVideo 热门同款视频（前端卡片直接消费）。
-type HotVideo struct {
-	Title    string `json:"title"`     // 视频标题
-	URL      string `json:"url"`       // 可播放链接（新窗口打开）
-	Platform string `json:"platform"`  // 平台标识（douyin/kuaishou/xiaohongshu/bilibili/web）
-	HotPoint string `json:"hot_point"` // 为什么火（一句话，帮商户理解可抄的点）
-	Topic    string `json:"topic"`     // 拍摄同款选题建议（15-30字，可直接作"想写什么"）
-}
+// HotVideo 热门同款视频（类型别名——entity 包统一定义，热路径无需 import entity）。
+type HotVideo = entity.HotVideo
+
+// ListOptions 热门视频列表查询选项（类型别名）。
+type ListOptions = entity.HotVideoListOptions
 
 // HotVideoUseCase 热门视频发现用例。
 type HotVideoUseCase struct {
-	brandRepo port.BrandRepository
-	searcher  port.LinkSearcher   // 通用搜索引擎（Bing/DDG）——降级数据源
-	douyin    port.SocialSearcher // 站内搜索——主数据源（真实爆款+数据，需 cookie 账号；多平台泛化）
-	aiGen     port.AIGenerator
+	brandRepo    port.BrandRepository
+	searcher     port.LinkSearcher   // 通用搜索引擎（Bing/DDG）——降级数据源
+	douyin       port.SocialSearcher // 站内搜索——主数据源（真实爆款+数据，需 cookie 账号；多平台泛化）
+	aiGen        port.AIGenerator
+	hotVideoRepo entity.HotVideoRepository // 热门视频持久化（可选注入；nil=不落库只走缓存）
 
 	mu               sync.Mutex
 	cache            map[string]cacheEntry // brandID → 结果缓存（24h）
 	lastDouyinSearch time.Time             // 上次站内搜索时间（全局频率限制——保护商户账号）
+}
+
+// SetHotVideoRepo 注入持久化仓储（可选——未注入则不落库，只走内存缓存）。
+func (uc *HotVideoUseCase) SetHotVideoRepo(repo entity.HotVideoRepository) {
+	uc.hotVideoRepo = repo
 }
 
 // douyinSearchCooldown 站内搜索全局冷却时间。
@@ -103,6 +106,7 @@ func (uc *HotVideoUseCase) ListHotVideos(ctx context.Context, tenantID, brandID 
 			uc.mu.Lock()
 			uc.cache[brandID] = cacheEntry{videos: videos, expireAt: time.Now().Add(cacheTTL), cachedAt: time.Now()}
 			uc.mu.Unlock()
+			uc.persistVideos(ctx, tenantID, brandID, videos, "douyin")
 			return videos, nil
 		} else if dErr != nil {
 			log.Printf("[HotVideo] 抖音站内搜索降级（%v），走通用搜索引擎链路", dErr)
@@ -140,7 +144,35 @@ func (uc *HotVideoUseCase) ListHotVideos(ctx context.Context, tenantID, brandID 
 	uc.mu.Lock()
 	uc.cache[brandID] = cacheEntry{videos: videos, expireAt: time.Now().Add(cacheTTL)}
 	uc.mu.Unlock()
+	uc.persistVideos(ctx, tenantID, brandID, videos, "search")
 	return videos, nil
+}
+
+// ListFromDB 从 DB 列出热门视频（支持搜索/排序/分页——替代纯缓存的 ListHotVideos）。
+func (uc *HotVideoUseCase) ListFromDB(ctx context.Context, brandID string, opts ListOptions) ([]HotVideo, int, error) {
+	if uc.hotVideoRepo == nil {
+		return nil, 0, nil
+	}
+	return uc.hotVideoRepo.List(ctx, brandID, entity.HotVideoListOptions{Platform: opts.Platform, Keyword: opts.Keyword, SortBy: opts.SortBy, Limit: opts.Limit, Offset: opts.Offset})
+}
+
+// persistVideos 搜索结果落库（异步，失败仅日志不阻断主流程）。
+func (uc *HotVideoUseCase) persistVideos(ctx context.Context, tenantID, brandID string, videos []HotVideo, source string) {
+	if uc.hotVideoRepo == nil || len(videos) == 0 {
+		return
+	}
+	for i := range videos {
+		videos[i].TenantID = tenantID
+		videos[i].BrandID = brandID
+		if videos[i].Source == "" {
+			videos[i].Source = source
+		}
+	}
+	if n, err := uc.hotVideoRepo.SaveBatch(ctx, videos); err != nil {
+		log.Printf("[HotVideo] 持久化失败: %v", err)
+	} else if n > 0 {
+		log.Printf("[HotVideo] 持久化 %d 条新视频（brand=%s, source=%s）", n, brandID, source)
+	}
 }
 
 // searchDouyinHot 主数据源：抖音站内搜索（一周内+最多点赞）→ LLM 生成火爆点与拍摄同款选题。

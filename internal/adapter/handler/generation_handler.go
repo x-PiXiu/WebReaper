@@ -49,42 +49,47 @@ func (h *GenerationHandler) HandleVoices(c *gin.Context) {
 	success(c, gin.H{"voices": list})
 }
 
-// HandleSubmit POST /api/v1/generation/tasks —— 提交生成任务（任何端点）。
-func (h *GenerationHandler) HandleSubmit(c *gin.Context) {
+// HandleUnifiedSubmit POST /api/v1/generation/submit —— 统一提交（傻瓜式）。
+//
+// 客户端只需要：
+//   - brand_id：品牌ID
+//   - text：文本描述
+//   - materials：素材ID列表（可选）
+//   - template：模板ID（可选）
+//   - duration：时长（可选）
+//   - quality：质量（可选）
+//
+// 系统自动：
+//   - 根据素材选择端点
+//   - 选择默认模型
+//   - 填充默认参数
+func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 	if h.uc == nil {
 		fail(c, fmt.Errorf("生成服务未配置"))
 		return
 	}
+
 	var req struct {
-		BrandID   string                 `json:"brand_id"`
-		SubType   string                 `json:"sub_type" binding:"required"`
-		Model     string                 `json:"model"` // subject 端点不需要 model（Vidu 主体 API 无此参数）
-		Params    map[string]any         `json:"params"`
-		Refs      []entity.PromptRef     `json:"refs"` // @引用素材（服务端翻译层按端点映射）
-		OffPeak   bool                   `json:"off_peak"`
-		Watermark bool                   `json:"watermark"`
+		BrandID   string   `json:"brand_id"`
+		Text      string   `json:"text"`
+		Materials []string `json:"materials"`
+		Template  string   `json:"template"`
+		Duration  int      `json:"duration"`
+		Quality   string   `json:"quality"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
-	if req.Params == nil {
-		req.Params = map[string]any{}
-	}
-	// 引用素材租户归属校验：本站 /media/ 路径必须属于当前租户（防 A 引用 B 的素材）
-	if err := validateRefsOwnership(middleware.CurrentTenantID(c), req.Refs); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 40000, "msg": err.Error()})
-		return
-	}
-	task, err := h.uc.Submit(c.Request.Context(), generation.SubmitInput{
-		TenantID: middleware.CurrentTenantID(c),
-		BrandID:  req.BrandID,
-		SubType:  req.SubType,
-		Model:    req.Model,
-		Params:   entity.GenerationParams(req.Params),
-		Refs:     req.Refs,
-		OffPeak:  req.OffPeak,
-		Watermark: req.Watermark,
+
+	task, err := h.uc.UnifiedSubmit(c.Request.Context(), generation.UnifiedSubmitInput{
+		TenantID:  middleware.CurrentTenantID(c),
+		BrandID:   req.BrandID,
+		Text:      req.Text,
+		Materials: req.Materials,
+		Template:  req.Template,
+		Duration:  req.Duration,
+		Quality:   req.Quality,
 	})
 	if err != nil {
 		// 参数校验类错误 400；配额 402 由 fail 统一映射

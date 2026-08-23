@@ -99,11 +99,19 @@ type ModelCapability struct {
 // GenerationSpec 端点/模型注册表条目（generation_specs 表——唯一事实源）。
 // 管理后台全量可编辑：能力 JSON（capabilities_json）覆盖 + 启用开关 + 端点路径。
 // Enabled=false 时该模型在端点下拉隐藏、提交被拒（全局掌控：停用/限流单模型）。
+//
+// 设计动机（按厂商区分）：
+//   - Provider 字段区分不同厂商（vidu/kling/...）
+//   - IsDefault 字段标记每个端点的默认模型
+//   - 管理后台可以为每个厂商的每个端点配置默认模型
 type GenerationSpec struct {
 	SubType          string `json:"sub_type"`           // 端点类型（text2video/…）
 	Model            string `json:"model"`              // 模型名
+	Provider         string `json:"provider"`           // 厂商名称（vidu/kling/...）
 	Endpoint         string `json:"endpoint"`           // 服务商端点路径
 	Enabled          bool   `json:"enabled"`            // 启用开关（false=停用）
+	IsDefault        bool   `json:"is_default"`         // 是否为默认模型
+	SortOrder        int    `json:"sort_order"`         // 排序
 	CapabilitiesJSON string `json:"capabilities_json"`  // 能力向量 JSON（管理后台可编辑）
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -112,9 +120,26 @@ type GenerationSpec struct {
 //
 // 两类：material（用户上传的图片/音频素材——供 Vidu 引用，避开 20MB body 限制）
 //       creation（生成物转存——24h URL 下载到本地/OSS 永久化）。
+//
+// 素材类型（Type 字段）：
+//   - image：图片素材（png/jpeg/jpg/webp）
+//   - video：视频素材（mp4/avi/mov）
+//   - audio：音频素材（mp3/wav/m4a/aac）
+//
+// 设计动机（整洁架构）：
+//   - Type/Name/Width/Height/Duration 字段用于端点自动选择（EndpointSelector）
+//   - 端点选择器根据素材类型自动选择合适的端点（如1张图片→img2video）
+//   - 零框架依赖：纯 struct + 领域规则，不 import gorm/llm。
 const (
 	AssetTypeMaterial = "material" // 用户上传素材
 	AssetTypeCreation = "creation" // 生成物转存
+)
+
+// 素材类型常量（用于端点自动选择）。
+const (
+	MaterialTypeImage = "image" // 图片素材
+	MaterialTypeVideo = "video" // 视频素材
+	MaterialTypeAudio = "audio" // 音频素材
 )
 
 type MediaAsset struct {
@@ -122,13 +147,47 @@ type MediaAsset struct {
 	TenantID  string
 	BrandID   string
 	OwnerType string // material/creation
+	Type      string // 素材类型：image/video/audio（端点自动选择用）
+	Name      string // 素材名称（用户可见，如"品牌Logo"）
 	SourceURL string
 	StoredURL string
 	Mime      string
 	SizeBytes int64
-	MetaJSON  string // 音色 voice_id / 主体 server_id 等关联
+	Width     int       // 图片/视频宽度（像素）
+	Height    int       // 图片/视频高度（像素）
+	Duration  float64   // 音频/视频时长（秒）
+	MetaJSON  string    // 音色 voice_id / 主体 server_id 等关联
 	CreatedAt time.Time
 	ExpiresAt *time.Time
+}
+
+// IsImage 判断是否为图片素材。
+func (m MediaAsset) IsImage() bool {
+	return m.Type == MaterialTypeImage
+}
+
+// IsVideo 判断是否为视频素材。
+func (m MediaAsset) IsVideo() bool {
+	return m.Type == MaterialTypeVideo
+}
+
+// IsAudio 判断是否为音频素材。
+func (m MediaAsset) IsAudio() bool {
+	return m.Type == MaterialTypeAudio
+}
+
+// InferTypeFromMime 根据MIME类型推断素材类型。
+func InferTypeFromMime(mime string) string {
+	switch {
+	case len(mime) >= 6 && mime[:6] == "image/":
+		return MaterialTypeImage
+	case len(mime) >= 6 && mime[:6] == "video/":
+		return MaterialTypeVideo
+	case len(mime) >= 6 && mime[:6] == "audio/":
+		return MaterialTypeAudio
+	default:
+		return ""
+	}
 }
 
 // GenerationVoice 官方音色（Vidu 语音合成音色表——静态参考数据）。

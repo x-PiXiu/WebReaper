@@ -394,6 +394,14 @@ export interface HotVideo {
   platform: string      // douyin / kuaishou / xiaohongshu / bilibili / web
   hot_point: string     // 为什么火（可抄的点）
   topic: string         // 拍摄同款选题建议（预填创作）
+  cover_url?: string
+  author?: string
+  play_count?: number
+  digg_count?: number
+  comment_count?: number
+  publish_time?: string // RFC3339
+  source?: string       // search / douyin
+  created_at?: string
 }
 
 // ---- 作品库三源聚合（我的作品页）----
@@ -660,10 +668,45 @@ export interface MediaAsset {
   tenant_id: string
   brand_id: string
   owner_type: string             // material / creation
-  url: string                    // 可访问 URL（素材列表/上传响应契约）
+  type: string                   // image / video / audio（新增）
+  name: string                   // 素材名称（新增）
+  url: string                    // 可访问 URL
   mime: string
   size_bytes: number
+  width: number                  // 图片/视频宽度（新增）
+  height: number                 // 图片/视频高度（新增）
+  duration: number               // 音频/视频时长（新增）
   created_at: string
+}
+
+// 生成模板（管理后台可动态配置）
+export interface GenerationTemplate {
+  id: string
+  tenant_id: string
+  name: string
+  description: string
+  icon: string
+  sub_type: string               // 端点类型
+  default_params: Record<string, unknown>
+  required_materials: string[]   // 必需素材类型
+  optional_materials: string[]   // 可选素材类型
+  sort_order: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+// 生成规格（端点×模型配置）
+export interface GenerationSpec {
+  sub_type: string
+  model: string
+  provider: string               // 厂商名称（新增）
+  endpoint: string
+  enabled: boolean
+  is_default: boolean            // 是否为默认模型（新增）
+  sort_order: number             // 排序（新增）
+  capabilities_json: string
+  updated_at: string
 }
 
 // 提示词 @引用（客户端从素材库选择 → 服务端翻译层按端点格式映射）

@@ -84,21 +84,52 @@ func (h *GEOHandler) SetHotVideoUC(uc *hotvideo.HotVideoUseCase) {
 }
 
 // HandleListHotVideos GET /merchant/brands/:id/hot-videos —— 品牌同赛道热门视频
-// （LLM+搜索发现，24h 缓存；?force=true 跳过缓存重搜）。前端「热门同款」tab 数据源。
+// 支持两种模式：
+//   - ?force=true：实时搜索+LLM 筛选（24h 缓存；结果自动落库积累）
+//   - 默认/带筛选参数：从 DB 列出（支持 ?platform=&q=&sort_by=&limit=&offset= 搜索/排序/分页）
 func (h *GEOHandler) HandleListHotVideos(c *gin.Context) {
 	if h.hotVideoUC == nil {
 		fail(c, fmt.Errorf("热门同款视频功能未启用"))
 		return
 	}
 	tenantID := middleware.CurrentTenantID(c)
+	brandID := c.Param("id")
 	force := c.Query("force") == "true"
-	videos, err := h.hotVideoUC.ListHotVideos(c.Request.Context(), tenantID, c.Param("id"), force)
-	if err != nil {
-		fail(c, err)
+	platform := c.Query("platform")
+	keyword := c.Query("q")
+	sortBy := c.Query("sort_by")
+
+	// 带筛选参数或非强制 → 优先从 DB 读（定时采集积累的历史数据）
+	if !force && (platform != "" || keyword != "" || sortBy != "" || c.Query("limit") != "") {
+		limit := 20
+		offset := 0
+		if v := c.Query("limit"); v != "" {
+			fmt.Sscanf(v, "%d", &limit)
+		}
+		if v := c.Query("offset"); v != "" {
+			fmt.Sscanf(v, "%d", &offset)
+		}
+		videos, total, err := h.hotVideoUC.ListFromDB(c.Request.Context(), brandID, hotvideo.ListOptions{
+			Platform: platform, Keyword: keyword, SortBy: sortBy,
+			Limit: limit, Offset: offset,
+		})
+		if err != nil {
+			fail(c, err); return
+		}
+		if videos == nil {
+			videos = []entity.HotVideo{}
+		}
+		success(c, gin.H{"videos": videos, "total": total})
 		return
 	}
+
+	// 默认/force → 实时搜索（结果自动落库）
+	videos, err := h.hotVideoUC.ListHotVideos(c.Request.Context(), tenantID, brandID, force)
+	if err != nil {
+		fail(c, err); return
+	}
 	if videos == nil {
-		videos = []hotvideo.HotVideo{}
+		videos = []entity.HotVideo{}
 	}
 	success(c, gin.H{"videos": videos})
 }
