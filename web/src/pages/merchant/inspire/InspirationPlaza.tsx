@@ -115,7 +115,7 @@ export default function InspirationPlaza() {
     })
     setRemaking(null)
     message.success(mode === 'graphic' ? '已带入发图文' : '已带入发视频')
-    navigate(mode === 'graphic' ? '/m/compose/graphic' : '/m/compose/video')
+    navigate(mode === 'graphic' ? '/m/compose/graphic' : '/m/compose/lipsync')
   }
 
   if (brandsLoading) return <PageLoading />

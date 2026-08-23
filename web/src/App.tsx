@@ -19,6 +19,8 @@ const Checkup = lazy(() => import('./pages/merchant/checkup/Checkup'))
 const Studio = lazy(() => import('./pages/merchant/studio/Studio'))
 const ComposeHub = lazy(() => import('./pages/merchant/compose/ComposeHub'))
 const LipSyncWizard = lazy(() => import('./pages/merchant/compose/LipSyncWizard'))
+const QuickGenerate = lazy(() => import('./pages/merchant/QuickGenerate'))
+const VideoTrackRedirect = lazy(() => import('./pages/merchant/compose/VideoTrackRedirect'))
 const ComposeTrackPage = lazy(() => import('./pages/merchant/compose/ComposeTrackPage'))
 const BenchmarkModule = lazy(() => import('./pages/merchant/compose/modules/BenchmarkModule'))
 const CopyModule = lazy(() => import('./pages/merchant/compose/modules/CopyModule'))
@@ -42,7 +44,6 @@ const AdminSettings = lazy(() => import('./pages/admin/Settings'))
 const AdminBilling = lazy(() => import('./pages/admin/Billing'))
 const Integrations = lazy(() => import('./pages/admin/Integrations'))
 const AdminPromptTemplates = lazy(() => import('./pages/admin/PromptTemplates'))
-const UnifiedSubmit = lazy(() => import('./pages/merchant/UnifiedSubmit'))
 
 function PageFallback() {
   return (
@@ -92,9 +93,10 @@ export default function App() {
           <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
           <Route path="/m/inspire" element={<LazyPage><InspirationPlaza /></LazyPage>} />
           <Route path="/m/compose" element={<LazyPage><ComposeHub /></LazyPage>} />
-          <Route path="/m/compose/submit" element={<LazyPage><UnifiedSubmit /></LazyPage>} />
+          <Route path="/m/compose/quick" element={<LazyPage><QuickGenerate /></LazyPage>} />
+          <Route path="/m/compose/submit" element={<Navigate to="/m/compose/quick" replace />} />
           <Route path="/m/compose/lipsync" element={<LazyPage><LipSyncWizard /></LazyPage>} />
-          <Route path="/m/compose/video" element={<LazyPage><ComposeTrackPage track="video" /></LazyPage>} />
+          <Route path="/m/compose/video" element={<LazyPage><VideoTrackRedirect /></LazyPage>} />
           <Route path="/m/compose/graphic" element={<LazyPage><ComposeTrackPage track="graphic" /></LazyPage>} />
           <Route path="/m/compose/benchmark" element={<LazyPage><BenchmarkModule /></LazyPage>} />
           <Route path="/m/compose/copy" element={<LazyPage><CopyModule /></LazyPage>} />

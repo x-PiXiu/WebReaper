@@ -90,6 +90,14 @@ function IntegrationCenter() {
         <p>厂商配置 + 能力路由——点击厂商卡片展开详情，切换默认 ≤10s 生效</p>
       </div>
 
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="商户口播向导依赖项"
+        description="商户「拍口播」与「快速生成」需要 Vidu 对口型、语音合成、参考生视频等模式已启用且积分充足。未配置时商户入口会显示能力不可用提示。"
+      />
+
       {vendorsLoading ? <Spin style={{ display: 'block', margin: '60px auto' }} /> : (
         <>
           {/* 厂商卡片网格 */}
@@ -404,7 +412,7 @@ function ViduModelPanel() {
 
   const { data: specs = [] } = useQuery({
     queryKey: ['admin-gen-specs'],
-    queryFn: () => businessApi.adminListGenerationSpecs().then(r => r.specs),
+    queryFn: () => businessApi.adminListGenerationSpecs(),
   })
 
   const { data: modes = [] } = useQuery({

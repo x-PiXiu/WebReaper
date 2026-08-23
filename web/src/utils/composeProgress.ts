@@ -51,6 +51,12 @@ export function composeProgressLabel(draft: ComposeDraft, track: ComposeTrack) {
   return parts.join(' · ')
 }
 
+export function composeResumePath(draft: ComposeDraft): string {
+  if (draft.track === 'graphic') return '/m/compose/graphic'
+  if (draft.track === 'lipsync' || (draft.wizardStep ?? 0) > 0) return '/m/compose/lipsync'
+  return '/m/compose/lipsync'
+}
+
 export function validateComposeStep(
   draft: ComposeDraft,
   track: ComposeTrack,

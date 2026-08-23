@@ -8,7 +8,14 @@ import type { GenerationTemplate } from '../../types/api'
 const { Text } = Typography
 const { TextArea } = Input
 
-// 端点类型选项
+const MATERIAL_LABELS: Record<string, string> = {
+  image: '图片',
+  video: '视频',
+  audio: '音频',
+  text: '文案',
+  subject: '主体',
+}
+
 const SUB_TYPE_OPTIONS = [
   { value: 'text2video', label: '文生视频' },
   { value: 'img2video', label: '图生视频' },
@@ -106,12 +113,13 @@ export default function AdminGenerationTemplates() {
       key: 'required_materials',
       width: 120,
       render: (materials: string[]) => (
-        <Space size={4}>
+        <Space size={4} wrap>
           {materials?.map(m => (
-            <Tag key={m} color={m === 'image' ? 'green' : m === 'video' ? 'orange' : 'purple'}>
-              {m}
+            <Tag key={m} color={m === 'image' ? 'green' : m === 'video' ? 'orange' : m === 'audio' ? 'purple' : 'default'}>
+              {MATERIAL_LABELS[m] || m}
             </Tag>
           ))}
+          {!materials?.length && <Text type="secondary" style={{ fontSize: 12 }}>仅文案</Text>}
         </Space>
       ),
     },

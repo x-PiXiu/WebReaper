@@ -48,6 +48,9 @@ import { CheckCircleOutlined } from '@ant-design/icons'
 import { getToken, useAuthStore } from '../../store/auth'
 import { businessApi } from '../../api/business'
 import type { ChatMessage } from '../../types/api'
+import { ChatQuickActions } from '../../components/chat/ChatQuickActions'
+import { AdvisorResultCard } from '../../components/chat/AdvisorResultCard'
+import { GenerationTaskCard, parseGenerateContentResult } from '../../components/chat/GenerationTaskCard'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -160,6 +163,15 @@ function ToolCallBlock({ tool }: { tool: ToolRecord }) {
   const planId = !isRunning && tool.name === 'publish_work'
     ? (String(tool.result || '').match(/plan_id=([a-z0-9.-]+)/) || [])[1] : undefined
   if (planId) return <PublishConfirmCard planId={planId} raw={String(tool.result || '')} />
+  if (!isRunning && tool.name === 'growth_advisor') {
+    return <AdvisorResultCard raw={String(tool.result || '')} />
+  }
+  if (!isRunning && tool.name === 'generate_content') {
+    const parsed = parseGenerateContentResult(String(tool.result || ''))
+    if (parsed.taskId) {
+      return <GenerationTaskCard taskId={parsed.taskId} subType={parsed.subType} initialStatus={parsed.status} />
+    }
+  }
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
@@ -741,6 +753,9 @@ export default function Chat() {
 
         {/* 输入区 */}
         <div style={{ flexShrink: 0, padding: '8px 24px', borderTop: '1px solid var(--wr-border)' }}>
+          <div style={{ maxWidth: 1080, margin: '0 auto 8px' }}>
+            <ChatQuickActions disabled={streaming} />
+          </div>
           {/* GEO 快捷问（商户端）：注入实时数据摘要，让 AI 解读你的品牌状态 */}
           {isMerchantChat && (
             <div style={{ maxWidth: 1080, margin: '0 auto 8px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

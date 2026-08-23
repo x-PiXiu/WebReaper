@@ -1135,6 +1135,17 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
               label: <span><Space size={6}><ThunderboltOutlined />创作</Space></span>,
               children: (
                 <>
+                  <Alert
+                    type="info" showIcon closable style={{ marginBottom: 14 }}
+                    message="日常创作推荐"
+                    description={
+                      <Space wrap size={8}>
+                        <Button size="small" type="primary" onClick={() => navigate('/m/compose/lipsync')}>口播向导</Button>
+                        <Button size="small" onClick={() => navigate('/m/compose/quick')}>快速生成</Button>
+                        <Text type="secondary" style={{ fontSize: 12 }}>以下为专业模式，需自行选择端点与参数</Text>
+                      </Space>
+                    }
+                  />
                   {/* 快速开始卡片（傻瓜化：一键选好模式+模型；替换原 5 分类 Segmented） */}
                   <div style={{ marginBottom: 10 }}>
                     <Text strong style={{ display: 'block', marginBottom: 8 }}>想创作什么？</Text>
@@ -1148,7 +1159,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
                       ghost size="small" style={{ marginBottom: 16 }}
                       items={[{
                         key: 'more',
-                        label: <span style={{ fontSize: 13 }}>更多模式（声音克隆 / 主体库 等 {moreModes.length} 种进阶玩法）</span>,
+                        label: <span style={{ fontSize: 13 }}>专业模式（{moreModes.length} 种进阶端点，admin 可开关）</span>,
                         children: (
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
                             {moreModes.map((st) => modeCard(st))}

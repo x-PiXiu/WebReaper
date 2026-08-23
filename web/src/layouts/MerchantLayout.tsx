@@ -25,7 +25,7 @@ const menu: NavItem[] = [
   { key: '/m/compose', label: '创作台', icon: <AppstoreAddOutlined /> },
   { key: '/m/works', label: '我的作品', icon: <FolderOpenOutlined /> },
   { key: '/m/distribution', label: '一键发布', icon: <ExportOutlined /> },
-  { key: '/m/analytics', label: '获客复盘', icon: <FundOutlined /> },
+  { key: '/m/analytics', label: '作品数据', icon: <FundOutlined /> },
   { key: '/m/chat', label: '获客管家', icon: <MessageOutlined /> },
   { key: '/m/my-plan', label: '套餐额度', icon: <CrownOutlined /> },
 ]
@@ -38,7 +38,7 @@ export default function MerchantLayout() {
       brandTagline={PRODUCT.tagline}
       brandIcon="获"
       siderWidth={300}
-      noPaddingKeys={['/m/chat', '/m/compose/video', '/m/compose/graphic']}
+      noPaddingKeys={['/m/chat', '/m/compose/video', '/m/compose/graphic', '/m/compose/lipsync', '/m/compose/quick']}
     />
   )
 }

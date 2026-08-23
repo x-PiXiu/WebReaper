@@ -166,7 +166,7 @@ export function AppShell({
       { value: '快捷 · 口播数字人', label: '快捷 · 口播数字人', target: '/m/compose/avatar' },
       { value: '快捷 · 一键发布', label: '快捷 · 一键发布', target: '/m/distribution' },
       { value: '快捷 · 素材库', label: '快捷 · 素材库', target: '/m/assets' },
-      { value: '快捷 · 获客复盘', label: '快捷 · 获客复盘', target: '/m/analytics' },
+      { value: '快捷 · 作品数据', label: '快捷 · 作品数据', target: '/m/analytics' },
       { value: '快捷 · 获客管家', label: '快捷 · 获客管家', target: '/m/chat' },
       { value: '快捷 · 账号人设', label: '快捷 · 账号人设', target: '/m/brands' },
     ] : []),

@@ -1,16 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Drawer, Segmented } from 'antd'
+import { Drawer } from 'antd'
 import { EyeOutlined } from '@ant-design/icons'
-import type { FlowStepDef } from '../../../config/product'
-import type { ComposeTrack } from '../../../store/composeDraft'
-
-type PreviewPlatform = 'douyin' | 'xiaohongshu'
+import type { WizardStepDef } from './types'
 
 type Props = {
-  track: ComposeTrack
-  steps: FlowStepDef[]
+  breadcrumb?: string
+  steps: WizardStepDef[]
   stepIndex: number
+  maxReachableStep: number
   onStepChange: (index: number) => void
   children: React.ReactNode
   preview: React.ReactNode
@@ -20,15 +18,19 @@ type Props = {
   nextHint?: string
   nextLoading?: boolean
   backLabel?: string
+  nextLabel?: string
+  alerts?: React.ReactNode
 }
 
 /**
- * 步骤创作壳：顶栏步骤 + 左编辑 / 右预览 + 底栏动作（底栏与编辑区一体）
+ * 通用向导壳：顶步骤 + 左操作 / 右手机预览 + 底栏动作
+ * 基于 ComposeFlowShell（cf-*）布局，口播向导专用扩展（wz-*）
  */
-export function ComposeFlowShell({
-  track,
+export function WizardShell({
+  breadcrumb = '拍同款口播',
   steps,
   stepIndex,
+  maxReachableStep,
   onStepChange,
   children,
   preview,
@@ -38,51 +40,38 @@ export function ComposeFlowShell({
   nextHint,
   nextLoading,
   backLabel,
+  nextLabel,
+  alerts,
 }: Props) {
   const step = steps[stepIndex]
-  const trackLabel = track === 'video' ? '发视频' : '发图文'
-  const otherPath = track === 'graphic' ? '/m/compose/lipsync' : '/m/compose/graphic'
-  const otherLabel = track === 'graphic' ? '拍口播' : '发图文'
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [previewPlatform, setPreviewPlatform] = useState<PreviewPlatform>(
-    track === 'graphic' ? 'xiaohongshu' : 'douyin',
-  )
 
   const previewHead = (
     <div className="cf-preview-head">
-      <strong>预览</strong>
-      <div className="cf-preview-head-right">
-        <Segmented
-          size="small"
-          value={previewPlatform}
-          onChange={(v) => setPreviewPlatform(v as PreviewPlatform)}
-          options={[
-            { label: '抖音', value: 'douyin' },
-            { label: '小红书', value: 'xiaohongshu' },
-          ]}
-        />
-        <span className="cf-preview-step">{stepIndex + 1}/{steps.length}</span>
-      </div>
+      <strong>成片预览</strong>
+      <span className="cf-preview-step">{stepIndex + 1}/{steps.length}</span>
     </div>
   )
 
   return (
-    <div className={`cf-root cf-platform-${previewPlatform}`}>
+    <div className="wz-root cf-root cf-platform-douyin">
       <header className="cf-top">
         <div className="cf-top-left">
           <Link to="/m/compose" className="cf-crumb">创作台</Link>
           <span className="cf-crumb-sep">/</span>
-          <span className="cf-crumb-cur">{trackLabel}</span>
+          <span className="cf-crumb-cur">{breadcrumb}</span>
         </div>
-        <nav className="cf-steps" aria-label="创作步骤">
+        <nav className="cf-steps" aria-label="向导步骤">
           {steps.map((s, i) => {
             const state = i === stepIndex ? 'active' : i < stepIndex ? 'done' : 'todo'
+            const reachable = i <= maxReachableStep
             return (
               <button
                 key={s.key}
                 type="button"
-                className={`cf-step cf-step-${state}`}
-                onClick={() => onStepChange(i)}
+                className={`cf-step cf-step-${state}${!reachable ? ' cf-step-locked' : ''}`}
+                disabled={!reachable}
+                onClick={() => reachable && onStepChange(i)}
               >
                 <span className="cf-step-num">{i + 1}</span>
                 <span className="cf-step-label">{s.label}</span>
@@ -90,9 +79,6 @@ export function ComposeFlowShell({
             )
           })}
         </nav>
-        <div className="cf-top-right">
-          <Link to={otherPath} className="cf-switch">改做{otherLabel}</Link>
-        </div>
       </header>
 
       <div className="cf-body">
@@ -110,7 +96,15 @@ export function ComposeFlowShell({
             </div>
             <p className="cf-main-tip">{step.tip}</p>
           </div>
-          <div className="cf-workspace">{children}</div>
+
+          {alerts}
+
+          <div className="cf-workspace wz-workspace">
+            <div key={step.key} className="wz-panel ip-wizard-panel">
+              {children}
+            </div>
+          </div>
+
           <footer className="cf-foot cf-foot-inset">
             <button type="button" className="cf-btn-ghost" onClick={onBack}>
               ← {backLabel || (stepIndex === 0 ? '返回创作台' : steps[stepIndex - 1].label)}
@@ -123,7 +117,7 @@ export function ComposeFlowShell({
                 disabled={nextDisabled || nextLoading}
                 onClick={onNext}
               >
-                {nextLoading ? '处理中…' : step.nextLabel}
+                {nextLoading ? '处理中…' : (nextLabel || step.nextLabel)}
               </button>
             </div>
           </footer>
@@ -136,7 +130,7 @@ export function ComposeFlowShell({
       </div>
 
       <Drawer
-        title="发布预览"
+        title="成片预览"
         placement="bottom"
         height="72vh"
         open={previewOpen}
@@ -144,7 +138,7 @@ export function ComposeFlowShell({
         className="cf-preview-drawer"
         destroyOnClose
       >
-        <div className={`cf-preview-drawer-inner cf-platform-${previewPlatform}`}>
+        <div className="cf-preview-drawer-inner cf-platform-douyin">
           {previewHead}
           <div className="cf-preview-body">{preview}</div>
         </div>

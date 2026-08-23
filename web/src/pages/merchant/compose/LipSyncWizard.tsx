@@ -1,23 +1,41 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams, useLocation } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Input, Radio, Segmented, Space, Steps, Tag, Typography, Upload, message,
+  Alert, Button, Input, Radio, Segmented, Tag, Typography, message,
 } from 'antd'
 import {
-  LinkOutlined, UploadOutlined, SoundOutlined, VideoCameraOutlined, UserOutlined,
-  RocketOutlined, CheckCircleOutlined,
+  LinkOutlined, EditOutlined, UploadOutlined, VideoCameraOutlined, UserOutlined,
+  RocketOutlined, CheckCircleOutlined, SoundOutlined, ExportOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import type { GenerationTask } from '../../../types/api'
 import VoicePicker from '../../../components/VoicePicker'
 import { useComposeDraft } from '../../../store/composeDraft'
+import { useBrandContext } from '../../../hooks/useBrands'
+import { runLipSyncPipeline, type LipSyncPipelineStage } from '../../../hooks/useLipSyncPipeline'
+import { useGenerationTasks, GENERATION_TASKS_KEY } from '../../../hooks/useGenerationTasks'
+import {
+  WizardShell, PhonePreview, PipelineProgress, MaterialDropzone, CapabilityBanner,
+  type WizardStepDef, type PipelineStage,
+} from '../../../components/wizard'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 const { TextArea } = Input
+
+const WIZARD_STEPS: WizardStepDef[] = [
+  { key: 'source', label: '文案来源', title: '从哪里开始？', tip: '粘贴爆款链接提取说话内容，或上传音视频，也可以直接手写', nextLabel: '下一步：确认文案' },
+  { key: 'script', label: '确认文案', title: '确认口播文案', tip: '可切换清洗版/改写版，编辑后进入出镜设置', nextLabel: '下一步：选谁出镜' },
+  { key: 'presence', label: '出镜方式', title: '谁来出镜？', tip: '真人出镜上传不说话视频；数字分身由 AI 生成画面', nextLabel: '下一步：配音色' },
+  { key: 'voice', label: '音色', title: '选择口播音色', tip: '点击试听，选中后进入成片', nextLabel: '下一步：生成成片' },
+  { key: 'produce', label: '成片', title: '生成成片', tip: '系统将自动完成语音合成、画面生成与对口型', nextLabel: '去发布' },
+]
 
 /** 正常语速 ≈4 字/秒（时长估算提示——D2） */
 const estSeconds = (text: string) => Math.ceil((text || '').length / 4)
+
+type SourceMode = 'link' | 'upload' | 'manual' | null
+type ScriptVersion = 'rewrite' | 'clean'
 
 function taskParams(t: GenerationTask): Record<string, any> {
   if (t.params && typeof t.params === 'object') return t.params as Record<string, any>
@@ -27,45 +45,35 @@ function taskParams(t: GenerationTask): Record<string, any> {
   return {}
 }
 
-/** 轮询任务到终态（向导链式提交的步骤间等待） */
-async function waitTask(id: string, onTick?: () => void, timeoutMs = 10 * 60 * 1000): Promise<GenerationTask> {
-  const start = Date.now()
-  for (;;) {
-    onTick?.()
-    const t = await businessApi.listGenerationTasks().then(r => r.tasks.find(x => x.id === id))
-    if (t && (t.state === 'success' || t.state === 'failed' || t.state === 'cancelled')) {
-      if (t.state !== 'success') throw new Error(t.err_msg || '任务失败')
-      return t
-    }
-    if (Date.now() - start > timeoutMs) throw new Error('任务超时（10 分钟）')
-    await new Promise(r => setTimeout(r, 5000))
-  }
-}
-
 /**
  * 拍同款口播视频向导（08 计划 D2 五步）：
- * ① 文案来源（分享链提取/上传提取/手写）→ ② 文案确认（双产出+时长估算）
- * → ③ 出镜方式（真人视频/数字分身）→ ④ 音色 → ⑤ 成片（TTS→对口型，分身先参考生）。
+ * ① 文案来源 → ② 文案确认 → ③ 出镜方式 → ④ 音色 → ⑤ 成片
  */
 export default function LipSyncWizard() {
-  // 08 R7：草稿持久化——刷新/关闭页面后可恢复向导进度
+  const navigate = useNavigate()
   const draft = useComposeDraft()
   const queryClient = useQueryClient()
+  const { brandId } = useBrandContext()
   const [searchParams] = useSearchParams()
   const location = useLocation()
   const presetSubjectId = searchParams.get('subject') || location.state?.subjectId || ''
   const presetState = location.state as { rawText?: string; title?: string; method?: string } | null
 
-  // 初始化优先级：URL 预填 > 草稿恢复 > 默认值
   const hasDraft = (draft.wizardStep ?? 0) > 0
   const [step, setStep] = useState(presetState?.rawText ? 1 : (draft.wizardStep || 0))
+  const [maxReachableStep, setMaxReachableStep] = useState(
+    Math.max(step, draft.wizardStep || 0, presetState?.rawText ? 1 : 0)
+  )
 
   // ① 文案来源
+  const [sourceMode, setSourceMode] = useState<SourceMode>(null)
   const [shareUrl, setShareUrl] = useState('')
   const [extracting, setExtracting] = useState(false)
   // ② 文案
   const [, setRawText] = useState(presetState?.rawText || draft.wizardCleanText || '')
   const [cleanText, setCleanText] = useState(draft.wizardCleanText || '')
+  const [rewriteText, setRewriteText] = useState('')
+  const [scriptVersion, setScriptVersion] = useState<ScriptVersion>('rewrite')
   const [script, setScript] = useState(presetState?.rawText || draft.wizardScript || '')
   const [topic, setTopic] = useState(draft.wizardTopic || '')
   const [rewriting, setRewriting] = useState(false)
@@ -74,21 +82,31 @@ export default function LipSyncWizard() {
     presetSubjectId ? 'avatar' : (draft.wizardPresence || 'real')
   )
   const [realVideoUrl, setRealVideoUrl] = useState(draft.wizardRealVideoUrl || '')
+  const [realVideoName, setRealVideoName] = useState('')
   const [intent, setIntent] = useState(draft.wizardIntent || '')
   // ④ 音色
   const [voiceId, setVoiceId] = useState(draft.wizardVoiceId || '')
   // ⑤ 成片
   const [producing, setProducing] = useState(false)
-  const [stage, setStage] = useState('')
+  const [pipelineStage, setPipelineStage] = useState<LipSyncPipelineStage>('')
+  const [failedStage, setFailedStage] = useState<LipSyncPipelineStage>('')
   const [resultUrl, setResultUrl] = useState(draft.wizardResultUrl || '')
   const [error, setError] = useState('')
-  // 链路任务 ID（R7：恢复后可从断点续跑）
   const [ttsTaskId, setTtsTaskId] = useState(draft.wizardTtsTaskId || '')
   const [refTaskId, setRefTaskId] = useState(draft.wizardRefTaskId || '')
   const [lipsyncTaskId, setLipsyncTaskId] = useState(draft.wizardLipsyncTaskId || '')
   const [subjectServerId, setSubjectServerId] = useState(presetSubjectId || draft.wizardSubjectId || '')
 
-  // 草稿同步：关键状态变更写回持久化（R7——刷新不丢进度）
+  const goStep = (next: number) => {
+    setStep(next)
+    setMaxReachableStep((m) => Math.max(m, next))
+  }
+
+  // 品牌上下文写入草稿
+  useEffect(() => {
+    if (brandId) draft.patch({ brandId })
+  }, [brandId])
+
   useEffect(() => {
     draft.patch({
       track: 'lipsync',
@@ -108,24 +126,24 @@ export default function LipSyncWizard() {
     })
   }, [step, presence, topic, script, cleanText, voiceId, realVideoUrl, subjectServerId, intent, ttsTaskId, refTaskId, lipsyncTaskId, resultUrl])
 
-  // 初始化时若有预填原文（灵感广场提取跳转），自动触发一次 AI 润色（静默）
   const [initRewriting, setInitRewriting] = useState(false)
   useEffect(() => {
     if (presetState?.rawText && !initRewriting && cleanText === '') {
       const prefilled = presetState.rawText
       setInitRewriting(true)
       businessApi.rewriteScript({ raw_text: prefilled, topic: topic || '' })
-        .then(rw => { setCleanText(rw.clean); setScript(rw.rewrite || rw.clean) })
-        .catch(() => { setCleanText(prefilled) })
+        .then(rw => {
+          setCleanText(rw.clean)
+          setRewriteText(rw.rewrite || rw.clean)
+          setScript(rw.rewrite || rw.clean)
+          setScriptVersion('rewrite')
+        })
+        .catch(() => { setCleanText(prefilled); setScript(prefilled) })
         .finally(() => setInitRewriting(false))
     }
   }, [])
 
-  // 我的音色 + 主体库（出镜选择）
-  const { data: tasks = [] } = useQuery({
-    queryKey: ['generation-tasks'],
-    queryFn: () => businessApi.listGenerationTasks().then(r => r.tasks),
-  })
+  const { tasks } = useGenerationTasks({ refetchInterval: false })
   const myVoices = useMemo(() => {
     const ids = new Set<string>()
     for (const t of tasks) {
@@ -144,24 +162,23 @@ export default function LipSyncWizard() {
       hasVideo: Array.isArray(taskParams(t).videos) && taskParams(t).videos.length > 0,
     })), [tasks])
 
-  // ① 提取
   const doExtract = async (payload: { share_url?: string; asset_url?: string }) => {
     setExtracting(true); setError('')
     try {
       const r = await businessApi.extractTranscript(payload)
       setRawText(r.raw_text)
-      setScript('')
       const rw = await businessApi.rewriteScript({ raw_text: r.raw_text, topic: topic || '口播获客' })
       setCleanText(rw.clean)
+      setRewriteText(rw.rewrite || rw.clean)
       setScript(rw.rewrite || rw.clean)
-      message.success('提取完成，文案已生成——可编辑')
-      setStep(1)
+      setScriptVersion('rewrite')
+      message.success('提取完成，文案已生成')
+      goStep(1)
     } catch (e: any) {
       setError(e?.response?.data?.msg || e?.message || '提取失败')
     } finally { setExtracting(false) }
   }
 
-  // ② 润色（手写路径 / 对编辑结果再润色）
   const doRewrite = async () => {
     if (!script.trim()) { message.warning('请先输入文案'); return }
     setRewriting(true)
@@ -169,236 +186,429 @@ export default function LipSyncWizard() {
       const rw = await businessApi.rewriteScript({ raw_text: script, topic: topic || '口播获客' })
       setRawText(script)
       setCleanText(rw.clean)
+      setRewriteText(rw.rewrite || rw.clean)
       setScript(rw.rewrite || rw.clean)
+      setScriptVersion('rewrite')
       message.success('已润色')
     } catch { /* 拦截器已提示 */ } finally { setRewriting(false) }
   }
 
-  // ⑤ 成片：TTS → （分身：参考生）→ 对口型
-  const produce = async () => {
+  const switchScriptVersion = (v: ScriptVersion) => {
+    if (v === 'clean' && cleanText) {
+      if (scriptVersion === 'rewrite') setRewriteText(script)
+      setScript(cleanText)
+    } else if (v === 'rewrite' && rewriteText) {
+      if (scriptVersion === 'clean') setCleanText(script)
+      setScript(rewriteText)
+    }
+    setScriptVersion(v)
+  }
+
+  const resolveTaskUrl = (id: string) => {
+    if (!id) return ''
+    const t = tasks.find(x => x.id === id)
+    if (!t || t.state !== 'success') return ''
+    return t.creations?.[0]?.stored_url || t.creations?.[0]?.url || ''
+  }
+
+  const produce = async (retryFrom?: 'tts' | 'ref' | 'lipsync') => {
     if (!script.trim()) { message.warning('文案为空'); return }
     if (!voiceId) { message.warning('请选择音色'); return }
-    setProducing(true); setError(''); setResultUrl(''); setStage('提交语音合成…')
+    setProducing(true); setError(''); setFailedStage('')
+    if (!retryFrom) setResultUrl('')
+    queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     try {
-      // ① TTS：文案 → 试听/驱动音频
-      const tts = await businessApi.submitGenerationTask({
-        sub_type: 'tts', model: '',
-        params: { text: script, voice_setting_voice_id: voiceId },
+      const result = await runLipSyncPipeline({
+        script,
+        voiceId,
+        presence,
+        realVideoUrl,
+        subjectServerId,
+        intent,
+      }, {
+        onStage: setPipelineStage,
+        retryFrom,
+        resume: retryFrom ? {
+          ttsTaskId,
+          refTaskId,
+          lipsyncTaskId,
+          audioUrl: resolveTaskUrl(ttsTaskId),
+          videoUrl: presence === 'avatar' ? resolveTaskUrl(refTaskId) : realVideoUrl,
+        } : undefined,
       })
-      setTtsTaskId(tts.id)
-      queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
-      const ttsDone = await waitTask(tts.id, () => setStage('语音合成中…'))
-      const audioUrl = ttsDone.creations?.[0]?.stored_url || ttsDone.creations?.[0]?.url || ''
-
-      // ② 出镜画面
-      let videoUrl = realVideoUrl
-      if (presence === 'avatar') {
-        if (!subjectServerId) throw new Error('请选择数字分身')
-        setStage('生成数字分身画面（参考生视频）…')
-        const prompt = intent.trim() || '人物面对镜头自然口播'
-        const ref = await businessApi.submitGenerationTask({
-          sub_type: 'reference2video', model: '', // D3 模型自动切换
-          params: { subjects: [{ name: '主角', server_id: subjectServerId }], prompt },
-        })
-        setRefTaskId(ref.id)
-        queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
-        const refDone = await waitTask(ref.id)
-        videoUrl = refDone.creations?.[0]?.stored_url || refDone.creations?.[0]?.url || ''
-      } else if (!videoUrl) {
-        throw new Error('请上传出镜视频')
-      }
-      if (!audioUrl) throw new Error('语音产物缺失（可重试）')
-      if (!videoUrl) throw new Error('分身画面产物缺失（可重试）')
-
-      // ③ 对口型
-      setStage('对口型合成成片…')
-      const lipsync = await businessApi.submitGenerationTask({
-        sub_type: 'lip_sync', model: '',
-        params: { video_url: videoUrl, audio_url: audioUrl },
-      })
-      setLipsyncTaskId(lipsync.id)
-      queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
-      const done = await waitTask(lipsync.id)
-      setResultUrl(done.creations?.[0]?.stored_url || done.creations?.[0]?.url || '')
+      setTtsTaskId(result.ttsTaskId)
+      setRefTaskId(result.refTaskId || '')
+      setLipsyncTaskId(result.lipsyncTaskId)
+      setResultUrl(result.resultUrl)
       message.success('成片完成')
-      queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
+      queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     } catch (e: any) {
       setError(e?.response?.data?.msg || e?.message || '成片失败')
-    } finally { setProducing(false); setStage('') }
+      setFailedStage(pipelineStage)
+    } finally {
+      setProducing(false)
+      setPipelineStage('')
+    }
   }
 
   const scriptSec = estSeconds(script)
+  const stepKey = WIZARD_STEPS[step]?.key || 'source'
 
-  return (
-    <div className="wr-page-content ip-page">
-      <div className="ip-page-hero">
-        <div>
-          <p className="ip-kicker">Wizard</p>
-          <h1>拍同款口播视频</h1>
-          <p className="ip-page-lead">参考爆款说话内容 → 确认文案 → 选谁来出镜 → 配音色 → 一键成片</p>
-        </div>
-      </div>
+  const pipelineStages = useMemo((): PipelineStage[] => {
+    const stages: PipelineStage[] = [
+      { key: 'tts', label: '语音合成', status: 'pending' },
+    ]
+    if (presence === 'avatar') {
+      stages.push({ key: 'ref', label: '数字分身画面', status: 'pending' })
+    }
+    stages.push({ key: 'lipsync', label: '对口型成片', status: 'pending' })
 
-      <Steps
-        current={step}
-        onChange={setStep}
-        size="small"
-        style={{ marginBottom: 20, maxWidth: 760 }}
-        items={[
-          { title: '文案来源' }, { title: '确认文案' }, { title: '出镜方式' }, { title: '音色' }, { title: '成片' },
-        ]}
-      />
+    const order = stages.map(s => s.key)
+    if (resultUrl) {
+      return stages.map(s => ({ ...s, status: 'done' as const }))
+    }
 
-      {error && <Alert type="error" showIcon style={{ marginBottom: 14 }} message={error} />}
-      {hasDraft && step > 0 && !resultUrl && (
+    const activeIdx = pipelineStage ? order.indexOf(pipelineStage) : -1
+    if (error && activeIdx >= 0) {
+      return stages.map((s, i) => ({
+        ...s,
+        status: i < activeIdx ? 'done' : i === activeIdx ? 'error' : 'pending',
+      }))
+    }
+    if (!producing || activeIdx < 0) return stages
+
+    return stages.map((s, i) => ({
+      ...s,
+      status: i < activeIdx ? 'done' : i === activeIdx ? 'active' : 'pending',
+    }))
+  }, [presence, producing, pipelineStage, resultUrl, error])
+
+  const canNext = (): boolean => {
+    if (step === 0) return false
+    if (step === 1) return !!script.trim()
+    if (step === 2) return presence === 'real' ? !!realVideoUrl : !!subjectServerId
+    if (step === 3) return !!voiceId
+    return false
+  }
+
+  const nextHint = (): string | undefined => {
+    if (step === 1 && !script.trim()) return '请先填写口播文案'
+    if (step === 2 && presence === 'real' && !realVideoUrl) return '请上传出镜视频'
+    if (step === 2 && presence === 'avatar' && !subjectServerId) return '请选择数字分身'
+    if (step === 3 && !voiceId) return '请选择音色'
+    return undefined
+  }
+
+  const handleNext = () => {
+    if (step === 4) {
+      if (resultUrl) {
+        const q = new URLSearchParams()
+        if (brandId) q.set('brandId', brandId)
+        q.set('mediaUrls', resultUrl)
+        q.set('contentType', 'video')
+        navigate(`/m/distribution?${q.toString()}`)
+      } else if (!producing) {
+        produce()
+      }
+      return
+    }
+    if (canNext()) goStep(step + 1)
+  }
+
+  const handleBack = () => {
+    if (step === 0) navigate('/m/compose')
+    else setStep(step - 1)
+  }
+
+  const presetFromVideo = (location.state as { fromVideoTrack?: boolean } | null)?.fromVideoTrack
+
+  const alerts = (
+    <>
+      {presetFromVideo && (
         <Alert
-          type="info" showIcon closable style={{ marginBottom: 14 }}
-          message="已恢复上次进度（草稿自动保存）"
+          type="info" showIcon closable className="wz-draft-banner"
+          message="发视频已升级为口播向导——你的文案已自动带入"
         />
       )}
+      {error && (
+        <Alert
+          type="error" showIcon className="wz-draft-banner"
+          message={error}
+          action={failedStage ? (
+            <Button size="small" onClick={() => produce(failedStage === 'ref' ? 'ref' : failedStage === 'lipsync' ? 'lipsync' : 'tts')}>
+              从失败步骤重试
+            </Button>
+          ) : undefined}
+        />
+      )}
+      {hasDraft && step > 0 && !resultUrl && (
+        <Alert
+          type="info" showIcon closable className="wz-draft-banner"
+          message={`已恢复上次进度（第 ${(draft.wizardStep || 0) + 1} 步）`}
+        />
+      )}
+      {!brandId && (
+        <Alert
+          type="warning" showIcon className="wz-draft-banner"
+          message={<>请先在 <Link to="/m/brands">账号人设</Link> 选择品牌，生成内容将关联到该品牌</>}
+        />
+      )}
+      <CapabilityBanner required={['lip_sync', 'tts', 'reference2video']} />
+    </>
+  )
 
+  const footerNextLabel = step === 4
+    ? (resultUrl ? '去发布' : producing ? '生成中…' : '一键成片')
+    : undefined
+
+  return (
+    <WizardShell
+      steps={WIZARD_STEPS}
+      stepIndex={step}
+      maxReachableStep={maxReachableStep}
+      onStepChange={setStep}
+      preview={
+        <PhonePreview
+          script={script}
+          videoUrl={realVideoUrl || undefined}
+          resultUrl={resultUrl || undefined}
+          presence={presence}
+          stepKey={stepKey}
+          estimatedSeconds={scriptSec}
+          topic={topic}
+        />
+      }
+      onBack={handleBack}
+      onNext={handleNext}
+      nextDisabled={(step < 4 && !canNext()) || (step === 4 && producing)}
+      nextHint={nextHint()}
+      nextLoading={extracting || rewriting || producing || initRewriting}
+      nextLabel={footerNextLabel}
+      backLabel={step === 0 ? '返回创作台' : undefined}
+      alerts={alerts}
+    >
       {step === 0 && (
-        <Space direction="vertical" size={14} style={{ width: '100%', maxWidth: 640 }}>
-          <Alert type="info" showIcon message="粘贴爆款视频分享链接，提取它说了什么作为你的文案底稿；也可以跳过直接手写" />
-          <Input.Search
-            size="large" enterButton={<><LinkOutlined /> 提取文案</>}
-            placeholder="粘贴抖音/快手分享链接（如 https://v.douyin.com/xxxx）"
-            value={shareUrl} onChange={e => setShareUrl(e.target.value)}
-            loading={extracting}
-            onSearch={() => shareUrl.trim() && doExtract({ share_url: shareUrl.trim() })}
-          />
-          <Space size={12}>
-            <Upload
-              accept="audio/*,video/*" showUploadList={false}
-              customRequest={async ({ file, onSuccess, onError }) => {
-                try {
-                  const r = await businessApi.uploadAsset(file as File)
-                  await doExtract({ asset_url: r.url })
-                  onSuccess?.(r)
-                } catch (e) { onError?.(e as Error) }
-              }}
+        <div className="ip-stagger">
+          <div className="wz-source-grid">
+            <button
+              type="button"
+              className={`wz-source-card${sourceMode === 'link' ? ' is-active' : ''}`}
+              onClick={() => setSourceMode('link')}
             >
-              <Button icon={<UploadOutlined />} loading={extracting}>上传音/视频提取</Button>
-            </Upload>
-            <Button type="dashed" onClick={() => setStep(1)}>跳过，手写文案</Button>
-          </Space>
-        </Space>
+              <span className="wz-source-card-icon"><LinkOutlined /></span>
+              <strong>粘贴分享链接</strong>
+              <span>从抖音/快手爆款提取说话内容</span>
+            </button>
+            <button
+              type="button"
+              className={`wz-source-card${sourceMode === 'upload' ? ' is-active' : ''}`}
+              onClick={() => setSourceMode('upload')}
+            >
+              <span className="wz-source-card-icon"><UploadOutlined /></span>
+              <strong>上传音/视频</strong>
+              <span>从本地文件提取文案</span>
+            </button>
+            <button
+              type="button"
+              className={`wz-source-card${sourceMode === 'manual' ? ' is-active' : ''}`}
+              onClick={() => { setSourceMode('manual'); goStep(1) }}
+            >
+              <span className="wz-source-card-icon"><EditOutlined /></span>
+              <strong>手写文案</strong>
+              <span>跳过提取，直接写口播稿</span>
+            </button>
+          </div>
+
+          {sourceMode === 'link' && (
+            <div className="wz-source-expand">
+              <Input.Search
+                size="large"
+                enterButton={<><LinkOutlined /> 提取文案</>}
+                placeholder="粘贴抖音/快手分享链接"
+                value={shareUrl}
+                onChange={e => setShareUrl(e.target.value)}
+                loading={extracting}
+                onSearch={() => shareUrl.trim() && doExtract({ share_url: shareUrl.trim() })}
+              />
+            </div>
+          )}
+
+          {sourceMode === 'upload' && (
+            <div className="wz-source-expand">
+              <MaterialDropzone
+                accept="audio/*,video/*"
+                hint="支持 mp4 / mov / mp3 / wav，上传后自动提取文案"
+                loading={extracting}
+                onUpload={async (file) => {
+                  const r = await businessApi.uploadAsset(file)
+                  await doExtract({ asset_url: r.url })
+                }}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {step === 1 && (
-        <Space direction="vertical" size={12} style={{ width: '100%', maxWidth: 720 }}>
+        <div className="ip-form-stack ip-stagger">
+          <label>一句话主题（AI 改写围绕它）</label>
           <Input
-            placeholder="一句话主题（AI 润色/改写围绕它，如：酸菜鱼餐馆新菜品）"
-            value={topic} onChange={e => setTopic(e.target.value)} maxLength={100}
+            placeholder="如：酸菜鱼餐馆新菜品推广"
+            value={topic}
+            onChange={e => setTopic(e.target.value)}
+            maxLength={100}
           />
+          {(cleanText || rewriteText) && (
+            <Segmented
+              value={scriptVersion}
+              onChange={v => switchScriptVersion(v as ScriptVersion)}
+              options={[
+                { label: '改写版（推荐）', value: 'rewrite', disabled: !rewriteText && !cleanText },
+                { label: '清洗版原文', value: 'clean', disabled: !cleanText },
+              ]}
+            />
+          )}
           <TextArea
-            rows={8} showCount
-            value={script} onChange={e => setScript(e.target.value)}
+            rows={9}
+            showCount
+            value={script}
+            onChange={e => setScript(e.target.value)}
             placeholder="输入或提取口播文案…"
-            style={{ fontSize: 14 }}
           />
-          <Space size={12} wrap>
-            <Tag color={scriptSec > 0 ? 'blue' : 'default'}>约 {scriptSec} 秒语音（≈4字/秒）</Tag>
-            <Button loading={rewriting} onClick={doRewrite} disabled={!script.trim()}>AI 润色/改写</Button>
-            {cleanText && (
-              <Button type="dashed" onClick={() => { setScript(cleanText); message.info('已切换为清洗版原文') }}>用原文</Button>
-            )}
-            <Button type="primary" disabled={!script.trim()} onClick={() => setStep(2)}>下一步：选谁出镜</Button>
-          </Space>
-        </Space>
+          <div className="wz-script-toolbar">
+            <span className="wz-duration-ring">
+              约 <strong>{scriptSec}</strong> 秒口播
+            </span>
+            <Button loading={rewriting} onClick={doRewrite} disabled={!script.trim()}>
+              AI 润色/改写
+            </Button>
+          </div>
+        </div>
       )}
 
       {step === 2 && (
-        <Space direction="vertical" size={14} style={{ width: '100%', maxWidth: 680 }}>
-          <Segmented
-            value={presence}
-            onChange={v => setPresence(v as 'real' | 'avatar')}
-            options={[
-              { value: 'real', label: '真人出镜（自己拍的视频）', icon: <VideoCameraOutlined /> },
-              { value: 'avatar', label: '数字分身（AI 生成画面）', icon: <UserOutlined /> },
-            ]}
-          />
-          {presence === 'real' ? (
-            <>
-              <Alert type="info" showIcon message="上传一段你自己出镜、不说话的视频——成片里你会对着文案开口说话（正脸、光线稳定效果最好）" />
-              <Upload
-                accept="video/mp4,video/quicktime,x-msvideo" maxCount={1}
-                customRequest={async ({ file, onSuccess, onError }) => {
-                  try {
-                    const r = await businessApi.uploadAsset(file as File)
+        <div className="ip-stagger">
+          <div className="wz-presence-grid">
+            <button
+              type="button"
+              className={`wz-presence-card${presence === 'real' ? ' is-active' : ''}`}
+              onClick={() => setPresence('real')}
+            >
+              <span className="wz-presence-card-icon"><VideoCameraOutlined /></span>
+              <strong>真人出镜</strong>
+              <span>上传自己拍的不说话视频，成片里你对口型开口</span>
+            </button>
+            <button
+              type="button"
+              className={`wz-presence-card${presence === 'avatar' ? ' is-active' : ''}`}
+              onClick={() => setPresence('avatar')}
+            >
+              <span className="wz-presence-card-icon"><UserOutlined /></span>
+              <strong>数字分身</strong>
+              <span>AI 生成出镜画面，再对口型合成成片</span>
+            </button>
+          </div>
+
+          <div className="wz-presence-detail">
+            {presence === 'real' ? (
+              <>
+                <Alert type="info" showIcon message="正脸、光线稳定、不说话的视频效果最好" />
+                <MaterialDropzone
+                  accept="video/mp4,video/quicktime,video/x-msvideo"
+                  hint={`文案约 ${scriptSec} 秒，出镜视频时长最好相近`}
+                  fileName={realVideoName || (realVideoUrl ? '已上传出镜视频' : undefined)}
+                  onUpload={async (file) => {
+                    const r = await businessApi.uploadAsset(file)
                     setRealVideoUrl(r.url)
-                    onSuccess?.(r)
-                  } catch (e) { onError?.(e as Error) }
-                }}
-                onRemove={() => setRealVideoUrl('')}
-              >
-                <Button icon={<UploadOutlined />}>{realVideoUrl ? '重新上传' : '上传出镜视频（mp4/mov/avi）'}</Button>
-              </Upload>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                时长参考：文案约 {scriptSec} 秒，出镜视频时长最好相近（差异大 Vidu 可能截断或延长）
-              </Text>
-            </>
-          ) : (
-            <>
-              <Alert type="info" showIcon message="选择资产库里的数字分身（没有可先去资产库创建）；一句话描述场景，AI 生成画面后再对口型" />
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                {subjects.length === 0 ? (
-                  <Text type="warning">还没有数字分身——<a href="/m/assets" target="_blank" rel="noreferrer">去资产库创建</a></Text>
-                ) : subjects.map(s => (
-                  <Radio.Button
-                    key={s.id} checked={subjectServerId === s.serverId}
-                    onClick={() => setSubjectServerId(s.serverId)}
-                  >
-                    {s.name}{s.hasVideo ? '（视频分身）' : ''}
-                  </Radio.Button>
-                ))}
-              </Space>
-              <Input
-                placeholder="一句话场景意图（如：在厨房里边做菜边对镜头讲解）"
-                value={intent} onChange={e => setIntent(e.target.value)} maxLength={200}
-              />
-            </>
-          )}
-          <Button
-            type="primary"
-            disabled={presence === 'real' ? !realVideoUrl : !subjectServerId}
-            onClick={() => setStep(3)}
-          >下一步：配音色</Button>
-        </Space>
+                    setRealVideoName(file.name)
+                    message.success('出镜视频已上传')
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <Alert type="info" showIcon message="选择资产库里的数字分身，一句话描述场景" />
+                <div className="wz-subject-picks">
+                  {subjects.length === 0 ? (
+                    <Text type="warning">
+                      还没有数字分身——<a href="/m/assets" target="_blank" rel="noreferrer">去资产库创建</a>
+                    </Text>
+                  ) : subjects.map(s => (
+                    <Radio.Button
+                      key={s.id}
+                      className="wz-subject-pick"
+                      checked={subjectServerId === s.serverId}
+                      onClick={() => setSubjectServerId(s.serverId)}
+                    >
+                      {s.name}{s.hasVideo ? '（视频分身）' : ''}
+                    </Radio.Button>
+                  ))}
+                </div>
+                <Input
+                  placeholder="场景意图（如：在厨房边做菜边对镜头讲解）"
+                  value={intent}
+                  onChange={e => setIntent(e.target.value)}
+                  maxLength={200}
+                />
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {step === 3 && (
-        <Space direction="vertical" size={14} style={{ width: '100%', maxWidth: 560 }}>
-          <Text strong><SoundOutlined /> 选择口播音色（可试听）</Text>
-          <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} style={{ maxWidth: 420 }} />
+        <div className="ip-form-stack ip-stagger">
+          <label><SoundOutlined /> 选择口播音色（可试听）</label>
+          <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} style={{ maxWidth: 480 }} />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            想用自己的声音？<a href="/m/compose/tools?tab=media" target="_blank" rel="noreferrer">去声音克隆</a>（7 天内在语音合成中调用一次即永久保留）
+            想用自己的声音？<a href="/m/compose/tools?tab=media" target="_blank" rel="noreferrer">去声音克隆</a>
           </Text>
-          <Button type="primary" disabled={!voiceId} onClick={() => setStep(4)}>下一步：生成成片</Button>
-        </Space>
+        </div>
       )}
 
       {step === 4 && (
-        <Space direction="vertical" size={14} style={{ width: '100%', maxWidth: 720 }}>
-          <Paragraph>
-            就绪检查：<Tag color="green">文案 {script.length} 字</Tag>
+        <div className="ip-stagger">
+          <div className="wz-ready-tags">
+            <Tag color="green">文案 {script.length} 字 · 约 {scriptSec} 秒</Tag>
             <Tag color="green">{presence === 'real' ? '真人出镜' : '数字分身'}</Tag>
-            <Tag color="green">音色 {voiceId}</Tag>
-          </Paragraph>
-          <Button type="primary" size="large" icon={<RocketOutlined />} loading={producing} onClick={produce}>
-            {producing ? (stage || '生成中…') : '一键成片（语音 → 画面 → 对口型）'}
-          </Button>
-          {resultUrl && (
-            <div>
-              <Alert type="success" showIcon icon={<CheckCircleOutlined />} message="成片完成" style={{ marginBottom: 10 }} />
-              <video src={resultUrl} controls style={{ width: '100%', maxWidth: 420, borderRadius: 12 }} />
-              <div style={{ marginTop: 8 }}>
-                <Button href={resultUrl} target="_blank" download>下载成片</Button>
-              </div>
+            <Tag color="green">音色已选</Tag>
+          </div>
+
+          <PipelineProgress stages={pipelineStages} />
+
+          {!resultUrl && !producing && (
+            <div className="wz-produce-actions">
+              <Button type="primary" size="large" icon={<RocketOutlined />} onClick={() => produce()}>
+                一键成片
+              </Button>
             </div>
           )}
-        </Space>
+
+          {producing && (
+            <Alert type="info" showIcon style={{ marginTop: 14 }} message="生成中，请勿关闭页面…" />
+          )}
+
+          {resultUrl && (
+            <>
+              <Alert
+                type="success" showIcon icon={<CheckCircleOutlined />}
+                message="成片完成" style={{ marginTop: 14 }}
+              />
+              <video
+                src={resultUrl}
+                controls
+                style={{ width: '100%', maxWidth: 420, borderRadius: 12, marginTop: 12 }}
+              />
+              <div className="wz-produce-actions">
+                <Button href={resultUrl} target="_blank" download>下载成片</Button>
+                <Button type="primary" icon={<ExportOutlined />} onClick={handleNext}>
+                  去发布
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       )}
-    </div>
+    </WizardShell>
   )
 }

@@ -94,7 +94,7 @@ export default function HotVideosTab({ brandId }: { brandId: string }) {
       selectedTitle: shooting.title.slice(0, 40),
     })
     setShooting(null)
-    navigate('/m/compose/video')
+    navigate('/m/compose/lipsync')
   }
 
   // 提取文案并导航到向导（08 计划 D4——灵感广场「提取文案」入口）

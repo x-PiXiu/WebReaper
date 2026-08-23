@@ -60,7 +60,7 @@ export default function GenerationSpecs() {
       // 端点类型枚举（用于"新增模型"下拉）
       const t = await businessApi.listGenerationTypes()
       setTypes(t.types.map((x) => x.sub_type))
-      return r.specs
+      return r
     },
   })
 

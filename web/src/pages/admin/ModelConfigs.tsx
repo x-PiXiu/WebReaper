@@ -1,6 +1,5 @@
-import { useState } from 'react'
-import { Typography, Card, Space, message, Tag, Table, Button, Switch, Select, Collapse } from 'antd'
-import { ThunderboltOutlined, SettingOutlined, CheckCircleFilled } from '@ant-design/icons'
+import { Typography, Card, Space, message, Tag, Table, Button, Switch, Collapse, Spin } from 'antd'
+import { SettingOutlined, CheckCircleFilled } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationSpec } from '../../types/api'
@@ -170,6 +169,10 @@ export default function AdminModelConfigs() {
 
   return (
     <div className="wr-page-content">
+      {isLoading ? (
+        <Spin style={{ display: 'block', margin: '60px auto' }} />
+      ) : (
+      <>
       <div className="wr-page-header">
         <h1>模型配置管理</h1>
         <p>按厂商分组管理模型配置，设置每个端点的默认模型——修改即时生效</p>
@@ -195,6 +198,8 @@ export default function AdminModelConfigs() {
           )}
         </Collapse>
       </Card>
+      </>
+      )}
     </div>
   )
 }

@@ -157,7 +157,7 @@ export default function CopyModule() {
           ) : (
             <Button onClick={() => navigate('/m/compose/voice')}>去配音</Button>
           )}
-          <Button type="link" onClick={() => navigate(isGraphic ? '/m/compose/graphic' : '/m/compose/video')}>
+          <Button type="link" onClick={() => navigate(isGraphic ? '/m/compose/graphic' : '/m/compose/lipsync')}>
             返回{isGraphic ? '发图文' : '发视频'}总览
           </Button>
         </Space>

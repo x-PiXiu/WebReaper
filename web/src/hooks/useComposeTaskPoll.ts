@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { message } from 'antd'
-import { businessApi } from '../api/business'
+import { fetchGenerationTasks, GENERATION_TASKS_KEY } from './useGenerationTasks'
 import { useComposeDraft } from '../store/composeDraft'
 import { isTaskDone, isTaskSuccess, taskCoverUrl, taskPrimaryUrl } from '../utils/generationTask'
 
@@ -30,7 +30,7 @@ export function useComposeTaskPoll() {
 
     const tick = async () => {
       try {
-        const { tasks } = await businessApi.listGenerationTasks()
+        const tasks = await fetchGenerationTasks()
         if (cancelled) return
 
         const byId = new Map(tasks.map((t) => [t.id, t]))
@@ -104,7 +104,7 @@ export function useComposeTaskPoll() {
         }
         if (worksDirty) {
           queryClient.invalidateQueries({ queryKey: ['merchant-works'] })
-          queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
+          queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
         }
       } catch {
         /* 后端未启动时静默 */

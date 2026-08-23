@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -417,7 +417,7 @@ export const businessApi = {
 
   // 查询可用模板（客户端）
   listTemplates: () =>
-    apiClient.get<unknown, { templates: GenerationTemplate[] }>('/api/v1/generation/templates'),
+    apiClient.get<unknown, { templates: GenerationTemplate[] }>('/api/v1/generation/templates').then((r) => r.templates),
 
   // 查询单个模板
   getTemplate: (id: string) =>
@@ -445,7 +445,7 @@ export const businessApi = {
     return apiClient.post<unknown, { id: string; url: string; mime: string; size_bytes: number; owner_type: string }>('/api/v1/media/assets', form)
   },
   listAssets: () =>
-    apiClient.get<unknown, { assets: MediaAsset[] }>('/api/v1/media/assets'),
+    apiClient.get<unknown, { assets: MediaAsset[] }>('/api/v1/media/assets').then((r) => r.assets),
   deleteAsset: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/media/assets/${id}`),
 
@@ -478,11 +478,13 @@ export const businessApi = {
     apiClient.put<unknown, { saved: number }>(`/api/v1/admin/generation/modes/${subType}`, { enabled }),
 
   adminListGenerationSpecs: () =>
-    apiClient.get<unknown, { specs: GenerationSpec[] }>('/api/v1/admin/generation/specs'),
-  adminSaveGenerationSpec: (subType: string, model: string, body: { capability: unknown; enabled: boolean }) =>
+    apiClient.get<unknown, { specs: GenerationSpec[] }>('/api/v1/admin/generation/specs').then((r) => r.specs),
+  adminSaveGenerationSpec: (subType: string, model: string, body: Partial<GenerationSpec>) =>
     apiClient.put<unknown, { saved: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`, body),
   adminDeleteGenerationSpec: (subType: string, model: string) =>
     apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`),
+  adminSetDefaultModel: (subType: string, model: string, provider?: string) =>
+    apiClient.put<unknown, { default: string }>(`/api/v1/admin/generation/specs/${subType}/${model}/default`, null, { params: { provider } }),
 
   // ---- LLM 默认模型切换 ----
   setLLMDefault: (name: string) =>
@@ -583,14 +585,4 @@ export const businessApi = {
     apiClient.put<unknown, GenerationTemplate>(`/api/v1/admin/templates/${id}`, data),
   adminDeleteGenerationTemplate: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/admin/templates/${id}`),
-
-  // admin 模型配置管理
-  adminListGenerationSpecs: () =>
-    apiClient.get<unknown, { specs: GenerationSpec[] }>('/api/v1/admin/generation/specs'),
-  adminSaveGenerationSpec: (subType: string, model: string, body: Partial<GenerationSpec>) =>
-    apiClient.put<unknown, { saved: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`, body),
-  adminDeleteGenerationSpec: (subType: string, model: string) =>
-    apiClient.delete<unknown, { deleted: boolean }>(`/api/v1/admin/generation/specs/${subType}/${model}`),
-  adminSetDefaultModel: (subType: string, model: string, provider?: string) =>
-    apiClient.put<unknown, { default: string }>(`/api/v1/admin/generation/specs/${subType}/${model}/default`, null, { params: { provider } }),
 }

@@ -567,8 +567,11 @@ export interface GenerationModeView {
 export interface GenerationSpec {
   sub_type: string
   model: string
+  provider?: string
   endpoint: string
   enabled: boolean
+  is_default?: boolean
+  sort_order?: number
   capabilities_json: string
   has_override?: boolean
   updated_at?: string
@@ -693,19 +696,6 @@ export interface GenerationTemplate {
   sort_order: number
   enabled: boolean
   created_at: string
-  updated_at: string
-}
-
-// 生成规格（端点×模型配置）
-export interface GenerationSpec {
-  sub_type: string
-  model: string
-  provider: string               // 厂商名称（新增）
-  endpoint: string
-  enabled: boolean
-  is_default: boolean            // 是否为默认模型（新增）
-  sort_order: number             // 排序（新增）
-  capabilities_json: string
   updated_at: string
 }
 

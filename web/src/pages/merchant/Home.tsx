@@ -4,13 +4,17 @@ import { useQuery } from '@tanstack/react-query'
 import { Button, Col, Row, Segmented, Space, Tag, Typography } from 'antd'
 import {
   ArrowRightOutlined, FireOutlined, LinkOutlined, RobotOutlined, SendOutlined,
+  VideoCameraOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useBrands } from '../../hooks/useBrands'
 import { businessApi } from '../../api/business'
 import { useComposeDraft } from '../../store/composeDraft'
-import { composeProgressLabel, hasComposeDraft } from '../../utils/composeProgress'
+import { composeProgressLabel, hasComposeDraft, composeResumePath } from '../../utils/composeProgress'
 import PageLoading from '../../components/PageLoading'
 import ChinaHotMap from '../../components/ChinaHotMap'
+import { GrowthStagesNav } from '../../components/GrowthStagesNav'
+import { useGenerationTasks } from '../../hooks/useGenerationTasks'
+import { inferGrowthStage } from '../../utils/growthStage'
 import { PRODUCT } from '../../config/product'
 import {
   CITY_HOTSPOTS, PROVINCE_HEAT, provinceByName, type CityHotspot,
@@ -33,6 +37,7 @@ export default function MerchantHome() {
     queryFn: () => businessApi.getAnalyticsSummary().catch(() => null),
     staleTime: 60_000,
   })
+  const { tasks: genTasks = [] } = useGenerationTasks({ refetchInterval: false })
   const draft = useComposeDraft()
 
   const [metric, setMetric] = useState<MetricKey>('heat')
@@ -42,10 +47,20 @@ export default function MerchantHome() {
   const published = works.filter((w) => w.status === 'published')
   const ready = works.filter((w) => w.status === 'ready')
   const hasDraft = hasComposeDraft(draft)
+  const hasLipsyncVideo = genTasks.some(
+    t => t.sub_type === 'lip_sync' && t.state === 'success' && (t.creations?.length ?? 0) > 0,
+  )
   const draftProgress = hasDraft ? composeProgressLabel(draft, draft.track) : ''
-  const draftResumePath = draft.track === 'graphic' ? '/m/compose/graphic' : '/m/compose/video'
+  const draftResumePath = composeResumePath(draft)
+  const draftResumeLabel = draft.track === 'lipsync' ? '拍口播' : draft.track === 'graphic' ? '发图文' : '发视频'
   const weekViews = summary?.totals?.views ?? 0
   const hasHeatData = PROVINCE_HEAT.length > 0 || CITY_HOTSPOTS.length > 0
+  const growthCurrent = inferGrowthStage({
+    brandCount: brands.length,
+    hasContent: hasLipsyncVideo || works.length > 0,
+    readyCount: ready.length,
+    publishedCount: published.length,
+  })
 
   const national = useMemo(() => {
     const leads = PROVINCE_HEAT.reduce((s, p) => s + p.leads, 0)
@@ -75,11 +90,13 @@ export default function MerchantHome() {
         </div>
         <Space wrap>
           <Button icon={<LinkOutlined />} onClick={() => navigate('/m/inspire')}>灵感广场</Button>
-          <Button type="primary" className="ip-btn-primary" icon={<RobotOutlined />} onClick={() => navigate('/m/compose/video')}>
-            发视频
+          <Button type="primary" className="ip-btn-primary" icon={<RobotOutlined />} onClick={() => navigate('/m/compose/lipsync')}>
+            拍口播视频
           </Button>
         </Space>
       </div>
+
+      <GrowthStagesNav current={growthCurrent} className="ch-growth ip-stagger" style={{ marginBottom: 16 }} />
 
       <Row gutter={[16, 16]} className="ip-stagger" style={{ marginBottom: 16 }}>
         {hasHeatData ? (
@@ -134,6 +151,23 @@ export default function MerchantHome() {
           </div>
         </Col>
       </Row>
+
+      {brands.length > 0 && !hasLipsyncVideo && !hasDraft && (
+        <div className="ip-onboard-card ip-stagger" style={{ marginBottom: 16 }}>
+          <h2 style={{ margin: '0 0 8px', fontSize: 18 }}>还没拍过口播视频？</h2>
+          <p style={{ margin: '0 0 16px', color: 'var(--wr-text-secondary)' }}>
+            三步搞定：提取爆款文案 → 选出镜 → 一键成片，系统自动完成对口型与合成。
+          </p>
+          <Space wrap>
+            <Button type="primary" size="large" className="ip-btn-primary" icon={<VideoCameraOutlined />} onClick={() => navigate('/m/compose/lipsync')}>
+              开始拍口播
+            </Button>
+            <Button size="large" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/compose/quick')}>
+              快速生成
+            </Button>
+          </Space>
+        </div>
+      )}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={16}>
@@ -200,9 +234,9 @@ export default function MerchantHome() {
                     type="primary"
                     className="ip-btn-primary"
                     icon={<ArrowRightOutlined />}
-                    onClick={() => navigate(`/m/compose/video`)}
+                    onClick={() => navigate('/m/compose/lipsync')}
                   >
-                    去发视频
+                    拍口播
                   </Button>
                   <Button icon={<SendOutlined />} onClick={() => navigate('/m/distribution')}>去发布</Button>
                 </Space>
@@ -216,7 +250,7 @@ export default function MerchantHome() {
             )}
             {CITY_HOTSPOTS.length === 0 && (
               <Space style={{ marginTop: 16 }} wrap>
-                <Button type="primary" className="ip-btn-primary" onClick={() => navigate('/m/compose/video')}>发视频</Button>
+                <Button type="primary" className="ip-btn-primary" onClick={() => navigate('/m/compose/lipsync')}>拍口播</Button>
                 <Button onClick={() => navigate('/m/compose/graphic')}>发图文</Button>
               </Space>
             )}
@@ -268,7 +302,7 @@ export default function MerchantHome() {
                   <>
                     <Text style={{ display: 'block', marginBottom: 4 }}>{draftProgress}</Text>
                     <Button type="link" style={{ padding: 0 }} onClick={() => navigate(draftResumePath)}>
-                      草稿未完成，继续{draft.track === 'graphic' ? '发图文' : '发视频'} →
+                      草稿未完成，继续{draftResumeLabel} →
                     </Button>
                   </>
                 ) : null}

@@ -1,8 +1,13 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Space, Tag, Typography } from 'antd'
+import { Alert, Space, Tag, Typography } from 'antd'
 import { modulesForTrack, useComposeDraft } from '../../../store/composeDraft'
 
 const { Text } = Typography
+
+const LEGACY_VIDEO_PATHS = new Set([
+  '/m/compose/benchmark', '/m/compose/copy', '/m/compose/titles',
+  '/m/compose/voice', '/m/compose/avatar', '/m/compose/edit', '/m/compose/cover',
+])
 
 /** 模块页顶栏：仅展示当前轨道相关模块，避免视频/图文混跳 */
 export function ComposeModuleHeader({
@@ -19,7 +24,8 @@ export function ComposeModuleHeader({
   const track = draft.track
   const mods = modulesForTrack(track)
   const trackLabel = track === 'graphic' ? '发图文' : '发视频'
-  const trackHome = track === 'graphic' ? '/m/compose/graphic' : '/m/compose/video'
+  const trackHome = track === 'graphic' ? '/m/compose/graphic' : '/m/compose/lipsync'
+  const showWizardHint = track !== 'graphic' && LEGACY_VIDEO_PATHS.has(pathname)
 
   const activePath = pathname + search
 
@@ -41,6 +47,21 @@ export function ComposeModuleHeader({
           <p className="ip-lead">{lead}</p>
         </div>
       </div>
+      {showWizardHint && (
+        <Alert
+          type="info"
+          showIcon
+          className="wz-draft-banner"
+          message="推荐：用口播向导或快速生成"
+          description={
+            <>
+              新流程步骤更少、自动对口型。试试
+              {' '}<Link to="/m/compose/lipsync">口播向导</Link>
+              {' '}或{' '}<Link to="/m/compose/quick">快速生成</Link>。
+            </>
+          }
+        />
+      )}
       <div className="ip-toolbar" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>本轨道模块</Text>
         <Space size={[6, 6]} wrap>

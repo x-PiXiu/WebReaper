@@ -150,7 +150,7 @@ export default function BenchmarkModule() {
             >
               去文案工作室
             </Button>
-            <Button type="link" onClick={() => navigate(draft.track === 'graphic' ? '/m/compose/graphic' : '/m/compose/video')}>
+            <Button type="link" onClick={() => navigate(draft.track === 'graphic' ? '/m/compose/graphic' : '/m/compose/lipsync')}>
               返回{draft.track === 'graphic' ? '发图文' : '发视频'}
             </Button>
           </Space>
