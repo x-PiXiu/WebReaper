@@ -341,7 +341,7 @@ func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.
 		if req.Quality != "" {
 			params["resolution"] = req.Quality
 		} else {
-			params["resolution"] = "720p" // 默认720p
+			params["resolution"] = "1080p" // 默认1080p（所有Vidu模型均支持）
 		}
 
 		// 如果用户指定了比例，使用用户指定的

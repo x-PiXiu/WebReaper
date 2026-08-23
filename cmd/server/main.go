@@ -1016,6 +1016,10 @@ func main() {
 		// 注入端点选择器（统一提交API需要）
 		endpointSelector := generation.NewEndpointSelector(mediaStore, nil)
 		genUC.SetEndpointSelector(endpointSelector)
+		// 模板管理用例（管理后台可动态配置生成模板）
+		templateRepo := repository.NewGormTemplateRepository(geoRepos.db)
+		templateUC := generation.NewTemplateUseCase(templateRepo)
+		router.SetTemplate(templateUC)
 		router.SetGeneration(genUC, viduProvider, genRegistry, genSpecRepo)
 		router.SetIntegrationRepo(integrationRepo) // 能力路由新表（集成中心 vendor/capability 管理）
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429

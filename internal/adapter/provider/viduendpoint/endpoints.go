@@ -29,7 +29,7 @@ func (text2videoAdapter) BuildRequest(ctx context.Context, model string, p entit
 		"model":  model,
 		"prompt": getString(p, "prompt"),
 	}
-	ensureStringParam(body, "resolution", p, "720p")
+	ensureStringParam(body, "resolution", p, "1080p")
 	ensureStringParam(body, "aspect_ratio", p, "16:9")
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
@@ -77,7 +77,7 @@ func (img2videoAdapter) BuildRequest(ctx context.Context, model string, p entity
 	if v := getString(p, "prompt"); v != "" {
 		body["prompt"] = v
 	}
-	ensureStringParam(body, "resolution", p, "720p")
+	ensureStringParam(body, "resolution", p, "1080p")
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
 	}
@@ -112,7 +112,7 @@ func (startEnd2videoAdapter) BuildRequest(ctx context.Context, model string, p e
 	if v := getString(p, "prompt"); v != "" {
 		body["prompt"] = v
 	}
-	ensureStringParam(body, "resolution", p, "720p")
+	ensureStringParam(body, "resolution", p, "1080p")
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
 	}
@@ -250,7 +250,7 @@ func (multiframeAdapter) BuildRequest(ctx context.Context, model string, p entit
 		"start_image":    getString(p, "start_image"),
 		"image_settings": getKeyFrames(p),
 	}
-	ensureStringParam(body, "resolution", p, "720p")
+	ensureStringParam(body, "resolution", p, "1080p")
 	if v := getString(p, "aspect_ratio"); v != "" {
 		body["aspect_ratio"] = v
 	}
@@ -299,7 +299,7 @@ func (digitalHumanAdapter) BuildRequest(ctx context.Context, model string, p ent
 			body["voice_id"] = voice
 		}
 	}
-	ensureStringParam(body, "resolution", p, "720p")
+	ensureStringParam(body, "resolution", p, "1080p")
 	if payload != "" {
 		body["payload"] = payload
 	}
