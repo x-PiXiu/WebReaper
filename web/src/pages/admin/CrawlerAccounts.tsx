@@ -131,11 +131,12 @@ export default function CrawlerAccounts() {
     setQrStatus('pending')
   }, [qrSessionId])
 
-  // 打开扫码弹窗
-  const openQRModal = (platform: string) => {
-    setQrPlatform(platform)
+  // 打开扫码弹窗（只打开弹窗，不自动启动扫码）
+  const openQRModal = () => {
     setIsQRModalOpen(true)
-    startQRLogin()
+    setQrStatus('pending')
+    setQrImage(null)
+    setQrSessionId(null)
   }
 
   // 表格列定义
@@ -226,7 +227,7 @@ export default function CrawlerAccounts() {
         title="平台方账号管理"
         extra={
           <Space>
-            <Button type="primary" icon={<QrcodeOutlined />} onClick={() => openQRModal('douyin')}>
+            <Button type="primary" icon={<QrcodeOutlined />} onClick={openQRModal}>
               扫码添加
             </Button>
             <Button icon={<PlusOutlined />} onClick={() => setIsManualModalOpen(true)}>
@@ -249,7 +250,7 @@ export default function CrawlerAccounts() {
 
       {/* 扫码登录弹窗 */}
       <Modal
-        title={`扫码登录 - ${PLATFORM_OPTIONS.find(p => p.value === qrPlatform)?.label || qrPlatform}`}
+        title="扫码添加平台方账号"
         open={isQRModalOpen}
         onCancel={cancelQRLogin}
         footer={[
@@ -261,18 +262,38 @@ export default function CrawlerAccounts() {
         width={400}
       >
         <div style={{ textAlign: 'center', padding: 20 }}>
-          <Select
-            value={qrPlatform}
-            onChange={(v) => {
-              setQrPlatform(v)
-              if (qrSessionId) cancelQRLogin()
-            }}
-            options={PLATFORM_OPTIONS}
-            style={{ marginBottom: 16, width: 200 }}
-          />
+          {/* 平台选择 */}
+          <div style={{ marginBottom: 16 }}>
+            <Text>选择平台：</Text>
+            <Select
+              value={qrPlatform}
+              onChange={(v) => {
+                setQrPlatform(v)
+                setQrImage(null)
+                setQrSessionId(null)
+                setQrStatus('pending')
+              }}
+              options={PLATFORM_OPTIONS}
+              style={{ marginLeft: 8, width: 150 }}
+            />
+          </div>
+
+          {/* 开始扫码按钮（未启动时显示） */}
+          {!qrSessionId && qrStatus === 'pending' && (
+            <Button
+              type="primary"
+              icon={<QrcodeOutlined />}
+              onClick={startQRLogin}
+              style={{ marginBottom: 16 }}
+            >
+              开始扫码
+            </Button>
+          )}
+
+          {/* 二维码显示 */}
           {qrStatus === 'expired' ? (
             <div>
-              <Text type="warning">二维码已过期，请重新获取</Text>
+              <Text type="warning">二维码已过期，请点击"重新获取二维码"</Text>
             </div>
           ) : qrImage ? (
             <div>
@@ -282,14 +303,14 @@ export default function CrawlerAccounts() {
                 style={{ maxWidth: 256, maxHeight: 256, border: '1px solid #eee' }}
               />
               <div style={{ marginTop: 8 }}>
-                <Text type="secondary">请使用手机扫描二维码登录</Text>
+                <Text type="secondary">请使用 {PLATFORM_OPTIONS.find(p => p.value === qrPlatform)?.label} 手机APP扫描二维码</Text>
               </div>
             </div>
-          ) : (
+          ) : qrSessionId ? (
             <div>
               <Text type="secondary">正在获取二维码...</Text>
             </div>
-          )}
+          ) : null}
         </div>
       </Modal>
 
