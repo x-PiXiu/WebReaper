@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { Typography, Card, Space, message, Tag, Modal, Input, Table, Button, Form, Select, InputNumber } from 'antd'
-import { PlusOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useState, useEffect, useCallback } from 'react'
+import { Typography, Card, Space, message, Tag, Modal, Table, Button, Select, Form, Input } from 'antd'
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, QrcodeOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { CrawlerAccount } from '../../types/api'
@@ -11,6 +11,7 @@ const PLATFORM_OPTIONS = [
   { value: 'douyin', label: '抖音' },
   { value: 'kuaishou', label: '快手' },
   { value: 'bilibili', label: 'B站' },
+  { value: 'xiaohongshu', label: '小红书' },
 ]
 
 const STATUS_COLORS: Record<string, string> = {
@@ -28,8 +29,13 @@ const HEALTH_COLORS: Record<string, string> = {
 // 平台方账号管理页面
 export default function CrawlerAccounts() {
   const queryClient = useQueryClient()
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [form] = Form.useForm()
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false)
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false)
+  const [qrPlatform, setQrPlatform] = useState('douyin')
+  const [qrSessionId, setQrSessionId] = useState<string | null>(null)
+  const [qrImage, setQrImage] = useState<string | null>(null)
+  const [qrStatus, setQrStatus] = useState<string>('pending')
+  const [manualForm] = Form.useForm()
 
   // 查询账号列表
   const { data, isLoading } = useQuery({
@@ -37,18 +43,6 @@ export default function CrawlerAccounts() {
     queryFn: () => businessApi.adminListCrawlerAccounts(),
   })
   const accounts = data?.accounts || []
-
-  // 创建账号
-  const createMutation = useMutation({
-    mutationFn: (data: Partial<CrawlerAccount>) => businessApi.adminCreateCrawlerAccount(data),
-    onSuccess: () => {
-      message.success('账号添加成功')
-      setIsCreateModalOpen(false)
-      form.resetFields()
-      queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
-    },
-    onError: () => message.error('添加失败'),
-  })
 
   // 删除账号
   const deleteMutation = useMutation({
@@ -71,6 +65,79 @@ export default function CrawlerAccounts() {
     onError: () => message.error('健康检查失败'),
   })
 
+  // 手动添加账号
+  const createMutation = useMutation({
+    mutationFn: (data: Partial<CrawlerAccount>) => businessApi.adminCreateCrawlerAccount(data),
+    onSuccess: () => {
+      message.success('账号添加成功')
+      setIsManualModalOpen(false)
+      manualForm.resetFields()
+      queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
+    },
+    onError: () => message.error('添加失败'),
+  })
+
+  // ---- 扫码登录流程 ----
+
+  // 启动扫码登录
+  const startQRLogin = useCallback(async () => {
+    try {
+      const resp = await businessApi.startQRLogin(qrPlatform, 'cookie')
+      setQrSessionId(resp.session_id)
+      setQrStatus('pending')
+      setQrImage(null)
+    } catch {
+      message.error('启动扫码登录失败')
+    }
+  }, [qrPlatform])
+
+  // 轮询扫码状态
+  useEffect(() => {
+    if (!qrSessionId || !isQRModalOpen) return
+
+    const timer = setInterval(async () => {
+      try {
+        const resp = await businessApi.pollQRLogin(qrSessionId, qrPlatform, 'cookie')
+        if (resp.qr_image) {
+          setQrImage(resp.qr_image)
+        }
+        if (resp.status === 'success') {
+          setQrStatus('success')
+          message.success(`账号绑定成功: ${resp.account_name}`)
+          setIsQRModalOpen(false)
+          setQrSessionId(null)
+          queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
+          clearInterval(timer)
+        } else if (resp.status === 'expired') {
+          setQrStatus('expired')
+          clearInterval(timer)
+        }
+      } catch {
+        // 继续轮询
+      }
+    }, 2000)
+
+    return () => clearInterval(timer)
+  }, [qrSessionId, qrPlatform, isQRModalOpen, queryClient])
+
+  // 取消扫码
+  const cancelQRLogin = useCallback(async () => {
+    if (qrSessionId) {
+      await businessApi.cancelQRLogin(qrSessionId).catch(() => {})
+    }
+    setIsQRModalOpen(false)
+    setQrSessionId(null)
+    setQrImage(null)
+    setQrStatus('pending')
+  }, [qrSessionId])
+
+  // 打开扫码弹窗
+  const openQRModal = (platform: string) => {
+    setQrPlatform(platform)
+    setIsQRModalOpen(true)
+    startQRLogin()
+  }
+
   // 表格列定义
   const columns = [
     {
@@ -78,7 +145,7 @@ export default function CrawlerAccounts() {
       dataIndex: 'platform',
       key: 'platform',
       render: (platform: string) => {
-        const labels: Record<string, string> = { douyin: '抖音', kuaishou: '快手', bilibili: 'B站' }
+        const labels: Record<string, string> = { douyin: '抖音', kuaishou: '快手', bilibili: 'B站', xiaohongshu: '小红书' }
         return <Tag color="blue">{labels[platform] || platform}</Tag>
       },
     },
@@ -158,13 +225,18 @@ export default function CrawlerAccounts() {
       <Card
         title="平台方账号管理"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreateModalOpen(true)}>
-            添加账号
-          </Button>
+          <Space>
+            <Button type="primary" icon={<QrcodeOutlined />} onClick={() => openQRModal('douyin')}>
+              扫码添加
+            </Button>
+            <Button icon={<PlusOutlined />} onClick={() => setIsManualModalOpen(true)}>
+              手动添加
+            </Button>
+          </Space>
         }
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-          平台方账号用于统一爬取热门视频数据。用户无需登录即可查看灵感广场。
+          平台方账号用于统一爬取热门视频数据。用户无需登录平台即可查看灵感广场。推荐使用扫码登录添加账号。
         </Text>
         <Table
           columns={columns}
@@ -175,15 +247,61 @@ export default function CrawlerAccounts() {
         />
       </Card>
 
-      {/* 创建账号弹窗 */}
+      {/* 扫码登录弹窗 */}
       <Modal
-        title="添加平台方账号"
-        open={isCreateModalOpen}
-        onCancel={() => setIsCreateModalOpen(false)}
-        onOk={() => form.submit()}
+        title={`扫码登录 - ${PLATFORM_OPTIONS.find(p => p.value === qrPlatform)?.label || qrPlatform}`}
+        open={isQRModalOpen}
+        onCancel={cancelQRLogin}
+        footer={[
+          <Button key="cancel" onClick={cancelQRLogin}>取消</Button>,
+          qrStatus === 'expired' ? (
+            <Button key="retry" type="primary" onClick={() => startQRLogin()}>重新获取二维码</Button>
+          ) : null,
+        ]}
+        width={400}
+      >
+        <div style={{ textAlign: 'center', padding: 20 }}>
+          <Select
+            value={qrPlatform}
+            onChange={(v) => {
+              setQrPlatform(v)
+              if (qrSessionId) cancelQRLogin()
+            }}
+            options={PLATFORM_OPTIONS}
+            style={{ marginBottom: 16, width: 200 }}
+          />
+          {qrStatus === 'expired' ? (
+            <div>
+              <Text type="warning">二维码已过期，请重新获取</Text>
+            </div>
+          ) : qrImage ? (
+            <div>
+              <img
+                src={`data:image/png;base64,${qrImage}`}
+                alt="扫码登录"
+                style={{ maxWidth: 256, maxHeight: 256, border: '1px solid #eee' }}
+              />
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary">请使用手机扫描二维码登录</Text>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Text type="secondary">正在获取二维码...</Text>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* 手动添加弹窗 */}
+      <Modal
+        title="手动添加账号"
+        open={isManualModalOpen}
+        onCancel={() => setIsManualModalOpen(false)}
+        onOk={() => manualForm.submit()}
         confirmLoading={createMutation.isPending}
       >
-        <Form form={form} layout="vertical" onFinish={(values) => createMutation.mutate(values)}>
+        <Form form={manualForm} layout="vertical" onFinish={(values) => createMutation.mutate(values)}>
           <Form.Item name="platform" label="平台" rules={[{ required: true }]}>
             <Select options={PLATFORM_OPTIONS} placeholder="选择平台" />
           </Form.Item>
@@ -191,7 +309,7 @@ export default function CrawlerAccounts() {
             <Input placeholder="例如：抖音工作号1" />
           </Form.Item>
           <Form.Item name="cookie" label="Cookie" rules={[{ required: true }]}>
-            <Input.TextArea rows={4} placeholder="从浏览器开发者工具复制 Cookie" />
+            <Input.TextArea rows={4} placeholder="从浏览器开发者工具复制 Cookie（不推荐，推荐扫码登录）" />
           </Form.Item>
           <Form.Item name="user_agent" label="User-Agent">
             <Input placeholder="可选，留空使用默认值" />
@@ -200,7 +318,7 @@ export default function CrawlerAccounts() {
             <Input placeholder="可选，例如 http://proxy:8080" />
           </Form.Item>
           <Form.Item name="daily_usage_limit" label="每日使用上限" initialValue={50}>
-            <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+            <Input type="number" min={1} max={1000} />
           </Form.Item>
         </Form>
       </Modal>
