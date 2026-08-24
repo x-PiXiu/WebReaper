@@ -116,10 +116,12 @@ type Router struct {
 	// 模板管理用例（管理后台可动态配置生成模板）——通过 SetTemplate 注入，可选
 	templateUC *generation.TemplateUseCase
 	// 灵感广场用例（热门视频采集+展示）——通过 SetInspiration 注入，可选
-	inspirationUC *inspiration.UseCase
+	inspirationUC       *inspiration.UseCase
+	inspirationVideoRepo port.InspirationVideoRepository
 	// 爬虫管理用例（管理后台爬虫配置/账号管理）——通过 SetCrawlerAdmin 注入，可选
-	crawlerConfigRepo  port.CrawlerConfigRepository
-	crawlerAccountRepo port.CrawlerAccountRepository
+	crawlerConfigRepo   port.CrawlerConfigRepository
+	crawlerAccountRepo  port.CrawlerAccountRepository
+	crawlerTaskLogRepo  port.CrawlerTaskLogRepository
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -320,7 +322,7 @@ func (r *Router) registerInspirationRoutes(api *gin.RouterGroup) {
 	if r.inspirationUC == nil {
 		return
 	}
-	ih := NewInspirationHandler(r.inspirationUC)
+	ih := NewInspirationHandler(r.inspirationUC, r.inspirationVideoRepo)
 	api.GET("/inspirations", ih.HandleList)
 	api.GET("/inspirations/:id", ih.HandleGet)
 	api.GET("/inspirations/platforms", ih.HandleListPlatforms)
@@ -335,7 +337,7 @@ func (r *Router) registerCrawlerAdminRoutes(api *gin.RouterGroup) {
 	adminGroup := api.Group("/admin")
 	adminGroup.Use(middleware.RequireRole("admin"))
 
-	cah := NewCrawlerAdminHandler(r.inspirationUC, r.crawlerConfigRepo, r.crawlerAccountRepo)
+	cah := NewCrawlerAdminHandler(r.inspirationUC, r.crawlerConfigRepo, r.crawlerAccountRepo, r.crawlerTaskLogRepo)
 
 	// 平台方账号管理
 	adminGroup.GET("/crawler-accounts", cah.HandleListAccounts)
@@ -357,14 +359,16 @@ func (r *Router) registerCrawlerAdminRoutes(api *gin.RouterGroup) {
 }
 
 // SetInspiration 注入灵感广场用例（可选；未注入则灵感端点不注册）。
-func (r *Router) SetInspiration(uc *inspiration.UseCase) {
+func (r *Router) SetInspiration(uc *inspiration.UseCase, videoRepo port.InspirationVideoRepository) {
 	r.inspirationUC = uc
+	r.inspirationVideoRepo = videoRepo
 }
 
 // SetCrawlerAdmin 注入爬虫管理仓储（可选；未注入则爬虫管理端点不注册）。
-func (r *Router) SetCrawlerAdmin(configRepo port.CrawlerConfigRepository, accountRepo port.CrawlerAccountRepository) {
+func (r *Router) SetCrawlerAdmin(configRepo port.CrawlerConfigRepository, accountRepo port.CrawlerAccountRepository, taskLogRepo port.CrawlerTaskLogRepository) {
 	r.crawlerConfigRepo = configRepo
 	r.crawlerAccountRepo = accountRepo
+	r.crawlerTaskLogRepo = taskLogRepo
 }
 
 // NewRouter 创建路由器（零参数——所有依赖通过 SetXxx 可选注入）。

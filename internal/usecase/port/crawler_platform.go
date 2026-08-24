@@ -130,6 +130,24 @@ type InspirationVideoRepository interface {
 	UpdateMetrics(ctx context.Context, videoID string, metrics entity.MetricsUpdate) error
 	// Delete 删除视频。
 	Delete(ctx context.Context, id string) error
+	// CountByPlatform 按平台统计视频数量。
+	CountByPlatform(ctx context.Context) ([]PlatformCount, error)
+	// CountByBrand 按品牌统计视频数量。
+	CountByBrand(ctx context.Context) ([]BrandCount, error)
+}
+
+// PlatformCount 平台统计结果。
+type PlatformCount struct {
+	Platform string `json:"platform"`
+	Count    int    `json:"count"`
+}
+
+// BrandCount 品牌统计结果。
+type BrandCount struct {
+	BrandID   string  `json:"brand_id"`
+	BrandName string  `json:"brand_name"`
+	Count     int     `json:"count"`
+	AvgScore  float64 `json:"avg_viral_score"`
 }
 
 // BrandInspirationRepository 品牌-视频关联仓储。

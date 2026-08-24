@@ -1031,6 +1031,7 @@ func main() {
 			brandInspirationRepo := repository.NewGormBrandInspirationRepository(geoRepos.db)
 			crawlerConfigRepo := repository.NewGormCrawlerConfigRepository(geoRepos.db)
 			crawlerAccountRepo := repository.NewGormCrawlerAccountRepository(geoRepos.db)
+			crawlerTaskLogRepo := repository.NewGormCrawlerTaskLogRepository(geoRepos.db)
 
 			inspirationUC := inspiration.NewUseCase(
 				inspirationVideoRepo,
@@ -1046,8 +1047,8 @@ func main() {
 				log.Info("灵感广场：抖音爬虫已注册")
 			}
 
-			router.SetInspiration(inspirationUC)
-			router.SetCrawlerAdmin(crawlerConfigRepo, crawlerAccountRepo)
+			router.SetInspiration(inspirationUC, inspirationVideoRepo)
+			router.SetCrawlerAdmin(crawlerConfigRepo, crawlerAccountRepo, crawlerTaskLogRepo)
 			log.Info("灵感广场已启用")
 		}
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429

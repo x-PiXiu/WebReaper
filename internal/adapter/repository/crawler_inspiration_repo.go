@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/port"
 )
 
 // ---- 平台方账号仓储 ----
@@ -656,21 +657,7 @@ func (r *GormInspirationVideoRepository) Delete(ctx context.Context, id string) 
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&InspirationVideoPO{}).Error
 }
 
-// PlatformCount 平台统计结果。
-type PlatformCount struct {
-	Platform string `json:"platform"`
-	Count    int    `json:"count"`
-}
-
-// BrandCount 品牌统计结果。
-type BrandCount struct {
-	BrandID   string  `json:"brand_id"`
-	BrandName string  `json:"brand_name"`
-	Count     int     `json:"count"`
-	AvgScore  float64 `json:"avg_viral_score"`
-}
-
-func (r *GormInspirationVideoRepository) CountByPlatform(ctx context.Context) ([]PlatformCount, error) {
+func (r *GormInspirationVideoRepository) CountByPlatform(ctx context.Context) ([]port.PlatformCount, error) {
 	var results []struct {
 		Platform string
 		Count    int
@@ -680,14 +667,14 @@ func (r *GormInspirationVideoRepository) CountByPlatform(ctx context.Context) ([
 		Group("platform").Find(&results).Error; err != nil {
 		return nil, err
 	}
-	out := make([]PlatformCount, 0, len(results))
+	out := make([]port.PlatformCount, 0, len(results))
 	for _, r := range results {
-		out = append(out, PlatformCount{Platform: r.Platform, Count: r.Count})
+		out = append(out, port.PlatformCount{Platform: r.Platform, Count: r.Count})
 	}
 	return out, nil
 }
 
-func (r *GormInspirationVideoRepository) CountByBrand(ctx context.Context) ([]BrandCount, error) {
+func (r *GormInspirationVideoRepository) CountByBrand(ctx context.Context) ([]port.BrandCount, error) {
 	var results []struct {
 		BrandID   string
 		BrandName string
@@ -700,9 +687,9 @@ func (r *GormInspirationVideoRepository) CountByBrand(ctx context.Context) ([]Br
 		Group("bi.brand_id").Find(&results).Error; err != nil {
 		return nil, err
 	}
-	out := make([]BrandCount, 0, len(results))
+	out := make([]port.BrandCount, 0, len(results))
 	for _, r := range results {
-		out = append(out, BrandCount{
+		out = append(out, port.BrandCount{
 			BrandID:   r.BrandID,
 			BrandName: r.BrandName,
 			Count:     r.Count,

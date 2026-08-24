@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/port"
 )
 
 // ---- Mock 实现 ----
@@ -46,6 +47,14 @@ func (m *mockVideoRepo) UpdateMetrics(ctx context.Context, videoID string, metri
 
 func (m *mockVideoRepo) Delete(ctx context.Context, id string) error {
 	return nil
+}
+
+func (m *mockVideoRepo) CountByPlatform(ctx context.Context) ([]port.PlatformCount, error) {
+	return nil, nil
+}
+
+func (m *mockVideoRepo) CountByBrand(ctx context.Context) ([]port.BrandCount, error) {
+	return nil, nil
 }
 
 type mockBrandRepo struct {

@@ -23,14 +23,15 @@ type StaggeredScheduler struct {
 	configRepo  port.CrawlerConfigRepository
 	accountRepo port.CrawlerAccountRepository
 
-	brandQueue    []BrandJob      // 品牌任务队列
-	retryQueue    []BrandJob      // 重试队列
-	queueMu       sync.Mutex
-	interval      time.Duration   // 基础间隔
-	accountsPerN  int             // 每 N 个品牌切换一次账号
-	executionCount int            // 已执行计数（用于账号轮换）
-	running       bool
-	stopCh        chan struct{}
+	brandQueue     []BrandJob      // 品牌任务队列
+	retryQueue     []BrandJob      // 重试队列
+	queueMu        sync.Mutex
+	interval       time.Duration   // 基础间隔（白天）
+	nightInterval  time.Duration   // 夜间间隔（00:00-06:00）
+	accountsPerN   int             // 每 N 个品牌切换一次账号
+	executionCount int             // 已执行计数（用于账号轮换）
+	running        bool
+	stopCh         chan struct{}
 }
 
 // BrandJob 品牌采集任务。
@@ -43,29 +44,35 @@ type BrandJob struct {
 
 // SchedulerConfig 调度器配置。
 type SchedulerConfig struct {
-	Interval     time.Duration // 基础间隔（默认 15 分钟）
-	AccountsPerN int           // 每 N 个品牌切换一次账号（默认 3）
+	Interval      time.Duration // 基础间隔（默认 15 分钟）
+	NightInterval time.Duration // 夜间间隔（默认 5 分钟，00:00-06:00）
+	AccountsPerN  int           // 每 N 个品牌切换一次账号（默认 3）
 }
 
 // NewStaggeredScheduler 创建分时段调度器。
 func NewStaggeredScheduler(uc *UseCase, configRepo port.CrawlerConfigRepository, accountRepo port.CrawlerAccountRepository, cfg *SchedulerConfig) *StaggeredScheduler {
 	interval := 15 * time.Minute
+	nightInterval := 5 * time.Minute
 	accountsPerN := 3
 	if cfg != nil {
 		if cfg.Interval > 0 {
 			interval = cfg.Interval
+		}
+		if cfg.NightInterval > 0 {
+			nightInterval = cfg.NightInterval
 		}
 		if cfg.AccountsPerN > 0 {
 			accountsPerN = cfg.AccountsPerN
 		}
 	}
 	return &StaggeredScheduler{
-		uc:           uc,
-		configRepo:   configRepo,
-		accountRepo:  accountRepo,
-		interval:     interval,
-		accountsPerN: accountsPerN,
-		stopCh:       make(chan struct{}),
+		uc:            uc,
+		configRepo:    configRepo,
+		accountRepo:   accountRepo,
+		interval:      interval,
+		nightInterval: nightInterval,
+		accountsPerN:  accountsPerN,
+		stopCh:        make(chan struct{}),
 	}
 }
 
@@ -103,7 +110,7 @@ func (s *StaggeredScheduler) Stop() {
 
 // run 调度器主循环。
 func (s *StaggeredScheduler) run(ctx context.Context) {
-	ticker := time.NewTicker(s.interval)
+	ticker := time.NewTicker(s.currentInterval())
 	defer ticker.Stop()
 
 	for {
@@ -114,8 +121,20 @@ func (s *StaggeredScheduler) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			s.executeNext(ctx)
+			// 动态调整间隔（夜间加速）
+			ticker.Reset(s.currentInterval())
 		}
 	}
+}
+
+// currentInterval 根据当前时间返回间隔。
+// 夜间（00:00-06:00）使用夜间间隔（默认 5 分钟），白天使用基础间隔（默认 15 分钟）。
+func (s *StaggeredScheduler) currentInterval() time.Duration {
+	hour := time.Now().Hour()
+	if hour >= 0 && hour < 6 {
+		return s.nightInterval
+	}
+	return s.interval
 }
 
 // executeNext 执行队列中的下一个品牌。

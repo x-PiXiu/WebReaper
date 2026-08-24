@@ -7,15 +7,17 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"webreaper/internal/usecase/inspiration"
+	"webreaper/internal/usecase/port"
 )
 
-// InspirationHandler 灵感广场 API（用户端，无需登录）。
+// InspirationHandler 灵感广场 API（用户端，无需登录平台账号）。
 type InspirationHandler struct {
-	uc *inspiration.UseCase
+	uc        *inspiration.UseCase
+	videoRepo port.InspirationVideoRepository
 }
 
-func NewInspirationHandler(uc *inspiration.UseCase) *InspirationHandler {
-	return &InspirationHandler{uc: uc}
+func NewInspirationHandler(uc *inspiration.UseCase, videoRepo port.InspirationVideoRepository) *InspirationHandler {
+	return &InspirationHandler{uc: uc, videoRepo: videoRepo}
 }
 
 // HandleList GET /api/v1/inspirations —— 灵感视频列表。
@@ -90,11 +92,16 @@ func (h *InspirationHandler) HandleListPlatforms(c *gin.Context) {
 
 // HandleBrandsStats GET /api/v1/inspirations/brands —— 各品牌灵感数量统计。
 func (h *InspirationHandler) HandleBrandsStats(c *gin.Context) {
-	if h.uc == nil {
+	if h.uc == nil || h.videoRepo == nil {
 		fail(c, fmt.Errorf("灵感服务未配置"))
 		return
 	}
 
-	// TODO: 实现品牌统计查询（需要 InspirationVideoRepository 的 CountByBrand 方法）
-	success(c, gin.H{"brands": []interface{}{}})
+	brands, err := h.videoRepo.CountByBrand(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+
+	success(c, gin.H{"brands": brands})
 }

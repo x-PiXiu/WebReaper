@@ -11,25 +11,25 @@ import (
 	"webreaper/internal/usecase/port"
 )
 
-// 确保 entity 包被引用（HandleCheckAccountHealth 使用 entity.HealthHealthy）
-var _ = entity.HealthHealthy
-
 // CrawlerAdminHandler 爬虫管理 API（管理后台，需要 admin 角色）。
 type CrawlerAdminHandler struct {
 	uc          *inspiration.UseCase
 	configRepo  port.CrawlerConfigRepository
 	accountRepo port.CrawlerAccountRepository
+	taskLogRepo port.CrawlerTaskLogRepository
 }
 
 func NewCrawlerAdminHandler(
 	uc *inspiration.UseCase,
 	configRepo port.CrawlerConfigRepository,
 	accountRepo port.CrawlerAccountRepository,
+	taskLogRepo port.CrawlerTaskLogRepository,
 ) *CrawlerAdminHandler {
 	return &CrawlerAdminHandler{
 		uc:          uc,
 		configRepo:  configRepo,
 		accountRepo: accountRepo,
+		taskLogRepo: taskLogRepo,
 	}
 }
 
@@ -331,15 +331,49 @@ func (h *CrawlerAdminHandler) HandleUpdateConfig(c *gin.Context) {
 
 // HandleListTasks GET /admin/crawlers/tasks —— 采集任务列表。
 func (h *CrawlerAdminHandler) HandleListTasks(c *gin.Context) {
-	// TODO: 实现任务日志查询（需要注入 CrawlerTaskLogRepository）
-	success(c, gin.H{"tasks": []interface{}{}})
+	if h.taskLogRepo == nil {
+		fail(c, fmt.Errorf("任务日志仓储未配置"))
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	platform := c.Query("platform")
+
+	var tasks []entity.CrawlerTaskLog
+	var err error
+	if platform != "" {
+		tasks, err = h.taskLogRepo.ListByPlatform(c.Request.Context(), platform, limit)
+	} else {
+		tasks, err = h.taskLogRepo.ListAll(c.Request.Context(), limit)
+	}
+	if err != nil {
+		fail(c, err)
+		return
+	}
+
+	success(c, gin.H{"tasks": tasks})
 }
 
 // HandleGetTask GET /admin/crawlers/tasks/:id —— 任务详情。
 func (h *CrawlerAdminHandler) HandleGetTask(c *gin.Context) {
-	// TODO: 实现任务详情查询
-	id := c.Param("id")
-	success(c, gin.H{"task_id": id, "status": "unknown"})
+	if h.taskLogRepo == nil {
+		fail(c, fmt.Errorf("任务日志仓储未配置"))
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		fail(c, fmt.Errorf("无效的任务 ID"))
+		return
+	}
+
+	task, err := h.taskLogRepo.FindByID(c.Request.Context(), id)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+
+	success(c, task)
 }
 
 // ---- 手动触发 ----
