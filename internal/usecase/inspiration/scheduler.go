@@ -152,14 +152,27 @@ func (s *StaggeredScheduler) loadAndDispatch(ctx context.Context) {
 		// 获取关键词（从池中轮换）
 		keywords := cfg.NextKeywords(3)
 		if len(keywords) == 0 {
-			// 关键词池为空，使用基础关键词
-			keywords = append(cfg.SearchKeywords, cfg.ExtraKeywords...)
+			// 关键词池为空，尝试用 LLM 生成
+			if s.uc.llm != nil && cfg.BrandID != "" {
+				log.Printf("[scheduler] 关键词池为空，尝试 LLM 生成 brand=%s", cfg.BrandID)
+				generated, genErr := s.uc.GenerateKeywords(ctx, cfg.BrandID, cfg.BrandID, "")
+				if genErr == nil && len(generated) > 0 {
+					cfg.KeywordPool = generated
+					cfg.LastKeywordIndex = 0
+					keywords = cfg.NextKeywords(3)
+					log.Printf("[scheduler] LLM 生成 %d 个关键词 brand=%s: %v", len(generated), cfg.BrandID, generated)
+				}
+			}
+			// 仍然为空，使用基础关键词
+			if len(keywords) == 0 {
+				keywords = append(cfg.SearchKeywords, cfg.ExtraKeywords...)
+			}
 		}
 		if len(keywords) == 0 {
 			continue
 		}
 
-		// 更新关键词轮换指针
+		// 更新关键词轮换指针和池
 		s.configRepo.Save(ctx, cfg)
 
 		job := BrandJob{
@@ -331,4 +344,69 @@ func NewDailyUsageResetter(accountRepo port.CrawlerAccountRepository) *DailyUsag
 // Reset 重置所有账号的每日使用次数。
 func (r *DailyUsageResetter) Reset(ctx context.Context) error {
 	return r.accountRepo.ResetDailyUsage(ctx)
+}
+
+// ---- 详情 API 定时刷新 ----
+
+// MetricsRefresher 互动指标定时刷新器。
+//
+// 每 12 小时刷新旧数据的播放量/点赞/评论等指标。
+// 搜索 API 不返回播放量，需要通过详情 API 补充。
+type MetricsRefresher struct {
+	uc         *UseCase
+	videoRepo  port.InspirationVideoRepository
+	refreshAge time.Duration // 多久未刷新的数据需要刷新
+	batchSize  int           // 每批刷新数量
+}
+
+// NewMetricsRefresher 创建指标刷新器。
+func NewMetricsRefresher(uc *UseCase, videoRepo port.InspirationVideoRepository) *MetricsRefresher {
+	return &MetricsRefresher{
+		uc:         uc,
+		videoRepo:  videoRepo,
+		refreshAge: 12 * time.Hour,
+		batchSize:  20,
+	}
+}
+
+// RefreshAll 刷新所有平台的旧数据指标。
+func (r *MetricsRefresher) RefreshAll(ctx context.Context) error {
+	// 遍历所有已注册的平台
+	for _, platform := range r.uc.ListPlatforms() {
+		if !r.uc.IsPlatformAlive(ctx, platform) {
+			log.Printf("[metrics] 平台 %s 不可用，跳过刷新", platform)
+			continue
+		}
+
+		// 获取该平台需要刷新的视频
+		videos, _, err := r.videoRepo.List(ctx, "", platform, "", "created_at", 1, r.batchSize)
+		if err != nil {
+			log.Printf("[metrics] 获取 %s 视频列表失败: %v", platform, err)
+			continue
+		}
+
+		// 过滤出需要刷新的视频（超过 refreshAge 未刷新）
+		var toRefresh []string
+		for _, v := range videos {
+			if v.LastRefreshedAt == nil || time.Since(*v.LastRefreshedAt) > r.refreshAge {
+				toRefresh = append(toRefresh, v.PlatformVideoID)
+			}
+		}
+
+		if len(toRefresh) == 0 {
+			log.Printf("[metrics] %s 无需刷新的视频", platform)
+			continue
+		}
+
+		// 调用详情 API 刷新
+		updated, err := r.uc.RefreshMetrics(ctx, platform, toRefresh)
+		if err != nil {
+			log.Printf("[metrics] %s 刷新失败: %v", platform, err)
+			continue
+		}
+
+		log.Printf("[metrics] %s 刷新完成: %d/%d 更新", platform, updated, len(toRefresh))
+	}
+
+	return nil
 }
