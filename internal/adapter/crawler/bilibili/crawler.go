@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,9 +32,10 @@ const (
 
 // BilibiliCrawler B站平台爬虫（实现 port.CrawlerPlatform）。
 type BilibiliCrawler struct {
-	client  *http.Client
+	client *http.Client
 	cookies string
 	config  CrawlerConfig
+	signer  *WBISigner
 }
 
 // CrawlerConfig B站爬虫配置。
@@ -51,10 +53,14 @@ func NewBilibiliCrawler(cookies string, config *CrawlerConfig) *BilibiliCrawler 
 	if config != nil {
 		cfg = *config
 	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	signer := NewWBISigner()
+
 	return &BilibiliCrawler{
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client:  client,
 		cookies: cookies,
 		config:  cfg,
+		signer:  signer,
 	}
 }
 
@@ -75,24 +81,43 @@ func (c *BilibiliCrawler) Search(ctx context.Context, opts entity.SearchOptions)
 		limit = c.config.MaxResults
 	}
 
+	// 刷新 WBI 密钥（如果需要）
+	if c.signer.NeedRefresh() {
+		if err := c.signer.FetchKeys(c.client, c.cookies); err != nil {
+			// 密钥获取失败，降级到无签名请求
+			log.Printf("[bilibili] WBI 密钥获取失败，降级到无签名: %v", err)
+		}
+	}
+
 	// 构造请求参数
-	params := url.Values{}
-	params.Set("search_type", "video")
-	params.Set("keyword", opts.Keyword)
-	params.Set("page", "1")
-	params.Set("pagesize", strconv.Itoa(limit))
+	params := map[string]string{
+		"search_type": "video",
+		"keyword":     opts.Keyword,
+		"page":        "1",
+		"pagesize":    strconv.Itoa(limit),
+	}
 
 	// 排序
 	switch opts.SortBy {
 	case "click":
-		params.Set("order", "click")
+		params["order"] = "click"
 	case "pubdate":
-		params.Set("order", "pubdate")
+		params["order"] = "pubdate"
 	default:
-		params.Set("order", "totalrank")
+		params["order"] = "totalrank"
 	}
 
-	reqURL := fmt.Sprintf("%s%s?%s", host, searchPath, params.Encode())
+	// WBI 签名
+	if c.signer.imgKey != "" {
+		params = c.signer.Sign(params)
+	}
+
+	// 编码为 URL 查询字符串
+	values := url.Values{}
+	for k, v := range params {
+		values.Set(k, v)
+	}
+	reqURL := fmt.Sprintf("%s%s?%s", host, searchPath, values.Encode())
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
@@ -143,10 +168,26 @@ func (c *BilibiliCrawler) GetDetail(ctx context.Context, videoID string) (*entit
 		return nil, fmt.Errorf("视频 ID 不能为空")
 	}
 
-	params := url.Values{}
-	params.Set("bvid", videoID)
+	// 刷新 WBI 密钥（如果需要）
+	if c.signer.NeedRefresh() {
+		if err := c.signer.FetchKeys(c.client, c.cookies); err != nil {
+			log.Printf("[bilibili] WBI 密钥获取失败: %v", err)
+		}
+	}
 
-	reqURL := fmt.Sprintf("%s%s?%s", host, detailPath, params.Encode())
+	// WBI 签名
+	params := map[string]string{
+		"bvid": videoID,
+	}
+	if c.signer.imgKey != "" {
+		params = c.signer.Sign(params)
+	}
+
+	values := url.Values{}
+	for k, v := range params {
+		values.Set(k, v)
+	}
+	reqURL := fmt.Sprintf("%s%s?%s", host, detailPath, values.Encode())
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
