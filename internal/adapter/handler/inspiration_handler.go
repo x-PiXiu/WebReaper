@@ -55,12 +55,28 @@ func (h *InspirationHandler) HandleList(c *gin.Context) {
 		return
 	}
 
-	success(c, gin.H{
+	// 构建响应
+	resp := gin.H{
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
 		"items":     videos,
-	})
+	}
+
+	// 无数据时返回采集状态提示
+	if total == 0 {
+		if brandID != "" {
+			resp["status"] = "collecting"
+			resp["message"] = "该品牌的热门视频正在采集中，请稍后再来查看"
+		} else {
+			resp["status"] = "collecting"
+			resp["message"] = "热门视频正在采集中，请稍后再来查看"
+		}
+	} else {
+		resp["status"] = "ready"
+	}
+
+	success(c, resp)
 }
 
 // HandleGet GET /api/v1/inspirations/:id —— 灵感视频详情。
