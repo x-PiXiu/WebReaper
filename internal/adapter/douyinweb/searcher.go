@@ -31,7 +31,6 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"webreaper/internal/adapter/chromedputil"
-	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
 
@@ -63,18 +62,15 @@ func (s *Searcher) SupportedPlatforms() []string { return []string{platform} }
 //  2. accounts 表中的平台工作账号（role=platform）
 //  3. accounts 表中的商户账号（兼容回退）
 func (s *Searcher) pickCookie(ctx context.Context, tenantID, plat string) (string, error) {
-	// 第一优先：crawler_accounts 表中的平台方账号
+	// 第一优先：crawler_accounts 表中的平台方账号（负载均衡：选使用次数最少的）
 	if s.crawlerAccountRepo != nil {
-		crawlerAccounts, err := s.crawlerAccountRepo.ListByPlatform(ctx, plat)
-		if err == nil {
-			for _, acc := range crawlerAccounts {
-				if acc.Status != entity.CrawlerAccountActive || acc.CookieEncrypted == "" {
-					continue
-				}
-				if cookie, dErr := s.vault.Decrypt(acc.CookieEncrypted); dErr == nil && cookie != "" {
-					log.Printf("[douyinweb] 使用平台方爬虫账号 %s", acc.AccountName)
-					return cookie, nil
-				}
+		acc, err := s.crawlerAccountRepo.SelectAvailable(ctx, plat)
+		if err == nil && acc.CookieEncrypted != "" {
+			if cookie, dErr := s.vault.Decrypt(acc.CookieEncrypted); dErr == nil && cookie != "" {
+				// 更新使用计数
+				_ = s.crawlerAccountRepo.IncrementUsage(ctx, acc.ID)
+				log.Printf("[douyinweb] 使用平台方爬虫账号 %s（用量 %d/%d）", acc.AccountName, acc.DailyUsageCount+1, acc.DailyUsageLimit)
+				return cookie, nil
 			}
 		}
 	}

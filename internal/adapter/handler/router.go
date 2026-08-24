@@ -350,13 +350,22 @@ func (r *Router) registerCrawlerAdminRoutes(api *gin.RouterGroup) {
 	adminGroup.GET("/crawlers", cah.HandleListConfigs)
 	adminGroup.GET("/crawlers/:platform", cah.HandleGetConfig)
 	adminGroup.PUT("/crawlers/:platform", cah.HandleUpdateConfig)
-		adminGroup.POST("/crawlers/:platform/test", cah.HandleTestConnection)
-		adminGroup.POST("/crawlers/:platform/trigger", cah.HandleTriggerCrawl)
-		adminGroup.POST("/crawlers/:platform/refresh-metrics", cah.HandleRefreshMetrics)
+	adminGroup.POST("/crawlers/:platform/test", cah.HandleTestConnection)
+	adminGroup.POST("/crawlers/:platform/trigger", cah.HandleTriggerCrawl)
+	adminGroup.POST("/crawlers/:platform/refresh-metrics", cah.HandleRefreshMetrics)
 
 	// 任务监控
 	adminGroup.GET("/crawlers/tasks", cah.HandleListTasks)
 	adminGroup.GET("/crawlers/tasks/:id", cah.HandleGetTask)
+
+	// 灵感内容管理（审核/统计）
+	if r.inspirationUC != nil && r.inspirationVideoRepo != nil {
+		ih := NewInspirationHandler(r.inspirationUC, r.inspirationVideoRepo)
+		adminGroup.PUT("/inspirations/:id", ih.HandleUpdateInspiration)
+		adminGroup.DELETE("/inspirations/:id", ih.HandleDeleteInspiration)
+		adminGroup.POST("/inspirations/batch", ih.HandleBatchInspirations)
+		adminGroup.GET("/inspirations/stats", ih.HandleStats)
+	}
 }
 
 // SetInspiration 注入灵感广场用例（可选；未注入则灵感端点不注册）。
