@@ -192,10 +192,13 @@ const findQRElementJS = `((method) => {
     // 检查 img 自身 class 和父容器 class 是否含 qr/code
     // 微博的 img 没有 class，但父容器 div class="qr-code" 有
     const parentCls = (img.parentElement && img.parentElement.className || '').toString().toLowerCase();
+    const ariaLabel = (img.getAttribute('aria-label') || '').toLowerCase();
     const hasQRClass = cls.includes('qr') || cls.includes('code') || cls.includes('qrcode') || cls.includes('qrimg')
-      || parentCls.includes('qr') || parentCls.includes('qrcode') || parentCls.includes('qr-code');
+      || parentCls.includes('qr') || parentCls.includes('qrcode') || parentCls.includes('qr-code')
+      || ariaLabel.includes('二维码') || ariaLabel.includes('qrcode');  // 抖音用 aria-label="二维码"
 
     // class 含 qr 的图片直接返回（QQ 的 qrImg、微信的 qrcode_img、微博父容器 qr-code）
+    // 抖音的 img class="RhjdbXj8" 通过 aria-label="二维码" 匹配
     if (hasQRClass && isImgSrc) {
       return JSON.stringify({ found: true, type: 'img', width: w, height: h, className: (img.className||parentCls||'').toString().slice(0,80), dataURL: src });
     }
