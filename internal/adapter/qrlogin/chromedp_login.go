@@ -104,13 +104,22 @@ var platformConfigs = map[string]platformConfig{
 			"douyin": "", // 抖音App扫码（默认）
 		},
 	},
-	// 快手创作者中心
+	// 快手创作者中心（需要先跳转到登录页，再点击扫码登录 tab）
 	"kuaishou": {
-		LoginURL:    "https://cp.kuaishou.com",
-		TabText:     "",
+		LoginURL:    "https://passport.kuaishou.com/pc/account/login/?sid=kuaishou.web.cp.api&callback=https%3A%2F%2Fcp.kuaishou.com%2Frest%2Finfra%2Fsts%3FfollowUrl%3Dhttps%253A%252F%252Fcp.kuaishou.com%252Fprofile%26setRootDomain%3Dtrue",
+		TabText:     "扫码登录",
 		AuthCookies: []string{"passToken", "kuaishou.server.webday7_st"},
 		LoginMethods: map[string]string{
 			"kuaishou": "", // 快手App扫码（默认）
+		},
+	},
+	// B站创作者中心
+	"bilibili": {
+		LoginURL:    "https://member.bilibili.com/platform/home",
+		TabText:     "扫码登录",
+		AuthCookies: []string{"SESSDATA", "bili_jct"},
+		LoginMethods: map[string]string{
+			"bilibili": "", // B站App扫码（默认）
 		},
 	},
 }
@@ -125,7 +134,7 @@ var platformConfigs = map[string]platformConfig{
 // method 参数：如果是第三方登录（wechat/qq/weibo），跳过知乎自身 canvas，只查 img。
 const findQRElementJS = `((method) => {
   // 默认登录方式（知乎App/小红书）：优先查 canvas
-  if (method === 'zhihu' || method === 'xiaohongshu' || method === 'douyin' || method === 'kuaishou' || method === '' ) {
+  if (method === 'zhihu' || method === 'xiaohongshu' || method === 'douyin' || method === 'kuaishou' || method === 'bilibili' || method === '' ) {
     const canvases = document.querySelectorAll('canvas');
     let canvasIdx = 0;
     for (const c of canvases) {
@@ -545,7 +554,7 @@ func (q *ChromedpQRLogin) captureQRCode(ctx context.Context, sessionID string, p
 			var popupURL string
 			for _, t := range targets {
 				if t.Type == "page" && t.URL != "" && t.URL != "about:blank" {
-					if !strings.Contains(t.URL, "zhihu.com/signin") && !strings.Contains(t.URL, "xiaohongshu.com") && !strings.Contains(t.URL, "creator.douyin.com") && !strings.Contains(t.URL, "cp.kuaishou.com") {
+					if !strings.Contains(t.URL, "zhihu.com/signin") && !strings.Contains(t.URL, "xiaohongshu.com") && !strings.Contains(t.URL, "creator.douyin.com") && !strings.Contains(t.URL, "cp.kuaishou.com") && !strings.Contains(t.URL, "passport.kuaishou.com") && !strings.Contains(t.URL, "member.bilibili.com") {
 						popupURL = t.URL
 						log.Printf("[QRLogin:%s] 发现弹出窗口: %s", sessionID, popupURL)
 						break
