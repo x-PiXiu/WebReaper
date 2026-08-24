@@ -276,11 +276,15 @@ func (uc *HotVideoUseCase) curateDouyin(ctx context.Context, brand entity.Brand,
 	result := make([]HotVideo, 0, len(videos))
 	for i, v := range videos {
 		result = append(result, HotVideo{
-			Title:    clamp(v.Desc, 40),
-			URL:      v.URL,
-			Platform: "douyin",
-			HotPoint: hotPoints[i+1],
-			Topic:    topics[i+1],
+			Title:        clamp(v.Desc, 40),
+			URL:          v.URL,
+			Platform:     "douyin",
+			Author:       v.Author,
+			PlayCount:    int64(v.PlayCount),
+			DiggCount:    int64(v.DiggCount),
+			CommentCount: int64(v.CommentCount),
+			HotPoint:     hotPoints[i+1],
+			Topic:        topics[i+1],
 		})
 		if result[i].Topic == "" {
 			result[i].Topic = "参考这条爆款的角度，拍一条" + industryOf(brand) + "同款获客视频"
