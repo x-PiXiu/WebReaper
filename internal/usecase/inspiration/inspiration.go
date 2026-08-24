@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"webreaper/internal/domain/entity"
@@ -16,11 +17,12 @@ import (
 
 // UseCase 灵感广场用例。
 type UseCase struct {
-	videoRepo  port.InspirationVideoRepository
-	brandRepo  port.BrandInspirationRepository
-	configRepo port.CrawlerConfigRepository
+	videoRepo   port.InspirationVideoRepository
+	brandRepo   port.BrandInspirationRepository
+	configRepo  port.CrawlerConfigRepository
 	accountRepo port.CrawlerAccountRepository
-	platforms  map[string]port.CrawlerPlatform
+	platforms   map[string]port.CrawlerPlatform
+	llm         port.AIGenerator // LLM 用于生成关键词
 }
 
 // NewUseCase 创建灵感广场用例。
@@ -37,6 +39,11 @@ func NewUseCase(
 		accountRepo: accountRepo,
 		platforms:   make(map[string]port.CrawlerPlatform),
 	}
+}
+
+// SetLLM 注入 LLM 用于生成关键词（可选）。
+func (uc *UseCase) SetLLM(llm port.AIGenerator) {
+	uc.llm = llm
 }
 
 // RegisterPlatform 注册平台爬虫。
@@ -154,6 +161,85 @@ func (uc *UseCase) ListPlatforms() []string {
 		platforms = append(platforms, p)
 	}
 	return platforms
+}
+
+// GenerateKeywords 调用 LLM 根据品牌信息生成搜索关键词。
+func (uc *UseCase) GenerateKeywords(ctx context.Context, brandName, industry, positioning string) ([]string, error) {
+	if uc.llm == nil {
+		return nil, fmt.Errorf("LLM 未配置")
+	}
+
+	prompt := fmt.Sprintf(`根据以下品牌信息，生成 5-8 个短视频平台搜索关键词，用于搜索该品牌的热门视频参考。
+品牌名称：%s
+行业：%s
+定位：%s
+要求：
+1. 每个关键词 2-8 个字
+2. 关键词要多样化，覆盖不同角度（行业词、场景词、情感词）
+3. 只输出关键词，用逗号分隔，不要其他内容`, brandName, industry, positioning)
+
+	messages := []port.ChatMessage{
+		{Role: "user", Content: prompt},
+	}
+
+	var resp string
+	result, err := uc.llm.ChatStream(ctx, "", "", messages, func(delta string) {
+		resp += delta
+	})
+	if err != nil {
+		return nil, fmt.Errorf("LLM 生成关键词失败: %w", err)
+	}
+	if result != "" {
+		resp = result
+	}
+
+	// 解析关键词
+	keywords := parseKeywords(resp)
+	if len(keywords) == 0 {
+		return nil, fmt.Errorf("LLM 未生成有效关键词")
+	}
+
+	return keywords, nil
+}
+
+// parseKeywords 解析 LLM 返回的关键词（逗号/空格分隔）。
+func parseKeywords(resp string) []string {
+	// 去除引号和多余空白
+	resp = strings.TrimSpace(resp)
+	resp = strings.Trim(resp, "\"'`")
+
+	var keywords []string
+	// 按逗号或换行分割
+	for _, sep := range []string{",", "，", "\n"} {
+		if strings.Contains(resp, sep) {
+			parts := strings.Split(resp, sep)
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" && len([]rune(p)) >= 2 {
+					keywords = append(keywords, p)
+				}
+			}
+			break
+		}
+	}
+
+	// 如果没有分隔符，整个字符串作为一个关键词
+	if len(keywords) == 0 && len([]rune(resp)) >= 2 {
+		keywords = append(keywords, resp)
+	}
+
+	return keywords
+}
+
+// RefreshKeywordPool 刷新品牌的关键词池（调用 LLM 生成新一批关键词）。
+func (uc *UseCase) RefreshKeywordPool(ctx context.Context, config *entity.CrawlerConfig, brandName, industry, positioning string) error {
+	keywords, err := uc.GenerateKeywords(ctx, brandName, industry, positioning)
+	if err != nil {
+		return err
+	}
+	config.KeywordPool = keywords
+	config.LastKeywordIndex = 0
+	return uc.configRepo.Save(ctx, *config)
 }
 
 // CrawlResult 采集结果。

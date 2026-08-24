@@ -171,9 +171,12 @@ type CrawlerConfigPO struct {
 	ID                   int64     `gorm:"primaryKey;autoIncrement"`
 	Platform             string    `gorm:"size:32;not null"`
 	TenantID             string    `gorm:"size:64;not null;default:''"`
+	BrandID              string    `gorm:"size:64;not null;default:''"`
 	Enabled              bool      `gorm:"not null;default:1"`
 	SearchKeywords       string    `gorm:"type:json"`
 	ExtraKeywords        string    `gorm:"type:json"`
+	KeywordPool          string    `gorm:"type:json"`
+	LastKeywordIndex     int       `gorm:"not null;default:0"`
 	CrawlIntervalMinutes int       `gorm:"not null;default:15"`
 	MaxResults           int       `gorm:"not null;default:20"`
 	SortBy               string    `gorm:"size:32;not null;default:'popular'"`
@@ -195,13 +198,17 @@ func (CrawlerConfigPO) TableName() string { return "crawler_configs" }
 func crawlerConfigToPO(c entity.CrawlerConfig) CrawlerConfigPO {
 	keywordsJSON, _ := json.Marshal(c.SearchKeywords)
 	extraJSON, _ := json.Marshal(c.ExtraKeywords)
+	poolJSON, _ := json.Marshal(c.KeywordPool)
 	return CrawlerConfigPO{
 		ID:                   c.ID,
 		Platform:             c.Platform,
 		TenantID:             c.TenantID,
+		BrandID:              c.BrandID,
 		Enabled:              c.Enabled,
 		SearchKeywords:       string(keywordsJSON),
 		ExtraKeywords:        string(extraJSON),
+		KeywordPool:          string(poolJSON),
+		LastKeywordIndex:     c.LastKeywordIndex,
 		CrawlIntervalMinutes: c.CrawlIntervalMinutes,
 		MaxResults:           c.MaxResults,
 		SortBy:               c.SortBy,
@@ -222,15 +229,20 @@ func crawlerConfigToPO(c entity.CrawlerConfig) CrawlerConfigPO {
 func crawlerConfigFromPO(po CrawlerConfigPO) entity.CrawlerConfig {
 	var keywords []string
 	var extra []string
+	var pool []string
 	_ = json.Unmarshal([]byte(po.SearchKeywords), &keywords)
 	_ = json.Unmarshal([]byte(po.ExtraKeywords), &extra)
+	_ = json.Unmarshal([]byte(po.KeywordPool), &pool)
 	return entity.CrawlerConfig{
 		ID:                   po.ID,
 		Platform:             po.Platform,
 		TenantID:             po.TenantID,
+		BrandID:              po.BrandID,
 		Enabled:              po.Enabled,
 		SearchKeywords:       keywords,
 		ExtraKeywords:        extra,
+		KeywordPool:          pool,
+		LastKeywordIndex:     po.LastKeywordIndex,
 		CrawlIntervalMinutes: po.CrawlIntervalMinutes,
 		MaxResults:           po.MaxResults,
 		SortBy:               po.SortBy,

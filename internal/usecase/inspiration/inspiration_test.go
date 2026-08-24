@@ -289,21 +289,21 @@ func TestSchedulerConfig_Defaults(t *testing.T) {
 	if s.interval != 15*time.Minute {
 		t.Errorf("interval = %v, want 15m", s.interval)
 	}
-	if s.accountsPerN != 3 {
-		t.Errorf("accountsPerN = %v, want 3", s.accountsPerN)
+	if s.workerCount != 5 {
+		t.Errorf("workerCount = %v, want 5", s.workerCount)
 	}
 }
 
 func TestSchedulerConfig_Custom(t *testing.T) {
 	cfg := &SchedulerConfig{
-		Interval:     5 * time.Minute,
-		AccountsPerN: 5,
+		Interval:    5 * time.Minute,
+		WorkerCount: 3,
 	}
 	s := NewStaggeredScheduler(nil, &mockConfigRepo{}, &mockAccountRepo{}, cfg)
 	if s.interval != 5*time.Minute {
 		t.Errorf("interval = %v, want 5m", s.interval)
 	}
-	if s.accountsPerN != 5 {
-		t.Errorf("accountsPerN = %v, want 5", s.accountsPerN)
+	if s.workerCount != 3 {
+		t.Errorf("workerCount = %v, want 3", s.workerCount)
 	}
 }

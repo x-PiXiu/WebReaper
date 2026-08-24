@@ -119,26 +119,44 @@ const (
 
 // CrawlerConfig 爬虫配置（DB 驱动，管理后台可改）。
 type CrawlerConfig struct {
-	ID                  int64     `json:"id"`
-	Platform            string    `json:"platform"`
-	TenantID            string    `json:"tenant_id"`
-	Enabled             bool      `json:"enabled"`
-	SearchKeywords      []string  `json:"search_keywords"`
-	ExtraKeywords       []string  `json:"extra_keywords"`
-	CrawlIntervalMinutes int      `json:"crawl_interval_minutes"`
-	MaxResults          int       `json:"max_results"`
-	SortBy              string    `json:"sort_by"`
-	PublishTime         string    `json:"publish_time"`
-	EnableComments      bool      `json:"enable_comments"`
-	EnableRefresh       bool      `json:"enable_refresh"`
-	RefreshIntervalHours int      `json:"refresh_interval_hours"`
-	RateLimitPerMin     int       `json:"rate_limit_per_min"`
-	ProxyEnabled        bool      `json:"proxy_enabled"`
-	MaxRetryCount       int       `json:"max_retry_count"`
-	LastCrawledAt       *time.Time `json:"last_crawled_at"`
-	LastError           string    `json:"last_error"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                   int64     `json:"id"`
+	Platform             string    `json:"platform"`
+	TenantID             string    `json:"tenant_id"`
+	BrandID              string    `json:"brand_id"`              // 关联品牌
+	Enabled              bool      `json:"enabled"`
+	SearchKeywords       []string  `json:"search_keywords"`
+	ExtraKeywords        []string  `json:"extra_keywords"`
+	KeywordPool          []string  `json:"keyword_pool"`          // LLM 生成的关键词池
+	LastKeywordIndex     int       `json:"last_keyword_index"`    // 关键词轮换指针
+	CrawlIntervalMinutes int       `json:"crawl_interval_minutes"`
+	MaxResults           int       `json:"max_results"`
+	SortBy               string    `json:"sort_by"`
+	PublishTime          string    `json:"publish_time"`
+	EnableComments       bool      `json:"enable_comments"`
+	EnableRefresh        bool      `json:"enable_refresh"`
+	RefreshIntervalHours int       `json:"refresh_interval_hours"`
+	RateLimitPerMin      int       `json:"rate_limit_per_min"`
+	ProxyEnabled         bool      `json:"proxy_enabled"`
+	MaxRetryCount        int       `json:"max_retry_count"`
+	LastCrawledAt        *time.Time `json:"last_crawled_at"`
+	LastError            string    `json:"last_error"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+// NextKeywords 从关键词池中获取下一批关键词（轮换）。
+// 返回 count 个未使用过的关键词，如果池中不够则循环。
+func (c *CrawlerConfig) NextKeywords(count int) []string {
+	if len(c.KeywordPool) == 0 {
+		return nil
+	}
+	result := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		idx := (c.LastKeywordIndex + i) % len(c.KeywordPool)
+		result = append(result, c.KeywordPool[idx])
+	}
+	c.LastKeywordIndex = (c.LastKeywordIndex + count) % len(c.KeywordPool)
+	return result
 }
 
 // CrawlerTaskLog 采集任务日志。
