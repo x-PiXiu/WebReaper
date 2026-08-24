@@ -480,14 +480,17 @@ type awemeInfo struct {
 	} `json:"author"`
 	Statistics videoStats `json:"statistics"`
 	CreateTime int64      `json:"create_time"`
-	Cover      struct {
-		URLList []string `json:"url_list"`
-	} `json:"cover"`
-	// Video 播放地址（文案提取管线的下载源——replaceDomain 后可直接 GET）
+	// Video 包含播放地址和封面（参考 MediaCrawler store/douyin/__init__.py）
 	Video struct {
 		PlayAddr struct {
 			URLList []string `json:"url_list"`
 		} `json:"play_addr"`
+		RawCover struct {
+			URLList []string `json:"url_list"`
+		} `json:"raw_cover"`
+		OriginCover struct {
+			URLList []string `json:"url_list"`
+		} `json:"origin_cover"`
 	} `json:"video"`
 }
 
@@ -519,24 +522,29 @@ type commentResp struct {
 }
 
 func toSocialVideo(a awemeInfo) port.SocialVideo {
-	v := port.SocialVideo{
+	// 封面 URL：优先 raw_cover，其次 origin_cover（参考 MediaCrawler）
+	coverURL := firstOrEmpty(a.Video.RawCover.URLList)
+	if coverURL == "" {
+		coverURL = firstOrEmpty(a.Video.OriginCover.URLList)
+	}
+
+	return port.SocialVideo{
 		Platform:     platform,
 		VideoID:      a.AwemeID,
 		Desc:         a.Desc,
 		Author:       a.Author.Nickname,
 		AuthorAvatar: firstOrEmpty(a.Author.Avatar.URLList),
 		URL:          "https://www.douyin.com/video/" + a.AwemeID,
-		CoverURL:     firstOrEmpty(a.Cover.URLList),
+		CoverURL:     coverURL,
 		VideoURL:     firstOrEmpty(a.Video.PlayAddr.URLList),
 		PlayCount:    a.Statistics.PlayCount,
 		DiggCount:    a.Statistics.DiggCount,
 		CommentCount: a.Statistics.CommentCount,
 		ShareCount:   a.Statistics.ShareCount,
 		CollectCount: a.Statistics.CollectCount,
-		Duration:     a.Duration / 1000, // 毫秒转秒
+		Duration:     a.Duration / 1000,
 		CreateTime:   a.CreateTime,
 	}
-	return v
 }
 
 // firstOrEmpty 返回字符串切片的第一个元素，空切片返回空字符串。

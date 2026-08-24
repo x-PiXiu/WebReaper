@@ -419,3 +419,59 @@ func (h *CrawlerAdminHandler) HandleTestConnection(c *gin.Context) {
 		"alive":    alive,
 	})
 }
+
+// HandleRefreshMetrics POST /admin/crawlers/:platform/refresh-metrics —— 刷新视频指标。
+//
+// 调用详情 API 补充搜索 API 不返回的字段（play_count/duration/collect_count 等）。
+func (h *CrawlerAdminHandler) HandleRefreshMetrics(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("灵感服务未配置"))
+		return
+	}
+
+	platform := c.Param("platform")
+	var req struct {
+		VideoIDs []string `json:"video_ids"` // 为空则刷新该平台所有视频
+		Limit    int      `json:"limit"`     // 最大刷新数量（默认 20）
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// 没有 body 也可以，使用默认值
+		req.Limit = 20
+	}
+
+	if req.Limit <= 0 || req.Limit > 100 {
+		req.Limit = 20
+	}
+
+	// 如果没有指定 video_ids，从数据库获取该平台的视频
+	if len(req.VideoIDs) == 0 {
+		// 获取该平台最近的视频
+		videos, _, err := h.uc.List(c.Request.Context(), "", platform, "", "created_at", 1, req.Limit)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		for _, v := range videos {
+			req.VideoIDs = append(req.VideoIDs, v.PlatformVideoID)
+		}
+	}
+
+	if len(req.VideoIDs) == 0 {
+		success(c, gin.H{"msg": "没有需要刷新的视频", "updated": 0})
+		return
+	}
+
+	// 调用详情 API 刷新指标
+	updated, err := h.uc.RefreshMetrics(c.Request.Context(), platform, req.VideoIDs)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+
+	success(c, gin.H{
+		"platform":    platform,
+		"total":       len(req.VideoIDs),
+		"updated":     updated,
+		"video_ids":   req.VideoIDs,
+	})
+}

@@ -350,8 +350,9 @@ func (r *Router) registerCrawlerAdminRoutes(api *gin.RouterGroup) {
 	adminGroup.GET("/crawlers", cah.HandleListConfigs)
 	adminGroup.GET("/crawlers/:platform", cah.HandleGetConfig)
 	adminGroup.PUT("/crawlers/:platform", cah.HandleUpdateConfig)
-	adminGroup.POST("/crawlers/:platform/test", cah.HandleTestConnection)
-	adminGroup.POST("/crawlers/:platform/trigger", cah.HandleTriggerCrawl)
+		adminGroup.POST("/crawlers/:platform/test", cah.HandleTestConnection)
+		adminGroup.POST("/crawlers/:platform/trigger", cah.HandleTriggerCrawl)
+		adminGroup.POST("/crawlers/:platform/refresh-metrics", cah.HandleRefreshMetrics)
 
 	// 任务监控
 	adminGroup.GET("/crawlers/tasks", cah.HandleListTasks)
