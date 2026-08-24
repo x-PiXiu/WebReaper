@@ -400,10 +400,11 @@ const findQRContainerJS = `(() => {
 })()`
 
 // clickTabByTextJS 通过文本内容点击扫码登录按钮的 JavaScript。
+// 返回值：true=找到并点击，false=未找到
 const clickTabByTextJS = `(text) => {
   const els = document.querySelectorAll('a, button, span, div, li');
   for (const el of els) {
-    if (el.textContent && el.textContent.includes(text) && el.offsetParent !== null) {
+    if (el.textContent && el.textContent.trim().includes(text) && el.offsetParent !== null) {
       el.click();
       return true;
     }
@@ -690,21 +691,27 @@ func (q *ChromedpQRLogin) processQRDetection(ctx context.Context, sessionID stri
 
 // captureQRFromPage 在原页面检测二维码（知乎App/小红书默认方式）
 func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, method string, pc platformConfig) {
+	// 记录当前页面 URL（调试用）
+	var currentURL string
+	chromedp.Run(ctx, chromedp.Evaluate(`() => window.location.href`, &currentURL))
+	log.Printf("[QRLogin:%s] 当前页面 URL: %s", sessionID, currentURL)
+
 	// 切换到扫码 tab（仅默认登录方式，第三方登录不需要点这个）
 	if pc.TabText != "" && (method == "" || method == "zhihu" || method == "xiaohongshu" || method == "kuaishou" || method == "bilibili") {
 		log.Printf("[QRLogin:%s] 尝试点击扫码 tab（文本=%q）", sessionID, pc.TabText)
 		clickCtx, clickCancel := context.WithTimeout(ctx, 10*time.Second)
+		var clickResult bool
 		err := chromedp.Run(clickCtx,
-			chromedp.ActionFunc(func(ctx context.Context) error {
-				return chromedp.Evaluate(fmt.Sprintf(`(%s)("%s")`, clickTabByTextJS, pc.TabText), nil).Do(ctx)
-			}),
-			chromedp.Sleep(2*time.Second),
+			chromedp.Evaluate(fmt.Sprintf(`(%s)("%s")`, clickTabByTextJS, pc.TabText), &clickResult),
+			chromedp.Sleep(3*time.Second), // 增加等待时间到 3 秒
 		)
 		clickCancel()
 		if err != nil {
 			log.Printf("[QRLogin:%s] 点击扫码 tab 失败（不阻断）: %v", sessionID, err)
-		} else {
+		} else if clickResult {
 			log.Printf("[QRLogin:%s] 扫码 tab 已点击", sessionID)
+		} else {
+			log.Printf("[QRLogin:%s] 扫码 tab 未找到匹配元素", sessionID)
 		}
 	}
 
