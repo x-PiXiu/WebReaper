@@ -8,11 +8,16 @@ type SocialVideo struct {
 	VideoID       string // 平台内视频 ID（详情查询/数据回读/评论获取的主键）
 	Desc          string // 视频文案（标题）
 	Author        string // 作者昵称
+	AuthorAvatar  string // 作者头像 URL
 	URL           string // 可播放链接
-	PlayCount     int    // 播放
+	CoverURL      string // 封面图 URL
+	VideoURL      string // 视频下载 URL
+	PlayCount     int    // 播放量（搜索 API 不返回，需详情 API 补充）
 	DiggCount     int    // 点赞
 	CommentCount  int    // 评论数
 	ShareCount    int    // 分享
+	CollectCount  int    // 收藏数
+	Duration      int    // 时长（秒）
 	CreateTime    int64  // 发布时间（unix 秒）
 }
 

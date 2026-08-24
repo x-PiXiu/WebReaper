@@ -128,22 +128,26 @@ func (c *DouyinCrawler) GetCapabilities() entity.PlatformCapabilities {
 
 // socialVideoToCrawled 将 port.SocialVideo 转换为 entity.CrawledVideo。
 //
-// 注意：SocialVideo 是搜索结果的精简数据，部分字段（CoverURL/Duration/Topics 等）
-// 需要通过 GetDetail 获取完整数据后补充。搜索阶段只填充可用字段。
+// 字段映射（参考 MediaCrawler store/douyin/__init__.py update_douyin_aweme）：
+//   - 搜索 API 返回：标题/点赞/评论/分享/收藏/封面/视频URL/时长
+//   - 搜索 API 不返回：播放量（需详情 API 补充）
 func socialVideoToCrawled(v port.SocialVideo) entity.CrawledVideo {
 	c := entity.CrawledVideo{
 		Platform:     v.Platform,
 		VideoID:      v.VideoID,
 		Title:        v.Desc,
 		Description:  v.Desc,
-		VideoURL:     v.URL,
+		CoverURL:     v.CoverURL,
+		VideoURL:     v.VideoURL,
 		Author:       v.Author,
+		AuthorAvatar: v.AuthorAvatar,
+		Duration:     v.Duration,
 		PlayCount:    int64(v.PlayCount),
 		DiggCount:    int64(v.DiggCount),
 		CommentCount: int64(v.CommentCount),
 		ShareCount:   int64(v.ShareCount),
+		CollectCount: int64(v.CollectCount),
 	}
-	// CreateTime 是 unix 秒，转换为 time.Time
 	if v.CreateTime > 0 {
 		c.PublishTime = time.Unix(v.CreateTime, 0)
 	}

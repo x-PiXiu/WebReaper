@@ -465,16 +465,24 @@ type videoStats struct {
 	DiggCount    int `json:"digg_count"`
 	CommentCount int `json:"comment_count"`
 	ShareCount   int `json:"share_count"`
+	CollectCount int `json:"collect_count"`
 }
 
 type awemeInfo struct {
 	AwemeID    string `json:"aweme_id"`
 	Desc       string `json:"desc"`
+	Duration   int    `json:"duration"` // 视频时长（毫秒）
 	Author     struct {
 		Nickname string `json:"nickname"`
+		Avatar   struct {
+			URLList []string `json:"url_list"`
+		} `json:"avatar"`
 	} `json:"author"`
 	Statistics videoStats `json:"statistics"`
 	CreateTime int64      `json:"create_time"`
+	Cover      struct {
+		URLList []string `json:"url_list"`
+	} `json:"cover"`
 	// Video 播放地址（文案提取管线的下载源——replaceDomain 后可直接 GET）
 	Video struct {
 		PlayAddr struct {
@@ -511,18 +519,32 @@ type commentResp struct {
 }
 
 func toSocialVideo(a awemeInfo) port.SocialVideo {
-	return port.SocialVideo{
+	v := port.SocialVideo{
 		Platform:     platform,
 		VideoID:      a.AwemeID,
 		Desc:         a.Desc,
 		Author:       a.Author.Nickname,
+		AuthorAvatar: firstOrEmpty(a.Author.Avatar.URLList),
 		URL:          "https://www.douyin.com/video/" + a.AwemeID,
+		CoverURL:     firstOrEmpty(a.Cover.URLList),
+		VideoURL:     firstOrEmpty(a.Video.PlayAddr.URLList),
 		PlayCount:    a.Statistics.PlayCount,
 		DiggCount:    a.Statistics.DiggCount,
 		CommentCount: a.Statistics.CommentCount,
 		ShareCount:   a.Statistics.ShareCount,
+		CollectCount: a.Statistics.CollectCount,
+		Duration:     a.Duration / 1000, // 毫秒转秒
 		CreateTime:   a.CreateTime,
 	}
+	return v
+}
+
+// firstOrEmpty 返回字符串切片的第一个元素，空切片返回空字符串。
+func firstOrEmpty(ss []string) string {
+	if len(ss) > 0 {
+		return ss[0]
+	}
+	return ""
 }
 
 var _ port.SocialSearcher = (*Searcher)(nil)
