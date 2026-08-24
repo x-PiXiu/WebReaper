@@ -208,8 +208,8 @@ export const businessApi = {
   startQRLogin: (platform: string, method?: string) =>
     apiClient.post<unknown, { session_id: string; platform: string; method: string }>('/api/v1/merchant/accounts/qr-login', { platform, method }),
 
-  pollQRLogin: (sessionId: string, platform: string, method?: string) =>
-    apiClient.get<unknown, { status: string; qr_image: string; account_id: string; account_name: string; expires_at: string }>(`/api/v1/merchant/accounts/qr-login/${sessionId}?platform=${platform}${method ? '&method=' + method : ''}`),
+  pollQRLogin: (sessionId: string, platform: string, method?: string, scene?: string) =>
+    apiClient.get<unknown, { status: string; qr_image: string; account_id: string; account_name: string; expires_at: string }>(`/api/v1/merchant/accounts/qr-login/${sessionId}?platform=${platform}${method ? '&method=' + method : ''}${scene ? '&scene=' + scene : ''}`),
 
   cancelQRLogin: (sessionId: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/merchant/accounts/qr-login/${sessionId}`),

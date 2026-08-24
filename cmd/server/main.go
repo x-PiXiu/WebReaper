@@ -1033,6 +1033,11 @@ func main() {
 			crawlerAccountRepo := repository.NewGormCrawlerAccountRepository(geoRepos.db)
 			crawlerTaskLogRepo := repository.NewGormCrawlerTaskLogRepository(geoRepos.db)
 
+			// 注入爬虫账号仓储到账号管理用例（支持 crawler 场景的扫码登录）
+			if geoAccountUC != nil {
+				geoAccountUC.SetCrawlerAccountRepo(crawlerAccountRepo)
+			}
+
 			inspirationUC := inspiration.NewUseCase(
 				inspirationVideoRepo,
 				brandInspirationRepo,

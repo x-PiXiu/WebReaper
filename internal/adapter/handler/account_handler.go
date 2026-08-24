@@ -181,13 +181,27 @@ func (h *AccountHandler) HandleStartQRLogin(c *gin.Context) {
 }
 
 // HandlePollQRLogin GET /api/v1/geo/accounts/qr-login/:sessionId —— 轮询扫码状态 + 二维码图片。
+//
+// Query 参数：
+//   - platform: 平台（douyin/kuaishou/bilibili/xiaohongshu）
+//   - method: 登录方式（cookie）
+//   - scene: 场景（account=用户发布 / crawler=平台方爬虫）
 func (h *AccountHandler) HandlePollQRLogin(c *gin.Context) {
 	tenantID := middleware.CurrentTenantID(c)
 	sessionID := c.Param("sessionId")
 	platform := c.Query("platform")
 	method := c.Query("method")
+	scene := c.DefaultQuery("scene", "account")
 
-	result, err := h.accountUC.PollQRLogin(c.Request.Context(), tenantID, sessionID, platform, method)
+	var result account.PollQRLoginResult
+	var err error
+
+	if scene == "crawler" {
+		result, err = h.accountUC.PollQRLoginWithScene(c.Request.Context(), tenantID, sessionID, platform, method, "crawler")
+	} else {
+		result, err = h.accountUC.PollQRLogin(c.Request.Context(), tenantID, sessionID, platform, method)
+	}
+
 	if err != nil {
 		fail(c, err)
 		return

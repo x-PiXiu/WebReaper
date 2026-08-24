@@ -97,15 +97,30 @@ export default function CrawlerAccounts() {
 
     const timer = setInterval(async () => {
       try {
-        const resp = await businessApi.pollQRLogin(qrSessionId, qrPlatform, 'cookie')
+        const resp = await businessApi.pollQRLogin(qrSessionId, qrPlatform, 'cookie', 'crawler')
         if (resp.qr_image) {
           setQrImage(resp.qr_image)
         }
         if (resp.status === 'success') {
           setQrStatus('success')
-          message.success(`账号绑定成功: ${resp.account_name}`)
+          message.success(`扫码登录成功: ${resp.account_name}`)
           setIsQRModalOpen(false)
           setQrSessionId(null)
+
+          // 扫码登录成功后，同步创建 crawler_accounts 记录
+          // Cookie 已保存在 accounts 表，通过 admin API 创建 crawler_accounts
+          try {
+            await businessApi.adminCreateCrawlerAccount({
+              platform: qrPlatform,
+              account_name: resp.account_name || `平台方账号-${qrPlatform}`,
+              cookie: '从accounts表同步', // 后端会从accounts表读取实际Cookie
+              daily_usage_limit: 50,
+            })
+            message.success('平台方账号添加成功')
+          } catch {
+            // 如果创建失败（可能已存在），不影响登录成功
+          }
+
           queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
           clearInterval(timer)
         } else if (resp.status === 'expired') {

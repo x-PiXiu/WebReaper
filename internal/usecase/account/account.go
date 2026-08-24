@@ -27,15 +27,21 @@ import (
 
 // AccountUseCase 账号扫码绑定 / 官方 OAuth 授权绑定 / 列表 / 解绑。
 type AccountUseCase struct {
-	accountRepo port.AccountRepository
-	qrLogin     port.QRLoginSession // 扫码登录会话（浏览器自动化，cookie 通道）
-	vault       port.CookieVault    // cookie/token 加密存储
-	oauth       port.OAuthProvider  // 平台官方 OAuth（API 通道；nil=未配置，仅扫码可用）
-	stateCodec  port.OAuthStateCodec
+	accountRepo       port.AccountRepository
+	crawlerAccountRepo port.CrawlerAccountRepository // 平台方爬虫账号（可选；crawler 场景用）
+	qrLogin           port.QRLoginSession // 扫码登录会话（浏览器自动化，cookie 通道）
+	vault             port.CookieVault    // cookie/token 加密存储
+	oauth             port.OAuthProvider  // 平台官方 OAuth（API 通道；nil=未配置，仅扫码可用）
+	stateCodec        port.OAuthStateCodec
 }
 
 func NewAccountUseCase(ar port.AccountRepository, qr port.QRLoginSession, vault port.CookieVault) *AccountUseCase {
 	return &AccountUseCase{accountRepo: ar, qrLogin: qr, vault: vault}
+}
+
+// SetCrawlerAccountRepo 注入平台方爬虫账号仓储（可选；用于 crawler 场景的扫码登录）。
+func (uc *AccountUseCase) SetCrawlerAccountRepo(repo port.CrawlerAccountRepository) {
+	uc.crawlerAccountRepo = repo
 }
 
 // SetOAuth 注入官方 OAuth 授权（可选；抖音开放平台等）。
@@ -144,6 +150,11 @@ type PollQRLoginResult struct {
 // PollQRLogin 轮询扫码状态。登录成功时自动创建账号并加密存 cookie。
 // method 指定登录方式（wechat/qq/weibo），用于记录账号的登录形式。
 func (uc *AccountUseCase) PollQRLogin(ctx context.Context, tenantID, sessionID, platform, method string) (PollQRLoginResult, error) {
+	return uc.PollQRLoginWithScene(ctx, tenantID, sessionID, platform, method, "account")
+}
+
+// PollQRLoginWithScene 轮询扫码登录状态（支持场景：account=用户发布 / crawler=平台方爬虫）。
+func (uc *AccountUseCase) PollQRLoginWithScene(ctx context.Context, tenantID, sessionID, platform, method, scene string) (PollQRLoginResult, error) {
 	if uc.qrLogin == nil {
 		return PollQRLoginResult{Status: "error"}, fmt.Errorf("扫码登录未启用")
 	}
@@ -171,21 +182,45 @@ func (uc *AccountUseCase) PollQRLogin(ctx context.Context, tenantID, sessionID, 
 	if displayName == "" {
 		displayName = platformDisplayName(platform)
 	}
-	acc := entity.Account{
-		ID:              fmt.Sprintf("acc-%d", now.UnixNano()),
-		TenantID:        tenantID,
-		Platform:        platform,
-		DisplayName:     displayName,
-		CookieEncrypted: encCookie,
-		Health:          entity.AccountHealthActive,
-		LoginMethod:     method,
-		ExpiresAt:       result.ExpiresAt,
-		BoundAt:         now,
-		LastUsedAt:      now,
+
+	var accountID string
+
+	// 根据 scene 决定保存位置
+	if scene == "crawler" && uc.crawlerAccountRepo != nil {
+		// 爬虫场景：保存到 crawler_accounts 表
+		crawlerAcc := entity.CrawlerAccount{
+			Platform:          platform,
+			AccountName:       displayName,
+			CookieEncrypted:   encCookie,
+			Status:            entity.CrawlerAccountActive,
+			HealthCheckResult: entity.HealthHealthy,
+			DailyUsageLimit:   50,
+			LastHealthCheckAt: &now,
+		}
+		if saveErr := uc.crawlerAccountRepo.Save(ctx, crawlerAcc); saveErr != nil {
+			return PollQRLoginResult{Status: "error"}, fmt.Errorf("保存爬虫账号失败: %w", saveErr)
+		}
+		accountID = fmt.Sprintf("crawler-%d", crawlerAcc.ID)
+	} else {
+		// 用户发布场景：保存到 accounts 表（原有逻辑）
+		acc := entity.Account{
+			ID:              fmt.Sprintf("acc-%d", now.UnixNano()),
+			TenantID:        tenantID,
+			Platform:        platform,
+			DisplayName:     displayName,
+			CookieEncrypted: encCookie,
+			Health:          entity.AccountHealthActive,
+			LoginMethod:     method,
+			ExpiresAt:       result.ExpiresAt,
+			BoundAt:         now,
+			LastUsedAt:      now,
+		}
+		if saveErr := uc.accountRepo.Save(ctx, acc); saveErr != nil {
+			return PollQRLoginResult{Status: "error"}, fmt.Errorf("保存账号失败: %w", saveErr)
+		}
+		accountID = acc.ID
 	}
-	if saveErr := uc.accountRepo.Save(ctx, acc); saveErr != nil {
-		return PollQRLoginResult{Status: "error"}, fmt.Errorf("保存账号失败: %w", saveErr)
-	}
+
 	// 如果账号名为空，等几秒让后台 goroutine 提取账号名后再查一次
 	if result.AccountName == "" {
 		for i := 0; i < 5; i++ {
@@ -193,15 +228,14 @@ func (uc *AccountUseCase) PollQRLogin(ctx context.Context, tenantID, sessionID, 
 			r2, _ := uc.qrLogin.PollStatus(ctx, sessionID)
 			if r2.AccountName != "" {
 				displayName = r2.AccountName
-				acc.DisplayName = displayName
-				_ = uc.accountRepo.Save(ctx, acc) // 更新账号名
 				break
 			}
 		}
 	}
+
 	// 登录成功后关闭浏览器会话
 	_ = uc.qrLogin.Cleanup(ctx, sessionID)
-	return PollQRLoginResult{Status: "success", AccountID: acc.ID, AccountName: displayName, ExpiresAt: result.ExpiresAt}, nil
+	return PollQRLoginResult{Status: "success", AccountID: accountID, AccountName: displayName, ExpiresAt: result.ExpiresAt}, nil
 }
 
 // CleanupSession 关闭扫码会话（用户取消或超时）。
