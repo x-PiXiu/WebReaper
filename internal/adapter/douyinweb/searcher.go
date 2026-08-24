@@ -31,6 +31,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"webreaper/internal/adapter/chromedputil"
+	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
 
@@ -39,25 +40,50 @@ const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 
 // Searcher port.SocialSearcher 的 douyin 实现。
 type Searcher struct {
-	accountRepo port.AccountRepository
-	vault       port.CookieVault
+	accountRepo       port.AccountRepository
+	crawlerAccountRepo port.CrawlerAccountRepository // 平台方爬虫账号（可选）
+	vault             port.CookieVault
 }
 
 func NewSearcher(ar port.AccountRepository, vault port.CookieVault) *Searcher {
 	return &Searcher{accountRepo: ar, vault: vault}
 }
 
+// SetCrawlerAccountRepo 注入平台方爬虫账号仓储（可选）。
+func (s *Searcher) SetCrawlerAccountRepo(repo port.CrawlerAccountRepository) {
+	s.crawlerAccountRepo = repo
+}
+
 func (s *Searcher) SupportedPlatforms() []string { return []string{platform} }
 
 // pickCookie 选健康的抖音 cookie 账号并解密。
-// 优先取平台工作账号（role=platform）——搜索是只读操作，风控风险集中到平台可控账号，
-// 不消耗商户账号的信任额度。无平台账号时回退商户账号（兼容期）。
+//
+// 优先级：
+//  1. crawler_accounts 表中的平台方账号（管理员通过扫码登录添加）
+//  2. accounts 表中的平台工作账号（role=platform）
+//  3. accounts 表中的商户账号（兼容回退）
 func (s *Searcher) pickCookie(ctx context.Context, tenantID, plat string) (string, error) {
+	// 第一优先：crawler_accounts 表中的平台方账号
+	if s.crawlerAccountRepo != nil {
+		crawlerAccounts, err := s.crawlerAccountRepo.ListByPlatform(ctx, plat)
+		if err == nil {
+			for _, acc := range crawlerAccounts {
+				if acc.Status != entity.CrawlerAccountActive || acc.CookieEncrypted == "" {
+					continue
+				}
+				if cookie, dErr := s.vault.Decrypt(acc.CookieEncrypted); dErr == nil && cookie != "" {
+					log.Printf("[douyinweb] 使用平台方爬虫账号 %s", acc.AccountName)
+					return cookie, nil
+				}
+			}
+		}
+	}
+
+	// 第二优先：accounts 表中的平台工作账号
 	accounts, err := s.accountRepo.ListAll(ctx)
 	if err != nil {
 		return "", err
 	}
-	// 第一优先：平台工作账号（跨租户共享）
 	for _, acc := range accounts {
 		if acc.Platform != plat || !acc.IsHealthy() || acc.IsOAuth() || acc.CookieEncrypted == "" {
 			continue
@@ -69,7 +95,8 @@ func (s *Searcher) pickCookie(ctx context.Context, tenantID, plat string) (strin
 			}
 		}
 	}
-	// 兼容回退：商户自己的账号
+
+	// 第三优先：商户自己的账号（兼容回退）
 	for _, acc := range accounts {
 		if acc.Platform != plat || acc.TenantID != tenantID || !acc.IsHealthy() || acc.IsOAuth() || acc.CookieEncrypted == "" {
 			continue

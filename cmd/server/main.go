@@ -1038,6 +1038,11 @@ func main() {
 				geoAccountUC.SetCrawlerAccountRepo(crawlerAccountRepo)
 			}
 
+			// 注入爬虫账号仓储到抖音搜索器（从 crawler_accounts 表读取 Cookie）
+			if socialSearcher != nil {
+				socialSearcher.SetCrawlerAccountRepo(crawlerAccountRepo)
+			}
+
 			inspirationUC := inspiration.NewUseCase(
 				inspirationVideoRepo,
 				brandInspirationRepo,
