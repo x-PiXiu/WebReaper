@@ -44,6 +44,9 @@ const AdminSettings = lazy(() => import('./pages/admin/Settings'))
 const AdminBilling = lazy(() => import('./pages/admin/Billing'))
 const Integrations = lazy(() => import('./pages/admin/Integrations'))
 const AdminPromptTemplates = lazy(() => import('./pages/admin/PromptTemplates'))
+const CrawlerAccounts = lazy(() => import('./pages/admin/CrawlerAccounts'))
+const CrawlerConfigs = lazy(() => import('./pages/admin/CrawlerConfigs'))
+const CrawlerTasks = lazy(() => import('./pages/admin/CrawlerTasks'))
 
 function PageFallback() {
   return (
@@ -144,6 +147,9 @@ export default function App() {
           <Route path="/admin/prompt-templates" element={<LazyPage><AdminPromptTemplates /></LazyPage>} />
           <Route path="/admin/billing" element={<LazyPage><AdminBilling /></LazyPage>} />
           <Route path="/admin/chat" element={<LazyPage><Chat /></LazyPage>} />
+          <Route path="/admin/crawler-accounts" element={<LazyPage><CrawlerAccounts /></LazyPage>} />
+          <Route path="/admin/crawler-configs" element={<LazyPage><CrawlerConfigs /></LazyPage>} />
+          <Route path="/admin/crawler-tasks" element={<LazyPage><CrawlerTasks /></LazyPage>} />
         </Route>
 
         <Route path="/" element={<RootRedirect />} />

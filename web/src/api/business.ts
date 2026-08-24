@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -585,4 +585,45 @@ export const businessApi = {
     apiClient.put<unknown, GenerationTemplate>(`/api/v1/admin/templates/${id}`, data),
   adminDeleteGenerationTemplate: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/admin/templates/${id}`),
+
+  // ---- 爬虫管理 API ----
+  // 平台方账号管理
+  adminListCrawlerAccounts: () =>
+    apiClient.get<unknown, { accounts: CrawlerAccount[] }>('/api/v1/admin/crawler-accounts'),
+  adminCreateCrawlerAccount: (data: Partial<CrawlerAccount>) =>
+    apiClient.post<unknown, { msg: string }>('/api/v1/admin/crawler-accounts', data),
+  adminUpdateCrawlerAccount: (id: number, data: Partial<CrawlerAccount>) =>
+    apiClient.put<unknown, { msg: string }>(`/api/v1/admin/crawler-accounts/${id}`, data),
+  adminDeleteCrawlerAccount: (id: number) =>
+    apiClient.delete<unknown, { msg: string }>(`/api/v1/admin/crawler-accounts/${id}`),
+  adminCheckCrawlerAccountHealth: (id: number, platform: string) =>
+    apiClient.post<unknown, { account_id: number; platform: string; healthy: boolean; result: string }>(
+      `/api/v1/admin/crawler-accounts/${id}/health?platform=${platform}`
+    ),
+
+  // 爬虫配置管理
+  adminListCrawlerConfigs: () =>
+    apiClient.get<unknown, { configs: CrawlerConfig[] }>('/api/v1/admin/crawlers'),
+  adminGetCrawlerConfig: (platform: string) =>
+    apiClient.get<unknown, CrawlerConfig>(`/api/v1/admin/crawlers/${platform}`),
+  adminUpdateCrawlerConfig: (platform: string, data: Partial<CrawlerConfig>) =>
+    apiClient.put<unknown, { msg: string }>(`/api/v1/admin/crawlers/${platform}`, data),
+  adminTestCrawlerConnection: (platform: string) =>
+    apiClient.post<unknown, { platform: string; alive: boolean }>(`/api/v1/admin/crawlers/${platform}/test`),
+  adminTriggerCrawl: (platform: string, data: { brand_id: string; keywords: string[] }) =>
+    apiClient.post<unknown, CrawlResult>(`/api/v1/admin/crawlers/${platform}/trigger`, data),
+
+  // 任务监控
+  adminListCrawlerTasks: (limit?: number) =>
+    apiClient.get<unknown, { tasks: CrawlerTaskLog[] }>(`/api/v1/admin/crawlers/tasks?limit=${limit || 50}`),
+  adminGetCrawlerTask: (id: number) =>
+    apiClient.get<unknown, CrawlerTaskLog>(`/api/v1/admin/crawlers/tasks/${id}`),
+
+  // 用户端灵感 API
+  listInspirations: (params?: { brand_id?: string; platform?: string; keyword?: string; sort_by?: string; page?: number; page_size?: number }) =>
+    apiClient.get<unknown, { total: number; page: number; page_size: number; items: InspirationVideo[] }>('/api/v1/inspirations', { params }),
+  getInspiration: (id: string) =>
+    apiClient.get<unknown, InspirationVideo>(`/api/v1/inspirations/${id}`),
+  listInspirationPlatforms: () =>
+    apiClient.get<unknown, { platforms: string[] }>('/api/v1/inspirations/platforms'),
 }

@@ -717,6 +717,112 @@ export interface ProviderConfig {
   updated_at: string
 }
 
+// ---- 爬虫管理相关类型 ----
+
+// 平台方账号
+export interface CrawlerAccount {
+  id: number
+  platform: string               // douyin/kuaishou/bilibili
+  account_name: string
+  cookie_encrypted: string       // 掩码（管理后台展示）
+  user_agent: string
+  proxy_address: string
+  status: string                 // active/expired/banned
+  last_used_at: string | null
+  last_health_check_at: string | null
+  health_check_result: string    // healthy/unhealthy/unknown
+  daily_usage_count: number
+  daily_usage_limit: number
+  created_at: string
+  updated_at: string
+}
+
+// 爬虫配置
+export interface CrawlerConfig {
+  id: number
+  platform: string
+  tenant_id: string
+  brand_id: string
+  enabled: boolean
+  search_keywords: string[]
+  extra_keywords: string[]
+  keyword_pool: string[]
+  last_keyword_index: number
+  crawl_interval_minutes: number
+  max_results: number
+  sort_by: string
+  publish_time: string
+  enable_comments: boolean
+  enable_refresh: boolean
+  refresh_interval_hours: number
+  rate_limit_per_min: number
+  proxy_enabled: boolean
+  max_retry_count: number
+  last_crawled_at: string | null
+  last_error: string
+  created_at: string
+  updated_at: string
+}
+
+// 采集任务日志
+export interface CrawlerTaskLog {
+  id: number
+  task_id: string
+  platform: string
+  brand_id: string
+  trigger_type: string           // scheduled/manual/first_time
+  status: string                 // running/success/failed
+  keywords_used: string[]
+  videos_found: number
+  videos_new: number
+  videos_updated: number
+  error_message: string
+  started_at: string
+  finished_at: string | null
+  duration_ms: number
+}
+
+// 采集结果
+export interface CrawlResult {
+  platform: string
+  brand_id: string
+  keywords: string[]
+  videos_found: number
+  videos_new: number
+  duration_ms: number
+  finished_at: string
+}
+
+// 灵感视频
+export interface InspirationVideo {
+  id: string
+  platform: string
+  platform_video_id: string
+  title: string
+  description: string
+  cover_url: string
+  video_url: string
+  author: string
+  author_avatar: string
+  duration: number
+  publish_time: string
+  play_count: number
+  digg_count: number
+  comment_count: number
+  share_count: number
+  collect_count: number
+  topics: string[]
+  music_name: string
+  music_author: string
+  sentiment: string
+  viral_score: number
+  is_pinned: boolean
+  is_recommended: boolean
+  admin_note: string
+  created_at: string
+  updated_at: string
+}
+
 // ---- 经济系统（订阅 / 计费 / 配额）----
 
 export interface Plan {

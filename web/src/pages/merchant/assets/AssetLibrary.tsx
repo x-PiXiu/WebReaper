@@ -499,7 +499,7 @@ function GenerateAssetModal({ open, type, onClose, onGenerated }: {
   const [taskId, setTaskId] = useState<string | null>(null)
   const [taskState, setTaskState] = useState<string | null>(null)
 
-  const { data: voices = [] } = useQuery({
+  const { data: _voices = [] } = useQuery({
     queryKey: ['generation-voices'],
     queryFn: () => businessApi.listGenerationVoices().then(r => r.voices),
     enabled: open && type === 'audio',

@@ -38,6 +38,14 @@ const adminMenu: NavItem[] = [
       { key: '/admin/knowledge', label: '知识库' },
     ],
   },
+  {
+    key: 'crawler', label: '爬虫管理',
+    children: [
+      { key: '/admin/crawler-accounts', label: '平台方账号' },
+      { key: '/admin/crawler-configs', label: '爬虫配置' },
+      { key: '/admin/crawler-tasks', label: '任务监控' },
+    ],
+  },
 ]
 
 // 管理后台布局。
