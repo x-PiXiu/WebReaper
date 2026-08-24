@@ -32,6 +32,7 @@ type KuaishouCrawler struct {
 	client  *http.Client
 	cookies string
 	config  CrawlerConfig
+	signer  *KuaishouSigner // 浏览器签名器（可选；nil=无签名降级）
 }
 
 // CrawlerConfig 快手爬虫配置。
@@ -57,6 +58,23 @@ func NewKuaishouCrawler(cookies string, config *CrawlerConfig) *KuaishouCrawler 
 	}
 }
 
+// SetSigner 注入签名器（可选；未注入则无签名降级）。
+func (c *KuaishouCrawler) SetSigner(signer *KuaishouSigner) {
+	c.signer = signer
+}
+
+// signRequest 对请求进行签名（如果签名器可用）。
+func (c *KuaishouCrawler) signRequest(ctx context.Context, url string, body map[string]any) string {
+	if c.signer == nil || !c.signer.IsReady() {
+		return ""
+	}
+	sig, err := c.signer.Sign(ctx, url, body)
+	if err != nil {
+		return ""
+	}
+	return sig
+}
+
 func (c *KuaishouCrawler) Platform() string { return platformName }
 
 // Search 关键词搜索热门视频。
@@ -76,15 +94,21 @@ func (c *KuaishouCrawler) Search(ctx context.Context, opts entity.SearchOptions)
 
 	// 构造请求体（参考 MediaCrawler kuaishou/client.py 第 172-189 行）
 	reqBody := map[string]any{
-		"keyword":      opts.Keyword,
-		"pcursor":      "",
-		"page":         "search",
+		"keyword":         opts.Keyword,
+		"pcursor":         "",
+		"page":            "search",
 		"searchSessionId": "",
 	}
 
 	bodyBytes, _ := json.Marshal(reqBody)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", host+searchPath, bytes.NewReader(bodyBytes))
+	// 构造请求 URL（带签名或无签名）
+	reqURL := host + searchPath
+	if signature := c.signRequest(ctx, searchPath, reqBody); signature != "" {
+		reqURL = fmt.Sprintf("%s%s?__NS_hxfalcon=%s&caver=2", host, searchPath, signature)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
