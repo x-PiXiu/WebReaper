@@ -17,6 +17,7 @@ import (
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/hotvideo"
+	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/works"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/knowledge"
@@ -114,6 +115,11 @@ type Router struct {
 	quotaGate port.QuotaStore
 	// 模板管理用例（管理后台可动态配置生成模板）——通过 SetTemplate 注入，可选
 	templateUC *generation.TemplateUseCase
+	// 灵感广场用例（热门视频采集+展示）——通过 SetInspiration 注入，可选
+	inspirationUC *inspiration.UseCase
+	// 爬虫管理用例（管理后台爬虫配置/账号管理）——通过 SetCrawlerAdmin 注入，可选
+	crawlerConfigRepo  port.CrawlerConfigRepository
+	crawlerAccountRepo port.CrawlerAccountRepository
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -309,6 +315,58 @@ func (r *Router) SetQuotaGate(g port.QuotaStore) {
 	r.quotaGate = g
 }
 
+// registerInspirationRoutes 注册灵感广场路由（用户端，无需登录）。
+func (r *Router) registerInspirationRoutes(api *gin.RouterGroup) {
+	if r.inspirationUC == nil {
+		return
+	}
+	ih := NewInspirationHandler(r.inspirationUC)
+	api.GET("/inspirations", ih.HandleList)
+	api.GET("/inspirations/:id", ih.HandleGet)
+	api.GET("/inspirations/platforms", ih.HandleListPlatforms)
+	api.GET("/inspirations/brands", ih.HandleBrandsStats)
+}
+
+// registerCrawlerAdminRoutes 注册爬虫管理路由（管理后台，需要 admin 角色）。
+func (r *Router) registerCrawlerAdminRoutes(api *gin.RouterGroup) {
+	if r.crawlerConfigRepo == nil && r.crawlerAccountRepo == nil && r.inspirationUC == nil {
+		return
+	}
+	adminGroup := api.Group("/admin")
+	adminGroup.Use(middleware.RequireRole("admin"))
+
+	cah := NewCrawlerAdminHandler(r.inspirationUC, r.crawlerConfigRepo, r.crawlerAccountRepo)
+
+	// 平台方账号管理
+	adminGroup.GET("/crawler-accounts", cah.HandleListAccounts)
+	adminGroup.POST("/crawler-accounts", cah.HandleCreateAccount)
+	adminGroup.PUT("/crawler-accounts/:id", cah.HandleUpdateAccount)
+	adminGroup.DELETE("/crawler-accounts/:id", cah.HandleDeleteAccount)
+	adminGroup.POST("/crawler-accounts/:id/health", cah.HandleCheckAccountHealth)
+
+	// 爬虫配置管理
+	adminGroup.GET("/crawlers", cah.HandleListConfigs)
+	adminGroup.GET("/crawlers/:platform", cah.HandleGetConfig)
+	adminGroup.PUT("/crawlers/:platform", cah.HandleUpdateConfig)
+	adminGroup.POST("/crawlers/:platform/test", cah.HandleTestConnection)
+	adminGroup.POST("/crawlers/:platform/trigger", cah.HandleTriggerCrawl)
+
+	// 任务监控
+	adminGroup.GET("/crawlers/tasks", cah.HandleListTasks)
+	adminGroup.GET("/crawlers/tasks/:id", cah.HandleGetTask)
+}
+
+// SetInspiration 注入灵感广场用例（可选；未注入则灵感端点不注册）。
+func (r *Router) SetInspiration(uc *inspiration.UseCase) {
+	r.inspirationUC = uc
+}
+
+// SetCrawlerAdmin 注入爬虫管理仓储（可选；未注入则爬虫管理端点不注册）。
+func (r *Router) SetCrawlerAdmin(configRepo port.CrawlerConfigRepository, accountRepo port.CrawlerAccountRepository) {
+	r.crawlerConfigRepo = configRepo
+	r.crawlerAccountRepo = accountRepo
+}
+
 // NewRouter 创建路由器（零参数——所有依赖通过 SetXxx 可选注入）。
 // 整洁架构"推迟决策"：Router 不绑死依赖，端点按注入的 usecase 条件注册。
 func NewRouter() *Router {
@@ -446,6 +504,8 @@ func (r *Router) Engine() *gin.Engine {
 	r.registerMediaRoutes(api)
 	r.registerAgentRoutes(api)
 	r.registerMerchantBillingRoutes(api)
+	r.registerInspirationRoutes(api)
+	r.registerCrawlerAdminRoutes(api)
 	r.registerAdminRoutes(api, geoHandler)
 	return e
 }

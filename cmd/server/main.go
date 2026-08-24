@@ -29,6 +29,7 @@ import (
 	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/bing"
 	"webreaper/internal/adapter/crawler"
+	douyincrawler "webreaper/internal/adapter/crawler/douyin"
 	"webreaper/internal/adapter/crypto"
 	geoadapter "webreaper/internal/adapter/geo"
 	"webreaper/internal/adapter/ttsmimo"
@@ -60,6 +61,7 @@ import (
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/generation"
+	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/works"
@@ -563,7 +565,7 @@ func main() {
 			// 抖音站内搜索（MediaCrawler 协议复刻：cookie 账号 + 页面内免签 fetch）——
 			// 热门同款 tab 主数据源；数据回读上线后复用 GetVideoDetail
 			// 站内搜索共享实例（热门同款主数据源 + 数据回读取详情）
-			socialSearcher := douyinweb.NewSearcher(accountRepos.account, vault)
+			socialSearcher = douyinweb.NewSearcher(accountRepos.account, vault)
 			if hotVideoUCRef != nil {
 				hotVideoUCRef.SetSocialSearcher(socialSearcher)
 			}
@@ -1022,6 +1024,32 @@ func main() {
 		router.SetTemplate(templateUC)
 		router.SetGeneration(genUC, viduProvider, genRegistry, genSpecRepo)
 		router.SetIntegrationRepo(integrationRepo) // 能力路由新表（集成中心 vendor/capability 管理）
+
+		// ---- 灵感广场（热门视频采集+展示）----
+		{
+			inspirationVideoRepo := repository.NewGormInspirationVideoRepository(geoRepos.db)
+			brandInspirationRepo := repository.NewGormBrandInspirationRepository(geoRepos.db)
+			crawlerConfigRepo := repository.NewGormCrawlerConfigRepository(geoRepos.db)
+			crawlerAccountRepo := repository.NewGormCrawlerAccountRepository(geoRepos.db)
+
+			inspirationUC := inspiration.NewUseCase(
+				inspirationVideoRepo,
+				brandInspirationRepo,
+				crawlerConfigRepo,
+				crawlerAccountRepo,
+			)
+
+			// 注册抖音爬虫（复用现有 douyinweb.Searcher）
+			if socialSearcher != nil {
+				douyinCrawler := douyincrawler.NewDouyinCrawler(socialSearcher, nil)
+				inspirationUC.RegisterPlatform("douyin", douyinCrawler)
+				log.Info("灵感广场：抖音爬虫已注册")
+			}
+
+			router.SetInspiration(inspirationUC)
+			router.SetCrawlerAdmin(crawlerConfigRepo, crawlerAccountRepo)
+			log.Info("灵感广场已启用")
+		}
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429
 		genUC.SetConcurrency(5)
 		// 轮询驱动：20s 周期扫描未终态任务（回调到达后幂等跳过；双通道合并）
