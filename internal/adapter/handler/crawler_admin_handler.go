@@ -11,6 +11,9 @@ import (
 	"webreaper/internal/usecase/port"
 )
 
+// 确保 entity 包被引用（HandleCheckAccountHealth 使用 entity.HealthHealthy）
+var _ = entity.HealthHealthy
+
 // CrawlerAdminHandler 爬虫管理 API（管理后台，需要 admin 角色）。
 type CrawlerAdminHandler struct {
 	uc          *inspiration.UseCase
@@ -94,6 +97,108 @@ func (h *CrawlerAdminHandler) HandleCreateAccount(c *gin.Context) {
 	}
 
 	success(c, gin.H{"msg": "账号添加成功"})
+}
+
+// HandleUpdateAccount PUT /admin/crawler-accounts/:id —— 更新账号。
+func (h *CrawlerAdminHandler) HandleUpdateAccount(c *gin.Context) {
+	if h.accountRepo == nil {
+		fail(c, fmt.Errorf("账号仓储未配置"))
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		fail(c, fmt.Errorf("无效的账号 ID"))
+		return
+	}
+
+	existing, err := h.accountRepo.FindByID(c.Request.Context(), id)
+	if err != nil {
+		fail(c, fmt.Errorf("账号不存在"))
+		return
+	}
+
+	var req struct {
+		AccountName     *string `json:"account_name"`
+		Cookie          *string `json:"cookie"`
+		UserAgent       *string `json:"user_agent"`
+		ProxyAddress    *string `json:"proxy_address"`
+		Status          *string `json:"status"`
+		DailyUsageLimit *int    `json:"daily_usage_limit"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+
+	if req.AccountName != nil {
+		existing.AccountName = *req.AccountName
+	}
+	if req.Cookie != nil {
+		existing.CookieEncrypted = *req.Cookie // TODO: 加密
+	}
+	if req.UserAgent != nil {
+		existing.UserAgent = *req.UserAgent
+	}
+	if req.ProxyAddress != nil {
+		existing.ProxyAddress = *req.ProxyAddress
+	}
+	if req.Status != nil {
+		existing.Status = *req.Status
+	}
+	if req.DailyUsageLimit != nil {
+		existing.DailyUsageLimit = *req.DailyUsageLimit
+	}
+
+	if err := h.accountRepo.Save(c.Request.Context(), existing); err != nil {
+		fail(c, err)
+		return
+	}
+
+	success(c, gin.H{"msg": "账号已更新"})
+}
+
+// HandleCheckAccountHealth POST /admin/crawler-accounts/:id/health —— 手动触发健康检查。
+func (h *CrawlerAdminHandler) HandleCheckAccountHealth(c *gin.Context) {
+	if h.accountRepo == nil || h.uc == nil {
+		fail(c, fmt.Errorf("服务未配置"))
+		return
+	}
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		fail(c, fmt.Errorf("无效的账号 ID"))
+		return
+	}
+
+	_, err = h.accountRepo.FindByID(c.Request.Context(), id)
+	if err != nil {
+		fail(c, fmt.Errorf("账号不存在"))
+		return
+	}
+
+	// 检测平台连接
+	platform := c.Query("platform")
+	if platform == "" {
+		platform = "douyin"
+	}
+	alive := h.uc.IsPlatformAlive(c.Request.Context(), platform)
+	result := entity.HealthHealthy
+	if !alive {
+		result = entity.HealthUnhealthy
+	}
+
+	if err := h.accountRepo.UpdateHealth(c.Request.Context(), id, result); err != nil {
+		fail(c, err)
+		return
+	}
+
+	success(c, gin.H{
+		"account_id": id,
+		"platform":   platform,
+		"healthy":    alive,
+		"result":     result,
+	})
 }
 
 // HandleDeleteAccount DELETE /admin/crawler-accounts/:id —— 删除账号。
@@ -226,8 +331,15 @@ func (h *CrawlerAdminHandler) HandleUpdateConfig(c *gin.Context) {
 
 // HandleListTasks GET /admin/crawlers/tasks —— 采集任务列表。
 func (h *CrawlerAdminHandler) HandleListTasks(c *gin.Context) {
-	// TODO: 实现任务日志查询
+	// TODO: 实现任务日志查询（需要注入 CrawlerTaskLogRepository）
 	success(c, gin.H{"tasks": []interface{}{}})
+}
+
+// HandleGetTask GET /admin/crawlers/tasks/:id —— 任务详情。
+func (h *CrawlerAdminHandler) HandleGetTask(c *gin.Context) {
+	// TODO: 实现任务详情查询
+	id := c.Param("id")
+	success(c, gin.H{"task_id": id, "status": "unknown"})
 }
 
 // ---- 手动触发 ----

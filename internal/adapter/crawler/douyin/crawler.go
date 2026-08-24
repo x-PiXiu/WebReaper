@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -126,8 +127,11 @@ func (c *DouyinCrawler) GetCapabilities() entity.PlatformCapabilities {
 }
 
 // socialVideoToCrawled 将 port.SocialVideo 转换为 entity.CrawledVideo。
+//
+// 注意：SocialVideo 是搜索结果的精简数据，部分字段（CoverURL/Duration/Topics 等）
+// 需要通过 GetDetail 获取完整数据后补充。搜索阶段只填充可用字段。
 func socialVideoToCrawled(v port.SocialVideo) entity.CrawledVideo {
-	return entity.CrawledVideo{
+	c := entity.CrawledVideo{
 		Platform:     v.Platform,
 		VideoID:      v.VideoID,
 		Title:        v.Desc,
@@ -139,4 +143,9 @@ func socialVideoToCrawled(v port.SocialVideo) entity.CrawledVideo {
 		CommentCount: int64(v.CommentCount),
 		ShareCount:   int64(v.ShareCount),
 	}
+	// CreateTime 是 unix 秒，转换为 time.Time
+	if v.CreateTime > 0 {
+		c.PublishTime = time.Unix(v.CreateTime, 0)
+	}
+	return c
 }

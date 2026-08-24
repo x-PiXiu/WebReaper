@@ -87,3 +87,14 @@ func (h *InspirationHandler) HandleListPlatforms(c *gin.Context) {
 	platforms := h.uc.ListPlatforms()
 	success(c, gin.H{"platforms": platforms})
 }
+
+// HandleBrandsStats GET /api/v1/inspirations/brands —— 各品牌灵感数量统计。
+func (h *InspirationHandler) HandleBrandsStats(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("灵感服务未配置"))
+		return
+	}
+
+	// TODO: 实现品牌统计查询（需要 InspirationVideoRepository 的 CountByBrand 方法）
+	success(c, gin.H{"brands": []interface{}{}})
+}

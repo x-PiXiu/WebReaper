@@ -23,13 +23,14 @@ type StaggeredScheduler struct {
 	configRepo  port.CrawlerConfigRepository
 	accountRepo port.CrawlerAccountRepository
 
-	brandQueue   []BrandJob      // 品牌任务队列
-	retryQueue   []BrandJob      // 重试队列
-	queueMu      sync.Mutex
-	interval     time.Duration   // 基础间隔
-	accountsPerN int             // 每 N 个品牌切换一次账号
-	running      bool
-	stopCh       chan struct{}
+	brandQueue    []BrandJob      // 品牌任务队列
+	retryQueue    []BrandJob      // 重试队列
+	queueMu       sync.Mutex
+	interval      time.Duration   // 基础间隔
+	accountsPerN  int             // 每 N 个品牌切换一次账号
+	executionCount int            // 已执行计数（用于账号轮换）
+	running       bool
+	stopCh        chan struct{}
 }
 
 // BrandJob 品牌采集任务。
@@ -134,6 +135,19 @@ func (s *StaggeredScheduler) executeNext(ctx context.Context) {
 	job := s.brandQueue[0]
 	s.brandQueue = s.brandQueue[1:]
 	s.queueMu.Unlock()
+
+	// 账号轮换：每执行 N 个品牌后，触发一次健康检查（确保账号状态最新）
+	s.executionCount++
+	if s.executionCount%s.accountsPerN == 0 {
+		log.Printf("[scheduler] 已执行 %d 个品牌，触发账号健康检查", s.executionCount)
+		// 异步执行健康检查，不阻塞当前任务
+		go func() {
+			checker := NewAccountHealthChecker(s.accountRepo, s.uc.platforms)
+			if err := checker.CheckAll(ctx); err != nil {
+				log.Printf("[scheduler] 健康检查失败: %v", err)
+			}
+		}()
+	}
 
 	log.Printf("[scheduler] 执行采集 platform=%s brand=%s keywords=%v", job.Platform, job.BrandID, job.Keywords)
 
