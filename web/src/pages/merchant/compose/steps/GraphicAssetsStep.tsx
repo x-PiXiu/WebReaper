@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Button, Input, Segmented, Space, Upload, message } from 'antd'
 import { PictureOutlined, PlusOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
@@ -23,29 +22,22 @@ export function GraphicAssetsStep() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const urls = draft.imageUrls || []
 
-  const { data: types = [] } = useQuery({
-    queryKey: ['generation-types'],
-    queryFn: () => businessApi.listGenerationTypes().then((r) => r.types),
-  })
-  const imgModel = types.find((t) => t.sub_type === 'text2image')?.models?.[0]?.model
-
   const list = useMemo(() => urls.filter(Boolean), [urls])
   const pendingImages = (draft.imageTaskIds || []).length
 
   const gen = async () => {
-    if (!imgModel) {
-      message.warning('暂无文生图模型')
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
       return
     }
     setBusy(true)
     try {
-      const res = await businessApi.submitGenerationTask({
-        brand_id: brandId || draft.brandId,
-        sub_type: 'text2image',
-        model: imgModel,
-        params: {
-          prompt: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感`,
-        },
+      const res = await businessApi.submitGeneration({
+        brand_id: bid,
+        type: 'image',
+        text: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感`,
+        aspect_ratio: '9:16',
       })
       draft.patch({
         imageTaskIds: [...(draft.imageTaskIds || []), res.id],

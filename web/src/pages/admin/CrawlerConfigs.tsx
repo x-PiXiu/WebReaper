@@ -133,6 +133,7 @@ export default function CrawlerConfigs() {
           <Button size="small" type="primary" icon={<ReloadOutlined />}
             onClick={() => {
               Modal.confirm({
+                centered: true,
                 title: '手动触发采集',
                 content: `确定立即采集 ${record.platform} 平台的数据吗？`,
                 onOk: () => triggerMutation.mutate({

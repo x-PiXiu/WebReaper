@@ -34,6 +34,7 @@ const adminMenu: NavItem[] = [
       { key: '/admin/chat', label: 'AI 对话' },
       { key: '/admin/agent-configs', label: 'Agent 配置' },
       { key: '/admin/prompt-templates', label: '提示词模板' },
+      { key: '/admin/generation-templates', label: '生成模板' },
       { key: '/admin/indexing', label: '提交渠道' },
       { key: '/admin/knowledge', label: '知识库' },
     ],
@@ -44,6 +45,7 @@ const adminMenu: NavItem[] = [
       { key: '/admin/crawler-accounts', label: '平台方账号' },
       { key: '/admin/crawler-configs', label: '爬虫配置' },
       { key: '/admin/crawler-tasks', label: '任务监控' },
+      { key: '/admin/inspirations', label: '灵感运营' },
     ],
   },
 ]

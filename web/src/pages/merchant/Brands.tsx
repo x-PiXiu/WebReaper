@@ -253,6 +253,7 @@ export default function Brands() {
       }
       // 成功即下一步：GEO 旅程是 品牌→关键词→监测→内容，创建完成直接引导去添加关键词
       Modal.success({
+        centered: true,
         title: `人设「${values.name}」创建成功`,
         content: '资料可以随时回来补齐。下一步：去内容合成分步做出第一条成片。',
         okText: '去内容合成',

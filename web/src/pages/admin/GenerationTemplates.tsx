@@ -169,6 +169,7 @@ export default function AdminGenerationTemplates() {
             icon={<DeleteOutlined />}
             onClick={() => {
               Modal.confirm({
+                centered: true,
                 title: '确认删除',
                 content: `确定要删除模板"${record.name}"吗？`,
                 onOk: () => deleteMutation.mutate(record.id),

@@ -386,9 +386,12 @@ function NotificationBell() {
     <div style={{ width: 340 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--wr-text-primary)' }}>通知</span>
-        {(unread?.unread || 0) > 0 && (
-          <Button size="small" type="link" style={{ fontSize: 12 }} onClick={markAll}>全部已读</Button>
-        )}
+        <Space size={4}>
+          {(unread?.unread || 0) > 0 && (
+            <Button size="small" type="link" style={{ fontSize: 12 }} onClick={markAll}>全部已读</Button>
+          )}
+          <Button size="small" type="link" style={{ fontSize: 12 }} onClick={() => navigate('/m/notifications')}>查看全部</Button>
+        </Space>
       </div>
       {items.length === 0 ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无通知" style={{ padding: '24px 0' }} />

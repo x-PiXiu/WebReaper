@@ -527,11 +527,15 @@ export interface PublishChannelConstraints {
   title_max_runes?: number // 标题最大字数（0/缺省=不限）
   min_images?: number      // 最少配图数（0/缺省=不要求）
   min_videos?: number      // 最少视频数（0/缺省=不要求）
+  require_tags?: boolean   // 独立标签必填（B站）
+  require_category?: boolean // 分区必选（B站）
+  max_tags?: number        // 标签数量上限
 }
 export interface PublishChannelView {
   platform: string
   name: string
-  content_types: string[]                      // article/image/video/audio
+  content_types: string[]                      // 半自动可用形态
+  auto_content_types?: string[]                 // 全自动可用形态（诚实矩阵）
   constraints?: Record<string, PublishChannelConstraints> // key=内容形态
   semi_auto: boolean
   auto: boolean

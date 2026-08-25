@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Button, Empty, Modal, Popconfirm, Typography, Upload, message } from 'antd'
+import { MODAL_W } from '../ui/modalFit'
 import { UploadOutlined, SoundOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
@@ -14,14 +15,15 @@ const { Text } = Typography
 
 const ASSET_ACCEPT: Record<string, string> = {
   image: 'image/png,image/jpeg,image/webp',
+  video: 'video/mp4,video/webm,video/quicktime',
   audio: 'audio/mpeg,audio/mp4,audio/wav',
-  any: 'image/png,image/jpeg,image/webp,audio/mpeg,audio/mp4,audio/wav',
+  any: 'image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/mp4,audio/wav',
 }
 
 export default function AssetPicker(props: {
   open: boolean
   mode: 'single' | 'multi'
-  accept: 'image' | 'audio' | 'any'
+  accept: 'image' | 'video' | 'audio' | 'any'
   title: string
   max?: number
   onClose: () => void
@@ -36,7 +38,7 @@ export default function AssetPicker(props: {
 
   const filtered = useMemo(() => {
     const list = normalizeMediaAssets(assets)
-    const kinds = accept === 'any' ? ['image', 'audio'] : [accept]
+    const kinds = accept === 'any' ? ['image', 'video', 'audio'] : [accept]
     return list.filter(a => kinds.some(k => a.mime.startsWith(k)))
   }, [assets, accept])
 
@@ -90,7 +92,7 @@ export default function AssetPicker(props: {
       title={title}
       open={open}
       onCancel={() => { setSelected([]); onClose() }}
-      width={680}
+      width={MODAL_W.xl}
       footer={mode === 'multi' ? [
         <Button key="cancel" onClick={() => { setSelected([]); onClose() }}>取消</Button>,
         <Button key="ok" type="primary" onClick={confirm} disabled={selected.length === 0}>

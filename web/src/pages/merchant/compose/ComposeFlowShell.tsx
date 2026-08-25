@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Drawer, Segmented } from 'antd'
+import { Modal, Segmented } from 'antd'
+import { MODAL_W } from '../../../ui/modalFit'
 import { EyeOutlined } from '@ant-design/icons'
 import type { FlowStepDef } from '../../../config/product'
 import type { ComposeTrack } from '../../../store/composeDraft'
@@ -135,20 +136,20 @@ export function ComposeFlowShell({
         </aside>
       </div>
 
-      <Drawer
+      <Modal
         title="发布预览"
-        placement="bottom"
-        height="72vh"
         open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        className="cf-preview-drawer"
+        onCancel={() => setPreviewOpen(false)}
+        width={MODAL_W.md}
+        footer={null}
         destroyOnClose
+        className="cf-preview-modal wr-modal-preview"
       >
         <div className={`cf-preview-drawer-inner cf-platform-${previewPlatform}`}>
           {previewHead}
           <div className="cf-preview-body">{preview}</div>
         </div>
-      </Drawer>
+      </Modal>
     </div>
   )
 }

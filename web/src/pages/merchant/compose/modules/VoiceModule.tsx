@@ -40,20 +40,19 @@ export default function VoiceModule() {
       message.warning('请先准备口播文案')
       return
     }
-    const m = model || ttsModels[0]
-    if (!m) {
-      message.warning('暂无可用 TTS 模型——请在管理后台配置生成规格，或前往「做视频图片」音频 Tab')
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
       return
     }
     setBusy(true)
     try {
-      const task = await businessApi.submitGenerationTask({
-        brand_id: brandId || draft.brandId,
-        sub_type: 'tts',
-        model: m,
-        params: { prompt: text.slice(0, 2000) },
+      const task = await businessApi.submitGeneration({
+        brand_id: bid,
+        text: text.slice(0, 2000),
+        type: 'audio',
       })
-      draft.patch({ voiceTaskId: task.id, brandId: brandId || draft.brandId })
+      draft.patch({ voiceTaskId: task.id, brandId: bid })
       message.success('配音任务已提交，可在生成任务列表查看产物')
       navigate('/m/compose/tools?tab=media')
     } catch {

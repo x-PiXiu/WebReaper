@@ -83,7 +83,7 @@ export default function AutoMonitorControl({ compact = false }: { compact?: bool
             ) : (
               <Button size="small" type="link" onClick={() => navigate('/m/my-plan')}>升级解锁 →</Button>
             )}
-            <Button size="small" type="link" onClick={() => navigate('/m/checkup?tab=report')}>配置盯盘 →</Button>
+            <Button size="small" type="link" onClick={() => navigate('/m/analytics?tab=report')}>配置盯盘 →</Button>
           </Space>
         </div>
       </div>

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Input, Space, Typography, message, Upload } from 'antd'
 import { PictureOutlined, PlusOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
@@ -24,26 +23,19 @@ export default function ImagesModule() {
   }, [])
   const urls = draft.imageUrls || []
 
-  const { data: types = [] } = useQuery({
-    queryKey: ['generation-types'],
-    queryFn: () => businessApi.listGenerationTypes().then((r) => r.types),
-  })
-  const imgModel = types.find((t) => t.sub_type === 'text2image')?.models?.[0]?.model
-
   const gen = async () => {
-    if (!imgModel) {
-      message.warning('暂无文生图模型')
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
       return
     }
     setBusy(true)
     try {
-      await businessApi.submitGenerationTask({
-        brand_id: brandId || draft.brandId,
-        sub_type: 'text2image',
-        model: imgModel,
-        params: {
-          prompt: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感，不要水印`,
-        },
+      await businessApi.submitGeneration({
+        brand_id: bid,
+        type: 'image',
+        text: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感，不要水印`,
+        aspect_ratio: '9:16',
       })
       message.success('配图任务已提交，完成后可在多媒体台取回 URL 填入下方')
       navigate('/m/compose/tools?tab=media')

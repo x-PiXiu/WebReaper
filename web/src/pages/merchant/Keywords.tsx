@@ -102,11 +102,12 @@ export default function Keywords({ embedded }: { embedded?: boolean }) {
         setRecoChecked([])
         if (failed > 0) message.warning(`已添加 ${ok} 个，${failed} 个失败`)
         Modal.success({
+          centered: true,
           title: `已添加 ${ok} 个问题`,
           content: '问题已入库——去问问 AI，看看这些问题上 AI 怎么回答。',
           okText: '去问问 AI',
           cancelText: '留在本页',
-          onOk: () => navigate('/m/checkup?tab=ask'),
+          onOk: () => navigate('/m/analytics?tab=ask'),
         })
       } else {
         message.error('添加失败——请检查网络后重试')
@@ -168,11 +169,12 @@ export default function Keywords({ embedded }: { embedded?: boolean }) {
       message.warning(`已添加 ${ok} 个，${failed} 个失败（可重新勾选后重试）`)
     } else {
       Modal.success({
+        centered: true,
         title: `已添加 ${ok} 个关键词`,
         content: '已入库——去问问 AI，看看这些词上 AI 会不会提到你。',
         okText: '去问问 AI',
         cancelText: '留在本页',
-        onOk: () => navigate('/m/checkup?tab=ask'),
+        onOk: () => navigate('/m/analytics?tab=ask'),
       })
     }
   }
@@ -271,7 +273,7 @@ export default function Keywords({ embedded }: { embedded?: boolean }) {
       title: '操作', key: 'action', width: 160,
       render: (_: unknown, r: Keyword) => (
         <Space size="small">
-          <Button size="small" type="link" onClick={() => navigate(`/m/checkup?tab=ask&q=${encodeURIComponent(r.term)}`)}>去测一测</Button>
+          <Button size="small" type="link" onClick={() => navigate(`/m/analytics?tab=ask&q=${encodeURIComponent(r.term)}`)}>去测一测</Button>
           <Popconfirm title="删除此关键词？" onConfirm={() => handleDelete(r.id)}>
             <Button size="small" type="text" danger>删除</Button>
           </Popconfirm>
@@ -291,7 +293,7 @@ export default function Keywords({ embedded }: { embedded?: boolean }) {
               <h1>问题库</h1>
               <p>顾客会搜什么，AI 就该在什么时候提到你——先让 AI 帮你想一批</p>
             </div>
-            <Button type="primary" icon={<RadarChartOutlined />} onClick={() => navigate('/m/checkup?tab=ask')}>
+            <Button type="primary" icon={<RadarChartOutlined />} onClick={() => navigate('/m/analytics?tab=ask')}>
               去问问 AI
             </Button>
           </div>

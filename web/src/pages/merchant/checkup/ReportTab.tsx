@@ -131,9 +131,9 @@ export default function ReportTab({
       <HealthScorePanel
         total={health.total}
         indicators={[
-          { label: 'AI 提到你', key: 'coverage', value: health.mentionCoverage, hint: 'AI 有多常提到你——近期所有监测的平均提及率', path: '/m/checkup?tab=records' },
-          { label: '态度', key: 'sentiment', value: health.sentimentScore, hint: 'AI 提到你时是夸你（正面）还是中性/批评', path: '/m/checkup?tab=records' },
-          { label: '首选推荐', key: 'firstPick', value: health.firstPickRate, hint: 'AI 第一个推荐你的比例（数据不足时显示"—"）', path: '/m/checkup?tab=records' },
+          { label: 'AI 提到你', key: 'coverage', value: health.mentionCoverage, hint: 'AI 有多常提到你——近期所有监测的平均提及率', path: '/m/analytics?tab=records' },
+          { label: '态度', key: 'sentiment', value: health.sentimentScore, hint: 'AI 提到你时是夸你（正面）还是中性/批评', path: '/m/analytics?tab=records' },
+          { label: '首选推荐', key: 'firstPick', value: health.firstPickRate, hint: 'AI 第一个推荐你的比例（数据不足时显示"—"）', path: '/m/analytics?tab=records' },
           { label: '内容资产', key: 'asset', value: health.contentAsset, hint: '已发布内容的规模——AI 可引用的素材（发布 1 篇顶 3 篇草稿）', path: '/m/compose' },
           { label: '信源完整', key: 'source', value: health.sourceIntegrity, hint: 'AI 回答列出的来源里，你自己网站占多少', path: '/m/compose' },
         ]}

@@ -131,7 +131,7 @@ export default function CitationsTab({
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>暂无来源数据</Text>
                   <Text type="secondary" style={{ fontSize: 11 }}>发起监测后，AI 回答里出现的链接会记录在这里</Text>
-                  <Button size="small" type="link" style={{ padding: 0 }} onClick={() => navigate('/m/checkup?tab=report')}>去发起监测 →</Button>
+                  <Button size="small" type="link" style={{ padding: 0 }} onClick={() => navigate('/m/analytics?tab=report')}>去发起监测 →</Button>
                 </Space>
               } />
             ) : (

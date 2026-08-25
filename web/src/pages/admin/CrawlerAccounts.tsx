@@ -223,6 +223,7 @@ export default function CrawlerAccounts() {
             icon={<DeleteOutlined />}
             onClick={() => {
               Modal.confirm({
+                centered: true,
                 title: '确认删除',
                 content: `确定删除账号 "${record.account_name}" 吗？`,
                 onOk: () => deleteMutation.mutate(record.id),

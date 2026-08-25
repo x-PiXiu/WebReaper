@@ -1,16 +1,18 @@
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Col, Drawer, Empty, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd'
-import { ArrowDownOutlined, ArrowUpOutlined, ExperimentOutlined, FundOutlined } from '@ant-design/icons'
+import { Alert, Button, Col, Empty, Modal, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd'
+import { ArrowDownOutlined, ArrowUpOutlined, ExperimentOutlined, FundOutlined, SearchOutlined } from '@ant-design/icons'
 import { LazyColumn, LazyLine } from '../../../components/charts/LazyCharts'
 import WorkDetailDrawer, { type WorkDetailData } from '../../../components/WorkDetailDrawer'
 import { businessApi } from '../../../api/business'
 import { useBrandContext } from '../../../hooks/useBrands'
+import { MODAL_W, modalBodyScroll } from '../../../ui/modalFit'
+import AskTab from '../checkup/AskTab'
 import ReportTab from '../checkup/ReportTab'
 import RecordsTab from '../checkup/RecordsTab'
 import { engineLabel } from '../../../utils/geoTerms'
-import type { Keyword, MonitoringResult } from '../../../types/api'
+import type { EngineOption, Keyword, MonitoringResult } from '../../../types/api'
 
 const { Text, Title } = Typography
 
@@ -50,13 +52,49 @@ function engineStats(results: MonitoringResult[]): EngineStat[] {
 /**
  * 作品数据：平台数据（真实发布记录聚合）+ AI 提及（引擎级品牌提及率）+ 作品明细。
  * 滚动叙事：指标卡 → 趋势图 → AI 提及面板 → 已发布作品表。
- * 互动数据（播放/点赞/评论）由数据回读上线后填充，当前显示 0 + 待回读提示。
+ * 互动数据有回读则展示真实数值；尚无则显示「平台回读接入后更新」。
  */
 export default function WorksAnalytics() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { brands, brandId, setCurrentBrand } = useBrandContext()
+  const urlTab = searchParams.get('tab')
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
+  const [aiTabKey, setAiTabKey] = useState('report')
   const [detail, setDetail] = useState<WorkDetailData | null>(null)
+
+  useEffect(() => {
+    if (urlTab === 'ask' || urlTab === 'report' || urlTab === 'records') {
+      setAiTabKey(urlTab)
+      setAiDrawerOpen(true)
+    }
+  }, [urlTab])
+
+  const openAiDrawer = (tab = 'report') => {
+    setAiTabKey(tab)
+    setAiDrawerOpen(true)
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev)
+      p.set('tab', tab)
+      return p
+    }, { replace: true })
+  }
+  const closeAiDrawer = () => {
+    setAiDrawerOpen(false)
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev)
+      p.delete('tab')
+      return p
+    }, { replace: true })
+  }
+  const setAiTab = (tab: string) => {
+    setAiTabKey(tab)
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev)
+      p.set('tab', tab)
+      return p
+    }, { replace: true })
+  }
 
   // 平台数据（真实发布记录聚合）
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -69,9 +107,12 @@ export default function WorksAnalytics() {
     queryFn: () => businessApi.getAllMonitorResults().catch((): MonitoringResult[] => []),
   })
   const { data: keywords = [] } = useQuery({
-    queryKey: ['geo-keywords', brandId],
-    queryFn: () => businessApi.listKeywords(brandId!).catch(() => [] as Keyword[]),
-    enabled: !!brandId,
+    queryKey: ['geo-all-keywords'],
+    queryFn: () => businessApi.listAllKeywords().catch(() => [] as Keyword[]),
+  })
+  const { data: engineOptions = [] } = useQuery({
+    queryKey: ['geo-engines'],
+    queryFn: () => businessApi.listEngines().catch(() => [] as EngineOption[]),
   })
 
   const engines = useMemo(
@@ -109,7 +150,11 @@ export default function WorksAnalytics() {
           { label: '已发布作品', value: (totals?.published ?? 0).toLocaleString(), delta: '' },
           { label: '近 7 日发布', value: (trend.slice(-7).reduce((s, p) => s + p.发布数, 0)).toLocaleString(), delta: '' },
           { label: 'AI 提及率', value: avgMention !== null ? `${(avgMention * 100).toFixed(1)}%` : '—', delta: '' },
-          { label: '互动总量', value: (totals?.likes ?? 0).toLocaleString(), delta: '待回读' },
+          {
+            label: '互动总量',
+            value: ((totals?.likes ?? 0) + (totals?.comments ?? 0)).toLocaleString(),
+            delta: (totals?.likes || totals?.comments) ? '' : '平台回读接入后更新',
+          },
         ].map((m) => (
           <Col xs={12} md={6} key={m.label}>
             <div className="ip-metric-card">
@@ -149,7 +194,7 @@ export default function WorksAnalytics() {
                 <ExperimentOutlined style={{ color: 'var(--wr-accent)' }} />
                 <Title level={5} style={{ margin: 0 }}>AI 提及——各大模型怎么推荐你</Title>
               </Space>
-              <Button size="small" type="link" onClick={() => setAiDrawerOpen(true)}>查看完整 AI 报告 →</Button>
+              <Button size="small" type="link" onClick={() => openAiDrawer('report')}>查看完整 AI 报告 →</Button>
             </div>
             {engines.length === 0 ? (
               <Empty description="暂无监测数据——AI 效果需要先发起监测" style={{ padding: '32px 0' }} />
@@ -179,8 +224,11 @@ export default function WorksAnalytics() {
             <Text type="secondary" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>
               商户问 AI「{brands.find((b) => b.id === brandId)?.industry || '你的行业'}哪家好」时，AI 推荐你的比例
             </Text>
-            <Button size="small" style={{ marginTop: 12, alignSelf: 'flex-start' }} onClick={() => setAiDrawerOpen(true)}>
+            <Button size="small" style={{ marginTop: 12, alignSelf: 'flex-start' }} onClick={() => openAiDrawer('report')}>
               完整报告与体检记录
+            </Button>
+            <Button size="small" type="link" icon={<SearchOutlined />} style={{ marginTop: 4, alignSelf: 'flex-start', paddingLeft: 0 }} onClick={() => openAiDrawer('ask')}>
+              测一测 AI 推不推荐你 →
             </Button>
           </div>
         </Col>
@@ -190,7 +238,9 @@ export default function WorksAnalytics() {
       <div className="ip-panel" style={{ marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <Title level={5} style={{ margin: 0 }}>已发布作品</Title>
-          <Text type="secondary" style={{ fontSize: 12 }}>互动数据回读上线后自动填充</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {(totals?.likes || totals?.comments) ? '含平台回读互动' : '互动数据随平台回读自动填充'}
+          </Text>
         </div>
         <Table
           rowKey="job_id"
@@ -235,21 +285,30 @@ export default function WorksAnalytics() {
         />
       </div>
 
-      {/* AI 效果完整报告 Drawer（Y：checkup 报告/记录组件收编，不占页面） */}
-      <Drawer
+      {/* AI 效果完整报告（居中弹窗；checkup 报告/记录/测一测，深链 ?tab=ask|report|records） */}
+      <Modal
         open={aiDrawerOpen}
-        onClose={() => setAiDrawerOpen(false)}
-        width={720}
-        title="AI 效果报告"
-        styles={{ body: { background: 'var(--wr-bg)', paddingTop: 8 } }}
+        onCancel={closeAiDrawer}
+        width={MODAL_W.xxl}
+        title="AI 效果"
+        footer={null}
+        destroyOnClose
+        className="wr-modal-preview"
+        styles={{ body: { ...modalBodyScroll.body, background: 'var(--wr-bg)', paddingTop: 8 } }}
       >
         <Tabs
-          defaultActiveKey="report"
+          activeKey={aiTabKey}
+          onChange={setAiTab}
           items={[
+            {
+              key: 'ask',
+              label: '测一测',
+              children: <AskTab keywords={keywords} engines={engineOptions} monitorResults={monitorResults} />,
+            },
             {
               key: 'report',
               label: '效果报告',
-              children: <ReportTab brands={brands} navigate={(p) => { setAiDrawerOpen(false); navigate(p) }} goAsk={() => setAiDrawerOpen(false)} />,
+              children: <ReportTab brands={brands} navigate={(p) => { closeAiDrawer(); navigate(p) }} goAsk={() => setAiTab('ask')} />,
             },
             {
               key: 'records',
@@ -258,9 +317,8 @@ export default function WorksAnalytics() {
             },
           ]}
         />
-      </Drawer>
+      </Modal>
 
-      {/* 作品详情 Drawer（与发布中心共用） */}
       <WorkDetailDrawer open={!!detail} onClose={() => setDetail(null)} work={detail} />
 
       {(totals?.views ?? 0) === 0 && works.length > 0 && (

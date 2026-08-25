@@ -77,6 +77,7 @@ export default function AgentConfigs() {
 
   const handleDeleteAgent = async (name: string) => {
     Modal.confirm({
+      centered: true,
       title: `删除 Agent「${name}」？`,
       content: '删除后，使用该 Agent 的历史会话不受影响，但新对话将不再显示此角色。',
       okText: '删除', okType: 'danger', cancelText: '取消',
@@ -138,6 +139,7 @@ export default function AgentConfigs() {
 
   const handleDeleteLLM = async (name: string) => {
     Modal.confirm({
+      centered: true,
       title: `删除 LLM 配置「${name}」？`,
       content: '引用此配置的 Agent 将回退到默认 LLM。',
       okText: '删除', okType: 'danger', cancelText: '取消',

@@ -228,12 +228,17 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
 
 
   const submitMutation = useMutation({
-    mutationFn: (data: Parameters<typeof businessApi.submitGenerationTask>[0]) => businessApi.submitGenerationTask(data),
+    mutationFn: async (data: Parameters<typeof businessApi.submitGenerationTask>[0]) => {
+      if (!data.brand_id) throw new Error('请先选择人设/品牌')
+      return businessApi.submitGenerationTask(data)
+    },
     onSuccess: () => {
       message.success('生成任务已提交')
       queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
     },
-    onError: () => { /* 拦截器已提示 */ },
+    onError: (e: Error) => {
+      if (e?.message) message.error(e.message)
+    },
   })
 
   const cancelMutation = useMutation({
@@ -388,7 +393,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     }
     // 必填校验（服务端兜底）
     if (subType === 'tts' && !clean.text) { message.warning('请输入合成文本'); return }
-    if (subType === 'tts' && !(clean.voice_setting_voice_id as string)) { message.warning('请先选择或输入一个音色'); return }
+    // 统一 submit 不传音色（文档 type=audio + text）；音色选择不阻断提交
     if (subType === 'voice_clone' && !submitRefs.some(r => r.kind === 'audio') && !clean.audio_url) { message.warning('请引用音频素材（声音克隆的原料）'); return }
     if (subType === 'digital_human' && !submitRefs.some(r => r.kind === 'image') && !clean.image) { message.warning('请引用人像图片'); return }
     if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { message.warning('请至少添加一个音效事件'); return }
@@ -403,8 +408,12 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
         message.warning('请输入提示词/文本'); return
       }
     }
+    if (!brandId) {
+      message.warning('请先选择人设/品牌后再生成')
+      return
+    }
     submitMutation.mutate({
-      brand_id: brandId || undefined,
+      brand_id: brandId,
       sub_type: subType,
       model,
       params: clean,
@@ -1122,7 +1131,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
               <h1>多媒体创作</h1>
               <p>视频 / 图片 / 音频生成——属于「内容生成」子能力</p>
             </div>
-            <Button type="link" onClick={() => navigate('/m/compose?tab=article')}>← 返回写文章</Button>
+            <Button type="link" onClick={() => navigate('/m/compose/tools?tab=article')}>← 返回写文章</Button>
           </div>
         )}
 

@@ -10,7 +10,7 @@ import { businessApi } from '../../../../api/business'
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
 
-/** 爆款对标：链接 / 本地音视频 → 转写原文（ASR 未接时支持粘贴与上传） */
+/** 爆款对标：链接 / 本地音视频 → 服务端转写原文 → 共享草稿 */
 export default function BenchmarkModule() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
@@ -36,32 +36,31 @@ export default function BenchmarkModule() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const applyTranscript = (text: string) => {
+  const applyTranscript = (text: string, source?: string) => {
     draft.patch({
       brandId: brandId || draft.brandId,
-      sourceUrl: url || draft.sourceUrl,
+      sourceUrl: source || url || draft.sourceUrl,
       transcript: text,
-      script: draft.script || text,
+      script: text,
     })
     message.success('已写入共享草稿，可去「文案工作室」继续')
   }
 
-  const mockTranscribeFromLink = () => {
+  const extractFromLink = async () => {
     if (!url.trim()) {
       message.warning('请先粘贴爆款链接')
       return
     }
     setBusy(true)
     try {
-      const bits = [
-        draft.refTitle ? `参考标题：${draft.refTitle}` : '',
-        draft.hotPoint ? `爆款要点：${draft.hotPoint}` : '',
-        `来源链接：${url.trim()}`,
-        '',
-        '（自动转写尚未接入——请粘贴口播原文，或根据要点自行补全文案）',
-      ].filter(Boolean)
+      const r = await businessApi.extractTranscript({
+        share_url: url.trim(),
+        title: draft.refTitle || undefined,
+      })
       draft.patch({ sourceUrl: url.trim() })
-      applyTranscript(bits.join('\n'))
+      applyTranscript(r.raw_text || '', url.trim())
+    } catch {
+      /* 拦截器 */
     } finally {
       setBusy(false)
     }
@@ -72,10 +71,11 @@ export default function BenchmarkModule() {
     try {
       const asset = await businessApi.uploadAsset(file)
       draft.patch({ sourceUrl: asset.url, brandId: brandId || draft.brandId })
-      applyTranscript(
-        `【本地文件】${file.name}\n素材地址：${asset.url}\n\n（语音转写即将接入——请粘贴转写文案，或去「文案工作室」撰写）`,
-      )
-      message.success('素材已上传')
+      const r = await businessApi.extractTranscript({
+        asset_url: asset.url,
+        title: file.name,
+      })
+      applyTranscript(r.raw_text || '', asset.url)
     } catch {
       /* 拦截器 */
     } finally {
@@ -88,15 +88,15 @@ export default function BenchmarkModule() {
     <div className="wr-page-content ip-page">
       <ComposeModuleHeader
         title="爆款对标"
-        lead="粘贴平台链接或上传本地音视频，沉淀对标原文到共享草稿"
-        badge="部分可用"
+        lead="粘贴平台链接或上传本地音视频，自动转写对标原文到共享草稿"
+        badge="可用"
       />
       <Alert
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="语音/视频自动转写（ASR）尚未接入服务端"
-        description="当前可上传素材、保存链接并手动粘贴口播原文；也可从人设档案「热门同款」带选题跳入。"
+        message="已接入服务端文案提取（与口播向导相同）"
+        description="支持分享链接与本站上传素材；也可手动改写转写结果。可从人设档案「热门同款」带选题跳入。"
       />
       <div className="wr-glass-card" style={{ padding: 24 }}>
         <Space direction="vertical" style={{ width: '100%' }} size={14}>
@@ -122,11 +122,11 @@ export default function BenchmarkModule() {
             />
           </div>
           <Space wrap>
-            <Button type="primary" className="ip-btn-primary" loading={busy} onClick={mockTranscribeFromLink}>
-              解析链接并写入草稿
+            <Button type="primary" className="ip-btn-primary" loading={busy} onClick={extractFromLink}>
+              解析链接并转写
             </Button>
             <Upload accept="audio/*,video/*" showUploadList={false} beforeUpload={onUpload}>
-              <Button icon={<UploadOutlined />} loading={busy}>上传本地音视频</Button>
+              <Button icon={<UploadOutlined />} loading={busy}>上传并转写</Button>
             </Upload>
             <Button type="link" onClick={() => navigate('/m/brands')}>去热门同款发现 →</Button>
           </Space>
@@ -135,7 +135,7 @@ export default function BenchmarkModule() {
             <TextArea
               style={{ marginTop: 8 }}
               rows={10}
-              placeholder="粘贴口播原文"
+              placeholder="转写结果会出现在这里，也可手动粘贴口播原文"
               value={draft.transcript || ''}
               onChange={(e) => draft.patch({ transcript: e.target.value, script: e.target.value })}
             />

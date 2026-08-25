@@ -97,7 +97,7 @@ export const GRAPHIC_FLOW_STEPS: FlowStepDef[] = [
 export const VIDEO_TRACK_STAGES = [
   { key: 'benchmark', label: '① 找对标', tip: '拆爆款视频结构，拿出口播原文', moduleKeys: ['benchmark'] },
   { key: 'copy', label: '② 写口播稿', tip: '文案工作室（口播）+ 标题话题', moduleKeys: ['copy', 'titles'] },
-  { key: 'produce', label: '③ 做成片', tip: '配音、数字人、剪辑、视频封面', moduleKeys: ['voice', 'avatar', 'edit', 'cover'] },
+  { key: 'produce', label: '③ 做成片', tip: '配音、数字人、成片确认、视频封面', moduleKeys: ['voice', 'avatar', 'edit', 'cover'] },
   { key: 'publish', label: '④ 发视频', tip: '发布到短视频平台获客', moduleKeys: ['publish-video'] },
 ] as const
 

@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Drawer, Space, Tag, Typography, message } from 'antd'
+import { Button, Modal, Space, Tag, Typography, message } from 'antd'
 import { LinkOutlined, ReloadOutlined, SoundOutlined } from '@ant-design/icons'
 import { LazyLine } from './charts/LazyCharts'
 import { businessApi } from '../api/business'
 import { PlatformBadge } from './PlatformBadge'
+import { MODAL_W, modalBodyScroll } from '../ui/modalFit'
 
 const { Text, Title } = Typography
 
 const TYPE_LABEL: Record<string, string> = { video: '视频', image: '图文', article: '文章', audio: '音频' }
 
-/** 详情 Drawer 的归一化数据（analytics 作品表 / 发布中心发布记录 两处映射后共用）。 */
+/** 详情弹窗的归一化数据（analytics 作品表 / 发布中心发布记录 两处映射后共用）。 */
 export interface WorkDetailData {
   jobId?: string
   title: string
@@ -26,7 +27,7 @@ export interface WorkDetailData {
 }
 
 /**
- * 作品详情 Drawer（共用组件）：作品数据页表格 + 发布中心发布记录的「详情」入口。
+ * 作品详情弹窗（共用）：作品数据页表格 + 发布中心发布记录的「详情」入口。
  * 基本信息 + 视频链接 + 互动数据卡（回读快照填充）+ 趋势折线 +「立即刷新」。
  */
 export default function WorkDetailDrawer({ open, onClose, work }: {
@@ -59,7 +60,6 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
     点赞: x.likes,
   }))
 
-  // 立即刷新：手动回读 → 失效相关查询 → 父级表格/汇总自动更新
   const doRefresh = async () => {
     if (!work.jobId) return
     setRefreshing(true)
@@ -77,9 +77,16 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width={480} title={work.title} styles={{ body: { background: 'var(--wr-bg)' } }}>
+    <Modal
+      open={open}
+      onCancel={onClose}
+      width={MODAL_W.lg}
+      title={work.title}
+      footer={null}
+      destroyOnClose
+      styles={{ body: { ...modalBodyScroll.body, background: 'var(--wr-bg)' } }}
+    >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
-        {/* 基本信息 */}
         <div className="ip-panel" style={{ padding: 16 }}>
           <Space wrap>
             <PlatformBadge platform={work.platform} size={14} />
@@ -103,7 +110,6 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
           </div>
         </div>
 
-        {/* 互动数据（回读快照） */}
         <div className="ip-panel" style={{ padding: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Title level={5} style={{ marginTop: 0 }}>互动数据</Title>
@@ -135,6 +141,6 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
           )}
         </div>
       </Space>
-    </Drawer>
+    </Modal>
   )
 }

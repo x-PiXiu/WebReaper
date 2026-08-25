@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Segmented, Select, Space, Upload, message } from 'antd'
+import { Alert, Button, Segmented, Select, Space, Upload, message } from 'antd'
 import { PictureOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { ensureMaterialId, submitUnified } from '../../../../api/generationSubmit'
 import { COVER_STYLES } from '../../../../data/coverStyles'
 import { AssetPicker } from '../../../../components/compose/AssetPicker'
 import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
@@ -20,7 +21,6 @@ export function VideoAssetsStep() {
   const [tab, setTab] = useState<AssetTab>('voice')
   const [busy, setBusy] = useState(false)
   const [ttsModel, setTtsModel] = useState<string>()
-  const [dhModel, setDhModel] = useState<string>()
   const [avatarImage, setAvatarImage] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
   const text = draft.rewritten || draft.script || ''
@@ -35,26 +35,22 @@ export function VideoAssetsStep() {
     return (t?.models || []).map((m) => m.model)
   }, [types])
 
-  const dhModels = useMemo(() => {
-    const t = types.find((x) => x.sub_type === 'digital_human')
-    return (t?.models || []).map((m) => m.model)
-  }, [types])
-
-  const imgModel = types.find((t) => t.sub_type === 'text2image')?.models?.[0]?.model
-
   const runTts = async () => {
-    const model = ttsModel || ttsModels[0]
-    if (!model || !text.trim()) {
-      message.warning('需要口播文案与 TTS 模型')
+    if (!text.trim()) {
+      message.warning('需要口播文案')
+      return
+    }
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
       return
     }
     setBusy(true)
     try {
-      const res = await businessApi.submitGenerationTask({
-        brand_id: brandId || draft.brandId,
-        sub_type: 'tts',
-        model,
-        params: { text },
+      const res = await submitUnified({
+        brand_id: bid,
+        text,
+        type: 'audio',
       })
       draft.patch({ voiceTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
       message.success('配音任务已提交，完成后自动填入')
@@ -66,47 +62,57 @@ export function VideoAssetsStep() {
   }
 
   const runAvatar = async () => {
-    const model = dhModel || dhModels[0]
-    if (!model || !text.trim()) {
-      message.warning('需要口播文案与数字人模型')
+    if (!text.trim()) {
+      message.warning('需要口播文案')
+      return
+    }
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
+      return
+    }
+    if (!avatarImage) {
+      message.warning('请先上传或选择人像图')
+      return
+    }
+    if (!draft.voiceUrl) {
+      message.warning('数字人口播需要配音——请先在「配音」Tab 生成')
+      setTab('voice')
       return
     }
     setBusy(true)
     try {
-      const res = await businessApi.submitGenerationTask({
-        brand_id: brandId || draft.brandId,
-        sub_type: 'digital_human',
-        model,
-        params: {
-          text,
-          image_url: avatarImage || undefined,
-          audio_url: draft.voiceUrl || undefined,
-        },
+      const imageId = await ensureMaterialId(avatarImage)
+      const audioId = await ensureMaterialId(draft.voiceUrl)
+      const res = await submitUnified({
+        brand_id: bid,
+        materials: [imageId, audioId],
+        text: text.slice(0, 200),
       })
       draft.patch({ avatarTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
-      message.success('数字人口播任务已提交，完成后自动填入成片')
-    } catch {
-      /* */
+      message.success('数字人口播任务已提交（图+音频 → digital_human）')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : ''
+      if (msg) message.error(msg)
     } finally {
       setBusy(false)
     }
   }
 
   const genCover = async () => {
-    if (!imgModel) {
-      message.warning('暂无文生图模型')
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
       return
     }
     const title = draft.selectedTitle || '短视频封面'
     setBusy(true)
     try {
-      const res = await businessApi.submitGenerationTask({
-        brand_id: brandId || draft.brandId,
-        sub_type: 'text2image',
-        model: imgModel,
-        params: {
-          prompt: `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目`,
-        },
+      const res = await submitUnified({
+        brand_id: bid,
+        type: 'image',
+        text: `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目`,
+        aspect_ratio: '9:16',
       })
       draft.patch({ coverTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
       message.success('封面生成任务已提交，完成后自动填入')
@@ -183,14 +189,16 @@ export function VideoAssetsStep() {
             />
           ) : (
             <>
-              <Space wrap style={{ width: '100%' }}>
-                <Select
-                  style={{ minWidth: 200 }}
-                  placeholder="数字人模型"
-                  value={dhModel || dhModels[0]}
-                  onChange={setDhModel}
-                  options={dhModels.map((m) => ({ value: m, label: m }))}
+              {!draft.voiceUrl && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="数字人口播需要先有配音（图+音频 → digital_human）"
+                  action={<Button size="small" onClick={() => setTab('voice')}>去配音</Button>}
                 />
+              )}
+              <Space wrap style={{ width: '100%' }}>
                 <Button type="primary" className="ip-btn-primary" loading={busy} onClick={runAvatar}>
                   提交口播成片
                 </Button>

@@ -86,7 +86,11 @@ export default function MerchantHome() {
         <div>
           <p className="ip-kicker">{PRODUCT.nameEn}</p>
           <h1>工作台</h1>
-          <p className="ip-lead">全国获客热力与城市热点——点选地图查看线索、发布量与对标话题</p>
+          <p className="ip-lead">
+            {hasHeatData
+              ? '全国获客热力与城市热点——点选地图查看线索、发布量与对标话题'
+              : '从灵感到成片、发布与数据回看——先拍口播或快速生成，打通获客主链路'}
+          </p>
         </div>
         <Space wrap>
           <Button icon={<LinkOutlined />} onClick={() => navigate('/m/inspire')}>灵感广场</Button>
@@ -171,14 +175,14 @@ export default function MerchantHome() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={16}>
-          <div className="ip-panel ip-rise" style={{ padding: '12px 12px 4px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '4px 8px 8px' }}>
-              <Space size={8}>
-                <FireOutlined style={{ color: 'var(--wr-accent)' }} />
-                <Text strong>获客热力图</Text>
-                <Tag style={{ margin: 0 }}>可缩放拖拽</Tag>
-              </Space>
-              {CITY_HOTSPOTS.length > 0 && (
+          {hasHeatData ? (
+            <div className="ip-panel ip-rise" style={{ padding: '12px 12px 4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '4px 8px 8px' }}>
+                <Space size={8}>
+                  <FireOutlined style={{ color: 'var(--wr-accent)' }} />
+                  <Text strong>获客热力图</Text>
+                  <Tag style={{ margin: 0 }}>可缩放拖拽</Tag>
+                </Space>
                 <Segmented
                   size="small"
                   value={metric}
@@ -189,27 +193,53 @@ export default function MerchantHome() {
                     { label: '按发布榜', value: 'posts' },
                   ]}
                 />
-              )}
+              </div>
+              <ChinaHotMap
+                height={520}
+                selectedId={hotspot?.id}
+                onSelectHotspot={(h) => {
+                  setHotspot(h)
+                  if (h) setProvinceName(h.province)
+                }}
+                onSelectProvince={(name) => {
+                  setProvinceName(name)
+                  const city = CITY_HOTSPOTS.find((c) => c.province === name || name.startsWith(c.province))
+                  if (city) setHotspot(city)
+                }}
+              />
             </div>
-            <ChinaHotMap
-              height={520}
-              selectedId={hotspot?.id}
-              onSelectHotspot={(h) => {
-                setHotspot(h)
-                if (h) setProvinceName(h.province)
-              }}
-              onSelectProvince={(name) => {
-                setProvinceName(name)
-                const city = CITY_HOTSPOTS.find((c) => c.province === name || name.startsWith(c.province))
-                if (city) setHotspot(city)
-              }}
-            />
-          </div>
+          ) : (
+            <div className="ip-panel ip-rise" style={{ padding: 24 }}>
+              <Space size={8} style={{ marginBottom: 12 }}>
+                <ThunderboltOutlined style={{ color: 'var(--wr-accent)' }} />
+                <Text strong>今日动作</Text>
+              </Space>
+              <Title level={4} style={{ margin: '0 0 8px' }}>用真实作品与发布推进获客</Title>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 20 }}>
+                热力地图数据尚未接入——先完成「创作 → 作品 → 发布」，数据会汇总到播放与互动指标。
+              </Text>
+              <Space wrap>
+                <Button type="primary" className="ip-btn-primary" icon={<VideoCameraOutlined />} onClick={() => navigate('/m/compose/lipsync')}>
+                  拍口播
+                </Button>
+                <Button icon={<ThunderboltOutlined />} onClick={() => navigate('/m/compose/quick')}>快速生成</Button>
+                <Button icon={<LinkOutlined />} onClick={() => navigate('/m/inspire')}>灵感广场</Button>
+                <Button icon={<SendOutlined />} onClick={() => navigate('/m/distribution')}>去发布</Button>
+                <Button type="link" onClick={() => navigate('/m/analytics')}>查看作品数据 →</Button>
+              </Space>
+              <div className="ip-hotspot-params" style={{ marginTop: 24 }}>
+                <div><span>已发</span><strong>{published.length}</strong></div>
+                <div><span>待发</span><strong>{ready.length}</strong></div>
+                <div><span>播放</span><strong>{weekViews.toLocaleString()}</strong></div>
+                <div><span>点赞</span><strong>{(summary?.totals?.likes ?? 0).toLocaleString()}</strong></div>
+              </div>
+            </div>
+          )}
         </Col>
 
         <Col xs={24} lg={8}>
           <div className="ip-panel ip-rise" style={{ marginBottom: 16 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>当前热点</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{hasHeatData ? '当前热点' : '快捷入口'}</Text>
             {hotspot ? (
               <>
                 <Title level={4} style={{ margin: '6px 0 8px' }}>
@@ -242,17 +272,18 @@ export default function MerchantHome() {
                 </Space>
               </>
             ) : (
-              <Text type="secondary">
-                {CITY_HOTSPOTS.length === 0
-                  ? '暂无热点数据，可先走爆款获客双轨创作'
-                  : '点击地图上的金色热点查看参数'}
-              </Text>
-            )}
-            {CITY_HOTSPOTS.length === 0 && (
-              <Space style={{ marginTop: 16 }} wrap>
-                <Button type="primary" className="ip-btn-primary" onClick={() => navigate('/m/compose/lipsync')}>拍口播</Button>
-                <Button onClick={() => navigate('/m/compose/graphic')}>发图文</Button>
-              </Space>
+              <>
+                <Title level={4} style={{ margin: '6px 0 8px' }}>创作与分发</Title>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                  从对标、口播到发布，一气呵成。
+                </Text>
+                <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                  <Button block type="primary" className="ip-btn-primary" onClick={() => navigate('/m/compose/lipsync')}>拍口播</Button>
+                  <Button block onClick={() => navigate('/m/compose/benchmark')}>爆款对标</Button>
+                  <Button block onClick={() => navigate('/m/compose/graphic')}>发图文</Button>
+                  <Button block onClick={() => navigate('/m/works')}>我的作品</Button>
+                </Space>
+              </>
             )}
           </div>
 

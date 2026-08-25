@@ -35,6 +35,7 @@ const AssetLibrary = lazy(() => import('./pages/merchant/assets/AssetLibrary'))
 const MyWorks = lazy(() => import('./pages/merchant/works/MyWorks'))
 const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
 const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
+const Notifications = lazy(() => import('./pages/merchant/Notifications'))
 const AdminUsers = lazy(() => import('./pages/admin/Users'))
 const Indexing = lazy(() => import('./pages/admin/Indexing'))
 const Knowledge = lazy(() => import('./pages/admin/Knowledge'))
@@ -47,6 +48,8 @@ const AdminPromptTemplates = lazy(() => import('./pages/admin/PromptTemplates'))
 const CrawlerAccounts = lazy(() => import('./pages/admin/CrawlerAccounts'))
 const CrawlerConfigs = lazy(() => import('./pages/admin/CrawlerConfigs'))
 const CrawlerTasks = lazy(() => import('./pages/admin/CrawlerTasks'))
+const AdminInspirations = lazy(() => import('./pages/admin/Inspirations'))
+const AdminGenerationTemplates = lazy(() => import('./pages/admin/GenerationTemplates'))
 
 function PageFallback() {
   return (
@@ -115,8 +118,9 @@ export default function App() {
           <Route path="/m/works" element={<LazyPage><MyWorks /></LazyPage>} />
           <Route path="/m/analytics" element={<LazyPage><WorksAnalytics /></LazyPage>} />
           {/* 兼容旧路由 */}
-          <Route path="/m/checkup" element={<Navigate to="/m/analytics" replace />} />
-          <Route path="/m/keywords" element={<Navigate to="/m/analytics" replace />} />
+          {/* 旧 checkup 深链保留 ?tab=ask|report|records → 作品数据 AI Drawer */}
+          <Route path="/m/checkup" element={<RedirectPreserve to="/m/analytics" />} />
+          <Route path="/m/keywords" element={<RedirectPreserve to="/m/analytics" />} />
           <Route path="/m/indexing-report" element={<Navigate to="/m/analytics" replace />} />
           <Route path="/m/visibility" element={<Navigate to="/m/analytics" replace />} />
           <Route path="/m/studio" element={<RedirectPreserve to="/m/compose/benchmark" />} />
@@ -128,7 +132,7 @@ export default function App() {
           <Route path="/m/distribution" element={<LazyPage><Distribution /></LazyPage>} />
           <Route path="/m/my-plan" element={<LazyPage><MyPlan /></LazyPage>} />
           <Route path="/m/chat" element={<LazyPage><Chat /></LazyPage>} />
-          <Route path="/m/notifications" element={<Navigate to="/m/dashboard" replace />} />
+          <Route path="/m/notifications" element={<LazyPage><Notifications /></LazyPage>} />
         </Route>
 
         <Route element={<ProtectedRoute role="admin"><AdminLayout /></ProtectedRoute>}>
@@ -142,6 +146,7 @@ export default function App() {
           <Route path="/admin/knowledge" element={<LazyPage><Knowledge /></LazyPage>} />
           <Route path="/admin/generation-specs" element={<Navigate to="/admin/integrations" replace />} />
           <Route path="/admin/providers" element={<Navigate to="/admin/integrations" replace />} />
+          <Route path="/admin/model-configs" element={<Navigate to="/admin/integrations" replace />} />
           <Route path="/admin/integrations" element={<LazyPage><Integrations /></LazyPage>} />
           <Route path="/admin/integrations/:id" element={<LazyPage><Integrations /></LazyPage>} />
           <Route path="/admin/prompt-templates" element={<LazyPage><AdminPromptTemplates /></LazyPage>} />
@@ -150,6 +155,8 @@ export default function App() {
           <Route path="/admin/crawler-accounts" element={<LazyPage><CrawlerAccounts /></LazyPage>} />
           <Route path="/admin/crawler-configs" element={<LazyPage><CrawlerConfigs /></LazyPage>} />
           <Route path="/admin/crawler-tasks" element={<LazyPage><CrawlerTasks /></LazyPage>} />
+          <Route path="/admin/inspirations" element={<LazyPage><AdminInspirations /></LazyPage>} />
+          <Route path="/admin/generation-templates" element={<LazyPage><AdminGenerationTemplates /></LazyPage>} />
         </Route>
 
         <Route path="/" element={<RootRedirect />} />

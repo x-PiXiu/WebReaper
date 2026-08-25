@@ -247,7 +247,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
               <h1>内容生成</h1>
               <p>AI 帮你写文章</p>
             </div>
-            <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/compose?tab=media')}>
+            <Button type="default" icon={<ThunderboltOutlined />} onClick={() => navigate('/m/compose/tools?tab=media')}>
               多媒体创作
             </Button>
           </div>

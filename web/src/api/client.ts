@@ -48,6 +48,7 @@ function promptQuotaExceeded() {
     content: '当前套餐的可用次数已用完——升级套餐可解锁更多监测/生成次数，或等待下月自动重置。',
     okText: '去升级',
     cancelText: '知道了',
+    centered: true,
     onOk: () => {
       window.location.href = '/m/my-plan'
     },

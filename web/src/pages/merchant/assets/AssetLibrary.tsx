@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Button, Empty, Input, Modal, Popconfirm, Segmented, Space, Tag, Typography, Upload, message,
+  Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Tag, Typography, Upload, message,
 } from 'antd'
 import {
   SoundOutlined, PictureOutlined, VideoCameraOutlined, FileTextOutlined, UserOutlined,
@@ -9,8 +9,12 @@ import {
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { useMediaAssets, MEDIA_ASSETS_QUERY_KEY } from '../../../hooks/useMediaAssets'
-import type { GenerationTask } from '../../../types/api'
+import { useBrandContext } from '../../../hooks/useBrands'
+import AssetPicker from '../../../components/AssetPicker'
+import type { GenerationTask, ModelCapability } from '../../../types/api'
 import VoicePicker from '../../../components/VoicePicker'
+import { MODAL_W, modalBodyScroll } from '../../../ui/modalFit'
+import { submitUnified } from '../../../api/generationSubmit'
 
 const { Text } = Typography
 
@@ -81,7 +85,7 @@ export default function AssetLibrary() {
   const { data: genTasks = [], refetch: refetchSubjects } = useQuery({
     queryKey: ['generation-tasks'],
     queryFn: () => businessApi.listGenerationTasks().then(r => r.tasks).catch(() => [] as GenerationTask[]),
-    enabled: tab === 'digital_human',
+    enabled: tab === 'digital_human' || tab === 'audio' || generateOpen,
   })
   const subjects: ViduSubject[] = useMemo(() => {
     return (genTasks || [])
@@ -270,7 +274,7 @@ export default function AssetLibrary() {
       {tab === 'article' && (
         articles.length === 0 ? (
           <Empty style={{ padding: 60 }} description="还没有文章——去内容合成写第一篇">
-            <Button type="primary" onClick={() => window.location.href = '/m/compose?tab=article'}>去写文章</Button>
+            <Button type="primary" onClick={() => window.location.href = '/m/compose/tools?tab=article'}>去写文章</Button>
           </Empty>
         ) : (
           <div className="ip-asset-grid">
@@ -338,11 +342,11 @@ export default function AssetLibrary() {
       <GenerateAssetModal
         open={generateOpen}
         type={generateType}
+        myVoices={myVoices}
         onClose={() => setGenerateOpen(false)}
         onGenerated={() => {
-          setGenerateOpen(false)
           queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY })
-          message.success('素材生成成功')
+          message.success('素材已生成并入库')
         }}
       />
     </div>
@@ -369,7 +373,7 @@ function checkVideoDuration(file: File): Promise<void> {
   })
 }
 
-function CreateSubjectModal({ open, voices, onClose, onCreated }: {
+function CreateSubjectModal({ open, voices, onClose, onCreated: _onCreated }: {
   open: boolean
   voices: string[]
   onClose: () => void
@@ -381,7 +385,6 @@ function CreateSubjectModal({ open, voices, onClose, onCreated }: {
   const [videoUrl, setVideoUrl] = useState('')
   const [voiceId, setVoiceId] = useState('')
   const [creating, setCreating] = useState(false)
-  const queryClient = useQueryClient()
 
   const handleCreate = async () => {
     if (!name.trim()) { message.warning(kind === 'scene' ? '请输入场景名称' : '请输入数字人名称'); return }
@@ -390,22 +393,13 @@ function CreateSubjectModal({ open, voices, onClose, onCreated }: {
     }
     setCreating(true)
     try {
-      const params: Record<string, unknown> = { name: name.trim(), kind }
-      if (imageUrls.length > 0) params.images = imageUrls
-      if (videoUrl) params.videos = [videoUrl]
-      if (kind === 'person' && voiceId.trim()) params.voice_id = voiceId.trim()
-      await businessApi.submitGenerationTask({ sub_type: 'subject', model: '', params })
-      onCreated()
-      onClose()
-      setName(''); setImageUrls([]); setVideoUrl(''); setVoiceId(''); setKind('person')
-      queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
-    } catch (e: any) {
-      message.error(e?.response?.data?.msg || '创建失败')
+      // 主体创建未纳入统一 submit（Docs 09：POST /generation/tasks 已删除）
+      message.warning('主体创建暂未纳入统一生成接口。请先用「生成图片/视频」准备素材，或使用「快速生成」模板。')
     } finally { setCreating(false) }
   }
 
   return (
-    <Modal open={open} title="创建主体" okText="创建" cancelText="取消" onOk={handleCreate} onCancel={onClose} confirmLoading={creating}>
+    <Modal open={open} title="创建主体" okText="创建" cancelText="取消" onOk={handleCreate} onCancel={onClose} confirmLoading={creating} width={MODAL_W.md}>
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
         <Segmented
           value={kind} onChange={v => setKind(v as 'person' | 'scene')}
@@ -485,100 +479,176 @@ function CreateSubjectModal({ open, voices, onClose, onCreated }: {
   )
 }
 
-/** 生成素材模态框 */
-function GenerateAssetModal({ open, type, onClose, onGenerated }: {
+/** 生成素材弹窗（居中）：参数由 listGenerationTypes 能力向量驱动，对齐 Vidu 端点校验 */
+function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }: {
   open: boolean
   type: 'image' | 'video' | 'audio' | 'voice'
+  myVoices?: string[]
   onClose: () => void
   onGenerated: () => void
 }) {
+  const { brandId } = useBrandContext()
   const [text, setText] = useState('')
+  const [model, setModel] = useState('')
+  const [duration, setDuration] = useState<number>()
+  const [resolution, setResolution] = useState('')
+  const [aspectRatio, setAspectRatio] = useState('')
+  const [refImages, setRefImages] = useState<{ id: string; url: string }[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [voiceId, setVoiceId] = useState('')
   const [audioFile, setAudioFile] = useState<File | null>(null)
+  const [voiceName, setVoiceName] = useState('')
   const [generating, setGenerating] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
   const [taskState, setTaskState] = useState<string | null>(null)
 
-  const { data: _voices = [] } = useQuery({
-    queryKey: ['generation-voices'],
-    queryFn: () => businessApi.listGenerationVoices().then(r => r.voices),
-    enabled: open && type === 'audio',
+  const subType = type === 'image' ? 'text2image'
+    : type === 'video' ? 'text2video'
+    : type === 'audio' ? 'tts'
+    : 'voice_clone'
+
+  const { data: types = [], isLoading: typesLoading } = useQuery({
+    queryKey: ['generation-types'],
+    queryFn: () => businessApi.listGenerationTypes().then(r => r.types),
+    enabled: open,
   })
 
+  const models = useMemo(() => {
+    const t = types.find(x => x.sub_type === subType)
+    return t?.models || []
+  }, [types, subType])
+
+  const cap: ModelCapability | undefined = useMemo(() => {
+    const entry = models.find(m => m.model === model) || models[0]
+    return entry?.capability
+  }, [models, model])
+
+  // 打开时重置；模型列表到位后选默认并回填能力默认值
+  useEffect(() => {
+    if (!open) return
+    setText('')
+    setVoiceId('')
+    setAudioFile(null)
+    setVoiceName('')
+    setRefImages([])
+    setTaskId(null)
+    setTaskState(null)
+    setGenerating(false)
+  }, [open, type])
+
+  useEffect(() => {
+    if (!open || models.length === 0) return
+    const preferred = type === 'image'
+      ? (models.find(m => m.model === 'viduq2') || models[0])
+      : models[0]
+    setModel(preferred.model)
+    const c = preferred.capability
+    const [dMin, dMax] = c.durations || [0, 0]
+    if (dMax > 0) {
+      const def = dMin === dMax ? dMin : Math.min(Math.max(4, dMin), dMax)
+      setDuration(def)
+    } else {
+      setDuration(undefined)
+    }
+    setResolution(c.resolutions?.[0] || '')
+    setAspectRatio(c.aspect_ratios?.[0] || (type === 'video' ? '16:9' : ''))
+  }, [open, type, models])
+
+  const title = type === 'image' ? '生成图片'
+    : type === 'video' ? '生成视频'
+    : type === 'audio' ? '生成配音'
+    : '克隆音色'
+
+  const lead = type === 'image' ? '一句话描述画面——可选参考图，结果自动入库供封面/图文引用'
+    : type === 'video' ? '文生短视频——时长、清晰度与比例按当前模型能力可选'
+    : type === 'audio' ? '选音色 + 文案，合成可复用的配音素材'
+    : '上传一段人声，克隆后可在配音/数字人中反复使用'
+
+  const maxPrompt = cap?.max_prompt_len
+    || (type === 'image' ? 2000 : type === 'voice' ? 1000 : type === 'audio' ? 10000 : 5000)
+
+  const imageNeedsRef = model === 'viduq1'
+
+  const resetForAnother = () => {
+    setTaskId(null)
+    setTaskState(null)
+  }
+
   const handleGenerate = async () => {
-    if (!text.trim()) {
-      message.warning('请输入描述文本')
+    if (type === 'voice') {
+      if (!audioFile) { message.warning('请上传参考音频'); return }
+      if (!text.trim()) { message.warning('请输入试听文本'); return }
+      const vid = (voiceName.trim() || `voice_${Date.now().toString(36)}`).replace(/[^a-zA-Z0-9_-]/g, '_')
+      if (!/^[a-zA-Z]/.test(vid) || vid.length < 8) {
+        message.warning('音色 ID 需以英文字母开头，且至少 8 位（字母/数字/-/_）')
+        return
+      }
+    } else if (!text.trim()) {
+      message.warning(type === 'audio' ? '请输入要合成的文案' : '请输入描述')
+      return
+    }
+    if ((type === 'image' || type === 'video') && models.length === 0) {
+      message.warning('当前未开通对应生成能力，请联系管理员')
+      return
+    }
+    if (type === 'audio' && !voiceId) {
+      // 统一 submit 暂不透传音色；不阻断，用系统默认
+    }
+    if (type === 'image' && imageNeedsRef && refImages.length === 0) {
+      message.warning('当前模型需要至少 1 张参考图')
+      return
+    }
+    if (!brandId) {
+      message.warning('请先选择人设/品牌')
       return
     }
 
     setGenerating(true)
     try {
-      let result: any
-
-      switch (type) {
-        case 'image':
-          result = await businessApi.submitGenerationTask({
-            sub_type: 'text2image',
-            model: '',
-            params: { prompt: text },
-          })
-          break
-
-        case 'video':
-          result = await businessApi.submitGenerationTask({
-            sub_type: 'text2video',
-            model: '',
-            params: { prompt: text },
-          })
-          break
-
-        case 'audio':
-          if (!voiceId) {
-            message.warning('请选择音色')
-            setGenerating(false)
-            return
-          }
-          result = await businessApi.submitGenerationTask({
-            sub_type: 'tts',
-            model: '',
-            params: {
-              text: text,
-              voice_setting_voice_id: voiceId,
-            },
-          })
-          break
-
-        case 'voice':
-          if (!audioFile) {
-            message.warning('请上传参考音频')
-            setGenerating(false)
-            return
-          }
-          // 先上传音频
-          const uploadResult = await businessApi.uploadAsset(audioFile)
-          result = await businessApi.submitGenerationTask({
-            sub_type: 'voice_clone',
-            model: '',
-            params: {
-              text: text,
-              audio_url: uploadResult.url,
-            },
-          })
-          break
+      let result: GenerationTask
+      if (type === 'image') {
+        result = await submitUnified({
+          brand_id: brandId,
+          text: text.trim(),
+          type: 'image',
+          materials: refImages.length ? refImages.map((r) => r.id) : undefined,
+        })
+      } else if (type === 'video') {
+        result = await submitUnified({
+          brand_id: brandId,
+          text: text.trim(),
+          type: 'video',
+          duration: duration || undefined,
+          quality: resolution || undefined,
+          aspect_ratio: aspectRatio || undefined,
+        })
+      } else if (type === 'audio') {
+        result = await submitUnified({
+          brand_id: brandId,
+          text: text.trim(),
+          type: 'audio',
+        })
+      } else {
+        const uploaded = await businessApi.uploadAsset(audioFile!)
+        result = await submitUnified({
+          brand_id: brandId,
+          text: text.trim(),
+          type: 'voice',
+          materials: [uploaded.id],
+        })
       }
 
       setTaskId(result.id)
       setTaskState(result.state)
-      message.success('生成任务已提交')
-
-      // 轮询任务状态
-      if (result.state !== 'success') {
-        pollTask(result.id)
-      } else {
+      message.success('任务已提交')
+      if (result.state === 'success') {
         onGenerated()
+      } else {
+        pollTask(result.id)
       }
-    } catch (error) {
-      message.error('生成失败')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : ''
+      if (msg && !msg.includes('配额')) message.error(msg)
     } finally {
       setGenerating(false)
     }
@@ -587,132 +657,280 @@ function GenerateAssetModal({ open, type, onClose, onGenerated }: {
   const pollTask = async (id: string) => {
     const poll = async () => {
       try {
-        const task = await businessApi.listGenerationTasks().then(r => r.tasks.find(t => t.id === id))
-        if (task) {
-          setTaskState(task.state)
-          if (task.state === 'success') {
-            message.success('生成完成')
-            onGenerated()
-            return
-          } else if (task.state === 'failed') {
-            message.error('生成失败: ' + (task.err_msg || '未知错误'))
-            return
-          }
+        const task = await businessApi.getGenerationTask(id)
+        setTaskState(task.state)
+        if (task.state === 'success') {
+          message.success('生成完成')
+          onGenerated()
+          return
         }
-        setTimeout(poll, 3000)
+        if (task.state === 'failed' || task.state === 'cancelled') {
+          message.error(task.err_msg || '生成失败')
+          return
+        }
+        setTimeout(poll, 2800)
       } catch {
-        setTimeout(poll, 3000)
+        setTimeout(poll, 4000)
       }
     }
-    setTimeout(poll, 3000)
+    setTimeout(poll, 2800)
   }
 
-  const getTitle = () => {
-    switch (type) {
-      case 'image': return '生成图片'
-      case 'video': return '生成视频'
-      case 'audio': return '生成音频'
-      case 'voice': return '克隆音色'
-    }
-  }
-
-  const getPlaceholder = () => {
-    switch (type) {
-      case 'image': return '描述你想要的图片，如：一个现代化的品牌Logo，简约风格'
-      case 'video': return '描述你想要的视频，如：品牌Logo缓慢旋转，背景渐变'
-      case 'audio': return '输入要合成的文本，如：欢迎来到我们的品牌'
-      case 'voice': return '输入克隆音色后要朗读的文本'
-    }
-  }
+  const busy = generating || (!!taskId && taskState !== 'success' && taskState !== 'failed' && taskState !== 'cancelled')
 
   return (
     <Modal
-      title={getTitle()}
       open={open}
       onCancel={onClose}
-      width={600}
+      width={MODAL_W.lg}
+      destroyOnClose
+      title={title}
+      styles={{ body: { ...modalBodyScroll.body, paddingTop: 8 } }}
       footer={
-        <Space>
-          <Button onClick={onClose}>取消</Button>
-          <Button
-            type="primary"
-            loading={generating}
-            disabled={generating || !!taskId}
-            onClick={handleGenerate}
-          >
-            {generating ? '生成中...' : taskId ? '已提交' : '生成'}
-          </Button>
-        </Space>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+          <Button onClick={onClose}>{taskState === 'success' ? '关闭' : '取消'}</Button>
+          <Space>
+            {taskState === 'success' && (
+              <Button onClick={resetForAnother}>再生成一份</Button>
+            )}
+            <Button
+              type="primary"
+              className="ip-btn-primary"
+              loading={generating}
+              disabled={busy && taskState !== 'failed'}
+              onClick={handleGenerate}
+            >
+              {generating ? '提交中…' : taskId && busy ? '生成中…' : taskState === 'failed' ? '重试' : '开始生成'}
+            </Button>
+          </Space>
+        </div>
       }
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        {/* 文本输入 */}
-        <div>
-          <Text strong>{type === 'audio' ? '合成文本' : type === 'voice' ? '朗读文本' : '描述'}</Text>
-          <Input.TextArea
-            style={{ marginTop: 8 }}
-            placeholder={getPlaceholder()}
-            autoSize={{ minRows: 3, maxRows: 6 }}
-            value={text}
-            onChange={e => setText(e.target.value)}
-            disabled={generating || !!taskId}
-          />
-        </div>
+      <p style={{ color: 'var(--wr-text-secondary)', fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>{lead}</p>
 
-        {/* 音色选择（仅音频） */}
-        {type === 'audio' && (
-          <div>
-            <Text strong>选择音色</Text>
-            <div style={{ marginTop: 8 }}>
-              <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={[]} />
+      {typesLoading ? (
+        <Text type="secondary">加载模型能力…</Text>
+      ) : models.length === 0 && (type === 'image' || type === 'video') ? (
+        <Alert type="warning" showIcon message="未开通此生成能力" description="管理后台需启用对应端点模型后才能生成。" />
+      ) : (
+        <Space direction="vertical" size={18} style={{ width: '100%' }}>
+          {(type === 'image' || type === 'video' || type === 'audio') && models.length > 1 && (
+            <div>
+              <Text strong style={{ fontSize: 13 }}>模型</Text>
+              <Select
+                style={{ width: '100%', marginTop: 8 }}
+                value={model || models[0]?.model}
+                onChange={setModel}
+                disabled={busy}
+                options={models.map(m => ({
+                  value: m.model,
+                  label: `${m.model}${m.capability?.family ? ` · ${m.capability.family}` : ''}`,
+                }))}
+              />
             </div>
-          </div>
-        )}
+          )}
 
-        {/* 参考音频上传（仅声音克隆） */}
-        {type === 'voice' && (
           <div>
-            <Text strong>参考音频</Text>
-            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-              上传一段音频（10秒-5分钟），系统将克隆这个音色
+            <Text strong style={{ fontSize: 13 }}>
+              {type === 'audio' ? '合成文案' : type === 'voice' ? '试听文案' : '画面描述'}
             </Text>
-            <Upload
-              maxCount={1}
-              accept="audio/mp3,audio/wav,audio/m4a"
-              beforeUpload={(file) => {
-                setAudioFile(file)
-                return false
-              }}
-              onRemove={() => setAudioFile(null)}
-              disabled={generating || !!taskId}
-            >
-              <Button icon={<SoundOutlined />} style={{ marginTop: 8 }}>
-                {audioFile ? '重新上传' : '上传参考音频'}
-              </Button>
-            </Upload>
+            <Input.TextArea
+              style={{ marginTop: 8 }}
+              placeholder={
+                type === 'image' ? '例如：午市套餐平铺在木质餐桌上，自然光，竖版种草风，无水印'
+                  : type === 'video' ? '例如：咖啡从拉花杯缓缓倒出，镜头缓慢推进，暖色调'
+                  : type === 'audio' ? '例如：欢迎光临，今日午市套餐限时优惠…'
+                  : '用这段话试听克隆音色，如：你好，欢迎来到我们的门店'
+              }
+              autoSize={{ minRows: 4, maxRows: 8 }}
+              showCount
+              maxLength={maxPrompt}
+              value={text}
+              onChange={e => setText(e.target.value)}
+              disabled={busy}
+            />
           </div>
-        )}
 
-        {/* 任务状态 */}
-        {taskId && (
-          <div style={{ padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
-            <Space>
-              <Tag color={taskState === 'success' ? 'green' : taskState === 'failed' ? 'red' : 'processing'}>
-                {taskState === 'success' ? '已完成' : taskState === 'failed' ? '失败' : '生成中'}
-              </Tag>
-              <Text type="secondary" style={{ fontSize: 12 }}>任务ID: {taskId}</Text>
-            </Space>
-          </div>
-        )}
+          {type === 'video' && cap && (
+            <div style={{
+              padding: 14,
+              borderRadius: 12,
+              background: 'var(--wr-bg-elevated)',
+              border: '1px solid var(--wr-border)',
+            }}>
+              <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>成片参数</Text>
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                {(() => {
+                  const [dMin, dMax] = cap.durations || [0, 0]
+                  if (dMax <= 0) return null
+                  if (dMin === dMax) {
+                    return <Text type="secondary" style={{ fontSize: 12 }}>时长固定 {dMin} 秒</Text>
+                  }
+                  return (
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>时长（{dMin}–{dMax} 秒）</Text>
+                      <div style={{ marginTop: 6 }}>
+                        <InputNumber
+                          min={dMin}
+                          max={dMax}
+                          value={duration}
+                          onChange={v => setDuration(typeof v === 'number' ? v : dMin)}
+                          disabled={busy}
+                          addonAfter="秒"
+                          style={{ width: 140 }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })()}
+                {(cap.resolutions?.length || 0) > 0 && (
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>清晰度</Text>
+                    <Segmented
+                      value={resolution || cap.resolutions![0]}
+                      onChange={v => setResolution(String(v))}
+                      options={cap.resolutions!.map(r => ({ value: r, label: r }))}
+                      disabled={busy}
+                    />
+                  </div>
+                )}
+                {(cap.aspect_ratios?.length || 0) > 0 && (
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>画面比例</Text>
+                    <Segmented
+                      value={aspectRatio || cap.aspect_ratios![0]}
+                      onChange={v => setAspectRatio(String(v))}
+                      options={cap.aspect_ratios!.map(r => ({ value: r, label: r }))}
+                      disabled={busy}
+                    />
+                  </div>
+                )}
+              </Space>
+            </div>
+          )}
 
-        {/* 说明 */}
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {type === 'image' && '生成的图片将自动保存到素材库'}
-          {type === 'video' && '生成的视频将自动保存到素材库，生成过程需要几分钟'}
-          {type === 'audio' && '生成的音频将自动保存到素材库'}
-          {type === 'voice' && '克隆的音色将保存到音色库，可在TTS中使用'}
-        </Text>
-      </Space>
+          {type === 'image' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text strong style={{ fontSize: 13 }}>
+                  参考图{imageNeedsRef ? '（必填）' : '（可选）'}
+                </Text>
+                <Button size="small" type="dashed" icon={<PlusOutlined />} disabled={busy || refImages.length >= 7} onClick={() => setPickerOpen(true)}>
+                  从素材库选
+                </Button>
+              </div>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                {imageNeedsRef ? '当前模型需 1–7 张参考图' : '不传则为纯文生图；最多 7 张'}
+              </Text>
+              {refImages.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未选参考图" style={{ margin: '8px 0' }} />
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {refImages.map((img, i) => (
+                    <div key={img.id + i} style={{ position: 'relative', width: 72, height: 72 }}>
+                      <img src={img.url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--wr-border)' }} />
+                      <Button
+                        size="small"
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        disabled={busy}
+                        style={{ position: 'absolute', top: -6, right: -6, background: 'var(--wr-bg)', borderRadius: '50%' }}
+                        onClick={() => setRefImages(prev => prev.filter((_, j) => j !== i))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {type === 'audio' && (
+            <div>
+              <Text strong style={{ fontSize: 13 }}>音色</Text>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginTop: 8, marginBottom: 8 }}
+                message="统一生成接口按文档使用系统默认音色（type=audio），暂不支持指定 voice_id"
+              />
+              <div style={{ marginTop: 8 }}>
+                <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} />
+              </div>
+            </div>
+          )}
+
+          {type === 'voice' && (
+            <>
+              <div>
+                <Text strong style={{ fontSize: 13 }}>音色 ID</Text>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                  英文字母开头，8–256 位；留空则自动生成
+                </Text>
+                <Input
+                  style={{ marginTop: 8 }}
+                  placeholder="如：shop_host_01"
+                  value={voiceName}
+                  onChange={e => setVoiceName(e.target.value)}
+                  disabled={busy}
+                />
+              </div>
+              <div>
+                <Text strong style={{ fontSize: 13 }}>参考人声</Text>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4, marginBottom: 8 }}>
+                  mp3 / wav / m4a，约 10 秒–5 分钟
+                </Text>
+                <Upload
+                  maxCount={1}
+                  accept="audio/mp3,audio/wav,audio/m4a,audio/mpeg"
+                  beforeUpload={(file) => { setAudioFile(file); return false }}
+                  onRemove={() => setAudioFile(null)}
+                  disabled={busy}
+                  fileList={audioFile ? [{ uid: '-1', name: audioFile.name, status: 'done' }] : []}
+                >
+                  <Button icon={<SoundOutlined />}>{audioFile ? '重新上传' : '上传参考音频'}</Button>
+                </Upload>
+              </div>
+            </>
+          )}
+
+          {taskId && (
+            <div style={{
+              padding: '12px 14px',
+              borderRadius: 10,
+              background: 'var(--wr-bg-elevated)',
+              border: '1px solid var(--wr-border)',
+            }}>
+              <Space wrap>
+                <Tag color={
+                  taskState === 'success' ? 'success'
+                    : taskState === 'failed' || taskState === 'cancelled' ? 'error'
+                    : 'processing'
+                }>
+                  {taskState === 'success' ? '已完成'
+                    : taskState === 'failed' ? '失败'
+                    : taskState === 'cancelled' ? '已取消'
+                    : '生成中'}
+                </Tag>
+                <Text type="secondary" style={{ fontSize: 12 }}>完成后会自动写入素材库</Text>
+              </Space>
+            </div>
+          )}
+        </Space>
+      )}
+
+      <AssetPicker
+        open={pickerOpen}
+        mode="multi"
+        accept="image"
+        title="选择参考图"
+        max={7}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(assets) => {
+          setRefImages(prev => [...prev, ...assets.map(a => ({ id: a.id, url: a.url }))].slice(0, 7))
+          setPickerOpen(false)
+        }}
+      />
     </Modal>
   )
 }

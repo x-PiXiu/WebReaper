@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { ConfigProvider, theme as antdTheme } from 'antd'
+import { App as AntdApp, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
@@ -47,6 +47,7 @@ const darkThemeConfig = {
     Card: { colorBgContainer: '#121218', headerBg: 'transparent' },
     Table: { headerBg: '#1a1a24', headerColor: '#a1a1aa', rowHoverBg: '#1a1a24', borderColor: 'rgba(255,255,255,0.06)' },
     Button: { primaryShadow: '0 0 16px rgba(124,108,255,0.3)', fontWeight: 500 },
+    Modal: { contentBg: '#121218' },
   },
 }
 
@@ -83,6 +84,18 @@ const lightThemeConfig = {
     Card: { colorBgContainer: '#ffffff', headerBg: 'transparent' },
     Table: { headerBg: '#f6f7f9', headerColor: '#52525b', rowHoverBg: '#f6f7f9', borderColor: 'rgba(0,0,0,0.06)' },
     Button: { fontWeight: 500 },
+    Modal: { contentBg: '#ffffff' },
+  },
+}
+
+/** 全局弹窗：居中 + 内容高度自适应视口（超出可滚） */
+const modalDefaults = {
+  centered: true,
+  styles: {
+    body: {
+      maxHeight: 'min(72vh, calc(100vh - 160px))',
+      overflowY: 'auto' as const,
+    },
   },
 }
 
@@ -95,7 +108,12 @@ function ThemedApp({ children }: { children: React.ReactNode }) {
     document.body.style.background = mode === 'dark' ? '#0a0a0f' : '#f4f4f5'
   }, [mode])
 
-  return <ConfigProvider locale={zhCN} theme={config}>{children}</ConfigProvider>
+  return (
+    <ConfigProvider locale={zhCN} theme={config} modal={modalDefaults}>
+      {/* AntdApp 让 Modal.confirm / message 等静态方法也能吃到 ConfigProvider */}
+      <AntdApp>{children}</AntdApp>
+    </ConfigProvider>
+  )
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

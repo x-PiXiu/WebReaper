@@ -1,4 +1,5 @@
 import { businessApi } from '../api/business'
+import { ensureMaterialId, submitUnified } from '../api/generationSubmit'
 import { fetchGenerationTasks } from './useGenerationTasks'
 import type { GenerationTask } from '../types/api'
 
@@ -30,10 +31,14 @@ function creationUrl(task: GenerationTask): string {
 export type LipSyncPipelineStage = 'tts' | 'ref' | 'lipsync' | ''
 
 export type LipSyncPipelineInput = {
+  brandId: string
   script: string
-  voiceId: string
+  /** 文档未支持指定音色；保留字段仅供 UI，提交不传 */
+  voiceId?: string
   presence: 'real' | 'avatar'
   realVideoUrl?: string
+  /** 数字分身：人像图素材 ID 或 URL（统一 submit → digital_human） */
+  portraitMaterial?: string
   subjectServerId?: string
   intent?: string
 }
@@ -55,7 +60,11 @@ export type LipSyncPipelineResult = {
   videoUrl: string
 }
 
-/** 口播成片链路：TTS →（分身：参考生）→ 对口型 */
+/**
+ * 口播成片链路（对齐统一 submit）：
+ * TTS(type=audio) → 真人：video+audio 素材 → lip_sync；
+ * 分身：image+audio 素材 → digital_human（一步成片）。
+ */
 export async function runLipSyncPipeline(
   input: LipSyncPipelineInput,
   opts: {
@@ -65,6 +74,7 @@ export async function runLipSyncPipeline(
   } = {},
 ): Promise<LipSyncPipelineResult> {
   const { onStage, resume, retryFrom } = opts
+  if (!input.brandId) throw new Error('请先选择人设/品牌')
 
   let audioUrl = resume?.audioUrl || ''
   let videoUrl = input.presence === 'real'
@@ -75,29 +85,15 @@ export async function runLipSyncPipeline(
   let lipsyncTaskId = resume?.lipsyncTaskId || ''
 
   const runTts = !retryFrom || retryFrom === 'tts' || !audioUrl
-  const runRef = input.presence === 'avatar' && (!retryFrom || retryFrom === 'ref' || retryFrom === 'tts' || !videoUrl)
-  const runLipsync = !retryFrom || retryFrom === 'lipsync' || retryFrom === 'ref' || retryFrom === 'tts'
-
-  if (retryFrom === 'lipsync') {
-    if (!audioUrl) throw new Error('语音产物缺失，请从语音合成重试')
-    if (!videoUrl) throw new Error('画面产物缺失，请从画面生成重试')
-    onStage?.('lipsync')
-    const lipsync = await businessApi.submitGenerationTask({
-      sub_type: 'lip_sync', model: '',
-      params: { video_url: videoUrl, audio_url: audioUrl },
-    })
-    lipsyncTaskId = lipsync.id
-    const done = await waitGenerationTask(lipsync.id)
-    const resultUrl = creationUrl(done)
-    if (!resultUrl) throw new Error('对口型产物缺失（可重试）')
-    return { ttsTaskId, refTaskId, lipsyncTaskId, resultUrl, audioUrl, videoUrl }
-  }
+  const runAvatar = input.presence === 'avatar' && (!retryFrom || retryFrom === 'ref' || retryFrom === 'tts' || !videoUrl)
+  const runLipsync = input.presence === 'real' && (!retryFrom || retryFrom === 'lipsync' || retryFrom === 'ref' || retryFrom === 'tts')
 
   if (runTts) {
     onStage?.('tts')
-    const tts = await businessApi.submitGenerationTask({
-      sub_type: 'tts', model: '',
-      params: { text: input.script, voice_setting_voice_id: input.voiceId },
+    const tts = await submitUnified({
+      brand_id: input.brandId,
+      text: input.script,
+      type: 'audio',
     })
     ttsTaskId = tts.id
     const ttsDone = await waitGenerationTask(tts.id)
@@ -105,28 +101,41 @@ export async function runLipSyncPipeline(
     if (!audioUrl) throw new Error('语音产物缺失（可重试）')
   }
 
-  if (input.presence === 'avatar' && runRef) {
-    if (!input.subjectServerId) throw new Error('请选择数字分身')
+  // 分身：图 + 音频 → digital_human（统一选择器自动识别）
+  if (input.presence === 'avatar' && runAvatar) {
+    const portrait = input.portraitMaterial
+    if (!portrait) {
+      throw new Error('请选择数字分身或上传人像参考图（主体 server_id 暂未纳入统一 submit）')
+    }
     onStage?.('ref')
-    const prompt = (input.intent || '').trim() || '人物面对镜头自然口播'
-    const ref = await businessApi.submitGenerationTask({
-      sub_type: 'reference2video', model: '',
-      params: { subjects: [{ name: '主角', server_id: input.subjectServerId }], prompt },
+    const audioId = await ensureMaterialId(audioUrl)
+    const imageId = await ensureMaterialId(portrait)
+    const dh = await submitUnified({
+      brand_id: input.brandId,
+      materials: [imageId, audioId],
+      text: (input.intent || '').trim() || input.script.slice(0, 200),
     })
-    refTaskId = ref.id
-    const refDone = await waitGenerationTask(ref.id)
-    videoUrl = creationUrl(refDone)
-    if (!videoUrl) throw new Error('分身画面产物缺失（可重试）')
-  } else if (input.presence === 'real') {
+    refTaskId = dh.id
+    lipsyncTaskId = dh.id
+    const done = await waitGenerationTask(dh.id)
+    const resultUrl = creationUrl(done)
+    if (!resultUrl) throw new Error('数字人口播产物缺失（可重试）')
+    videoUrl = resultUrl
+    return { ttsTaskId, refTaskId, lipsyncTaskId, resultUrl, audioUrl, videoUrl }
+  }
+
+  if (input.presence === 'real') {
     videoUrl = input.realVideoUrl || videoUrl
     if (!videoUrl) throw new Error('请上传出镜视频')
   }
 
   if (runLipsync) {
     onStage?.('lipsync')
-    const lipsync = await businessApi.submitGenerationTask({
-      sub_type: 'lip_sync', model: '',
-      params: { video_url: videoUrl, audio_url: audioUrl },
+    const videoId = await ensureMaterialId(videoUrl)
+    const audioId = await ensureMaterialId(audioUrl)
+    const lipsync = await submitUnified({
+      brand_id: input.brandId,
+      materials: [videoId, audioId],
     })
     lipsyncTaskId = lipsync.id
     const done = await waitGenerationTask(lipsync.id)
@@ -137,3 +146,6 @@ export async function runLipSyncPipeline(
 
   throw new Error('链路状态异常，请重试')
 }
+
+/** @deprecated 保留导出以免旧引用断裂；新代码请用 submitUnified */
+export const submitGenerationTask = businessApi.submitGenerationTask

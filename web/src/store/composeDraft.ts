@@ -102,18 +102,18 @@ export type ComposeModuleDef = {
 }
 
 export const COMPOSE_MODULES: ComposeModuleDef[] = [
-  { key: 'benchmark', path: '/m/compose/benchmark', label: '爆款对标', desc: '链接或素材 → 沉淀可改写原文', status: 'partial', track: 'shared' },
+  { key: 'benchmark', path: '/m/compose/benchmark', label: '爆款对标', desc: '链接或素材 → 自动转写原文', status: 'ready', track: 'shared' },
   { key: 'copy', path: '/m/compose/copy', label: '文案工作室', desc: '编辑 + AI 差异化改写（口播/图文）', status: 'ready', track: 'shared' },
   { key: 'titles', path: '/m/compose/titles', label: '标题话题', desc: '标题与话题标签', status: 'ready', track: 'shared' },
   // 发视频专属
-  { key: 'voice', path: '/m/compose/voice', label: '爆款配音', desc: '口播文案转语音', status: 'partial', track: 'video' },
-  { key: 'avatar', path: '/m/compose/avatar', label: '口播数字人', desc: '形象 + 文案生成口播视频', status: 'partial', track: 'video' },
-  { key: 'edit', path: '/m/compose/edit', label: '智能剪辑', desc: '字幕、节奏与成片', status: 'soon', track: 'video' },
-  { key: 'cover', path: '/m/compose/cover', label: '视频封面', desc: '短视频封面标题卡', status: 'partial', track: 'video' },
+  { key: 'voice', path: '/m/compose/voice', label: '爆款配音', desc: '口播文案转语音', status: 'ready', track: 'video' },
+  { key: 'avatar', path: '/m/compose/avatar', label: '口播数字人', desc: '形象 + 文案生成口播视频', status: 'ready', track: 'video' },
+  { key: 'edit', path: '/m/compose/edit', label: '成片确认', desc: '确认成片地址，再去封面发布', status: 'ready', track: 'video' },
+  { key: 'cover', path: '/m/compose/cover', label: '视频封面', desc: '短视频封面标题卡', status: 'ready', track: 'video' },
   { key: 'publish-video', path: '/m/distribution?contentType=video', label: '发布视频', desc: '发到抖音等短视频平台', status: 'ready', track: 'video' },
   // 发图文专属
-  { key: 'images', path: '/m/compose/images', label: '图文配图', desc: '配图生成与素材挑选', status: 'partial', track: 'graphic' },
-  { key: 'cover-graphic', path: '/m/compose/cover?track=graphic', label: '图文封面', desc: '笔记/帖子封面图', status: 'partial', track: 'graphic' },
+  { key: 'images', path: '/m/compose/images', label: '图文配图', desc: '配图生成与素材挑选', status: 'ready', track: 'graphic' },
+  { key: 'cover-graphic', path: '/m/compose/cover?track=graphic', label: '图文封面', desc: '笔记/帖子封面图', status: 'ready', track: 'graphic' },
   { key: 'publish-graphic', path: '/m/distribution?contentType=article', label: '发布图文', desc: '发小红书/公众号等图文渠道', status: 'ready', track: 'graphic' },
 ]
 

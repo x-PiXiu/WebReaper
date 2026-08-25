@@ -25,13 +25,12 @@ export function statusConfig(status: string) {
 export default function PublishJobTable({
   jobs,
   onRefresh,
-  reMonitorPending,
 }: {
   jobs: PublishJob[]
   onRefresh: () => void
-  reMonitorPending: string | null
 }) {
   const [detailWork, setDetailWork] = useState<WorkDetailData | null>(null)
+  const [reMonitorPending, setReMonitorPending] = useState<string | null>(null)
   const handleMarkPublished = async (jobId: string) => {
     try {
       await businessApi.markPublished(jobId)
@@ -40,6 +39,7 @@ export default function PublishJobTable({
   }
 
   const handleReMonitor = async (jobId: string) => {
+    setReMonitorPending(jobId)
     try {
       const job = await businessApi.reMonitorJob(jobId)
       const diff = job.post_mention_rate - job.pre_mention_rate
@@ -47,6 +47,9 @@ export default function PublishJobTable({
       message.info(`复测完成：表现 ${(job.pre_mention_rate * 100).toFixed(1)}% → ${(job.post_mention_rate * 100).toFixed(1)}%（${sign}${(diff * 100).toFixed(1)}%）`)
       onRefresh()
     } catch { /* 拦截器已提示 */ }
+    finally {
+      setReMonitorPending(null)
+    }
   }
 
   const columns = [

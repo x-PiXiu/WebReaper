@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { Button, Input, Space, Typography, message, Alert } from 'antd'
 import { PictureOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
@@ -27,28 +26,21 @@ export default function CoverModule() {
   const isGraphic = draft.track === 'graphic'
   const title = draft.selectedTitle || draft.refTitle || (isGraphic ? '图文封面标题' : '视频封面标题')
 
-  const { data: types = [] } = useQuery({
-    queryKey: ['generation-types'],
-    queryFn: () => businessApi.listGenerationTypes().then((r) => r.types),
-  })
-  const imgModel = types.find((t) => t.sub_type === 'text2image')?.models?.[0]?.model
-
   const genImage = async () => {
-    if (!imgModel) {
-      message.warning('暂无文生图模型')
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
       return
     }
     setBusy(true)
     try {
-      await businessApi.submitGenerationTask({
-        brand_id: brandId || draft.brandId,
-        sub_type: 'text2image',
-        model: imgModel,
-        params: {
-          prompt: isGraphic
-            ? `小红书封面图，竖屏，大标题「${title}」，清爽种草风`
-            : `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目，适合抖音`,
-        },
+      await businessApi.submitGeneration({
+        brand_id: bid,
+        type: 'image',
+        text: isGraphic
+          ? `小红书封面图，竖屏，大标题「${title}」，清爽种草风`
+          : `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目，适合抖音`,
+        aspect_ratio: '9:16',
       })
       message.success('封面图任务已提交，请到多媒体工作台取回 URL 填入下方')
       navigate('/m/compose/tools?tab=media')

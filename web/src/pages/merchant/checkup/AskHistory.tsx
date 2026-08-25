@@ -92,7 +92,7 @@ export default function AskHistory({
   }, [keywords, monitorResults, brandMap])
 
   const retest = (question: string) => {
-    navigate(`/m/checkup?tab=ask&q=${encodeURIComponent(question)}`)
+    navigate(`/m/analytics?tab=ask&q=${encodeURIComponent(question)}`)
   }
 
   if (rows.length === 0) {
@@ -103,7 +103,7 @@ export default function AskHistory({
             <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 10 }}>
               每次在「问问 AI」测过的问题都会留痕在这里——隔周复测，就能看到 AI 对你的态度变化
             </Text>
-            <Button type="primary" onClick={() => navigate('/m/checkup?tab=ask')}>去问第一个问题</Button>
+            <Button type="primary" onClick={() => navigate('/m/analytics?tab=ask')}>去问第一个问题</Button>
           </div>
         </Empty>
       </Card>

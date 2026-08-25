@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Drawer } from 'antd'
+import { Modal } from 'antd'
+import { MODAL_W } from '../../ui/modalFit'
 import { EyeOutlined } from '@ant-design/icons'
 import type { WizardStepDef } from './types'
 
@@ -129,20 +130,20 @@ export function WizardShell({
         </aside>
       </div>
 
-      <Drawer
+      <Modal
         title="成片预览"
-        placement="bottom"
-        height="72vh"
         open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        className="cf-preview-drawer"
+        onCancel={() => setPreviewOpen(false)}
+        width={MODAL_W.md}
+        footer={null}
         destroyOnClose
+        className="cf-preview-modal wr-modal-preview"
       >
         <div className="cf-preview-drawer-inner cf-platform-douyin">
           {previewHead}
           <div className="cf-preview-body">{preview}</div>
         </div>
-      </Drawer>
+      </Modal>
     </div>
   )
 }

@@ -155,12 +155,22 @@ export default function LipSyncWizard() {
   }, [tasks])
   const subjects = useMemo(() => tasks
     .filter(t => t.sub_type === 'subject' && t.state === 'success')
-    .map(t => ({
-      id: t.id,
-      serverId: t.provider_task_id,
-      name: taskParams(t).name || t.id.slice(0, 8),
-      hasVideo: Array.isArray(taskParams(t).videos) && taskParams(t).videos.length > 0,
-    })), [tasks])
+    .map(t => {
+      const p = taskParams(t)
+      const images = Array.isArray(p.images) ? p.images.filter((u: unknown) => typeof u === 'string') as string[] : []
+      return {
+        id: t.id,
+        serverId: t.provider_task_id,
+        name: p.name || t.id.slice(0, 8),
+        hasVideo: Array.isArray(p.videos) && p.videos.length > 0,
+        portraitUrl: images[0] || t.creations?.[0]?.url || '',
+      }
+    }), [tasks])
+
+  const selectedSubject = useMemo(
+    () => subjects.find((s) => s.serverId === subjectServerId),
+    [subjects, subjectServerId],
+  )
 
   const doExtract = async (payload: { share_url?: string; asset_url?: string }) => {
     setExtracting(true); setError('')
@@ -213,16 +223,27 @@ export default function LipSyncWizard() {
 
   const produce = async (retryFrom?: 'tts' | 'ref' | 'lipsync') => {
     if (!script.trim()) { message.warning('文案为空'); return }
-    if (!voiceId) { message.warning('请选择音色'); return }
+    const bid = brandId || draft.brandId
+    if (!bid) { message.warning('请先选择人设/品牌'); return }
+    if (presence === 'avatar' && !selectedSubject?.portraitUrl && !subjectServerId) {
+      message.warning('请选择带人像图的数字分身')
+      return
+    }
+    if (presence === 'real' && !realVideoUrl) {
+      message.warning('请上传出镜视频')
+      return
+    }
     setProducing(true); setError(''); setFailedStage('')
     if (!retryFrom) setResultUrl('')
     queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     try {
       const result = await runLipSyncPipeline({
+        brandId: bid,
         script,
-        voiceId,
+        voiceId: voiceId || undefined,
         presence,
         realVideoUrl,
+        portraitMaterial: selectedSubject?.portraitUrl || undefined,
         subjectServerId,
         intent,
       }, {
@@ -286,8 +307,11 @@ export default function LipSyncWizard() {
   const canNext = (): boolean => {
     if (step === 0) return false
     if (step === 1) return !!script.trim()
-    if (step === 2) return presence === 'real' ? !!realVideoUrl : !!subjectServerId
-    if (step === 3) return !!voiceId
+    if (step === 2) {
+      if (presence === 'real') return !!realVideoUrl
+      return !!subjectServerId && !!selectedSubject?.portraitUrl
+    }
+    if (step === 3) return true // 音色可选；未选则后端用默认
     return false
   }
 
@@ -295,7 +319,9 @@ export default function LipSyncWizard() {
     if (step === 1 && !script.trim()) return '请先填写口播文案'
     if (step === 2 && presence === 'real' && !realVideoUrl) return '请上传出镜视频'
     if (step === 2 && presence === 'avatar' && !subjectServerId) return '请选择数字分身'
-    if (step === 3 && !voiceId) return '请选择音色'
+    if (step === 2 && presence === 'avatar' && subjectServerId && !selectedSubject?.portraitUrl) {
+      return '该分身缺少人像图，请换一个或去素材库补图'
+    }
     return undefined
   }
 
@@ -559,9 +585,15 @@ export default function LipSyncWizard() {
       {step === 3 && (
         <div className="ip-form-stack ip-stagger">
           <label><SoundOutlined /> 选择口播音色（可试听）</label>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="统一生成接口暂不支持指定音色（文档仅 text+type=audio），将使用系统默认音色"
+          />
           <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} style={{ maxWidth: 480 }} />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            想用自己的声音？<a href="/m/compose/tools?tab=media" target="_blank" rel="noreferrer">去声音克隆</a>
+            可跳过；想用自己的声音？<a href="/m/compose/tools?tab=media" target="_blank" rel="noreferrer">去声音克隆</a>
           </Text>
         </div>
       )}
@@ -571,7 +603,7 @@ export default function LipSyncWizard() {
           <div className="wz-ready-tags">
             <Tag color="green">文案 {script.length} 字 · 约 {scriptSec} 秒</Tag>
             <Tag color="green">{presence === 'real' ? '真人出镜' : '数字分身'}</Tag>
-            <Tag color="green">音色已选</Tag>
+            <Tag color={voiceId ? 'green' : 'default'}>{voiceId ? '音色已选' : '默认音色'}</Tag>
           </div>
 
           <PipelineProgress stages={pipelineStages} />

@@ -29,7 +29,8 @@ function distributionPath(w: WorkItem) {
   if (w.content_id) q.set('contentId', w.content_id)
   if (w.media_urls?.length) q.set('mediaUrls', w.media_urls.join(','))
   if (w.brand_id) q.set('brandId', w.brand_id)
-  q.set('publishForm', w.kind === 'article' ? 'article' : w.kind === 'image' ? 'image' : 'video')
+  q.set('contentType', w.kind === 'article' ? 'article' : w.kind === 'image' ? 'image' : 'video')
+  if (w.title) q.set('title', w.title)
   const s = q.toString()
   return s ? `/m/distribution?${s}` : '/m/distribution'
 }

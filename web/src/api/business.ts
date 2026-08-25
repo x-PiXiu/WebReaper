@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { submitGenerationTaskCompat, submitUnified } from './generationSubmit'
 import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding } from '../types/api'
 
 // 通用平台 API 封装。
@@ -252,8 +253,22 @@ export const businessApi = {
     apiClient.get<unknown, Array<{ views: number; likes: number; comments: number; shares: number; collected_at: string }>>(`/api/v1/merchant/publish-jobs/${jobId}/metrics`),
 
   // ---- GEO 内容发布（半自动）----
-  publishContent: (data: { account_id?: string; platform: string; content_id?: string; brand_id?: string; title?: string; content?: string; mode?: string; scheduled_at?: string; content_type?: string; media_urls?: string[]; cover_url?: string }) =>
-    apiClient.post<unknown, PublishJob>('/api/v1/merchant/publish', data),
+  publishContent: (data: {
+    account_id?: string
+    platform: string
+    content_id?: string
+    brand_id?: string
+    title?: string
+    content?: string
+    mode?: string
+    scheduled_at?: string
+    content_type?: string
+    media_urls?: string[]
+    cover_url?: string
+    tags?: string[]
+    category?: string
+    store_address?: string
+  }) => apiClient.post<unknown, PublishJob>('/api/v1/merchant/publish', data),
 
   listPublishJobs: () =>
     apiClient.get<unknown, PublishJob[]>('/api/v1/merchant/publish-jobs'),
@@ -369,23 +384,29 @@ export const businessApi = {
   updateTavilyKey: (data: { enabled: boolean; api_key?: string }) =>
     apiClient.put<unknown, { name: string; enabled: boolean; note: string }>('/api/v1/admin/tavily-key', data),
 
-  // ---- 统一生成（Vidu 全量接入：视频/图片/音频/数字人）----
+  // ---- 统一生成（Docs/API/统一生成API文档.md：仅 POST /generation/submit）----
+  // 字段：brand_id / text / materials / template / type / duration / quality / aspect_ratio
 
-  // 端点类型 + 模型 + 能力向量（表单驱动）
+  // 端点类型 + 模型 + 能力向量（表单能力展示；提交不再传 model/sub_type）
   listGenerationTypes: () =>
     apiClient.get<unknown, { types: GenerationType[] }>('/api/v1/generation/types'),
 
-  // 统一提交API（傻瓜式：客户端不需要选择端点/模型）
+  // 统一提交（傻瓜式：text + materials + type，服务端选端点/模型）
   submitGeneration: (data: {
     brand_id: string
-    text: string
+    text?: string
     materials?: string[]
     template?: string
+    type?: 'video' | 'image' | 'audio' | 'voice'
     duration?: number
     quality?: string
-  }) => apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', data),
+    aspect_ratio?: string
+  }) => submitUnified(data),
 
-  // 原有高级提交API（保留兼容）
+  /**
+   * @deprecated 高级 POST /generation/tasks 已删除。
+   * 保留此方法作兼容：内部映射到 submitGeneration（见 generationSubmit.ts）。
+   */
   submitGenerationTask: (data: {
     brand_id?: string
     sub_type: string
@@ -394,10 +415,13 @@ export const businessApi = {
     refs?: PromptRef[]
     off_peak?: boolean
     watermark?: boolean
-  }) => apiClient.post<unknown, GenerationTask>('/api/v1/generation/tasks', data),
+  }) => submitGenerationTaskCompat(data),
 
   listGenerationTasks: () =>
     apiClient.get<unknown, { tasks: GenerationTask[] }>('/api/v1/generation/tasks'),
+
+  getGenerationTask: (id: string) =>
+    apiClient.get<unknown, GenerationTask>(`/api/v1/generation/tasks/${id}`),
 
   cancelGenerationTask: (id: string) =>
     apiClient.post<unknown, { cancelled: string }>(`/api/v1/generation/tasks/${id}/cancel`),
@@ -466,6 +490,34 @@ export const businessApi = {
   // 发布通道能力清单（能力驱动：平台过滤/动态检查清单）
   listPublishChannels: () =>
     apiClient.get<unknown, { channels: PublishChannelView[] }>('/api/v1/merchant/publish/channels'),
+
+  // 多平台内容适配预览（ContentAdapter 只读）
+  previewPublishAdapt: (data: { title?: string; content?: string; tags?: string[]; platforms: string[] }) =>
+    apiClient.post<unknown, { previews: Array<{
+      platform: string
+      title?: string
+      description?: string
+      tags?: string[]
+      cta?: string
+      title_truncated?: boolean
+      error?: string
+    }> }>('/api/v1/merchant/publish/adapt-preview', data),
+
+  getPublishDraft: (brandId: string) =>
+    apiClient.get<unknown, { draft: string | null; updated_at?: string }>('/api/v1/merchant/publish/draft', { params: { brand_id: brandId } }),
+
+  savePublishDraft: (brandId: string, draft: string) =>
+    apiClient.put<unknown, { saved: boolean }>('/api/v1/merchant/publish/draft', { brand_id: brandId, draft }),
+
+  deletePublishDraft: (brandId: string) =>
+    apiClient.delete<unknown, { deleted: boolean }>('/api/v1/merchant/publish/draft', { params: { brand_id: brandId } }),
+
+  getBrandPublishStats: (brandId: string) =>
+    apiClient.get<unknown, {
+      brand_id: string
+      daily_usage: Record<string, number>
+      quotas: Array<{ platform: string; used_today: number; max_per_day: number; remaining: number; at_limit: boolean }>
+    }>(`/api/v1/merchant/brands/${brandId}/publish-stats`),
 
   // 生成模式开关（admin：sub_type 批量启停——商户端模式收敛）
   adminListGenerationModes: () =>
@@ -617,11 +669,21 @@ export const businessApi = {
 
   // 用户端灵感 API
   listInspirations: (params?: { brand_id?: string; platform?: string; keyword?: string; sort_by?: string; page?: number; page_size?: number }) =>
-    apiClient.get<unknown, { total: number; page: number; page_size: number; items: InspirationVideo[] }>('/api/v1/inspirations', { params }),
+    apiClient.get<unknown, { total: number; page: number; page_size: number; items: InspirationVideo[]; status?: string; message?: string }>('/api/v1/inspirations', { params }),
   getInspiration: (id: string) =>
     apiClient.get<unknown, InspirationVideo>(`/api/v1/inspirations/${id}`),
   listInspirationPlatforms: () =>
     apiClient.get<unknown, { platforms: string[] }>('/api/v1/inspirations/platforms'),
+
+  // Admin 灵感运营
+  adminInspirationStats: () =>
+    apiClient.get<unknown, { total_videos: number; total_brands: number; by_platform: { platform: string; count: number }[]; by_brand: { brand_id: string; count: number }[] }>('/api/v1/admin/inspirations/stats'),
+  adminUpdateInspiration: (id: string, data: { is_pinned?: boolean; is_recommended?: boolean; admin_note?: string }) =>
+    apiClient.put<unknown, InspirationVideo>(`/api/v1/admin/inspirations/${id}`, data),
+  adminDeleteInspiration: (id: string) =>
+    apiClient.delete<unknown, { msg: string; id: string }>(`/api/v1/admin/inspirations/${id}`),
+  adminBatchInspirations: (data: { ids: string[]; action: 'delete' | 'pin' | 'recommend' }) =>
+    apiClient.post<unknown, { msg: string; affected: number }>('/api/v1/admin/inspirations/batch', data),
 
   // 品牌发布配置
   getBrandPublishConfigs: (brandId: string) =>
@@ -635,5 +697,9 @@ export const businessApi = {
   unbindAccountFromBrand: (brandId: string, accountId: string) =>
     apiClient.delete<unknown, void>(`/api/v1/merchant/brands/${brandId}/publish-config/bindings/${accountId}`),
   getPublishStats: (brandId: string) =>
-    apiClient.get<unknown, { brand_id: string; daily_usage: Record<string, number> }>(`/api/v1/merchant/brands/${brandId}/publish-stats`),
+    apiClient.get<unknown, {
+      brand_id: string
+      daily_usage: Record<string, number>
+      quotas: Array<{ platform: string; used_today: number; max_per_day: number; remaining: number; at_limit: boolean }>
+    }>(`/api/v1/merchant/brands/${brandId}/publish-stats`),
 }
