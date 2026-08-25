@@ -205,15 +205,22 @@ func (r *Registry) Models(ctx context.Context, subType string) ([]string, error)
 		return nil, fmt.Errorf("端点 %q 未注册", subType)
 	}
 	seen := map[string]bool{}
+	disabled := map[string]bool{} // DB 显式停用的模型——defaultCaps 兜底不得回流
 	var out []string
 	for _, s := range r.specs(ctx) {
-		if s.SubType == subType && s.Enabled && !seen[s.Model] {
+		if s.SubType != subType {
+			continue
+		}
+		if s.Enabled && !seen[s.Model] {
 			seen[s.Model] = true
 			out = append(out, s.Model)
 		}
+		if !s.Enabled {
+			disabled[s.Model] = true // 停用行也标记（此前漏洞：停用不进 seen → 兜底又加回）
+		}
 	}
 	for _, c := range r.defaultCaps[subType] {
-		if !seen[c.Model] {
+		if !seen[c.Model] && !disabled[c.Model] {
 			seen[c.Model] = true
 			out = append(out, c.Model)
 		}

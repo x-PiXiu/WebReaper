@@ -5,6 +5,11 @@
 package inspiration
 
 import (
+	"sync"
+	"path/filepath"
+	"net/url"
+	"net/http"
+	"io"
 	"context"
 	"fmt"
 	"log"
@@ -23,7 +28,11 @@ type UseCase struct {
 	accountRepo port.CrawlerAccountRepository
 	platforms   map[string]port.CrawlerPlatform
 	llm         port.AIGenerator // LLM 用于生成关键词
+	media       port.MediaAssetStore // 可选；本地转存（站内播放不依赖原站防盗链）
 }
+
+// SetMediaStore 注入媒体存储（可选；注入后爬取入库的视频异步转存到本地）。
+func (uc *UseCase) SetMediaStore(m port.MediaAssetStore) { uc.media = m }
 
 // NewUseCase 创建灵感广场用例。
 func NewUseCase(
@@ -101,6 +110,12 @@ func (uc *UseCase) CrawlBrand(ctx context.Context, platform, brandID string, key
 	newCount, err := uc.videoRepo.SaveBatch(ctx, inspirations)
 	if err != nil {
 		return nil, fmt.Errorf("保存视频失败: %w", err)
+	}
+
+	// 异步本地转存（新入库视频——下载到 /media 后前端站内播放，与点赞/评论数同屏；
+	// 失败保留原始链接。后台执行不阻塞爬取返回）
+	if uc.media != nil {
+		go uc.archiveToLocal(context.Background(), inspirations)
 	}
 
 	// 建立品牌关联
@@ -251,4 +266,73 @@ type CrawlResult struct {
 	VideosNew   int       `json:"videos_new"`
 	DurationMs  int       `json:"duration_ms"`
 	FinishedAt  time.Time `json:"finished_at"`
+}
+
+
+// archiveToLocal 异步转存：下载 VideoURL → 本地存储 → 回填 LocalVideoURL。
+// 单个失败静默跳过（保留原始链接——用户要求的兜底语义）；并发限制 2 防打满带宽。
+func (uc *UseCase) archiveToLocal(ctx context.Context, videos []entity.InspirationVideo) {
+	sem := make(chan struct{}, 2)
+	var wg sync.WaitGroup
+	for _, v := range videos {
+		if v.VideoURL == "" || v.LocalVideoURL != "" {
+			continue
+		}
+		wg.Add(1)
+		go func(v entity.InspirationVideo) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			localURL, err := downloadToLocal(ctx, uc.media, v.VideoURL)
+			if err != nil {
+				log.Printf("[inspiration] 转存失败（保留原始链接）id=%s: %v", v.ID, err)
+				return
+			}
+			v.LocalVideoURL = localURL
+			if uErr := uc.videoRepo.Update(ctx, v); uErr != nil {
+				log.Printf("[inspiration] 转存回填失败 id=%s: %v", v.ID, uErr)
+			} else {
+				log.Printf("[inspiration] 视频已本地转存 id=%s → %s", v.ID, localURL)
+			}
+		}(v)
+	}
+	wg.Wait()
+}
+
+// downloadToLocal 下载远端视频到媒体存储，返回可访问 URL。
+// 大小上限 100MB（B站 360P 教程约 3.5MB/3.6min；抖音/快手短视频普遍 <30MB）。
+func downloadToLocal(ctx context.Context, store port.MediaAssetStore, videoURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, videoURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36")
+	// B站 CDN 防盗链（其他平台无此校验不受影响）
+	if u, pErr := url.Parse(videoURL); pErr == nil {
+		if strings.Contains(u.Host, "bilivideo.com") || strings.Contains(u.Host, "hdslb.com") {
+			req.Header.Set("Referer", "https://www.bilibili.com")
+		}
+	}
+	client := &http.Client{Timeout: 3 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 100<<20))
+	if err != nil || len(data) == 0 {
+		return "", fmt.Errorf("下载读取失败")
+	}
+	ext := ".mp4"
+	if e := filepath.Ext(strings.Split(videoURL, "?")[0]); strings.EqualFold(e, ".webm") {
+		ext = ".webm"
+	}
+	asset, err := store.SaveFile(ctx, "", "", "creation", data, "video/mp4", ext)
+	if err != nil {
+		return "", err
+	}
+	return asset.SourceURL, nil
 }

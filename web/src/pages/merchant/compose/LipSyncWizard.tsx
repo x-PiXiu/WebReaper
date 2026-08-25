@@ -423,7 +423,7 @@ export default function LipSyncWizard() {
             >
               <span className="wz-source-card-icon"><LinkOutlined /></span>
               <strong>粘贴分享链接</strong>
-              <span>从抖音/快手爆款提取说话内容</span>
+              <span>从抖音 / B站爆款提取说话内容</span>
             </button>
             <button
               type="button"
@@ -450,7 +450,7 @@ export default function LipSyncWizard() {
               <Input.Search
                 size="large"
                 enterButton={<><LinkOutlined /> 提取文案</>}
-                placeholder="粘贴抖音/快手分享链接"
+                placeholder="粘贴抖音 / B站分享链接（其他平台请下载后上传）"
                 value={shareUrl}
                 onChange={e => setShareUrl(e.target.value)}
                 loading={extracting}

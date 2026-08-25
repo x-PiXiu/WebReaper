@@ -455,14 +455,18 @@ export interface PublishJob {
   brand_id: string
   title: string
   mode: string             // semi-auto / auto
-  status: string           // pending / running / published / failed
+  status: string           // pending / running / published / failed / scheduled（view 层派生）
   content_type?: string    // video / image / article（详情 Drawer 形态展示）
   external_url: string
   error_msg: string
   created_at: string
   published_at: string     // 发布成功时间
-  pre_mention_rate: number  // 发布前提及率
-  post_mention_rate: number // 发布后提及率
+  scheduled_at?: string    // 排期时间（scheduled 状态时展示）
+  pre_mention_rate: number | null   // 发布前提及率（null=未监测）
+  post_mention_rate: number | null  // 发布后提及率（null=未复测——服务端零值输出 null）
+  media_urls?: string[]    // 媒体文件（服务端已下发）
+  cover_url?: string
+  transport?: string       // 实际执行通道 link/rpa/api
 }
 
 // ---- 用户管理（管理端）----
@@ -790,6 +794,7 @@ export interface InspirationVideo {
   description: string
   cover_url: string
   video_url: string
+  local_video_url?: string  // 本地转存地址（空=未转存，前端回落原始链接）
   author: string
   author_avatar: string
   duration: number

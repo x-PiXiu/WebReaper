@@ -224,7 +224,7 @@ export default function MerchantHome() {
                 </Button>
                 <Button icon={<ThunderboltOutlined />} onClick={() => navigate('/m/compose/quick')}>快速生成</Button>
                 <Button icon={<LinkOutlined />} onClick={() => navigate('/m/inspire')}>灵感广场</Button>
-                <Button icon={<SendOutlined />} onClick={() => navigate('/m/distribution')}>去发布</Button>
+                <Button icon={<SendOutlined />} onClick={() => navigate('/m/distribution?contentType=video')}>去发布</Button>
                 <Button type="link" onClick={() => navigate('/m/analytics')}>查看作品数据 →</Button>
               </Space>
               <div className="ip-hotspot-params" style={{ marginTop: 24 }}>
@@ -268,7 +268,7 @@ export default function MerchantHome() {
                   >
                     拍口播
                   </Button>
-                  <Button icon={<SendOutlined />} onClick={() => navigate('/m/distribution')}>去发布</Button>
+                  <Button icon={<SendOutlined />} onClick={() => navigate('/m/distribution?contentType=video')}>去发布</Button>
                 </Space>
               </>
             ) : (

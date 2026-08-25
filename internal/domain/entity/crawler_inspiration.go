@@ -202,6 +202,9 @@ type InspirationVideo struct {
 	Description     string    `json:"description"`
 	CoverURL        string    `json:"cover_url"`
 	VideoURL        string    `json:"video_url"`
+	// LocalVideoURL 本地转存地址（/media/...——异步下载成功后填充；空=未转存，
+	// 前端回落原始 VideoURL 跳转。站内播放不依赖原站防盗链）
+	LocalVideoURL   string    `json:"local_video_url"`
 	Author          string    `json:"author"`
 	AuthorAvatar    string    `json:"author_avatar"`
 	Duration        int       `json:"duration"`

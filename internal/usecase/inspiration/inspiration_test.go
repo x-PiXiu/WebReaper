@@ -17,6 +17,10 @@ type mockVideoRepo struct {
 	listErr  error
 }
 
+func (m *mockVideoRepo) Update(ctx context.Context, video entity.InspirationVideo) error {
+	return nil
+}
+
 func (m *mockVideoRepo) SaveBatch(ctx context.Context, videos []entity.InspirationVideo) (int, error) {
 	if m.saveErr != nil {
 		return 0, m.saveErr

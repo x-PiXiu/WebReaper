@@ -16,7 +16,9 @@ type VideoLinkResolver interface {
 	SupportedPlatforms() []string
 	// Resolve 解析分享链/网页链：返回可直接下载的视频直链 + 标题 + 平台。
 	// 不支持的链接返回错误（调用方提示改用直接上传）。
-	Resolve(ctx context.Context, tenantID, rawURL string) (videoURL, title, platform string, err error)
+	// localPath 非空 = 解析器已在自身上下文完成下载（如快手 chromedp：CDN pkey
+	// 签名绑定浏览器会话，URL 离开上下文即失效）——调用方跳过 safeDownload 直接用。
+	Resolve(ctx context.Context, tenantID, rawURL string) (videoURL, title, platform, localPath string, err error)
 }
 
 // MediaAVTool 本地媒体处理（ffmpeg/ffprobe 封装——字幕探测与音轨剥离）。
@@ -32,6 +34,9 @@ type MediaAVTool interface {
 	ExtractSubtitle(ctx context.Context, mediaPath string) (text string, ok bool, err error)
 	// ExtractAudio 抽音轨为 16kHz 单声道 mp3（ASR 输入格式），返回文件路径。
 	ExtractAudio(ctx context.Context, mediaPath string) (audioPath string, err error)
+	// SegmentAudio 把音频按 segSeconds 切段（16kHz 单声道 mp3），返回段文件路径列表。
+	// 长音频分段转写用（半小时+ 音视频超出 ASR 上限的解决方案）。
+	SegmentAudio(ctx context.Context, audioPath string, segSeconds int) ([]string, error)
 }
 
 // SpeechTranscriber 语音识别（音频 → 文本）。

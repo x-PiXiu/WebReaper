@@ -46,17 +46,18 @@ var publishDryRun = strings.TrimSpace(os.Getenv("PUBLISH_DRY_RUN")) != ""
 
 func NewDouyinAutoChannel() *DouyinAutoChannel { return &DouyinAutoChannel{} }
 
-func (c *DouyinAutoChannel) Platform() string             { return "douyin" }
-func (c *DouyinAutoChannel) SupportedMediaType() []string { return []string{"video", "image"} }
+func (c *DouyinAutoChannel) Platform() string { return "douyin" }
+func (c *DouyinAutoChannel) SupportedMediaType() []string { return []string{"video"} }
 func (c *DouyinAutoChannel) SupportedContentTypes() []string {
-	return []string{entity.ContentTypeVideo, entity.ContentTypeImage}
+	// 能力诚实化（Plan-14 修正 #11）：图文（publish-image）RPA 未实现——声明了
+	// 就是给前端放出必然失败的选项。实现后恢复 ContentTypeImage。
+	return []string{entity.ContentTypeVideo}
 }
 
 func (c *DouyinAutoChannel) DisplayName() string { return "抖音" }
 func (c *DouyinAutoChannel) Constraints() map[string]entity.ChannelConstraints {
 	return map[string]entity.ChannelConstraints{
 		entity.ContentTypeVideo: {TitleMaxRunes: 55, MinVideos: 1},
-		entity.ContentTypeImage: {TitleMaxRunes: 55, MinImages: 1},
 	}
 }
 
@@ -96,25 +97,33 @@ func (c *DouyinAutoChannel) writebackCookie(ctx context.Context, job entity.Publ
 }
 
 // KuaishouAutoChannel 快手发布通道（半自动 + 全自动）。
-type KuaishouAutoChannel struct{}
+type KuaishouAutoChannel struct {
+	accountRepo port.AccountRepository // 可选：cookie 回写
+	vault       port.CookieVault
+}
 
 var _ port.PublishChannel = (*KuaishouAutoChannel)(nil)
 var _ port.ChannelInfoProvider = (*KuaishouAutoChannel)(nil)
 var _ port.AutoPublishChannel = (*KuaishouAutoChannel)(nil)
 
+// SetAccountStore 注入账号存储（可选；发布会话后 cookie 滚动回写）。
+func (c *KuaishouAutoChannel) SetAccountStore(ar port.AccountRepository, v port.CookieVault) {
+	c.accountRepo, c.vault = ar, v
+}
+
 func NewKuaishouAutoChannel() *KuaishouAutoChannel { return &KuaishouAutoChannel{} }
 
-func (c *KuaishouAutoChannel) Platform() string             { return "kuaishou" }
-func (c *KuaishouAutoChannel) SupportedMediaType() []string { return []string{"video", "image"} }
+func (c *KuaishouAutoChannel) Platform() string { return "kuaishou" }
+func (c *KuaishouAutoChannel) SupportedMediaType() []string { return []string{"video"} }
 func (c *KuaishouAutoChannel) SupportedContentTypes() []string {
-	return []string{entity.ContentTypeVideo, entity.ContentTypeImage}
+	// 能力诚实化：image（图文）RPA 未实现（与抖音同规则——实现后再声明）
+	return []string{entity.ContentTypeVideo}
 }
 
 func (c *KuaishouAutoChannel) DisplayName() string { return "快手" }
 func (c *KuaishouAutoChannel) Constraints() map[string]entity.ChannelConstraints {
 	return map[string]entity.ChannelConstraints{
 		entity.ContentTypeVideo: {TitleMaxRunes: 80, MinVideos: 1},
-		entity.ContentTypeImage: {TitleMaxRunes: 80, MinImages: 1},
 	}
 }
 
@@ -125,16 +134,153 @@ func (c *KuaishouAutoChannel) PublishSemiAuto(_ context.Context, _ entity.Publis
 
 // PublishAuto 全自动：chromedp + HumanAction 反检测层，RPA 发布视频。
 func (c *KuaishouAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJob, cookie string) (string, error) {
-	return publishVideoRPA(ctx, job, cookie, "kuaishou", "https://cp.kuaishou.com/article/publish/video")
+	videoURL, newCookie, err := publishKuaishouVideo(ctx, job, cookie)
+	if err != nil {
+		return "", err
+	}
+	// cookie 滚动回写（对齐抖音/B站/视频号）
+	if c.accountRepo != nil && c.vault != nil && newCookie != "" && job.AccountID != "" {
+		if acc, fErr := c.accountRepo.FindByID(context.Background(), job.TenantID, job.AccountID); fErr == nil && acc.ID != "" {
+			if enc, eErr := c.vault.Encrypt(newCookie); eErr == nil {
+				acc.CookieEncrypted = enc
+				if sErr := c.accountRepo.Save(context.Background(), acc); sErr == nil {
+					log.Printf("[PublishAuto:kuaishou] cookie 已滚动回写（账号 %s 绑定续期）", acc.ID)
+				}
+			}
+		}
+	}
+	return videoURL, nil
 }
 
-// publishVideoRPA 快手全自动发布（模式与抖音同构，选择器待真机调试后启用）。
-func publishVideoRPA(ctx context.Context, job entity.PublishJob, cookie, platform, publishURL string) (string, error) {
-	_ = ctx
-	_ = job
-	_ = cookie
-	_ = publishURL
-	return "", fmt.Errorf("%s 全自动视频发布开发中（当前支持半自动模式——生成链接手动发布）", platform)
+// publishKuaishouVideo 快手全自动发布——抖音六步混合模式的同构复刻（2026-08-25 实现，
+// 选择器多策略候选、待 DRY_RUN 真机校准）。
+// 实测知识（扫码登录域调试）：登录链 passport.kuaishou.com → cp.kuaishou.com；
+// 认证 cookie kuaishou.web.cp.api_st/_ph（种在 .kuaishou.com 父域）；
+// 登录态预检以"导航后是否回落 passport.*login"为准。
+//
+//	① 下载视频 → ② Stealth 浏览器+cookie(.kuaishou.com) → ③ 上传
+//	→ ④ 等标题框出现=上传完成 → ⑤ 填标题+简介（L1 独立输入框，快手最简单）
+//	→ ⑥ DRY_RUN 闸门 → 点发布 → 结果确认（URL/DOM 提取）
+func publishKuaishouVideo(ctx context.Context, job entity.PublishJob, cookie string) (videoURL, newCookie string, err error) {
+	if len(job.MediaURLs) == 0 {
+		return "", "", fmt.Errorf("视频文件缺失（MediaURLs 为空）——全自动发布需要 mp4 的 URL")
+	}
+	// ① 视频落本地
+	paths, cleanup, dErr := downloadMediaToTemp(job.MediaURLs)
+	if dErr != nil {
+		return "", "", fmt.Errorf("下载视频失败: %w", dErr)
+	}
+	defer cleanup()
+	videoPath := paths[0]
+	log.Printf("[PublishAuto:kuaishou] 视频已就绪 %s", videoPath)
+
+	// ② Stealth 浏览器 + cookie 注入
+	opts := humanize.StealthOptions()
+	opts = append(opts,
+		chromedp.WindowSize(1280, 800),
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
+	)
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	defer browserCancel()
+	sessionCtx, sessionCancel := context.WithTimeout(browserCtx, 5*time.Minute)
+	defer sessionCancel()
+
+	ha := humanize.New(sessionCtx)
+	// 首次 Run + cookie 注入 + 导航同一 context（qrlogin 同款陷阱）
+	var currentURL string
+	if e := chromedp.Run(sessionCtx,
+		network.Enable(),
+		network.SetCookies(parseCookies(cookie, ".kuaishou.com")),
+		chromedp.ActionFunc(func(c context.Context) error { return humanize.InjectFingerprint(c) }),
+		chromedp.Navigate("https://cp.kuaishou.com/article/publish/video"),
+		chromedp.Sleep(4*time.Second),
+		chromedp.Location(&currentURL),
+	); e != nil {
+		return "", "", fmt.Errorf("打开快手发布页失败: %w", e)
+	}
+	if strings.Contains(currentURL, "passport.kuaishou.com") && strings.Contains(currentURL, "login") {
+		return "", "", fmt.Errorf("cookie 失效（回落 passport 登录页），请重新绑定快手账号")
+	}
+	log.Printf("[PublishAuto:kuaishou] 登录态预检通过，发布页已打开")
+
+	// ③ 上传视频（CDP SetUploadFiles，trusted）
+	if e := chromedp.Run(sessionCtx,
+		chromedp.WaitVisible(`input[type=file]`, chromedp.ByQuery),
+		chromedp.SetUploadFiles(`input[type=file]`, []string{videoPath}, chromedp.ByQuery),
+	); e != nil {
+		return "", "", fmt.Errorf("上传视频失败: %w", e)
+	}
+	log.Printf("[PublishAuto:kuaishou] 视频已提交上传，等待处理…")
+
+	// ④ 上传完成信号：标题输入框出现（快手是独立标题 input——比抖音编辑器更直接）
+	titleSel := waitFirstVisible(sessionCtx, 120*time.Second,
+		`input[placeholder*="标题"]`, `input[placeholder*="作品"]`, `[class*="title"] input`)
+	if titleSel == "" {
+		return "", "", fmt.Errorf("等待上传完成超时（标题框未出现）——建议 DRY_RUN 核查选择器")
+	}
+	log.Printf("[PublishAuto:kuaishou] 上传完成（标题框选择器=%s）", titleSel)
+
+	// ⑤ 填标题 + 简介（L1 独立控件，SendKeys 即可）
+	if e := ha.Click(titleSel); e == nil {
+		if te := ha.Type(titleSel, clampRunes(job.Title, 80)); te != nil {
+			log.Printf("[PublishAuto:kuaishou] 标题填充失败（不阻断）: %v", te)
+		}
+	}
+	descSel := waitFirstVisible(sessionCtx, 10*time.Second,
+		`textarea[placeholder*="简介"]`, `textarea[placeholder*="描述"]`, `[class*="desc"] textarea`)
+	if descSel != "" && job.Content != "" {
+		if e := ha.Click(descSel); e == nil {
+			if te := ha.Type(descSel, clampRunes(job.Content, 1000)); te != nil {
+				log.Printf("[PublishAuto:kuaishou] 简介填充失败（不阻断）: %v", te)
+			}
+		}
+	}
+
+	// ⑥ DRY_RUN：截图留证，不点发布
+	if publishDryRun {
+		_ = os.MkdirAll("data", 0o755)
+		var shot []byte
+		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil {
+			p := fmt.Sprintf("data/publish-dryrun-kuaishou-%s.png", job.ID)
+			_ = os.WriteFile(p, shot, 0o644)
+			log.Printf("[PublishAuto:kuaishou] DRY_RUN 完成（未发布）——截图 %s", p)
+		}
+		return "", readBackCookieByDomain(sessionCtx, ".kuaishou.com"), nil
+	}
+
+	// ⑦ 点发布（候选文本："发布"排"存草稿"；部分版本是"确认发布"）
+	if e := markButtonByText(sessionCtx, "发布", "存草稿"); e != nil {
+		return "", "", fmt.Errorf("定位发布按钮失败: %w", e)
+	}
+	if e := ha.Click(`[data-wr-publish-btn]`); e != nil {
+		return "", "", fmt.Errorf("点击发布失败: %w", e)
+	}
+	log.Printf("[PublishAuto:kuaishou] 已点击发布，等待结果确认…")
+
+	// 确认：发布成功跳内容管理页——URL/DOM 提取视频链接（快手 video/(\w+) 形态待真机校准）
+	confirmCtx, confirmCancel := context.WithTimeout(sessionCtx, 60*time.Second)
+	defer confirmCancel()
+	if url, e := extractVideoURLAfterPublish(confirmCtx); e == nil && url != "" {
+		return url, readBackCookieByDomain(confirmCtx, ".kuaishou.com"), nil
+	}
+	return "", readBackCookieByDomain(confirmCtx, ".kuaishou.com"), fmt.Errorf("发布结果确认超时（可能已发出——请到快手创作者中心人工核对）")
+}
+
+// readBackCookieByDomain 从浏览器导出指定域的最新 cookie（滚动回写用；多平台共用）。
+func readBackCookieByDomain(ctx context.Context, domain string) string {
+	cookies, err := network.GetCookies().Do(ctx)
+	if err != nil {
+		return ""
+	}
+	var parts []string
+	for _, c := range cookies {
+		if strings.HasSuffix(c.Domain, domain) {
+			parts = append(parts, c.Name+"="+c.Value)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // publishDouyinVideo 抖音全自动发布——六步混合模式（MediaCrawler 工程思想在"写"场景的映射：

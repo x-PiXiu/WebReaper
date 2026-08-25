@@ -82,6 +82,7 @@ func (h *TranscriptHandler) respond(c *gin.Context, res *videotranscript.Extract
 	}
 	success(c, gin.H{
 		"raw_text": res.RawText, "title": res.Title, "method": res.Method,
+		"raw_text_lines": res.Lines, // 按句切分的行（一行一句——raw_text 已按换行分行，数组供结构化渲染）
 	})
 }
 

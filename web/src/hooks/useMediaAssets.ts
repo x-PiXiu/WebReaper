@@ -13,16 +13,18 @@ export function normalizeMediaAssets(data: unknown): MediaAsset[] {
   return []
 }
 
-export async function fetchMediaAssets(): Promise<MediaAsset[]> {
-  const res = await businessApi.listAssets().catch(() => ({ assets: [] as MediaAsset[] }))
+export async function fetchMediaAssets(owner?: 'material' | 'creation' | 'all'): Promise<MediaAsset[]> {
+  const res = await businessApi.listAssets(owner).catch(() => ({ assets: [] as MediaAsset[] }))
   return normalizeMediaAssets(res)
 }
 
-/** 素材库列表（全站共用 queryKey，返回 MediaAsset[]） */
-export function useMediaAssets(enabled = true) {
+/** 素材库列表（queryKey 含 owner——素材/产物分开缓存）。
+ * owner 缺省 material（配图/配音等生成素材场景，向后兼容）；
+ * 'all' 含 AI 产物（成片视频）——发布向导选发视频用。 */
+export function useMediaAssets(enabled = true, owner: 'material' | 'creation' | 'all' = 'material') {
   return useQuery({
-    queryKey: MEDIA_ASSETS_QUERY_KEY,
-    queryFn: fetchMediaAssets,
+    queryKey: ['media-assets', owner],
+    queryFn: () => fetchMediaAssets(owner),
     enabled,
     select: normalizeMediaAssets,
   })

@@ -164,7 +164,13 @@ func (h *PublishConfigHandler) HandleUnbindAccount(c *gin.Context) {
 	success(c, gin.H{"message": "解绑成功"})
 }
 
+// defaultDailyQuota 各平台默认日上限（品牌未配置限流时的保守默认——Plan-14 8.3）。
+var defaultDailyQuota = map[string]int{
+	"xiaohongshu": 3, "douyin": 5, "kuaishou": 5, "weixin": 5, "bilibili": 3, "zhihu": 2,
+}
+
 // HandleGetPublishStats GET /api/v1/merchant/brands/:id/publish-stats
+// 响应 quotas 数组是向导限流拦截的数据源（此前缺失导致"今日已达上限"永不触发）。
 func (h *PublishConfigHandler) HandleGetPublishStats(c *gin.Context) {
 	if h.usageRepo == nil {
 		fail(c, fmt.Errorf("统计服务未配置"))
@@ -173,19 +179,50 @@ func (h *PublishConfigHandler) HandleGetPublishStats(c *gin.Context) {
 	tenantID := middleware.CurrentTenantID(c)
 	brandID := c.Param("id")
 
-	// 获取各平台今日使用量
-	platforms := []string{"douyin", "kuaishou", "xiaohongshu", "weixin", "bilibili"}
-	stats := make(map[string]int)
+	// 品牌发布配置（取每平台自定义日上限；无配置走保守默认）
+	configs, _ := h.configRepo.FindByBrand(c.Request.Context(), tenantID, brandID)
+	maxByPlatform := make(map[string]int)
+	if configs != nil {
+		for _, cfg := range configs {
+			if cfg.RateLimit.MaxPerDay > 0 {
+				maxByPlatform[cfg.Platform] = cfg.RateLimit.MaxPerDay
+			}
+		}
+	}
+
+	platforms := []string{"douyin", "kuaishou", "xiaohongshu", "weixin", "bilibili", "zhihu"}
+	stats := make(map[string]int, len(platforms))
+	type quota struct {
+		Platform  string `json:"platform"`
+		UsedToday int    `json:"used_today"`
+		MaxPerDay int    `json:"max_per_day"`
+		Remaining int    `json:"remaining"`
+		AtLimit   bool   `json:"at_limit"`
+	}
+	quotas := make([]quota, 0, len(platforms))
 	for _, platform := range platforms {
 		usage, err := h.usageRepo.GetDailyUsage(c.Request.Context(), tenantID, brandID, platform)
 		if err != nil {
 			continue
 		}
 		stats[platform] = usage
+		maxDay := maxByPlatform[platform]
+		if maxDay <= 0 {
+			maxDay = defaultDailyQuota[platform]
+		}
+		remaining := maxDay - usage
+		if remaining < 0 {
+			remaining = 0
+		}
+		quotas = append(quotas, quota{
+			Platform: platform, UsedToday: usage, MaxPerDay: maxDay,
+			Remaining: remaining, AtLimit: usage >= maxDay,
+		})
 	}
 
 	success(c, gin.H{
-		"brand_id":     brandID,
-		"daily_usage":  stats,
+		"brand_id":    brandID,
+		"daily_usage": stats,
+		"quotas":      quotas,
 	})
 }

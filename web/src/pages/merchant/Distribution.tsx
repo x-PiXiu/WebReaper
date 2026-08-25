@@ -369,7 +369,7 @@ export default function Distribution() {
                         const pj = jobs.filter((j: PublishJob) => j.platform === pf.key)
                         const monitored = pj.filter((j: PublishJob) => j.post_mention_rate != null)
                         const avgDelta = monitored.length > 0
-                          ? monitored.reduce((s: number, j: PublishJob) => s + (j.post_mention_rate - (j.pre_mention_rate || 0)), 0) / monitored.length
+                          ? monitored.reduce((s: number, j: PublishJob) => s + ((j.post_mention_rate || 0) - (j.pre_mention_rate || 0)), 0) / monitored.length
                           : null
                         return (
                           <div key={pf.key} style={{ padding: '12px 16px', background: 'var(--wr-bg-elevated)', borderRadius: 10 }}>

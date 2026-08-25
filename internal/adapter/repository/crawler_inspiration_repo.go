@@ -457,6 +457,7 @@ type InspirationVideoPO struct {
 	Description     string     `gorm:"type:text"`
 	CoverURL        string     `gorm:"size:1024;not null;default:''"`
 	VideoURL        string     `gorm:"size:1024;not null;default:''"`
+	LocalVideoURL   string     `gorm:"size:1024;not null;default:''"`
 	Author          string     `gorm:"size:128;not null;default:''"`
 	AuthorAvatar    string     `gorm:"size:1024;not null;default:''"`
 	Duration        int        `gorm:"not null;default:0"`
@@ -491,6 +492,7 @@ func inspirationVideoToPO(v entity.InspirationVideo) InspirationVideoPO {
 		Description:     v.Description,
 		CoverURL:        v.CoverURL,
 		VideoURL:        v.VideoURL,
+		LocalVideoURL:   v.LocalVideoURL,
 		Author:          v.Author,
 		AuthorAvatar:    v.AuthorAvatar,
 		Duration:        v.Duration,
@@ -525,6 +527,7 @@ func inspirationVideoFromPO(po InspirationVideoPO) entity.InspirationVideo {
 		Description:     po.Description,
 		CoverURL:        po.CoverURL,
 		VideoURL:        po.VideoURL,
+		LocalVideoURL:   po.LocalVideoURL,
 		Author:          po.Author,
 		AuthorAvatar:    po.AuthorAvatar,
 		Duration:        po.Duration,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Alert, Button, Empty, Input, Select, Space, Spin, Steps, Switch, Tag, Typography, message,
+  Alert, Button, Empty, Input, Select, Space, Spin, Steps, Switch, Tag, Tooltip, Typography, message,
 } from 'antd'
 import {
   ArrowDownOutlined, ArrowUpOutlined, CheckCircleOutlined, LinkOutlined, CloudUploadOutlined,
@@ -151,10 +151,11 @@ export default function PublishWizard(props: {
     supportsAutoForm(platform, form, channelByPlatform.get(platform))
 
   const formOptions = useMemo(() => {
+    // 顺序=产品主流程优先（视频获客 → 图文种草 → 长文SEO）——首屏视觉重心是视频
     const all: { value: PublishForm; label: string }[] = [
-      { value: 'article', label: '发文章' },
-      { value: 'image', label: '发图文' },
       { value: 'video', label: '发视频' },
+      { value: 'image', label: '发图文' },
+      { value: 'article', label: '发文章' },
     ]
     const supported = new Set(channels.flatMap((c) => c.content_types || []))
     if (supported.size === 0) return all
@@ -163,7 +164,16 @@ export default function PublishWizard(props: {
 
   useEffect(() => {
     if (formOptions.length && !formOptions.some((o) => o.value === draft.contentType)) {
-      patch({ contentType: formOptions[0].value })
+      // 当前形态不可用时的回退：优先同族近亲（video↔image 视觉内容互备），而非
+      // 一律跳 formOptions[0]（曾把发视频用户硬切到发文章）。
+      const fallback: Record<PublishForm, PublishForm[]> = {
+        video: ['image', 'article'],
+        image: ['video', 'article'],
+        article: ['image', 'video'],
+      }
+      const next = (fallback[draft.contentType] || []).find((f) => formOptions.some((o) => o.value === f))
+        ?? formOptions[0].value
+      patch({ contentType: next })
     }
   }, [formOptions, draft.contentType, patch])
 
@@ -454,6 +464,13 @@ export default function PublishWizard(props: {
             先定形态，再选账号——系统只展示该形态真实可用的平台
           </Paragraph>
 
+          {channels.length === 0 && (
+            <Alert
+              type="error" showIcon style={{ marginBottom: 16 }}
+              message="平台能力加载失败"
+              description="无法确定各平台可用形态——请刷新重试。此前会降级放出全部形态（含已下线选项），选到提交才报 400。"
+            />
+          )}
           <div style={{ marginBottom: 20 }}>
             <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>内容形态</Text>
             <Space wrap>
@@ -547,9 +564,11 @@ export default function PublishWizard(props: {
                       <Text type="secondary" style={{ fontSize: 11 }}>{a.display_name}</Text>
                     </div>
                     {q && q.max_per_day > 0 && (
-                      <Tag color={atLimit ? 'warning' : 'default'} style={{ margin: 0, fontSize: 10 }}>
-                        {q.used_today}/{q.max_per_day}
-                      </Tag>
+                      <Tooltip title={`今日已发 ${q.used_today} 篇 / 每日上限 ${q.max_per_day} 篇（达上限仍可选中并改为定时明日发布）`}>
+                        <Tag color={atLimit ? 'warning' : 'default'} style={{ margin: 0, fontSize: 10 }}>
+                          今日 {q.used_today}/{q.max_per_day}
+                        </Tag>
+                      </Tooltip>
                     )}
                     {selected && <CheckCircleOutlined style={{ color: 'var(--wr-primary)' }} />}
                   </div>
@@ -797,14 +816,6 @@ export default function PublishWizard(props: {
               />
             )}
           </div>
-          {draft.isScheduled && (
-            <Alert
-              type="warning"
-              showIcon
-              style={{ marginTop: 12 }}
-              message="定时发布接口尚未接线（handler 未透传 scheduled_at），请改回立即发布"
-            />
-          )}
         </div>
       )}
 

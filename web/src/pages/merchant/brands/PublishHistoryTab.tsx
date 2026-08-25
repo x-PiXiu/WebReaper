@@ -40,10 +40,10 @@ export default function PublishHistoryTab({ brandId }: Props) {
   const [platform, setPlatform] = useState<string>('all')
   const [status, setStatus] = useState<string>('all')
 
-  // 获取发布任务列表
+  // 获取发布任务列表（brand 维度——服务端按 brand_id 过滤，不再混入他品牌任务）
   const { data: jobs = [], isLoading, refetch } = useQuery({
     queryKey: ['publish-jobs', brandId],
-    queryFn: () => businessApi.listPublishJobs(),
+    queryFn: () => businessApi.listPublishJobs(brandId),
     enabled: !!brandId,
   })
 

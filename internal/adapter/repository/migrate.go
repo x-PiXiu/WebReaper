@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -74,6 +75,36 @@ func RunMigrations(db *gorm.DB) error {
 	// 根因：早期迁移（022）建的列名与后来修改的 GORM PO 不一致。
 	if err := fixColumnMismatches(db); err != nil {
 		return fmt.Errorf("fix column mismatches: %w", err)
+	}
+	// 兼容性修复：统一全库表 collation 到 utf8mb4_unicode_ci（幂等——已统一的表跳过）。
+	// 根因：早期迁移建表只写 CHARSET=utf8mb4 未指定 COLLATE，MySQL 8 服务器默认
+	// utf8mb4_0900_ai_ci，与显式 unicode_ci 的新表（065+）JOIN 比较时报
+	// Error 1267 Illegal mix of collations（如 admin/inspirations/stats 的
+	// geo_brands ↔ brand_inspirations 关联）。
+	if err := fixCollationMismatch(db); err != nil {
+		return fmt.Errorf("fix collation mismatch: %w", err)
+	}
+	return nil
+}
+
+// fixCollationMismatch 把 collation 非 utf8mb4_unicode_ci 的基表统一 CONVERT 过去。
+// 统一到多数派（065+ 迁移显式声明的 unicode_ci）；CONVERT 会重建表，大表耗时——
+// 单表失败仅日志不阻断（下次启动重试，幂等）。
+func fixCollationMismatch(db *gorm.DB) error {
+	var tables []string
+	if err := db.Raw(`SELECT table_name FROM information_schema.tables
+		WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'
+		  AND table_collation <> 'utf8mb4_unicode_ci'`).Scan(&tables).Error; err != nil {
+		return err
+	}
+	for _, t := range tables {
+		if err := db.Exec(fmt.Sprintf("ALTER TABLE `%s` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", t)).Error; err != nil {
+			log.Printf("[migrate] 表 %s collation 统一失败（跳过，下次重试）: %v", t, err)
+			continue
+		}
+	}
+	if len(tables) > 0 {
+		log.Printf("[migrate] 已统一 %d 张表的 collation 到 utf8mb4_unicode_ci（消除新老表 JOIN 的 Error 1267）", len(tables))
 	}
 	return nil
 }

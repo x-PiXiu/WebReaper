@@ -22,7 +22,8 @@ type ZapLogger struct {
 // NewZapLogger 创建 zap Logger。
 // env="development" 用 Console 编码（彩色、人类友好）；
 // env="production" 用 JSON 编码（机器可解析、便于 ELK 采集）。
-func NewZapLogger(env string) (*ZapLogger, error) {
+// level 显式覆盖（debug/info/warn/error；空=按环境默认：dev=debug、prod=info）。
+func NewZapLogger(env, level string) (*ZapLogger, error) {
 	var cfg zap.Config
 	if env == "production" {
 		cfg = zap.NewProductionConfig()
@@ -30,6 +31,9 @@ func NewZapLogger(env string) (*ZapLogger, error) {
 	} else {
 		cfg = zap.NewDevelopmentConfig()
 		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder // 彩色级别
+	}
+	if lv := parseZapLevel(level); lv != nil {
+		cfg.Level = zap.NewAtomicLevelAt(*lv) // LOG_LEVEL 显式覆盖（本地排查用）
 	}
 
 	z, err := cfg.Build(zap.AddCallerSkip(1)) // 跳过本包装层，显示真实调用方
@@ -39,10 +43,19 @@ func NewZapLogger(env string) (*ZapLogger, error) {
 	return &ZapLogger{zap: z}, nil
 }
 
+// parseZapLevel 字符串 → zap 级别（未知/空返回 nil=不覆盖）。
+func parseZapLevel(s string) *zapcore.Level {
+	var lv zapcore.Level
+	if err := lv.UnmarshalText([]byte(s)); err == nil && s != "" {
+		return &lv
+	}
+	return nil
+}
+
 // MustNewZapLogger 创建 zap Logger，失败时 panic。
 // 仅供 main 启动阶段使用（启动失败无法恢复）。
-func MustNewZapLogger(env string) *ZapLogger {
-	l, err := NewZapLogger(env)
+func MustNewZapLogger(env, level string) *ZapLogger {
+	l, err := NewZapLogger(env, level)
 	if err != nil {
 		panic(err)
 	}

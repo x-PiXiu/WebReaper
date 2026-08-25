@@ -70,13 +70,18 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 	}
 
 	var req struct {
-		BrandID   string   `json:"brand_id"`
-		Text      string   `json:"text"`
-		Materials []string `json:"materials"`
-		Template  string   `json:"template"`
-		Type      string   `json:"type"`      // 生成类型：video/image/audio/voice
-		Duration  int      `json:"duration"`
-		Quality   string   `json:"quality"`
+		BrandID     string         `json:"brand_id"`
+		Text        string         `json:"text"`
+		Materials   []string       `json:"materials"`
+		Template    string         `json:"template"`
+		Type        string         `json:"type"` // 生成类型：video/image/audio/voice
+		Duration    int            `json:"duration"`
+		Quality     string         `json:"quality"`
+		AspectRatio string         `json:"aspect_ratio"` // 画面比例（9:16 等——竖版封面/配图必需，此前全链丢弃致恒 16:9）
+		Params      map[string]any `json:"params"`       // 高级参数透传（seed/style/voice_setting_* 等白名单合并）
+		Watermark   bool           `json:"watermark"`    // 带水印（傻瓜式客户端不传——管理后台默认值通道）
+		OffPeak     bool           `json:"off_peak"`     // 错峰生成（更便宜但更慢；同上）
+		SubType     string         `json:"sub_type"`     // 显式端点覆盖（subject 创建主体等——空=自动选择）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -84,14 +89,19 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 	}
 
 	task, err := h.uc.UnifiedSubmit(c.Request.Context(), generation.UnifiedSubmitInput{
-		TenantID:  middleware.CurrentTenantID(c),
-		BrandID:   req.BrandID,
-		Text:      req.Text,
-		Materials: req.Materials,
-		Template:  req.Template,
-		Type:      req.Type,
-		Duration:  req.Duration,
-		Quality:   req.Quality,
+		TenantID:    middleware.CurrentTenantID(c),
+		BrandID:     req.BrandID,
+		Text:        req.Text,
+		Materials:   req.Materials,
+		Template:    req.Template,
+		Type:        req.Type,
+		Duration:    req.Duration,
+		Quality:     req.Quality,
+		AspectRatio: req.AspectRatio,
+		Params:      req.Params,
+		Watermark:   req.Watermark,
+		OffPeak:     req.OffPeak,
+		SubType:     req.SubType,
 	})
 	if err != nil {
 		// 参数校验类错误 400；配额 402 由 fail 统一映射
@@ -149,6 +159,9 @@ func (h *GenerationHandler) HandleTypes(c *gin.Context) {
 		models := make([]gin.H, 0, len(caps))
 		for _, cap := range caps {
 			models = append(models, gin.H{"model": cap.Model, "capability": cap})
+		}
+		if len(models) == 0 {
+			continue // 无可用模型的端点不下发——前端 CapabilityBanner 据此告警（此前空 models 仍返回致永不告警）
 		}
 		out = append(out, gin.H{"sub_type": t, "models": models})
 	}
@@ -235,6 +248,22 @@ func (h *GenerationHandler) HandleCallback(c *gin.Context, provider port.Generat
 }
 
 // generationTaskToView 任务 → API 契约（snake_case）。
+// retryHintFromErrCode err_code → 前端失败处理建议 key（RetryAuto 稍后重试 /
+// RetryManual 改参数重试 / RetryTerminal 不可重试）。此前前端拿 Vidu 原码做 key
+// 匹配永不命中，失败建议永不显示。
+func retryHintFromErrCode(errCode string) string {
+	switch {
+	case errCode == "QuotaExceeded":
+		return "RetryTerminal"
+	case strings.HasPrefix(errCode, "TooMany"), errCode == "LocalStuckTimeout", errCode == "":
+		return "RetryAuto"
+	case strings.HasPrefix(errCode, "Invalid"), strings.HasPrefix(errCode, "Auth"), strings.HasPrefix(errCode, "Unauthorized"):
+		return "RetryManual"
+	default:
+		return "RetryAuto"
+	}
+}
+
 func generationTaskToView(t entity.GenerationTask) gin.H {
 	creations := []gin.H{}
 	if t.CreationsJSON != "" {
@@ -253,6 +282,7 @@ func generationTaskToView(t entity.GenerationTask) gin.H {
 		"type": t.Type, "sub_type": t.SubType, "model": t.Model,
 		"provider": t.Provider, "provider_task_id": t.ProviderTaskID,
 		"state": t.State, "err_code": t.ErrCode, "err_msg": t.ErrMsg,
+		"retry_hint": retryHintFromErrCode(t.ErrCode),
 		"params": t.ParamsJSON, "creations": creations,
 		"credits": t.Credits, "off_peak": t.OffPeak, "watermark": t.Watermark,
 		"retry_count": t.RetryCount,

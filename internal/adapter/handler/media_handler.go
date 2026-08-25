@@ -23,8 +23,9 @@ func NewMediaHandler(store port.MediaAssetStore) *MediaHandler {
 	return &MediaHandler{store: store}
 }
 
-// HandleUpload POST /api/v1/media/assets —— multipart 上传素材（图片/音频）。
-// 返回 {id, url, mime, size_bytes, type, name}——url 直接可用于生成任务的 images/audio_url 参数。
+// HandleUpload POST /api/v1/media/assets —— multipart 上传素材（图片/音频/视频）。
+// 返回 {id, url, mime, size_bytes, type, name}——url 直接可用于生成任务的 images/audio_url
+// 参数及发布向导的 media_urls（视频发布素材）。
 func (h *MediaHandler) HandleUpload(c *gin.Context) {
 	if h.store == nil {
 		fail(c, fmt.Errorf("素材存储未配置"))
@@ -36,22 +37,31 @@ func (h *MediaHandler) HandleUpload(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-	// 大小限制 20MB（Vidu POST body 上限；素材单文件限制）
-	data, err := io.ReadAll(io.LimitReader(file, 21<<20))
+	mime := header.Header.Get("Content-Type")
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	// 类型白名单与分级大小限制：图片/音频 20MB（Vidu POST body 上限）；视频 200MB
+	//（发布素材——口播成片几十~几百 MB，20MB 必然拒之门外；不进 Vidu 不受其限制）。
+	isVideo := ext == ".mp4" || ext == ".webm" || ext == ".mov"
+	limit := 21 << 20
+	if isVideo {
+		limit = 201 << 20
+	}
+	data, err := io.ReadAll(io.LimitReader(file, int64(limit)))
 	if err != nil {
 		fail(c, fmt.Errorf("读取文件失败: %w", err))
 		return
 	}
-	if len(data) > 20<<20 {
-		fail(c, fmt.Errorf("素材超过 20MB 上限"))
+	if len(data) > limit-1 {
+		fail(c, fmt.Errorf("素材超过 %dMB 上限", (limit-1)>>20))
 		return
 	}
-	// 类型白名单：图片（png/jpeg/jpg/webp）+ 音频（mp3/m4a/wav）
-	mime := header.Header.Get("Content-Type")
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	allowed := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".mp3": true, ".m4a": true, ".wav": true}
+	allowed := map[string]bool{
+		".png": true, ".jpg": true, ".jpeg": true, ".webp": true, // 图片
+		".mp3": true, ".m4a": true, ".wav": true, // 音频
+		".mp4": true, ".webm": true, ".mov": true, // 视频（发布素材）
+	}
 	if !allowed[ext] {
-		fail(c, fmt.Errorf("仅支持图片(png/jpg/webp)与音频(mp3/m4a/wav)素材，收到 %s", ext))
+		fail(c, fmt.Errorf("仅支持图片(png/jpg/webp)、音频(mp3/m4a/wav)与视频(mp4/webm/mov)素材，收到 %s", ext))
 		return
 	}
 	asset, err := h.store.SaveFile(c.Request.Context(), middleware.CurrentTenantID(c), c.PostForm("brand_id"), "material", data, mime, ext)
@@ -76,7 +86,13 @@ func (h *MediaHandler) HandleList(c *gin.Context) {
 		fail(c, fmt.Errorf("素材存储未配置"))
 		return
 	}
-	assets, err := h.store.List(c.Request.Context(), middleware.CurrentTenantID(c), entity.AssetTypeMaterial)
+	// owner 过滤：material（默认，向后兼容——配图/配音场景）/ creation（AI 产物，含成片视频）/
+	// all（素材+产物——发布向导选发视频用：成片主要落在 creation）。
+	owner := c.DefaultQuery("owner", entity.AssetTypeMaterial)
+	if owner == "all" {
+		owner = "" // store.List 语义：空 = 全部
+	}
+	assets, err := h.store.List(c.Request.Context(), middleware.CurrentTenantID(c), owner)
 	if err != nil {
 		fail(c, err)
 		return

@@ -94,6 +94,8 @@ export async function runLipSyncPipeline(
       brand_id: input.brandId,
       text: input.script,
       type: 'audio',
+      // 音色选择（此前声明了 voiceId 却从未提交——B 类修复的后端通道已通，补前端接线）
+      params: input.voiceId ? { voice_setting_voice_id: input.voiceId } : undefined,
     })
     ttsTaskId = tts.id
     const ttsDone = await waitGenerationTask(tts.id)

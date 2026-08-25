@@ -15,6 +15,8 @@ export type UnifiedSubmitPayload = {
   duration?: number
   quality?: string
   aspect_ratio?: string
+  params?: Record<string, unknown>
+  sub_type?: string
 }
 
 /** 旧高级提交形态（已删除 POST /generation/tasks）→ 映射到统一 submit */
@@ -50,6 +52,12 @@ export async function ensureMaterialId(source: string): Promise<string> {
   const s = (source || '').trim()
   if (!s) throw new Error('素材地址为空')
   if (!/^https?:\/\//i.test(s) && !s.startsWith('data:') && !s.startsWith('blob:')) {
+    return s
+  }
+  // 本站托管的资产（/media/...）直接传原 URL——服务端按 URL 匹配素材，
+  // 免去「下载回浏览器再重传」的双份流量与跨源 fetch 失败风险
+  const mediaBase = window.location.origin + '/media/'
+  if (s.startsWith('/media/') || s.startsWith(mediaBase)) {
     return s
   }
   const res = await fetch(s)
@@ -99,6 +107,20 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
     throw new Error('主体创建暂未纳入统一提交接口，请用人像图走数字人口播')
   }
 
+  // 高级参数打包（白名单外的 key 服务端会丢弃；保留字段已被上面的显式提取消费）
+  const ADVANCED_KEYS = [
+    'seed', 'style', 'movement_amplitude', 'audio', 'audio_type', 'bgm',
+    'watermark', 'off_peak', 'payload', 'voice_id', 'model',
+    'image_settings', 'timing_prompts',
+    'voice_setting_speed', 'voice_setting_volume', 'voice_setting_pitch',
+    'voice_setting_voice_id', 'voice_setting_emotion',
+  ] as const
+  const adv: Record<string, unknown> = {}
+  for (const k of ADVANCED_KEYS) {
+    const v = (params as Record<string, unknown>)[k]
+    if (v !== undefined && v !== null && v !== '') adv[k] = v
+  }
+
   const materialIds = new Set<string>(refIds(data.refs))
   const urlKeys = ['audio_url', 'video_url', 'image', 'image_url'] as const
   for (const k of urlKeys) {
@@ -142,6 +164,7 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
     duration,
     quality,
     aspect_ratio,
+    params: Object.keys(adv).length ? adv : undefined,
   }
 }
 
@@ -159,6 +182,8 @@ export async function submitUnified(payload: UnifiedSubmitPayload): Promise<Gene
     duration: payload.duration,
     quality: payload.quality,
     aspect_ratio: payload.aspect_ratio,
+    params: payload.params,
+    sub_type: payload.sub_type,
   })
 }
 

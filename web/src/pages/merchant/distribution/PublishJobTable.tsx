@@ -42,9 +42,9 @@ export default function PublishJobTable({
     setReMonitorPending(jobId)
     try {
       const job = await businessApi.reMonitorJob(jobId)
-      const diff = job.post_mention_rate - job.pre_mention_rate
+      const diff = (job.post_mention_rate || 0) - (job.pre_mention_rate || 0)
       const sign = diff > 0 ? '+' : ''
-      message.info(`复测完成：表现 ${(job.pre_mention_rate * 100).toFixed(1)}% → ${(job.post_mention_rate * 100).toFixed(1)}%（${sign}${(diff * 100).toFixed(1)}%）`)
+      message.info(`复测完成：表现 ${((job.pre_mention_rate || 0) * 100).toFixed(1)}% → ${((job.post_mention_rate || 0) * 100).toFixed(1)}%（${sign}${(diff * 100).toFixed(1)}%）`)
       onRefresh()
     } catch { /* 拦截器已提示 */ }
     finally {
@@ -80,9 +80,9 @@ export default function PublishJobTable({
       title: '表现变化', key: 'mention_rate', width: 140,
       render: (_: unknown, r: PublishJob) => {
         if (!r.post_mention_rate) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
-        const pre = (r.pre_mention_rate * 100).toFixed(1)
+        const pre = ((r.pre_mention_rate || 0) * 100).toFixed(1)
         const post = (r.post_mention_rate * 100).toFixed(1)
-        const diff = r.post_mention_rate - r.pre_mention_rate
+        const diff = r.post_mention_rate - (r.pre_mention_rate || 0)
         const color = diff > 0 ? 'var(--wr-success)' : diff < 0 ? 'var(--wr-danger)' : 'var(--wr-text-muted)'
         return <Text style={{ fontSize: 12, color }}>{pre}% → {post}%{diff !== 0 && ` (${diff > 0 ? '+' : ''}${(diff * 100).toFixed(1)}%)`}</Text>
       },

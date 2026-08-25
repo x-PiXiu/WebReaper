@@ -50,7 +50,10 @@ func (uc *NotifyUseCase) UnreadCount(ctx context.Context, tenantID string) (int,
 	return uc.repo.UnreadCount(ctx, tenantID)
 }
 
-// MarkRead 标记已读（id 空 = 全部已读）。
+// MarkRead 标记已读（id 空 = 全部已读；前端"全部已读"按钮传 "all"——归一为空）。
 func (uc *NotifyUseCase) MarkRead(ctx context.Context, tenantID, id string) error {
+	if id == "all" {
+		id = ""
+	}
 	return uc.repo.MarkRead(ctx, tenantID, id)
 }

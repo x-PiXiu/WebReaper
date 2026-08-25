@@ -113,6 +113,9 @@ type PublishConfig struct {
 type ServerConfig struct {
 	Port string // 监听端口，默认 8082
 	Env  string // 运行环境：development / production
+	// LogLevel 日志级别（debug/info/warn/error；空=按环境默认：dev=debug、prod=info）。
+	// 本地排查时在 .env 设 LOG_LEVEL=debug 后重启生效。
+	LogLevel string
 	// APIPrefix 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）。
 	// 生产部署在宿主机 nginx 后面，通过前缀区分不同项目的请求。
 	APIPrefix string
@@ -290,6 +293,7 @@ func Load() Config {
 		Server: ServerConfig{
 			Port:               getenvDefault("SERVER_PORT", "8082"),
 			Env:                getenvDefault("APP_ENV", "development"),
+			LogLevel:           getenvDefault("LOG_LEVEL", ""),
 			APIPrefix:          getenvDefault("API_PREFIX", ""),
 			PublicBaseURL:      getenvDefault("PUBLIC_BASE_URL", "http://localhost:8082"),
 			IndexNowKey:        os.Getenv("INDEXNOW_KEY"),

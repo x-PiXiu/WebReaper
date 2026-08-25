@@ -10,6 +10,7 @@ package mediaav
 
 import (
 	"context"
+	"sort"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -109,6 +110,34 @@ func (t *FFmpegTool) ExtractAudio(ctx context.Context, mediaPath string) (string
 		return "", fmt.Errorf("抽音轨失败: %v: %s", err, truncate(string(out), 200))
 	}
 	return audioPath, nil
+}
+
+// SegmentAudio 把音频按 segSeconds 切段（16kHz 单声道 mp3——与 ExtractAudio 同规格，
+// segment muxer 流复制不重编码，秒级完成）。返回按序段文件路径（调用方负责删除）。
+func (t *FFmpegTool) SegmentAudio(ctx context.Context, audioPath string, segSeconds int) ([]string, error) {
+	if !t.Available() {
+		return nil, fmt.Errorf("ffmpeg 不可用")
+	}
+	if segSeconds <= 0 {
+		segSeconds = 300 // 默认 5 分钟/段
+	}
+	outPattern := audioPath + ".seg%03d.mp3"
+	pctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	if out, err := exec.CommandContext(pctx, t.bin("ffmpeg"),
+		"-y", "-i", audioPath, "-f", "segment",
+		"-segment_time", fmt.Sprintf("%d", segSeconds),
+		"-ac", "1", "-ar", "16000", "-b:a", "64k", "-codec:a", "libmp3lame",
+		outPattern).CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("音频分段失败: %v: %s", err, truncate(string(out), 200))
+	}
+	// 按序收集段文件
+	matches, _ := filepath.Glob(audioPath + ".seg*.mp3")
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("分段后未产出段文件")
+	}
+	return matches, nil
 }
 
 // srtToText srt 字幕 → 纯文本（去序号/时间轴，按行合并为段落）。

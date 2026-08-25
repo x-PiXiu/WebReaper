@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 	"log"
@@ -13,6 +15,7 @@ import (
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/adapter/agent"
 	"webreaper/internal/usecase/account"
+	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/works"
 )
 
@@ -25,7 +28,22 @@ type AccountHandler struct {
 	worksUC        *works.WorksUseCase // 可选：作品库聚合
 	pendingStore   *agent.PendingPublishStore // 可选：发布计划暂存（硬确认）
 	frontendBaseURL string // OAuth 回调完成后 302 跳回的前端地址
+	adapterRegistry port.ContentAdapterRegistry // 可选：适配预览（向导阶段⑤）
+	draftCache      DraftCache // 可选：向导云草稿（Redis）
 }
+
+// DraftCache 向导云草稿存储（RedisCache 天然实现；测试可 Mock）。
+type DraftCache interface {
+	Get(ctx context.Context, key string) (string, bool, error)
+	Set(ctx context.Context, key, value string, ttl time.Duration) error
+	Del(ctx context.Context, keys ...string) error
+}
+
+// SetContentAdapters 注入内容适配器注册表（适配预览用，可选）。
+func (h *AccountHandler) SetContentAdapters(r port.ContentAdapterRegistry) { h.adapterRegistry = r }
+
+// SetDraftCache 注入向导云草稿存储（可选；未注入时前端自动降级 localStorage）。
+func (h *AccountHandler) SetDraftCache(dc DraftCache) { h.draftCache = dc }
 
 // SetWorksUC 注入作品库聚合用例（可选）。
 func (h *AccountHandler) SetWorksUC(uc *works.WorksUseCase) { h.worksUC = uc }
@@ -117,23 +135,41 @@ func accountsToView(as []entity.Account) []gin.H {
 }
 
 func publishJobToView(j entity.PublishJob) gin.H {
+	// mention_rate 零值输出 null（前端用 != null 区分"未复测"——输出 0 会污染
+	// 表现变化均值统计：未复测任务被计入 (0-pre) 拉低均值）
+	preRate, postRate := any(nil), any(nil)
+	if j.PreMentionRate != 0 {
+		preRate = j.PreMentionRate
+	}
+	if j.PostMentionRate != 0 {
+		postRate = j.PostMentionRate
+	}
+	// 状态派生：pending + 未来排期时间 → scheduled（前端"已排期"筛选的语义来源；
+	// 库内仍存 pending——到期执行不改）
+	displayStatus := j.Status
+	if j.Status == entity.PublishStatusPending && !j.ScheduledAt.IsZero() && j.ScheduledAt.After(time.Now()) {
+		displayStatus = "scheduled"
+	}
 	return gin.H{
 		"id":                j.ID,
 		"account_id":        j.AccountID,
 		"platform":          j.Platform,
+		"brand_id":          j.BrandID,
 		"content_id":        j.ContentID,
 		"title":             j.Title,
 		"mode":              j.Mode,
-		"status":            j.Status,
+		"status":            displayStatus,
+		"scheduled_at":      j.ScheduledAt,
 		"external_url":      j.ExternalURL,
 		"error_msg":         j.ErrorMsg,
 		"created_at":        j.CreatedAt,
 		"published_at":      j.PublishedAt,
-		"pre_mention_rate":  j.PreMentionRate,
-		"post_mention_rate": j.PostMentionRate,
+		"pre_mention_rate":  preRate,
+		"post_mention_rate": postRate,
 		"content_type":      j.ContentType,
 		"media_urls":        j.MediaURLs,
 		"cover_url":         j.CoverURL,
+		"transport":         j.Transport,
 	}
 }
 
@@ -291,29 +327,167 @@ func (h *AccountHandler) HandlePublish(c *gin.Context) {
 		ContentType string   `json:"content_type"` // image/video/article/audio
 		MediaURLs   []string `json:"media_urls"`   // 媒体文件 URL（图文=图片）
 		CoverURL    string   `json:"cover_url"`    // 封面图
+		// 对接向导（Plan-14）补齐的字段——此前 JSON 绑定静默丢弃导致定时发布失效/标签分区仅正文兜底
+		ScheduledAt  string   `json:"scheduled_at"`  // ISO 时间（空=立即发布）
+		Tags         []string `json:"tags"`          // 标签（B站独立标签框等）
+		Category     string   `json:"category"`      // 平台分区（B站必选）
+		StoreAddress string   `json:"store_address"` // 门店地址（本地生活曝光信号）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
+	var scheduledAt time.Time
+	if req.ScheduledAt != "" {
+		t, pErr := time.Parse(time.RFC3339, req.ScheduledAt)
+		if pErr != nil {
+			fail(c, fmt.Errorf("scheduled_at 格式错误（需 ISO/RFC3339）: %w", pErr))
+			return
+		}
+		scheduledAt = t
+	}
 	job, err := h.publishUC.Publish(c.Request.Context(), account.PublishInput{
-		TenantID:    tenantID,
-		BrandID:     req.BrandID,
-		AccountID:   req.AccountID,
-		Platform:    req.Platform,
-		ContentID:   req.ContentID,
-		Title:       req.Title,
-		Content:     req.Content,
-		Mode:        req.Mode,
-		ContentType: req.ContentType,
-		MediaURLs:   req.MediaURLs,
-		CoverURL:    req.CoverURL,
+		TenantID:     tenantID,
+		BrandID:      req.BrandID,
+		AccountID:    req.AccountID,
+		Platform:     req.Platform,
+		ContentID:    req.ContentID,
+		Title:        req.Title,
+		Content:      req.Content,
+		Mode:         req.Mode,
+		ContentType:  req.ContentType,
+		MediaURLs:    req.MediaURLs,
+		CoverURL:     req.CoverURL,
+		ScheduledAt:  scheduledAt,
+		Tags:         req.Tags,
+		Category:     req.Category,
+		StoreAddress: req.StoreAddress,
 	})
 	if err != nil {
 		fail(c, err)
 		return
 	}
 	success(c, publishJobToView(job))
+}
+
+// HandlePreviewAdapt POST /api/v1/merchant/publish/preview —— 多平台内容适配预览
+// （向导阶段⑤数据源：预览即真实适配结果——ContentAdapter 只读暴露，Plan-14 修正 #7）。
+// 前端本地截断规则仅在本文档接口 404 时兜底，双端规则由此归一。
+func (h *AccountHandler) HandlePreviewAdapt(c *gin.Context) {
+	if h.adapterRegistry == nil {
+		fail(c, fmt.Errorf("适配预览未配置"))
+		return
+	}
+	var req struct {
+		Title     string   `json:"title"`
+		Content   string   `json:"content"`
+		Tags      []string `json:"tags"`
+		Platforms []string `json:"platforms" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	type preview struct {
+		Platform       string   `json:"platform"`
+		Title          string   `json:"title,omitempty"`
+		Description    string   `json:"description,omitempty"`
+		Tags           []string `json:"tags,omitempty"`
+		CTA            string   `json:"cta,omitempty"`
+		TitleTruncated bool     `json:"title_truncated,omitempty"`
+		Error          string   `json:"error,omitempty"`
+	}
+	previews := make([]preview, 0, len(req.Platforms))
+	for _, platform := range req.Platforms {
+		p := preview{Platform: platform}
+		adapter, err := h.adapterRegistry.Get(platform)
+		if err != nil {
+			p.Error = err.Error()
+			previews = append(previews, p)
+			continue
+		}
+		adapted, err := adapter.Adapt(c.Request.Context(), port.AdaptRequest{
+			Platform: platform, Title: req.Title, Description: req.Content, Tags: req.Tags,
+		})
+		if err != nil {
+			p.Error = err.Error()
+			previews = append(previews, p)
+			continue
+		}
+		p.Title, p.Description, p.Tags, p.CTA = adapted.Title, adapted.Description, adapted.Tags, adapted.CTA
+		p.TitleTruncated = len([]rune(adapted.Title)) < len([]rune(req.Title))
+		previews = append(previews, p)
+	}
+	success(c, gin.H{"previews": previews})
+}
+
+// ---- 向导云草稿（Plan-14 修正 #8：多端同步；未部署 Redis 时前端降级 localStorage）----
+
+const publishDraftTTL = 7 * 24 * time.Hour
+
+func (h *AccountHandler) draftKey(tenantID, brandID string) string {
+	return "publish:draft:" + tenantID + ":" + brandID
+}
+
+// HandleGetPublishDraft GET /api/v1/merchant/publish/draft?brand_id=xx
+func (h *AccountHandler) HandleGetPublishDraft(c *gin.Context) {
+	if h.draftCache == nil {
+		fail(c, fmt.Errorf("草稿服务未配置"))
+		return
+	}
+	brandID := c.Query("brand_id")
+	if brandID == "" {
+		fail(c, fmt.Errorf("brand_id 必填"))
+		return
+	}
+	// 存储结构 {draft, updated_at}（元数据随值一起存，避免多 key）
+	var entry struct {
+		Draft     string `json:"draft"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	if raw, ok, err := h.draftCache.Get(c.Request.Context(), h.draftKey(middleware.CurrentTenantID(c), brandID)); err == nil && ok && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &entry)
+	}
+	success(c, gin.H{"draft": entry.Draft, "updated_at": entry.UpdatedAt})
+}
+
+// HandleSavePublishDraft PUT /api/v1/merchant/publish/draft
+func (h *AccountHandler) HandleSavePublishDraft(c *gin.Context) {
+	if h.draftCache == nil {
+		fail(c, fmt.Errorf("草稿服务未配置"))
+		return
+	}
+	var req struct {
+		BrandID string `json:"brand_id" binding:"required"`
+		Draft   string `json:"draft"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	entry, _ := json.Marshal(map[string]string{
+		"draft": req.Draft, "updated_at": time.Now().Format(time.RFC3339),
+	})
+	if err := h.draftCache.Set(c.Request.Context(), h.draftKey(middleware.CurrentTenantID(c), req.BrandID), string(entry), publishDraftTTL); err != nil {
+		fail(c, fmt.Errorf("草稿保存失败: %w", err))
+		return
+	}
+	success(c, gin.H{"saved": true})
+}
+
+// HandleDeletePublishDraft DELETE /api/v1/merchant/publish/draft?brand_id=xx
+func (h *AccountHandler) HandleDeletePublishDraft(c *gin.Context) {
+	if h.draftCache == nil {
+		fail(c, fmt.Errorf("草稿服务未配置"))
+		return
+	}
+	brandID := c.Query("brand_id")
+	if brandID == "" {
+		fail(c, fmt.Errorf("brand_id 必填"))
+		return
+	}
+	_ = h.draftCache.Del(c.Request.Context(), h.draftKey(middleware.CurrentTenantID(c), brandID))
+	success(c, gin.H{"deleted": true})
 }
 
 // HandleListPublishJobs GET /api/v1/geo/publish-jobs —— 列出发布任务记录。
@@ -323,6 +497,16 @@ func (h *AccountHandler) HandleListPublishJobs(c *gin.Context) {
 	if err != nil {
 		fail(c, err)
 		return
+	}
+	// 品牌维度过滤（品牌发布历史 Tab 传 brand_id——租户级列表混入他品牌任务的修复）
+	if brandID := c.Query("brand_id"); brandID != "" {
+		filtered := make([]entity.PublishJob, 0, len(jobs))
+		for _, j := range jobs {
+			if j.BrandID == brandID {
+				filtered = append(filtered, j)
+			}
+		}
+		jobs = filtered
 	}
 	success(c, publishJobsToView(jobs))
 }

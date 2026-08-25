@@ -15,7 +15,7 @@ var _ port.Logger = (*ZapLogger)(nil)
 
 func TestZapLogger_AllLevels(t *testing.T) {
 	// 各级别调用不应 panic
-	l := MustNewZapLogger("development")
+	l := MustNewZapLogger("development", "")
 	defer l.Sync()
 
 	l.Debug("debug msg", port.String("k", "v"))
@@ -25,13 +25,13 @@ func TestZapLogger_AllLevels(t *testing.T) {
 }
 
 func TestZapLogger_Production(t *testing.T) {
-	l := MustNewZapLogger("production")
+	l := MustNewZapLogger("production", "")
 	defer l.Sync()
 	l.Info("production log") // 不应 panic
 }
 
 func TestZapLogger_With(t *testing.T) {
-	l := MustNewZapLogger("development")
+	l := MustNewZapLogger("development", "")
 	defer l.Sync()
 
 	// With 返回的子 Logger 应带持久字段

@@ -36,6 +36,8 @@ func (text2videoAdapter) BuildRequest(ctx context.Context, model string, p entit
 	}
 	if v := getInt(p, "seed"); v > 0 {
 		body["seed"] = v
+	} else if v := getFloat(p, "movement_amplitude"); v != 0 {
+		body["movement_amplitude"] = v // 注释声明 q1/2.0 生效——此前从未读取（声明与实现不符）
 	}
 	if v := getString(p, "style"); v != "" {
 		body["style"] = v
@@ -81,6 +83,12 @@ func (img2videoAdapter) BuildRequest(ctx context.Context, model string, p entity
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
 	}
+	if v := getInt(p, "seed"); v > 0 {
+		body["seed"] = v
+	}
+	if v := getFloat(p, "movement_amplitude"); v != 0 {
+		body["movement_amplitude"] = v // 注释声明 q1/2.0 生效——补齐读取
+	}
 	if payload != "" {
 		body["payload"] = payload
 	}
@@ -115,6 +123,12 @@ func (startEnd2videoAdapter) BuildRequest(ctx context.Context, model string, p e
 	ensureStringParam(body, "resolution", p, "1080p")
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
+	}
+	if v := getInt(p, "seed"); v > 0 {
+		body["seed"] = v
+	}
+	if v := getFloat(p, "movement_amplitude"); v != 0 {
+		body["movement_amplitude"] = v // 注释声明 q1/2.0 生效——补齐读取
 	}
 	if payload != "" {
 		body["payload"] = payload

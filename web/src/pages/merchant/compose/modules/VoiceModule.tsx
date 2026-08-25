@@ -51,6 +51,7 @@ export default function VoiceModule() {
         brand_id: bid,
         text: text.slice(0, 2000),
         type: 'audio',
+        params: model ? { model } : undefined, // TTS 模型选择（此前下拉是死控件——所选模型从未提交）
       })
       draft.patch({ voiceTaskId: task.id, brandId: bid })
       message.success('配音任务已提交，可在生成任务列表查看产物')

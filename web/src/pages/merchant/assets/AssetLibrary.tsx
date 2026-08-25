@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { useMediaAssets, MEDIA_ASSETS_QUERY_KEY } from '../../../hooks/useMediaAssets'
+import { GENERATION_TASKS_KEY } from '../../../hooks/useGenerationTasks'
 import { useBrandContext } from '../../../hooks/useBrands'
 import AssetPicker from '../../../components/AssetPicker'
 import type { GenerationTask, ModelCapability } from '../../../types/api'
@@ -385,6 +386,8 @@ function CreateSubjectModal({ open, voices, onClose, onCreated: _onCreated }: {
   const [videoUrl, setVideoUrl] = useState('')
   const [voiceId, setVoiceId] = useState('')
   const [creating, setCreating] = useState(false)
+  const { brandId } = useBrandContext()
+  const queryClient = useQueryClient()
 
   const handleCreate = async () => {
     if (!name.trim()) { message.warning(kind === 'scene' ? '请输入场景名称' : '请输入数字人名称'); return }
@@ -393,9 +396,19 @@ function CreateSubjectModal({ open, voices, onClose, onCreated: _onCreated }: {
     }
     setCreating(true)
     try {
-      // 主体创建未纳入统一 submit（Docs 09：POST /generation/tasks 已删除）
-      message.warning('主体创建暂未纳入统一生成接口。请先用「生成图片/视频」准备素材，或使用「快速生成」模板。')
-    } finally { setCreating(false) }
+      // 数字分身主体注册（Vidu /ent/v2/subjects 同步端点——一键傻瓜式）：
+      // 形象照已上传素材库（URL 直传），name + voice_id 一并注册，server_id 落任务产物
+      const task = await businessApi.submitGeneration({
+        brand_id: brandId || '',
+        text: name.trim(),
+        materials: imageUrls,
+        sub_type: 'subject',
+        params: voiceId ? { voice_id: voiceId } : undefined,
+      })
+      message.success(`数字分身「${name.trim()}」已创建（任务 ${task.id}）——生成视频时可直接复用该形象`)
+      queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
+      onClose()
+    } catch { /* 拦截器已提示 */ } finally { setCreating(false) }
   }
 
   return (

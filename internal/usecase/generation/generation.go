@@ -14,6 +14,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -62,6 +65,10 @@ type GenerationUseCase struct {
 	nonceStore port.CallbackNonceStore
 	// notifier 任务终态通知（可选；nil=不通知——异步任务完成主动唤醒商户）
 	notifier port.TaskNotifier
+	// settingRepo 系统设置（可选；傻瓜式默认值通道——watermark/off_peak 等管理后台全局默认）
+	settingRepo port.SystemSettingRepository
+	// templateRepo 生成模板（可选；傻瓜式默认值通道——模板 default_params 填充未显式指定的参数）
+	templateRepo port.TemplateRepository
 	// callbackURL 公网回调地址（可选；空=纯轮询。注入到支持回调的端点请求体——
 	// Vidu 任务状态变化时主动 POST，轮询降级为兜底通道，双通道幂等合并）
 	callbackURL string
@@ -225,18 +232,12 @@ func (uc *GenerationUseCase) getDefaultModel(ctx context.Context, subType string
 		return ""
 	}
 
-	// 查找默认模型（is_default=true）
-	for _, name := range names {
-		if cap, cErr := uc.registry.Capability(ctx, subType, name); cErr == nil {
-			// 如果有默认标记，返回这个模型
-			if cap.Model != "" {
-				return cap.Model
-			}
-		}
+	// 默认模型 = 可用列表第一个（Models() 已过滤停用——registry 修复后
+	// DB 停用的模型不再经 defaultCaps 兜底回流，此处选择即安全）
+	if len(names) > 0 {
+		return names[0]
 	}
-
-	// 如果没有默认模型，返回第一个
-	return names[0]
+	return ""
 }
 
 // inlineMediaKeys 请求体中承载媒体 URL 的字段（数组与单值两种形态）。
@@ -335,6 +336,14 @@ type SubmitInput struct {
 func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity.GenerationTask, error) {
 	if uc.registry == nil || uc.repo == nil {
 		return entity.GenerationTask{}, fmt.Errorf("生成服务未配置")
+	}
+
+	// 私网素材本地化（本地开发模式：Vidu 云端拉不到 localhost/内网 URL——
+	// 本站素材读文件转 base64 data URI 内联；公网部署 URL 原样、行为不变）
+	if in.Params != nil {
+		if err := uc.localizePrivateMaterials(ctx, in.Params); err != nil {
+			return entity.GenerationTask{}, err
+		}
 	}
 
 	// 动态选择 provider
@@ -913,6 +922,241 @@ type UnifiedSubmitInput struct {
 	Type      string   // 生成类型（可选：video/image/audio/voice）
 	Duration  int      // 时长（可选）
 	Quality   string   // 质量（可选）
+	// AspectRatio 画面比例（9:16 等——竖版封面/配图必需；此前全链丢弃致恒 16:9）
+	AspectRatio string
+	// Params 高级参数透传通道（seed/style/voice_setting_* 等白名单 key——
+	// selector 的 applyDefaults 出口合并，用户显式值覆盖默认）
+	Params map[string]any
+	// Watermark/OffPeak 任务级开关（傻瓜式客户端不暴露——管理后台/默认值控制；
+	// 此前 SubmitInput 有字段但统一提交无通道，勾选静默无效）
+	Watermark bool
+	OffPeak   bool
+	// SubType 显式端点覆盖（空=selector 按素材自动选择）。当前支持 "subject"：
+	// 数字分身主体注册（Vidu /ent/v2/subjects 同步端点——name+形象照+音色）。
+	SubType string
+}
+
+// submitSubject 数字分身主体注册（/ent/v2/subjects 同步端点）。
+// name=Text；形象照取素材图（≤3，URL 直传形态兼容 E4）；voice_id 从 Params。
+// 提交即终态：server_id 在返回任务的 creations[0].id——reference2video 复用。
+func (uc *GenerationUseCase) submitSubject(ctx context.Context, in UnifiedSubmitInput) (entity.GenerationTask, error) {
+	if in.Text == "" {
+		return entity.GenerationTask{}, fmt.Errorf("主体名称（text）必填")
+	}
+	params := entity.GenerationParams{"name": in.Text}
+	if uc.asset != nil && len(in.Materials) > 0 {
+		assets, err := uc.asset.List(ctx, in.TenantID, entity.AssetTypeMaterial)
+		if err == nil {
+			idMap := map[string]bool{}
+			for _, id := range in.Materials {
+				idMap[id] = true
+			}
+			var images []string
+			for _, a := range assets {
+				if (idMap[a.ID] || containsStrAny(in.Materials, a.SourceURL)) && a.Type == entity.MaterialTypeImage && len(images) < 3 {
+					images = append(images, a.SourceURL)
+				}
+			}
+			if len(images) > 0 {
+				params["images"] = images
+			}
+		}
+	}
+	if v, ok := in.Params["voice_id"].(string); ok && v != "" {
+		params["voice_id"] = v
+	}
+	return uc.Submit(ctx, SubmitInput{
+		TenantID: in.TenantID, BrandID: in.BrandID,
+		SubType: "subject", Model: "", Params: params,
+		Watermark: in.Watermark, OffPeak: in.OffPeak,
+	})
+}
+
+// containsStrAny 列表包含（URL 直传素材匹配用）。
+func containsStrAny(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- 私网素材本地化（本地开发模式：Vidu 云端拉不到 localhost/内网素材 URL）----
+
+// materialURLKeys params 中承载素材 URL 的字段（单值形态）。
+var materialURLKeys = []string{"image", "audio_url", "video_url", "start_image", "ref_photo_url", "prompt_audio_url"}
+
+// maxInlineMaterialBytes base64 内联的素材大小上限（Vidu POST body 20MB 限制，
+// base64 膨胀 ~1.33x——8MB 文件 ≈ 10.7MB body，留足其他字段余量。
+// 超限视频在本地模式明确报错引导配置公网 PUBLIC_BASE_URL）。
+const maxInlineMaterialBytes = 8 << 20
+
+// isPrivateHost 判断 URL host 是否私网/环回（厂商云端不可达）。
+func isPrivateHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" {
+		return true
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return true // 解析失败按私网处理（保守——本地 hosts 场景）
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return true
+		}
+	}
+	return false
+}
+
+// toDataURI 文件字节 → 厂商 data URI（data:<mime>;base64,<payload>——Vidu 的
+// images/audio_url/video_url 等字段通用格式）。
+func toDataURI(data []byte, mime string) string {
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+// localizePrivateMaterials 私网素材 URL → base64 data URI（Submit 前统一转换）。
+// 公网 URL 原样保留（生产行为不变）；仅本地/内网部署时生效。
+func (uc *GenerationUseCase) localizePrivateMaterials(ctx context.Context, params entity.GenerationParams) error {
+	if uc.asset == nil {
+		return nil
+	}
+	localize := func(rawURL string) (string, bool, error) {
+		if rawURL == "" || !isPrivateHost(rawURL) {
+			return rawURL, false, nil
+		}
+		if !strings.Contains(rawURL, "/media/") {
+			return rawURL, false, nil // 非本站托管（如外部 localhost 服务）——不动，交给厂商报错
+		}
+		data, mime, ok := uc.asset.ReadLocal(ctx, rawURL)
+		if !ok {
+			return rawURL, false, nil // 读不到（OSS 模式等）——原样保留
+		}
+		if len(data) > maxInlineMaterialBytes {
+			return "", false, fmt.Errorf("素材 %s 为 %dMB，超出本地内联上限 8MB——本地开发模式请上传更小的素材，或配置公网可达的 PUBLIC_BASE_URL", truncateURL(rawURL), len(data)>>20)
+		}
+		log.Printf("[LocalizeMaterials][DEBUG] %s → base64 data URI（mime=%s %d字节）", truncateURL(rawURL), mime, len(data))
+		return toDataURI(data, mime), true, nil
+	}
+	for _, k := range materialURLKeys {
+		if s, ok := params[k].(string); ok {
+			nv, changed, err := localize(s)
+			if err != nil {
+				return err
+			}
+			if changed {
+				params[k] = nv
+			}
+		}
+	}
+	if arr, ok := params["images"].([]string); ok {
+		for i, s := range arr {
+			nv, changed, err := localize(s)
+			if err != nil {
+				return err
+			}
+			if changed {
+				arr[i] = nv
+			}
+		}
+	}
+	if arr, ok := params["images"].([]any); ok { // JSON 反序列化形态
+		for i, v := range arr {
+			if s, ok := v.(string); ok {
+				nv, changed, err := localize(s)
+				if err != nil {
+					return err
+				}
+				if changed {
+					arr[i] = nv
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// truncateURL 日志/报错用 URL 截断。
+func truncateURL(u string) string {
+	if len(u) > 80 {
+		return u[:80] + "…"
+	}
+	return u
+}
+
+// SetSettingRepo 注入系统设置仓储（可选；傻瓜式默认值通道）。
+func (uc *GenerationUseCase) SetSettingRepo(sr port.SystemSettingRepository) { uc.settingRepo = sr }
+
+// SetTemplateRepo 注入生成模板仓储（可选；模板默认参数通道）。
+func (uc *GenerationUseCase) SetTemplateRepo(tr port.TemplateRepository) { uc.templateRepo = tr }
+
+// applyTemplateDefaults 模板默认参数填充（傻瓜式：客户端不传的参数取模板 default_params——
+// 此前 template 字段全链零消费，管理后台配的 prompt 前缀/风格等默认全部丢失）。
+// 只填未显式指定的 key；模板不存在/未启用静默跳过（提交仍按显式参数走）。
+func (uc *GenerationUseCase) applyTemplateDefaults(ctx context.Context, in *UnifiedSubmitInput) {
+	if uc.templateRepo == nil || in.Template == "" || in.SubType == "subject" {
+		return
+	}
+	tpl, err := uc.templateRepo.FindByID(ctx, in.Template)
+	if err != nil || !tpl.Enabled {
+		return
+	}
+	if in.Params == nil {
+		in.Params = map[string]any{}
+	}
+	for k, v := range tpl.DefaultParams {
+		switch k {
+		case "duration":
+			if in.Duration == 0 {
+				if d, ok := v.(float64); ok {
+					in.Duration = int(d)
+				}
+			}
+		case "quality", "resolution":
+			if in.Quality == "" {
+				if q, ok := v.(string); ok {
+					in.Quality = q
+				}
+			}
+		case "aspect_ratio":
+			if in.AspectRatio == "" {
+				if a, ok := v.(string); ok {
+					in.AspectRatio = a
+				}
+			}
+		case "type":
+			if in.Type == "" {
+				if t, ok := v.(string); ok {
+					in.Type = t
+				}
+			}
+		default:
+			// 其余高级参数（prompt 前缀/风格/运镜等）：未显式指定才采用模板值
+			if _, exists := in.Params[k]; !exists {
+				in.Params[k] = v
+			}
+		}
+	}
+}
+
+// generationBoolDefault 系统设置布尔默认值（"1"/"true" 为真；未配置/无仓储回落 fallback）。
+func (uc *GenerationUseCase) generationBoolDefault(ctx context.Context, key string, fallback bool) bool {
+	if uc.settingRepo == nil {
+		return fallback
+	}
+	st, err := uc.settingRepo.Get(ctx, key)
+	if err != nil || st.Value == "" {
+		return fallback
+	}
+	return st.Value == "1" || st.Value == "true"
 }
 
 // UnifiedSubmit 统一提交（傻瓜式：客户端不需要选择端点/模型）。
@@ -929,15 +1173,35 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 		return entity.GenerationTask{}, fmt.Errorf("端点选择器未配置")
 	}
 
+	// 显式端点：主体注册（数字分身一键创建——server_id 落任务 creations[0].id）
+	if in.SubType == "subject" {
+		return uc.submitSubject(ctx, in)
+	}
+
+	// 模板默认参数填充（管理后台模板的 default_params——未显式指定才采用）
+	uc.applyTemplateDefaults(ctx, &in)
+
+	// 傻瓜式默认值：watermark/off_peak 客户端不暴露——未显式指定时取管理后台
+	// 系统设置（gen_default_watermark / gen_default_off_peak），均未配置回落 false
+	if !in.Watermark {
+		in.Watermark = uc.generationBoolDefault(ctx, "gen_default_watermark", false)
+	}
+	if !in.OffPeak {
+		in.OffPeak = uc.generationBoolDefault(ctx, "gen_default_off_peak", false)
+	}
+
 	// 1. 构建统一请求
 	req := entity.UnifiedGenerationRequest{
-		BrandID:   in.BrandID,
-		Text:      in.Text,
-		Materials: in.Materials,
-		Template:  in.Template,
-		Type:      in.Type,
-		Duration:  in.Duration,
-		Quality:   in.Quality,
+		TenantID:    in.TenantID, // 素材查询按租户隔离
+		BrandID:     in.BrandID,
+		Text:        in.Text,
+		Materials:   in.Materials,
+		Template:    in.Template,
+		Type:        in.Type,
+		Duration:    in.Duration,
+		Quality:     in.Quality,
+		AspectRatio: in.AspectRatio,
+		Params:      in.Params,
 	}
 
 	// 2. 端点自动选择
@@ -953,5 +1217,7 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 		SubType:  selectResult.SubType,
 		Model:    "", // 空=自动选择
 		Params:   selectResult.Params,
+		Watermark: in.Watermark,
+		OffPeak:   in.OffPeak,
 	})
 }

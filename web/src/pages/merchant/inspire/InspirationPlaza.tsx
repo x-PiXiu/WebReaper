@@ -42,6 +42,7 @@ export default function InspirationPlaza() {
   const [platform, setPlatform] = useState<string>('all')
   const [remaking, setRemaking] = useState<{ item: InspirationVideo; mode: RemakeMode } | null>(null)
   const [topicDraft, setTopicDraft] = useState('')
+  const [playing, setPlaying] = useState<InspirationVideo | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['inspirations', brandId, platform, kind],
@@ -232,14 +233,24 @@ export default function InspirationPlaza() {
                       <Text type="secondary" style={{ fontSize: 11 }}>作者：{v.author}</Text>
                     )}
                     <div className="inspire-card-actions">
-                      <Button
-                        size="small"
-                        icon={<PlayCircleOutlined />}
-                        disabled={!v.video_url}
-                        onClick={() => v.video_url && window.open(v.video_url, '_blank', 'noopener')}
-                      >
-                        原帖
-                      </Button>
+                      {v.local_video_url ? (
+                        <Button
+                          size="small"
+                          icon={<PlayCircleOutlined />}
+                          onClick={() => setPlaying(v)}
+                        >
+                          播放
+                        </Button>
+                      ) : (
+                        <Button
+                          size="small"
+                          icon={<PlayCircleOutlined />}
+                          disabled={!v.video_url}
+                          onClick={() => v.video_url && window.open(v.video_url, '_blank', 'noopener')}
+                        >
+                          原帖
+                        </Button>
+                      )}
                       <Button
                         size="small"
                         type="primary"
@@ -293,6 +304,31 @@ export default function InspirationPlaza() {
             placeholder="你的差异化选题"
           />
         </Space>
+      </Modal>
+
+      {/* 站内视频播放（本地转存——与点赞/评论数据同屏，不跳原站不受防盗链限制） */}
+      <Modal
+        open={!!playing}
+        title={playing?.title || '视频播放'}
+        footer={null}
+        width={480}
+        centered
+        onCancel={() => setPlaying(null)}
+      >
+        {playing?.local_video_url && (
+          <video
+            src={playing.local_video_url}
+            controls
+            autoPlay
+            style={{ width: '100%', maxHeight: 480, borderRadius: 8, background: '#000' }}
+          />
+        )}
+        {playing && (
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+            👁 {(playing.play_count || 0).toLocaleString()} · ❤ {(playing.digg_count || 0).toLocaleString()} · 💬 {(playing.comment_count || 0).toLocaleString()}
+            {playing.author ? ` · 作者：${playing.author}` : ''}
+          </Typography.Text>
+        )}
       </Modal>
     </div>
   )

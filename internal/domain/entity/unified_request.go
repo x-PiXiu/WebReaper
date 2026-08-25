@@ -14,7 +14,8 @@ package entity
 //   - 用户输入文本 + 指定type=audio → 系统选择tts端点
 type UnifiedGenerationRequest struct {
 	// 基础信息（从JWT/上下文获取，不需要客户端传）
-	// TenantID  string `json:"tenant_id"`  // 从JWT获取
+	// TenantID 由 usecase 层注入（handler 已从 JWT 解析）——素材查询按租户隔离
+	TenantID string `json:"-"`
 	// UserID    string `json:"user_id"`    // 从JWT获取
 
 	// 用户输入（必填）
@@ -30,6 +31,9 @@ type UnifiedGenerationRequest struct {
 
 	// 高级选项（可选，有默认值）
 	AspectRatio string `json:"aspect_ratio"` // 比例（可选，默认16:9）
+	// Params 高级参数透传（兼容层的 seed/style/voice_setting_* 等专业模式参数——
+	// selector 出口按白名单合并进 GenerationParams，用户显式值覆盖默认）
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // EndpointSelectResult 端点选择结果。

@@ -141,6 +141,10 @@ type ChannelConstraints struct {
 	TitleMaxRunes int `json:"title_max_runes,omitempty"` // 标题最大字数（0=不限）
 	MinImages     int `json:"min_images,omitempty"`      // 最少配图数（0=不要求）
 	MinVideos     int `json:"min_videos,omitempty"`      // 最少视频数（0=不要求）
+	// 平台级表单约束（B站：标签必填≥1 + 分区必选——此前前端只能靠本地猜测表）
+	RequireTags     bool `json:"require_tags,omitempty"`
+	RequireCategory bool `json:"require_category,omitempty"`
+	MaxTags         int  `json:"max_tags,omitempty"` // 0=不限
 }
 
 // ChannelInfo 发布通道能力清单（GET /geo/publish/channels 下发——前端能力驱动的数据源：
@@ -151,7 +155,11 @@ type ChannelInfo struct {
 	ContentTypes []string                      `json:"content_types"`  // 支持的内容形态（article/image/video/audio）
 	Constraints  map[string]ChannelConstraints `json:"constraints,omitempty"` // key=内容形态
 	SemiAuto     bool                          `json:"semi_auto"`      // 半自动可用
-	Auto         bool                          `json:"auto"`           // 全自动可用
+	Auto         bool                          `json:"auto"`           // 全自动可用（平台级；形态级看 AutoContentTypes）
+	// AutoContentTypes 全自动「已真机验证」的形态清单（形态级诚实矩阵——
+	// Auto 字段只表明实现了 AutoPublishChannel 接口，不区分形态）。
+	// 前端优先消费此字段判定某形态能否全自动；真机验证一个形态加一个。
+	AutoContentTypes []string `json:"auto_content_types,omitempty"`
 }
 
 type PublishJob struct {
@@ -189,6 +197,10 @@ type PublishJob struct {
 	// Transport 实际执行通道（link/rpa/api——发布域三轴重构后按次记录，
 	// 降级链"启动前短路切换"的实际落点；空=历史数据）。
 	Transport string
+	// Tags 标签（B站独立标签框等平台级真标签；持久化为 JSON 文本）。
+	Tags []string
+	// Category 平台分区（B站投稿必选）。
+	Category string
 }
 
 // IsValid 领域规则。

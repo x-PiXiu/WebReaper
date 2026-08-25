@@ -3,6 +3,10 @@ package generation
 import (
 	"context"
 	"fmt"
+	"log"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -52,7 +56,7 @@ type MaterialStats struct {
 // Select 根据素材自动选择端点。
 func (s *EndpointSelectorImpl) Select(ctx context.Context, req entity.UnifiedGenerationRequest) (entity.EndpointSelectResult, error) {
 	// 1. 获取素材信息
-	materials, err := s.getMaterials(ctx, req.Materials)
+	materials, err := s.getMaterials(ctx, req.TenantID, req.Materials)
 	if err != nil {
 		return entity.EndpointSelectResult{}, err
 	}
@@ -77,7 +81,7 @@ func (s *EndpointSelectorImpl) Select(ctx context.Context, req entity.UnifiedGen
 }
 
 // getMaterials 获取素材信息。
-func (s *EndpointSelectorImpl) getMaterials(ctx context.Context, materialIDs []string) ([]entity.MediaAsset, error) {
+func (s *EndpointSelectorImpl) getMaterials(ctx context.Context, tenantID string, materialIDs []string) ([]entity.MediaAsset, error) {
 	if len(materialIDs) == 0 {
 		return nil, nil
 	}
@@ -86,22 +90,28 @@ func (s *EndpointSelectorImpl) getMaterials(ctx context.Context, materialIDs []s
 		return nil, nil
 	}
 
-	// 查询素材库（使用List方法，按租户查询后过滤）
-	// 注意：这里需要修改为支持按ID查询的方法，暂时使用List
-	allMaterials, err := s.mediaStore.List(ctx, "", entity.AssetTypeMaterial)
+	// 查询素材库（租户隔离——此前传空租户列出全部租户素材再按 ID 过滤，
+	// 隔离仅靠 ID 不可猜；现从请求上下文取租户）
+	allMaterials, err := s.mediaStore.List(ctx, tenantID, entity.AssetTypeMaterial)
 	if err != nil {
 		return nil, fmt.Errorf("查询素材失败: %w", err)
 	}
 
-	// 过滤出指定ID的素材
+	// 过滤出指定素材：ID 直配 或 URL 直传匹配（前端对本站 /media/... 资产免重传，
+	// 直接传原 URL——按路径后缀匹配 SourceURL）
 	idMap := make(map[string]bool)
+	urlMap := make(map[string]bool)
 	for _, id := range materialIDs {
-		idMap[id] = true
+		if strings.HasPrefix(id, "/media/") || strings.Contains(id, "/media/") {
+			urlMap[filepath.Base(id)] = true
+		} else {
+			idMap[id] = true
+		}
 	}
 
 	var materials []entity.MediaAsset
 	for _, m := range allMaterials {
-		if idMap[m.ID] {
+		if idMap[m.ID] || (len(urlMap) > 0 && urlMap[filepath.Base(m.SourceURL)]) {
 			materials = append(materials, m)
 		}
 	}
@@ -326,6 +336,35 @@ func (s *EndpointSelectorImpl) buildTTSParams(req entity.UnifiedGenerationReques
 	}
 }
 
+// advancedParamKeys 高级参数白名单（merge 的准入集合——adapter 只按已知 key 构造
+// 请求体，白名单外字段即使混入也会被 adapter 忽略；白名单让意图显式且防误覆盖核心字段）。
+var advancedParamKeys = map[string]bool{
+	"seed": true, "style": true, "movement_amplitude": true,
+	"audio": true, "audio_type": true, "bgm": true,
+	"watermark": true, "off_peak": true, "payload": true,
+	"voice_id": true, // 用户自定义音色名（voice_clone 尊重用户输入，覆盖自动生成名）
+	"image_settings": true, "timing_prompts": true,
+	"speed": true, "volume": true, "ref_photo_url": true, // lip_sync 文本驱动（裸 key 风格）
+	"model": true, "resolution": true, "duration": true, "aspect_ratio": true,
+}
+
+// advancedParamAllowed 白名单判定（voice_setting_* 前缀族整体放行——TTS 语速/音量/音色/情感）。
+func advancedParamAllowed(key string) bool {
+	return advancedParamKeys[key] || strings.HasPrefix(key, "voice_setting_")
+}
+
+// mergeAdvancedParams 用户高级参数合并（覆盖默认值——applyDefaults 之后调用，
+// 用户显式值优先）。兼容层透传的专业模式参数（multiframe 的 image_settings、
+// 音效的 timing_prompts、TTS 的 voice_setting_* 等）由此到达 adapter。
+func mergeAdvancedParams(params entity.GenerationParams, user map[string]any) {
+	for k, v := range user {
+		if v == nil || !advancedParamAllowed(k) {
+			continue
+		}
+		params[k] = v
+	}
+}
+
 // applyDefaults 应用默认值。
 func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.GenerationParams, req entity.UnifiedGenerationRequest) entity.GenerationParams {
 	// 如果用户指定了时长，使用用户指定的
@@ -352,5 +391,19 @@ func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.
 		}
 	}
 
+	// 高级参数合并（最后执行——用户显式值覆盖以上默认）
+	mergeAdvancedParams(params, req.Params)
+
+	log.Printf("[EndpointSelector][DEBUG] 端点=%s 参数keys=%v 用户高级参数=%d个", subType, paramKeysSorted(params), len(req.Params))
 	return params
+}
+
+// paramKeysSorted 日志用：参数 key 排序列表（值不打——脱敏）。
+func paramKeysSorted(p entity.GenerationParams) []string {
+	keys := make([]string, 0, len(p))
+	for k := range p {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

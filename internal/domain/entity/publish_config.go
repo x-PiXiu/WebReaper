@@ -4,18 +4,20 @@ import "time"
 
 // BrandPublishConfig 品牌发布配置
 // 每个品牌在每个平台可以有不同的发布配置（账号绑定、限速、默认标签等）
+// ⚠️ 字段带 json tag（snake_case）——handler 直接序列化 entity 返回前端，
+// 无 tag 时 Go 默认 PascalCase，前端按 snake_case 读取全部落空（曾致配置表空白）。
 type BrandPublishConfig struct {
-	ID             string
-	TenantID       string
-	BrandID        string
-	Platform       string
-	AccountIDs     []string
-	RateLimit      RateLimit
-	DefaultTags    []string
-	DefaultPersona string
-	IsActive       bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID             string    `json:"id"`
+	TenantID       string    `json:"tenant_id"`
+	BrandID        string    `json:"brand_id"`
+	Platform       string    `json:"platform"`
+	AccountIDs     []string  `json:"account_ids"`
+	RateLimit      RateLimit `json:"rate_limit"`
+	DefaultTags    []string  `json:"default_tags"`
+	DefaultPersona string    `json:"default_persona"`
+	IsActive       bool      `json:"is_active"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // RateLimit 限速配置

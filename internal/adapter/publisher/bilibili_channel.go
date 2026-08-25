@@ -48,7 +48,8 @@ func (c *BilibiliAutoChannel) SupportedContentTypes() []string {
 func (c *BilibiliAutoChannel) DisplayName() string { return "B站" }
 func (c *BilibiliAutoChannel) Constraints() map[string]entity.ChannelConstraints {
 	return map[string]entity.ChannelConstraints{
-		entity.ContentTypeVideo: {TitleMaxRunes: 80, MinVideos: 1},
+		// 标签必填 ≥1（上限10）+ 分区必选——投稿页硬约束，服务端下发给前端动态表单
+		entity.ContentTypeVideo: {TitleMaxRunes: 80, MinVideos: 1, RequireTags: true, RequireCategory: true, MaxTags: 10},
 	}
 }
 
@@ -183,6 +184,63 @@ func publishBilibiliVideo(ctx context.Context, job entity.PublishJob, cookie str
 			if te := ha.Type(descSel, desc); te != nil {
 				log.Printf("[PublishAuto:bilibili] 描述填充失败（不阻断）: %v", te)
 			}
+		}
+	}
+
+	// ⑤b 标签（Plan-14 #4：Tags 字段贯通——B站独立标签框必填 ≥1）。
+	// 多策略候选 + 容错（选择器未真机验证；失败仅日志，DRY_RUN 截图核对）。
+	if len(job.Tags) > 0 {
+		tagSel := waitFirstVisible(sessionCtx, 10*time.Second,
+			`.tag-input`, `input[placeholder*="标签"]`, `[class*="tag"] input`)
+		if tagSel != "" {
+			// B站标签输入是"打字→回车确认"模式
+			if e := ha.Click(tagSel); e == nil {
+				for i, tag := range job.Tags {
+					if i >= 10 {
+						break // B站标签上限 10 个
+					}
+					if te := ha.Type(tagSel, strings.TrimPrefix(tag, "#")); te != nil {
+						log.Printf("[PublishAuto:bilibili] 标签 %q 填充失败（不阻断）: %v", tag, te)
+						break
+					}
+					_ = chromedp.Run(sessionCtx, chromedp.SendKeys(tagSel, "\r", chromedp.ByQuery))
+				}
+				log.Printf("[PublishAuto:bilibili] 已填 %d 个标签", len(job.Tags))
+			}
+		} else {
+			log.Printf("[PublishAuto:bilibili] 未定位到标签输入框（选择器待真机校准，DRY_RUN 核查）")
+		}
+	}
+
+	// ⑤c 分区（Plan-14 #5：Category 字段贯通——B站投稿分区必选）。
+	// B站分区是自定义下拉（非原生 select）：点击触发 → 按文本选项点击。未配置时
+	// 尝试默认选第一项（页面常有预选分区，无操作即用默认）。
+	if job.Category != "" {
+		var catDone bool
+		_ = chromedp.Run(sessionCtx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+			// 候选：分区选择器容器 → 点击展开 → 文本匹配选项
+			const triggers = document.querySelectorAll('[class*="category"], [class*="zone"] [class*="select"], .select-wrapper');
+			for (const t of triggers) {
+				if (t.offsetParent === null) continue;
+				t.click();
+				break;
+			}
+			return true;
+		})()`), &catDone))
+		_ = chromedp.Sleep(1 * time.Second)
+		var picked bool
+		_ = chromedp.Run(sessionCtx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+			const opts = document.querySelectorAll('li, [class*="option"], [class*="item"]');
+			for (const o of opts) {
+				if (o.offsetParent === null) continue;
+				if ((o.textContent || '').trim().includes(%q)) { o.click(); return true; }
+			}
+			return false;
+		})()`, job.Category), &picked))
+		if !picked {
+			log.Printf("[PublishAuto:bilibili] 分区 %q 未选中（选择器待真机校准）", job.Category)
+		} else {
+			log.Printf("[PublishAuto:bilibili] 分区已选: %s", job.Category)
 		}
 	}
 

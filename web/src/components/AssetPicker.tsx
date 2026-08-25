@@ -34,7 +34,8 @@ export default function AssetPicker(props: {
   const [selected, setSelected] = useState<MediaAsset[]>([])
   const [uploading, setUploading] = useState(false)
 
-  const { data: assets = [] } = useMediaAssets(open)
+  // 选视频/任意形态时拉素材+AI产物（成片视频主要落在 creation）——否则只拉上传素材
+  const { data: assets = [] } = useMediaAssets(open, accept === 'video' || accept === 'any' ? 'all' : 'material')
 
   const filtered = useMemo(() => {
     const list = normalizeMediaAssets(assets)

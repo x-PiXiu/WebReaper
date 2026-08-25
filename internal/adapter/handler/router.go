@@ -104,6 +104,8 @@ type Router struct {
 	pendingPublish     *agent.PendingPublishStore // 发布计划暂存（主 Agent 硬确认；可选）
 	transportRegistry  *port.TransportRegistry    // 通道轴注册表（管理后台切换端点用；可选）
 	settingRepo        port.SystemSettingRepository // 系统设置仓储（通道 override 持久化用；可选）
+	contentAdapters    port.ContentAdapterRegistry // 内容适配器注册表（向导适配预览；可选）
+	draftCache         DraftCache                 // 向导云草稿存储（Redis；可选）
 	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
@@ -248,6 +250,13 @@ func (r *Router) SetAccount(au *account.AccountUseCase, pu *account.PublishUseCa
 	r.accountUC = au
 	r.publishSemiUC = pu
 	r.accountFrontendURL = frontendBaseURL
+}
+
+// SetPublishWizard 注入向导配套服务（可选；未注入则适配预览/云草稿端点报"未配置"，
+// 前端自动降级本地规则/localStorage）。
+func (r *Router) SetPublishWizard(adapters port.ContentAdapterRegistry, dc DraftCache) {
+	r.contentAdapters = adapters
+	r.draftCache = dc
 }
 
 // SetGeneration 注入统一生成用例（可选；Vidu 全量接入——未注入则生成端点不注册）。

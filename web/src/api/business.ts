@@ -270,8 +270,8 @@ export const businessApi = {
     store_address?: string
   }) => apiClient.post<unknown, PublishJob>('/api/v1/merchant/publish', data),
 
-  listPublishJobs: () =>
-    apiClient.get<unknown, PublishJob[]>('/api/v1/merchant/publish-jobs'),
+  listPublishJobs: (brandId?: string) =>
+    apiClient.get<unknown, PublishJob[]>(`/api/v1/merchant/publish-jobs${brandId ? `?brand_id=${brandId}` : ''}`),
 
   markPublished: (jobId: string) =>
     apiClient.post<unknown, unknown>(`/api/v1/merchant/publish-jobs/${jobId}/published`),
@@ -401,6 +401,8 @@ export const businessApi = {
     duration?: number
     quality?: string
     aspect_ratio?: string
+    params?: Record<string, unknown> // 高级参数（模型选择/音色等——与 generationSubmit 同通道）
+    sub_type?: string // 显式端点覆盖（subject=数字分身主体注册；空=自动选择）
   }) => submitUnified(data),
 
   /**
@@ -464,8 +466,8 @@ export const businessApi = {
     form.append('file', file)
     return apiClient.post<unknown, { id: string; url: string; mime: string; size_bytes: number; owner_type: string }>('/api/v1/media/assets', form)
   },
-  listAssets: () =>
-    apiClient.get<unknown, { assets: MediaAsset[] }>('/api/v1/media/assets').then((r) => r.assets),
+  listAssets: (owner?: 'material' | 'creation' | 'all') =>
+    apiClient.get<unknown, { assets: MediaAsset[] }>(`/api/v1/media/assets${owner && owner !== 'material' ? `?owner=${owner}` : ''}`).then((r) => r.assets),
   deleteAsset: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/media/assets/${id}`),
 

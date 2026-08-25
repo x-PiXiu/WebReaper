@@ -161,7 +161,7 @@ func (h *InspirationHandler) HandleUpdateInspiration(c *gin.Context) {
 		return
 	}
 
-	success(c, video)
+	// 前端期望 {msg, id}（此前连写两次 success() 输出双 JSON 拼接体，解析必失败）
 	success(c, gin.H{"msg": "更新成功", "id": id})
 }
 

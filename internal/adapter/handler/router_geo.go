@@ -132,6 +132,10 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 		return
 	}
 	accountHandler := NewAccountHandler(r.accountUC, r.publishSemiUC)
+	if r.contentAdapters != nil || r.draftCache != nil {
+		accountHandler.SetContentAdapters(r.contentAdapters)
+		accountHandler.SetDraftCache(r.draftCache)
+	}
 	if r.accountFrontendURL != "" {
 		accountHandler.SetFrontendBaseURL(r.accountFrontendURL)
 	}
@@ -168,6 +172,10 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 		api.DELETE("/merchant/brands/:id/knowledge/materials/:mid", bkHandler.HandleDeleteMaterial)
 	}
 	api.POST("/merchant/publish", accountHandler.HandlePublish)
+	api.POST("/merchant/publish/adapt-preview", accountHandler.HandlePreviewAdapt) // 向导阶段⑤：多平台真实适配预览（路径对齐前端 business.ts 调用）
+	api.GET("/merchant/publish/draft", accountHandler.HandleGetPublishDraft) // 向导云草稿（多端同步；无 Redis 前端降级 localStorage）
+	api.PUT("/merchant/publish/draft", accountHandler.HandleSavePublishDraft)
+	api.DELETE("/merchant/publish/draft", accountHandler.HandleDeletePublishDraft)
 	api.GET("/merchant/publish-jobs", accountHandler.HandleListPublishJobs)
 	api.GET("/merchant/works/analytics-summary", accountHandler.HandleAnalyticsSummary) // 作品数据页聚合
 	api.POST("/merchant/publish-jobs/:id/refresh-metrics", accountHandler.HandleRefreshJobMetrics) // 手动回读互动数据

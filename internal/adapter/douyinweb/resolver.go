@@ -47,9 +47,9 @@ func IsDouyinLink(rawURL string) bool {
 }
 
 // Resolve 分享链/网页链 → 播放直链。
-func (r *LinkResolver) Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, error) {
+func (r *LinkResolver) Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, string, error) {
 	if !IsDouyinLink(rawURL) {
-		return "", "", "", fmt.Errorf("暂不支持该链接（当前支持抖音分享链；其他平台可下载后直接上传视频）")
+		return "", "", "", "", fmt.Errorf("暂不支持该链接（当前支持抖音 / B站分享链；其他平台可下载后直接上传视频）")
 	}
 	// ① 短链 → 最终网页地址 → aweme_id
 	videoID := ""
@@ -58,24 +58,24 @@ func (r *LinkResolver) Resolve(ctx context.Context, tenantID, rawURL string) (st
 	} else {
 		finalURL, err := r.followRedirect(ctx, rawURL)
 		if err != nil {
-			return "", "", "", fmt.Errorf("分享链解析失败: %w", err)
+			return "", "", "", "", fmt.Errorf("分享链解析失败: %w", err)
 		}
 		m := awemeIDRe.FindStringSubmatch(finalURL)
 		if m == nil {
-			return "", "", "", fmt.Errorf("链接里找不到视频（可能已删除或非视频内容）")
+			return "", "", "", "", fmt.Errorf("链接里找不到视频（可能已删除或非视频内容）")
 		}
 		videoID = m[1]
 	}
 	// ② 视频页上下文调详情接口拿播放直链（复用搜索器的账号/RPA 基建）
 	info, err := r.searcher.getAwemeDetail(ctx, tenantID, videoID)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	if len(info.Video.PlayAddr.URLList) == 0 {
-		return "", "", "", fmt.Errorf("详情无播放地址（可能视频已删除）")
+		return "", "", "", "", fmt.Errorf("详情无播放地址（可能视频已删除）")
 	}
 	playURL := replacePlayDomain(info.Video.PlayAddr.URLList[0])
-	return playURL, info.Desc, platform, nil
+	return playURL, info.Desc, platform, "", nil
 }
 
 // followRedirect 分享短链 302 → 最终网页地址（不下载内容）。

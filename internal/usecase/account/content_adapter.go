@@ -84,6 +84,18 @@ var DefaultPlatformConfigs = map[string]PlatformContentConfig{
 		DefaultTags:        []string{"#推荐", "#好看", "#视频"},
 		CTATemplates:       []string{"\n\n👍 觉得有用点个赞吧", "\n\n❤️ 喜欢的话关注我"},
 	},
+	"zhihu": {
+		Platform:           "zhihu",
+		MaxTitleLength:     100, // 专栏标题上限（实测）
+		MaxDescriptionLength: 100000,
+		MaxTagCount:        5, // 话题可选
+		AllowEmoji:         true,
+		EmojiDensity:       0.02,
+		MaxNewLines:        0,
+		RequireCTA:         false, // 长文场景不强推 CTA
+		DefaultTags:        []string{},
+		CTATemplates:       []string{},
+	},
 }
 
 // DefaultContentAdapter 默认内容适配器实现

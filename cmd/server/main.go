@@ -45,7 +45,9 @@ import (
 	"webreaper/internal/adapter/publisher"
 	transport "webreaper/internal/adapter/publisher/transport"
 	"webreaper/internal/adapter/douyinoauth"
+	"webreaper/internal/adapter/biliweb"
 	"webreaper/internal/adapter/douyinweb"
+	"webreaper/internal/adapter/videolink"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
@@ -80,7 +82,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-	logger := zaplogger.MustNewZapLogger(cfg.Server.Env)
+	logger := zaplogger.MustNewZapLogger(cfg.Server.Env, cfg.Server.LogLevel)
 	defer logger.Sync()
 
 	// 生产环境配置校验（fail-fast——缺失必填项直接退出）
@@ -97,7 +99,7 @@ func main() {
 	})
 	if err != nil {
 		// trace 初始化失败不阻断启动——降级为 no-op，业务照常运行
-		log := zaplogger.MustNewZapLogger(cfg.Server.Env)
+		log := zaplogger.MustNewZapLogger(cfg.Server.Env, cfg.Server.LogLevel)
 		log.Warn("trace 初始化失败，降级为 no-op", port.Err(err))
 	}
 	defer func() { _ = traceShutdown(context.Background()) }()
@@ -615,6 +617,17 @@ func main() {
 			}
 
 			router.SetAccount(geoAccountUC, geoPublishUC, cfg.Publish.FrontendBaseURL)
+			// 向导配套（Plan-14 对接修复）：适配预览（ContentAdapter 接线）+ 云草稿（Redis）。
+			// 任一未装配前端自动降级（本地截断规则/localStorage），不阻断。
+			adapterRegistry := account.NewContentAdapterRegistryImpl()
+			for _, cfg := range account.DefaultPlatformConfigs {
+				adapterRegistry.Register(account.NewDefaultContentAdapter(cfg))
+			}
+			var wizardDraft handler.DraftCache
+			if rc, ok := cacheStore.(*cache.RedisCache); ok {
+				wizardDraft = rc
+			}
+			router.SetPublishWizard(adapterRegistry, wizardDraft)
 			log.Info("多平台发布已启用（账号绑定 + 半自动/全自动发布：知乎/小红书）")
 		}
 	} else {
@@ -863,9 +876,13 @@ func main() {
 			gen.SetCapResolver(capResolver)
 		}
 		var transcriptResolver port.VideoLinkResolver
+		var douyinResolver port.VideoLinkResolver
 		if socialSearcher != nil {
-			transcriptResolver = douyinweb.NewLinkResolver(socialSearcher)
+			douyinResolver = douyinweb.NewLinkResolver(socialSearcher)
 		}
+		// 多平台组合：B站公开 API + 抖音账号基建 + og 兜底（快手已评估放弃：
+		// CDN pkey 会话签名 + 滑块验证码双层风控，2026-08-26 实测）
+		transcriptResolver = videolink.NewComposite(douyinResolver, biliweb.NewResolver())
 		asrClient := asropenai.NewTranscriber(func() asropenai.ASRConfig {
 			// 优先走 CapabilityResolver（新表+旧表统一查询）
 			if cap, err := capResolver.Resolve(context.Background(), "asr"); err == nil && cap.APIKey != "" {
@@ -892,10 +909,14 @@ func main() {
 			return asropenai.ASRConfig{}
 		})
 		if aiGenerator != nil {
-			router.SetTranscript(videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, aiGenerator))
+			tUC := videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, aiGenerator)
+			tUC.SetCache(cacheStore) // 提取缓存（24h——同 URL 免重复 ASR 计费）
+			router.SetTranscript(tUC)
 		} else {
 			log.Warn("AI 生成器未装配——文案双产出不可用（提取仍可用）")
-			router.SetTranscript(videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, nil))
+			tUC := videotranscript.NewUseCase(transcriptResolver, avTool, asrClient, nil)
+			tUC.SetCache(cacheStore)
+			router.SetTranscript(tUC)
 		}
 		// 多厂商 provider 注册
 		providers := map[string]port.GenerationProvider{
@@ -935,6 +956,10 @@ func main() {
 		if notifyUC != nil {
 			genUC.SetTaskNotifier(genTaskNotifier{notifyUC})
 		}
+		// 傻瓜式默认值通道（watermark/off_peak 等管理后台全局默认——gen_default_* 键）
+		genUC.SetSettingRepo(settingRepo)
+		// 模板默认参数通道（管理后台模板 default_params——未显式指定才采用）
+		genUC.SetTemplateRepo(repository.NewGormTemplateRepository(geoRepos.db))
 		// 回调通道激活（双通道：回调秒级推送 + 20s 轮询兜底，幂等合并）。
 		// 仅公网可达地址注入——localhost 对 Vidu 不可达，注入只会产生 3 次
 		// 失败投递；本地开发自动保持纯轮询。显式 VIDU_CALLBACK_URL 优先。
@@ -1032,6 +1057,8 @@ func main() {
 				crawlerConfigRepo,
 				crawlerAccountRepo,
 			)
+			// 本地转存（爬取入库的视频异步下载到 /media——前端站内播放不依赖原站防盗链）
+			inspirationUC.SetMediaStore(mediaStore)
 
 			// 注册抖音爬虫（复用现有 douyinweb.Searcher）
 			if socialSearcher != nil {
@@ -1051,7 +1078,11 @@ func main() {
 			publishBindingRepo := repository.NewGormAccountBrandBindingRepository(geoRepos.db)
 			publishUsageRepo := repository.NewGormPublishUsageRepository(geoRepos.db)
 			router.SetPublishConfig(publishConfigRepo, publishBindingRepo, publishUsageRepo)
-			log.Info("品牌发布配置已启用")
+			// 发布用量记账 + 服务端限流（配额展示的写侧——缺此 used_today 恒 0）
+			if geoPublishUC != nil {
+				geoPublishUC.SetPublishUsage(publishUsageRepo, publishConfigRepo)
+			}
+			log.Info("品牌发布配置已启用（含用量记账与限流闸门）")
 		}
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429
 		genUC.SetConcurrency(5)

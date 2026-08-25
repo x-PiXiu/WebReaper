@@ -15,6 +15,7 @@ package account
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -400,10 +401,47 @@ type PublishUseCase struct {
 	socialSearch   port.SocialSearcher        // 可选：站内搜索（回读取详情用）
 	transports     *port.TransportRegistry    // 可选：通道轴注册表（link/rpa/api 多通道共存+降级链）
 	resolver       port.CredentialResolver    // 可选：凭证解析（rpa→cookie/api→token，用例层不碰 vault）
+	usageRepo      port.PublishUsageRepository // 可选：发布用量记账（限流读写两侧——缺此发布不限速且配额恒 0）
+	configRepo     port.BrandPublishConfigRepository // 可选：品牌限流配置（服务端强制限流用）
 }
 
 func NewPublishUseCase(jr port.PublishJobRepository, reg port.PublishChannelRegistry, ar port.AccountRepository, vault port.CookieVault) *PublishUseCase {
 	return &PublishUseCase{jobRepo: jr, registry: reg, accountRepo: ar, vault: vault}
+}
+
+// SetPublishUsage 注入发布用量与品牌配置仓储（可选；记账+服务端限流）。
+func (uc *PublishUseCase) SetPublishUsage(ur port.PublishUsageRepository, cr port.BrandPublishConfigRepository) {
+	uc.usageRepo, uc.configRepo = ur, cr
+}
+
+// checkPublishLimit 服务端限流闸门（品牌配置了日上限且已用尽时拒绝）。
+// 前端向导有同款拦截（quotas at_limit），这里是 Agent/curl 绕过前端时的防线。
+func (uc *PublishUseCase) checkPublishLimit(ctx context.Context, tenantID, brandID, platform string) error {
+	if uc.usageRepo == nil || uc.configRepo == nil || brandID == "" {
+		return nil
+	}
+	cfg, err := uc.configRepo.FindByPlatform(ctx, tenantID, brandID, platform)
+	if err != nil || cfg == nil || cfg.RateLimit.MaxPerDay <= 0 {
+		return nil // 无配置不限流（保守默认展示在前端；服务端只在显式配置时强制）
+	}
+	used, err := uc.usageRepo.GetDailyUsage(ctx, tenantID, brandID, platform)
+	if err != nil {
+		return nil // 记账失败不阻断发布（可用性优先）
+	}
+	if used >= cfg.RateLimit.MaxPerDay {
+		return fmt.Errorf("品牌在 %s 平台今日发布已达上限（%d/%d）——可改用定时明日发布", platform, used, cfg.RateLimit.MaxPerDay)
+	}
+	return nil
+}
+
+// recordPublishUsage 发布成功记账（used_today/at_limit 的写侧——缺此 publish-stats 恒 0）。
+func (uc *PublishUseCase) recordPublishUsage(ctx context.Context, tenantID, brandID, platform string) {
+	if uc.usageRepo == nil || brandID == "" {
+		return
+	}
+	if err := uc.usageRepo.IncrementUsage(ctx, tenantID, brandID, platform); err != nil {
+		log.Printf("[Publish] 用量记账失败（不阻断）: %v", err)
+	}
 }
 
 // SetMonitorTrigger 注入监测触发器（可选；发布效果追踪用）。
@@ -461,6 +499,16 @@ func (uc *PublishUseCase) validateCapability(ch port.PublishChannel, contentType
 			if cs.MinVideos > 0 && contentType == entity.ContentTypeVideo && mediaCount < cs.MinVideos {
 				return fmt.Errorf("视频发布至少需要 %d 个视频文件（当前 %d）", cs.MinVideos, mediaCount)
 			}
+			// 平台级表单约束（B站：标签/分区）——前端有同款检查，此处是 Agent/curl 的防线
+			if cs.RequireTags && len(in.Tags) == 0 {
+				return fmt.Errorf("%s 发布需要至少 1 个标签", ch.Platform())
+			}
+			if cs.MaxTags > 0 && len(in.Tags) > cs.MaxTags {
+				return fmt.Errorf("%s 标签最多 %d 个（当前 %d）", ch.Platform(), cs.MaxTags, len(in.Tags))
+			}
+			if cs.RequireCategory && in.Category == "" {
+				return fmt.Errorf("%s 发布需要选择分区", ch.Platform())
+			}
 		}
 	}
 	return nil
@@ -475,6 +523,15 @@ func (uc *PublishUseCase) SetMetricsStore(mr port.VideoMetricRepository, ss port
 // 选内容形态 → 过滤可用平台 → 按约束动态生成检查清单）。
 // 新平台 = 注册新 Channel（声明 DisplayName/SupportedContentTypes/Constraints），
 // 本清单自动出现，前端零改动。
+// verifiedAutoForms 全自动「已真机验证」的形态清单（Plan-14 修正 #9——服务端成为
+// 形态级诚实矩阵的事实源，替代前端 CAPABILITY_FALLBACK 猜测表）。
+// 维护规则：DRY_RUN 真机验证通过一个形态（连续 3 次稳定）才加入；抖音/B站/视频号
+// 视频流程已实现但选择器未验证、快手为 stub，故暂不放行。
+var verifiedAutoForms = map[string][]string{
+	"zhihu":       {entity.ContentTypeArticle},
+	"xiaohongshu": {entity.ContentTypeImage},
+}
+
 func (uc *PublishUseCase) ChannelCapabilities() []entity.ChannelInfo {
 	if uc.registry == nil {
 		return nil
@@ -490,6 +547,7 @@ func (uc *PublishUseCase) ChannelCapabilities() []entity.ChannelInfo {
 		}
 		if _, ok := ch.(port.AutoPublishChannel); ok {
 			info.Auto = true
+			info.AutoContentTypes = verifiedAutoForms[ch.Platform()]
 		}
 		if ip, ok := ch.(port.ChannelInfoProvider); ok {
 			info.Name = ip.DisplayName()
@@ -523,6 +581,10 @@ type PublishInput struct {
 	MediaURLs []string
 	// CoverURL 封面图 URL
 	CoverURL string
+	// Tags 标签（B站独立标签框等平台级真标签；正文 #话题 由前端/适配层处理）
+	Tags []string
+	// Category 平台分区（B站投稿必选）
+	Category string
 }
 
 // appendPublicLink 在发布内容尾部追加公开站链接（纯函数，可单测）。
@@ -564,6 +626,10 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 	if vErr := uc.validateCapability(ch, in.ContentType, in); vErr != nil {
 		return entity.PublishJob{}, vErr
 	}
+	// 服务端限流闸门（品牌配置日上限且已用尽时拒绝；无配置不限流）
+	if lErr := uc.checkPublishLimit(ctx, in.TenantID, in.BrandID, in.Platform); lErr != nil {
+		return entity.PublishJob{}, lErr
+	}
 
 	// 发布前处理：Markdown 转纯文本（社媒平台不渲染 Markdown）。
 	// 先过滤 think 标签（兜底：历史内容可能在生成期未被过滤，防止思考过程泄漏到平台）。
@@ -571,8 +637,10 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 	// 公开站链接兜尾（平台差异：知乎加外链加速爬虫发现；小红书加外链易触发限流，不加）
 	publishContent = appendPublicLink(publishContent, in.Platform, uc.publicBaseURL, in.ContentID)
 	// 门店地址注入（本地生活 P3：内容层本地曝光信号——正文尾部附"📍 地址"。
-	// 全平台安全（纯文本内容，不触平台规则）；平台"添加定位"能力见 P4，暂缓）。
-	if in.StoreAddress != "" {
+	// 全平台安全（纯文本内容，不触平台规则）；平台"添加定位"能力见 P4，暂缓。
+	// 防重：向导前端 buildPublishContent 已拼 📍 门店地址（handler 绑定前的历史兜底），
+	// 注入前检查正文已含则跳过——两条注入路径并存时不重复。
+	if in.StoreAddress != "" && !strings.Contains(publishContent, "门店地址：") {
 		publishContent = strings.TrimRight(publishContent, "\n") + "\n\n📍 门店地址：" + in.StoreAddress
 	}
 	// 标题：优先用调用方传入（内容工作台已带标题），空或过短则从正文提取
@@ -598,6 +666,8 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		ContentType:  in.ContentType,
 		MediaURLs:    in.MediaURLs,
 		CoverURL:     in.CoverURL,
+		Tags:         in.Tags,
+		Category:     in.Category,
 	}
 
 	// 定时发送：ScheduledAt 在未来 → 仅落库 pending，到期由调度任务执行发布
@@ -778,6 +848,9 @@ func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob
 		job.ExternalURL = result.ExternalURL
 		job.PublishedAt = time.Now()
 		_ = uc.jobRepo.Save(bgCtx, job)
+
+		// 用量记账（品牌×平台 今日发布数——配额展示与限流的数据源）
+		uc.recordPublishUsage(bgCtx, job.TenantID, job.BrandID, job.Platform)
 
 		// 归还账号到池（更新 LastUsedAt）
 		if uc.accountPool != nil {
@@ -1087,5 +1160,12 @@ func (uc *PublishUseCase) AnalyticsSummary(ctx context.Context, tenantID string)
 
 // MarkPublished 用户在平台确认发布后，前端调此方法标记任务为已发布。
 func (uc *PublishUseCase) MarkPublished(ctx context.Context, tenantID, jobID string) error {
-	return uc.jobRepo.UpdateStatus(ctx, tenantID, jobID, entity.PublishStatusPublished, "", "")
+	if err := uc.jobRepo.UpdateStatus(ctx, tenantID, jobID, entity.PublishStatusPublished, "", ""); err != nil {
+		return err
+	}
+	// 半手动确认=发布完成——补记用量（半自动创建链接时不记，真发出才占配额）
+	if j, jErr := uc.GetJobStatus(ctx, tenantID, jobID); jErr == nil {
+		uc.recordPublishUsage(ctx, tenantID, j.BrandID, j.Platform)
+	}
+	return nil
 }

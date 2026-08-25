@@ -81,7 +81,9 @@ const DRAFT_KEY = 'wr_publish_wizard_v1'
 export function emptyDraft(partial?: Partial<WizardDraft>): WizardDraft {
   return {
     step: 1,
-    contentType: 'article',
+    // 默认 video：产品主流程是视频获客（口播向导/成片分发）——此前默认 article，
+    // "发视频"入口未带形态参数时落进"发文章"高亮（用户实测困惑）。
+    contentType: 'video',
     title: '',
     content: '',
     mediaURLs: [],
@@ -305,10 +307,8 @@ export function checkCompleteness(
   if (draft.mode === 'auto' && !selectedCanAuto) {
     gaps.push({ step: 4, text: '所选平台当前形态不支持全自动，请改用半自动' })
   }
-  // 定时：当前 merchant/publish handler 未绑定 scheduled_at，开启则任务会立即创建
-  if (draft.isScheduled) {
-    gaps.push({ step: 4, text: '定时发布接口尚未接线，请改用「立即」或稍后再试' })
-  }
+  // 定时发布：后端已全链路支持（scheduled_at 绑定 + 落库排期 + 定时任务执行），
+  // 此前的"接口尚未接线"自锁已移除。
 
   return gaps
 }

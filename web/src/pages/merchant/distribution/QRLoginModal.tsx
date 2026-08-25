@@ -7,11 +7,15 @@ import { businessApi } from '../../../api/business'
 const { Text, Paragraph } = Typography
 
 // 平台元信息（扫码弹窗内自用；页面级平台卡片仍在 Distribution 页）
+// 六平台与后端 chromedp_login 的 platformConfigs 对齐——缺 bilibili/weixin 时
+// 从账号池点"绑定B站/视频号"弹窗标题显示"绑定 账号"（名字空白）
 export const QR_PLATFORMS = [
   { key: 'douyin', name: '抖音' },
   { key: 'kuaishou', name: '快手' },
   { key: 'zhihu', name: '知乎' },
   { key: 'xiaohongshu', name: '小红书' },
+  { key: 'bilibili', name: 'B站' },
+  { key: 'weixin', name: '视频号' },
 ]
 
 // 扫码登录弹窗（账号绑定）：二维码获取/轮询/状态指示自包含于此。
