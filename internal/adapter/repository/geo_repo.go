@@ -82,10 +82,11 @@ func (r *GormBrandRepository) Delete(ctx context.Context, tenantID, id string) e
 	return q.Where("id = ?", id).Delete(&BrandPO{}).Error
 }
 
-// DeleteCascade 级联删除（R1 事务：品牌+其下关键词原子删除——此前用例层逐个删
-// 关键词再删品牌，中途失败留下孤儿关键词）。事务边界是用例的决策、机制归仓储。
+// DeleteCascade 级联删除（R1 事务：品牌+其下关键词+灵感关联+门店+监测结果原子删除）。
+// 事务边界是用例的决策、机制归仓储。
 func (r *GormBrandRepository) DeleteCascade(ctx context.Context, tenantID, brandID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 删除关键词
 		kq := tx.Where("brand_id = ?", brandID)
 		if tenantID != "" {
 			kq = kq.Where("tenant_id = ?", tenantID)
@@ -93,6 +94,31 @@ func (r *GormBrandRepository) DeleteCascade(ctx context.Context, tenantID, brand
 		if err := kq.Delete(&KeywordPO{}).Error; err != nil {
 			return err
 		}
+
+		// 2. 删除品牌-灵感关联
+		if err := tx.Where("brand_id = ?", brandID).Delete(&BrandInspirationPO{}).Error; err != nil {
+			return err
+		}
+
+		// 3. 删除门店档案
+		sq := tx.Where("brand_id = ?", brandID)
+		if tenantID != "" {
+			sq = sq.Where("tenant_id = ?", tenantID)
+		}
+		if err := sq.Delete(&StoreLocationPO{}).Error; err != nil {
+			return err
+		}
+
+		// 4. 删除监测结果
+		mq := tx.Where("brand_id = ?", brandID)
+		if tenantID != "" {
+			mq = mq.Where("tenant_id = ?", tenantID)
+		}
+		if err := mq.Delete(&MonitoringResultPO{}).Error; err != nil {
+			return err
+		}
+
+		// 5. 删除品牌
 		bq := tx.Where("id = ?", brandID)
 		if tenantID != "" {
 			bq = bq.Where("tenant_id = ?", tenantID)

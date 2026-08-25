@@ -126,6 +126,8 @@ type InspirationVideoRepository interface {
 	List(ctx context.Context, brandID, platform, keyword, sortBy string, page, pageSize int) ([]entity.InspirationVideo, int, error)
 	// FindByID 根据 ID 查询视频。
 	FindByID(ctx context.Context, id string) (entity.InspirationVideo, error)
+	// Update 更新视频信息（置顶/推荐/备注等）。
+	Update(ctx context.Context, video entity.InspirationVideo) error
 	// UpdateMetrics 更新视频的互动指标。
 	UpdateMetrics(ctx context.Context, videoID string, metrics entity.MetricsUpdate) error
 	// Delete 删除视频。

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/port"
 )
@@ -14,10 +15,16 @@ import (
 type InspirationHandler struct {
 	uc        *inspiration.UseCase
 	videoRepo port.InspirationVideoRepository
+	brandRepo port.BrandRepository // 用于校验品牌归属
 }
 
 func NewInspirationHandler(uc *inspiration.UseCase, videoRepo port.InspirationVideoRepository) *InspirationHandler {
 	return &InspirationHandler{uc: uc, videoRepo: videoRepo}
+}
+
+// SetBrandRepo 注入品牌仓储（用于租户隔离校验）。
+func (h *InspirationHandler) SetBrandRepo(repo port.BrandRepository) {
+	h.brandRepo = repo
 }
 
 // HandleList GET /api/v1/inspirations —— 灵感视频列表。
@@ -35,12 +42,21 @@ func (h *InspirationHandler) HandleList(c *gin.Context) {
 		return
 	}
 
+	tenantID := middleware.CurrentTenantID(c)
 	brandID := c.Query("brand_id")
 	platform := c.Query("platform")
 	keyword := c.Query("keyword")
 	sortBy := c.DefaultQuery("sort_by", "viral_score")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	// 租户隔离：校验品牌是否属于当前租户
+	if brandID != "" && h.brandRepo != nil {
+		if _, err := h.brandRepo.FindByID(c.Request.Context(), tenantID, brandID); err != nil {
+			fail(c, fmt.Errorf("品牌不存在或无权访问"))
+			return
+		}
+	}
 
 	if page < 1 {
 		page = 1
@@ -140,7 +156,12 @@ func (h *InspirationHandler) HandleUpdateInspiration(c *gin.Context) {
 		video.AdminNote = *req.AdminNote
 	}
 
-	// TODO: 实现 Update 方法到 repository
+	if err := h.videoRepo.Update(c.Request.Context(), video); err != nil {
+		fail(c, fmt.Errorf("更新失败: %w", err))
+		return
+	}
+
+	success(c, video)
 	success(c, gin.H{"msg": "更新成功", "id": id})
 }
 

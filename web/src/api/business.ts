@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, HotVideo, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -220,10 +220,6 @@ export const businessApi = {
   // 抖音官方 OAuth 授权（新窗口打开授权页扫码；回调由服务端处理并 302 跳回前端）
   getDouyinOAuthURL: () =>
     apiClient.get<unknown, { url: string }>('/api/v1/merchant/accounts/douyin/oauth/url'),
-
-  // 热门同款视频发现（支持 DB 筛选/排序/分页 + 实时搜索）
-  listHotVideos: (brandId: string, params?: { force?: boolean; platform?: string; q?: string; sort_by?: string; limit?: number; offset?: number }) =>
-    apiClient.get<unknown, { videos: HotVideo[]; total?: number }>(`/api/v1/merchant/brands/${brandId}/hot-videos`, { params }),
 
   // 作品库三源聚合（我的作品页）
   listWorks: () =>
@@ -626,4 +622,18 @@ export const businessApi = {
     apiClient.get<unknown, InspirationVideo>(`/api/v1/inspirations/${id}`),
   listInspirationPlatforms: () =>
     apiClient.get<unknown, { platforms: string[] }>('/api/v1/inspirations/platforms'),
+
+  // 品牌发布配置
+  getBrandPublishConfigs: (brandId: string) =>
+    apiClient.get<unknown, BrandPublishConfig[]>(`/api/v1/merchant/brands/${brandId}/publish-config`),
+  updateBrandPublishConfig: (brandId: string, config: Partial<BrandPublishConfig>) =>
+    apiClient.put<unknown, BrandPublishConfig>(`/api/v1/merchant/brands/${brandId}/publish-config`, config),
+  deleteBrandPublishConfig: (brandId: string, platform: string) =>
+    apiClient.delete<unknown, void>(`/api/v1/merchant/brands/${brandId}/publish-config/${platform}`),
+  bindAccountToBrand: (brandId: string, data: { account_id: string; platform: string; is_default: boolean }) =>
+    apiClient.post<unknown, AccountBrandBinding>(`/api/v1/merchant/brands/${brandId}/publish-config/bindings`, data),
+  unbindAccountFromBrand: (brandId: string, accountId: string) =>
+    apiClient.delete<unknown, void>(`/api/v1/merchant/brands/${brandId}/publish-config/bindings/${accountId}`),
+  getPublishStats: (brandId: string) =>
+    apiClient.get<unknown, { brand_id: string; daily_usage: Record<string, number> }>(`/api/v1/merchant/brands/${brandId}/publish-stats`),
 }

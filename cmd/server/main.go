@@ -63,7 +63,6 @@ import (
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/geo"
-	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/works"
 	"webreaper/internal/usecase/indexing"
 	"webreaper/internal/usecase/knowledge"
@@ -345,7 +344,6 @@ func main() {
 	var geoDistillUCRef *geo.KeywordDistillUseCase
 	var geoNearbyUCRef *geo.NearbyUseCase     // X-01：附近同行配额注入用
 	var geoDiagnoseUCRef *geo.DiagnoseUseCase // X-01：诊断配额注入用
-	var hotVideoUCRef *hotvideo.HotVideoUseCase // 热门同款用例（账号仓储就绪后注入抖音站内搜索）
 	if geoRepos != nil && cfg.LLM.IsConfigured() {
 		geoScorer := ai.NewLLMGEOScorer(aiGenerator)
 		geoBrandUC := geo.NewBrandUseCase(geoRepos.brand, geoRepos.keyword)
@@ -491,12 +489,6 @@ func main() {
 			geoIndustryUC.SetCache(cacheStore)
 		}
 		router.SetGEOHealth(geoHealthUC)
-		// 热门同款视频发现（人设档案 tab：LLM+搜索 → 拍摄同款选题建议，24h 缓存）
-		hotVideoUCRef = hotvideo.NewHotVideoUseCase(geoRepos.brand, ai.NewWebLinkSearcher(webFetcher), aiGenerator)
-		// 热门视频持久化（搜索结果落 DB，支持搜索/排序/定时采集积累）
-		hotVideoRepo := repository.NewGormHotVideoRepository(geoRepos.db)
-		hotVideoUCRef.SetHotVideoRepo(hotVideoRepo)
-		router.SetGEOHotVideo(hotVideoUCRef)
 		// 行业全景看板（v3 P2：跨商户聚合——行业能见度/品牌美誉度/信源域名榜）
 		router.SetGEOIndustry(geoIndustryUC)
 
@@ -566,9 +558,6 @@ func main() {
 			// 热门同款 tab 主数据源；数据回读上线后复用 GetVideoDetail
 			// 站内搜索共享实例（热门同款主数据源 + 数据回读取详情）
 			socialSearcher = douyinweb.NewSearcher(accountRepos.account, vault)
-			if hotVideoUCRef != nil {
-				hotVideoUCRef.SetSocialSearcher(socialSearcher)
-			}
 			// 发布通道注册表（工厂模式，已注册知乎/小红书全自动通道——同时支持半自动+全自动）
 			channelRegistry := publisher.NewChannelRegistry()
 			// cookie 滚动回写（发布会话后把浏览器最新 cookie 写回账号库——绑定滚动续期）
@@ -598,7 +587,6 @@ func main() {
 			pendingStore := agent.NewPendingPublishStore()
 			router.SetPendingPublishStore(pendingStore)
 			toolRegistry.Register(agent.NewQueryBrandsTool(geoRepos.brand))
-			toolRegistry.Register(agent.NewDiscoverHotVideosTool(hotVideoUCRef))
 			toolRegistry.Register(agent.NewListWorksTool(worksUC))
 			toolRegistry.Register(agent.NewQueryAnalyticsTool(geoPublishUC))
 			toolRegistry.Register(agent.NewTriggerMonitorTool(geoMonitorUCRef))
@@ -794,11 +782,6 @@ func main() {
 		if knowledgeUCRef != nil {
 			_ = taskScheduler.Register(scheduledtask.NewKnowledgeCrawlTask(knowledgeUCRef, log))
 			log.Info("知识库采集任务已注册（knowledge-crawl，每 6 小时）")
-		}
-		// 热门视频定期采集（每 6h 按品牌轮询，结果落 DB 积累——商户进 tab 直接读）
-		if hotVideoUCRef != nil {
-			_ = taskScheduler.Register(scheduledtask.NewHotVideoCrawlTask(hotVideoUCRef, geoRepos.brand, log))
-			log.Info("热门视频采集任务已注册（hot-video-crawl，每 6 小时）")
 		}
 	}
 
@@ -1057,9 +1040,18 @@ func main() {
 				log.Info("灵感广场：抖音爬虫已注册")
 			}
 
-			router.SetInspiration(inspirationUC, inspirationVideoRepo)
+			router.SetInspiration(inspirationUC, inspirationVideoRepo, geoRepos.brand)
 			router.SetCrawlerAdmin(crawlerConfigRepo, crawlerAccountRepo, crawlerTaskLogRepo)
 			log.Info("灵感广场已启用")
+		}
+
+		// 品牌发布配置（P06：多平台发布模块）
+		if geoRepos != nil {
+			publishConfigRepo := repository.NewGormBrandPublishConfigRepository(geoRepos.db)
+			publishBindingRepo := repository.NewGormAccountBrandBindingRepository(geoRepos.db)
+			publishUsageRepo := repository.NewGormPublishUsageRepository(geoRepos.db)
+			router.SetPublishConfig(publishConfigRepo, publishBindingRepo, publishUsageRepo)
+			log.Info("品牌发布配置已启用")
 		}
 		// 并发节流（P3）：限制同时提交到 Vidu 的请求数，防瞬时高峰触发 QuotaExceeded/429
 		genUC.SetConcurrency(5)

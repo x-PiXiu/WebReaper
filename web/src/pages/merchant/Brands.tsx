@@ -12,7 +12,9 @@ import { useBrandOverviews } from '../../hooks/useBrandOverviews'
 import { rateColor } from '../../utils/geo'
 import StoreTab from './brands/StoreTab'
 import KnowledgeTab from './brands/KnowledgeTab'
-import HotVideosTab from './brands/HotVideosTab'
+import InspirationTab from './brands/InspirationTab'
+import PublishConfigTab from './brands/PublishConfigTab'
+import PublishHistoryTab from './brands/PublishHistoryTab'
 import type { Brand, CompetitorSuggestion } from '../../types/api'
 
 const { Text } = Typography
@@ -574,14 +576,24 @@ export default function Brands() {
                     </div>
                   </>),
                 },
-                {
-                  key: 'hot-videos',
-                  label: '热门同款',
-                  children: <HotVideosTab brandId={selectedBrand.id} />,
-                },
                 ...(selectedBrand.biz_type !== 'online'
                   ? [{ key: 'stores', label: '门店档案', children: <StoreTab brand={selectedBrand} /> }]
                   : []),
+                {
+                  key: 'inspiration',
+                  label: '灵感',
+                  children: <InspirationTab brandId={selectedBrand.id} />,
+                },
+                {
+                  key: 'publish-config',
+                  label: '发布配置',
+                  children: <PublishConfigTab brandId={selectedBrand.id} />,
+                },
+                {
+                  key: 'publish-history',
+                  label: '发布历史',
+                  children: <PublishHistoryTab brandId={selectedBrand.id} />,
+                },
                 {
                   key: 'knowledge',
                   label: '知识库',

@@ -94,6 +94,8 @@ func NewChannelRegistry() *ChannelRegistry {
 	r.Register(NewXiaohongshuAutoChannel())
 	r.Register(NewDouyinAutoChannel())     // 抖音（获客智能体转型：视频分发主战场）
 	r.Register(NewKuaishouAutoChannel())   // 快手
+	r.Register(NewBilibiliAutoChannel())   // B站
+	r.Register(NewWeixinAutoChannel())     // 视频号
 	return r
 }
 

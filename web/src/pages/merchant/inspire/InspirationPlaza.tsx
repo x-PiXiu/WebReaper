@@ -5,7 +5,7 @@ import {
   Button, Empty, Input, Modal, Segmented, Select, Space, Spin, Tag, Typography, message,
 } from 'antd'
 import {
-  EditOutlined, FireOutlined, PlayCircleOutlined, SyncOutlined, VideoCameraOutlined,
+  EditOutlined, FireOutlined, PlayCircleOutlined, VideoCameraOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { useBrandContext } from '../../../hooks/useBrands'
@@ -14,7 +14,7 @@ import { PRODUCT } from '../../../config/product'
 import { PlatformBadge } from '../../../components/PlatformBadge'
 import { PlatformIcon } from '../../../components/PlatformIcon'
 import { getPlatformLabel } from '../../../data/platforms'
-import type { HotVideo } from '../../../types/api'
+import type { InspirationVideo } from '../../../types/api'
 import PageLoading from '../../../components/PageLoading'
 
 const { Text, Paragraph } = Typography
@@ -24,13 +24,13 @@ const GRAPHIC_PLATFORMS = new Set(['xiaohongshu', 'web'])
 type ContentKind = 'all' | 'video' | 'graphic'
 type RemakeMode = 'video' | 'graphic'
 
-function kindOf(v: HotVideo): RemakeMode {
+function kindOf(v: InspirationVideo): RemakeMode {
   return GRAPHIC_PLATFORMS.has(v.platform) ? 'graphic' : 'video'
 }
 
 /**
  * 灵感广场：展示同赛道近期社交平台爆款短视频/图文，一键复刻进爆款获客双轨。
- * 数据沿用热门同款 API（LLM + 站内/搜索发现，24h 缓存）。
+ * 数据来自灵感 API（平台爬虫采集，用户无需登录社媒账号）。
  */
 export default function InspirationPlaza() {
   const navigate = useNavigate()
@@ -40,18 +40,21 @@ export default function InspirationPlaza() {
 
   const [kind, setKind] = useState<ContentKind>('all')
   const [platform, setPlatform] = useState<string>('all')
-  const [remaking, setRemaking] = useState<{ item: HotVideo; mode: RemakeMode } | null>(null)
+  const [remaking, setRemaking] = useState<{ item: InspirationVideo; mode: RemakeMode } | null>(null)
   const [topicDraft, setTopicDraft] = useState('')
-  const [refreshing, setRefreshing] = useState(false)
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['hot-videos', brandId],
-    queryFn: () => businessApi.listHotVideos(brandId!),
+  const { data, isLoading } = useQuery({
+    queryKey: ['inspirations', brandId, platform, kind],
+    queryFn: () => businessApi.listInspirations({
+      brand_id: brandId || undefined,
+      platform: platform !== 'all' ? platform : undefined,
+      page_size: 50,
+    }),
     enabled: !!brandId,
-    staleTime: 24 * 3600_000,
+    staleTime: 5 * 60_000,
   })
 
-  const videos = data?.videos || []
+  const videos = data?.items || []
 
   const platforms = useMemo(() => {
     const set = new Set(videos.map((v) => v.platform).filter(Boolean))
@@ -60,35 +63,17 @@ export default function InspirationPlaza() {
 
   const filtered = useMemo(() => {
     return videos.filter((v) => {
-      if (platform !== 'all' && v.platform !== platform) return false
       if (kind === 'video' && kindOf(v) !== 'video') return false
       if (kind === 'graphic' && kindOf(v) !== 'graphic') return false
       return true
     })
-  }, [videos, kind, platform])
+  }, [videos, kind])
 
-  const refresh = async () => {
-    if (!brandId) {
-      message.warning('请先选择人设档案')
-      return
-    }
-    setRefreshing(true)
-    message.loading({ content: '正在拉取社交平台最新爆款…', key: 'inspire', duration: 0 })
-    try {
-      await businessApi.listHotVideos(brandId, { force: true })
-      await queryClient.invalidateQueries({ queryKey: ['hot-videos', brandId] })
-      message.success({ content: '灵感已更新', key: 'inspire' })
-    } catch {
-      message.error({ content: '更新失败，稍后再试', key: 'inspire' })
-    } finally {
-      setRefreshing(false)
-    }
-  }
-
-  const openRemake = (item: HotVideo, mode: RemakeMode) => {
+  const openRemake = (item: InspirationVideo, mode: RemakeMode) => {
     setRemaking({ item, mode })
     const prefix = mode === 'graphic' ? '写一篇同款种草：' : '拍一条同款：'
-    setTopicDraft(item.topic || `${prefix}${item.title}`)
+    const topic = item.topics?.[0] || `${prefix}${item.title}`
+    setTopicDraft(topic)
   }
 
   const confirmRemake = () => {
@@ -102,14 +87,14 @@ export default function InspirationPlaza() {
     draft.setTrack(mode)
     draft.patch({
       brandId,
-      sourceUrl: item.url || undefined,
+      sourceUrl: item.video_url || undefined,
       refTitle: item.title,
-      hotPoint: item.hot_point || undefined,
+      hotPoint: item.description?.slice(0, 100) || undefined,
       script: topic,
       transcript: [
-        item.hot_point ? `【为什么火】${item.hot_point}` : '',
+        item.description ? `【简介】${item.description.slice(0, 200)}` : '',
         `【选题】${topic}`,
-        item.url ? `【来源】${item.url}` : '',
+        item.video_url ? `【来源】${item.video_url}` : '',
       ].filter(Boolean).join('\n'),
       selectedTitle: item.title.slice(0, 40),
     })
@@ -139,20 +124,12 @@ export default function InspirationPlaza() {
             options={brands.map((b) => ({ value: b.id, label: b.name }))}
             notFoundContent="请先建人设档案"
           />
-          <Button
-            icon={<SyncOutlined spin={refreshing || isFetching} />}
-            loading={refreshing}
-            disabled={!brandId}
-            onClick={refresh}
-          >
-            刷新爆款
-          </Button>
         </Space>
       </div>
 
       {!brandId ? (
         <div className="ip-panel" style={{ padding: 48, textAlign: 'center' }}>
-          <Empty description="先建人设档案，才能按行业发现实时爆款">
+          <Empty description="先建人设档案，才能按行业发现爆款灵感">
             <Button type="primary" className="ip-btn-primary" onClick={() => navigate('/m/brands')}>
               去建人设
             </Button>
@@ -200,19 +177,21 @@ export default function InspirationPlaza() {
                 )}
               />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                {filtered.length} 条灵感 · 约每日更新
+                {filtered.length} 条灵感
               </Text>
             </Space>
           </div>
 
           {isLoading ? (
             <div className="ip-panel" style={{ padding: 64, textAlign: 'center' }}>
-              <Spin tip="正在发现社交平台近期爆款…" size="large" />
+              <Spin tip="正在加载灵感…" size="large" />
             </div>
           ) : filtered.length === 0 ? (
             <div className="ip-panel" style={{ padding: 48 }}>
-              <Empty description="暂无匹配灵感——完善人设行业/定位，或点「刷新爆款」重搜">
-                <Button type="primary" className="ip-btn-primary" onClick={refresh}>刷新爆款</Button>
+              <Empty description="暂无匹配灵感——完善人设行业/定位，或稍后再来看看">
+                <Button type="primary" className="ip-btn-primary" onClick={() => queryClient.invalidateQueries({ queryKey: ['inspirations'] })}>
+                  刷新
+                </Button>
               </Empty>
             </div>
           ) : (
@@ -220,34 +199,44 @@ export default function InspirationPlaza() {
               {filtered.map((v, i) => {
                 const mode = kindOf(v)
                 return (
-                  <article key={(v.url || v.title) + i} className="inspire-card">
+                  <article key={(v.platform_video_id || v.title) + i} className="inspire-card">
+                    {v.cover_url && (
+                      <div className="inspire-card-cover">
+                        <img src={v.cover_url} alt={v.title} loading="lazy" />
+                      </div>
+                    )}
                     <div className="inspire-card-top">
                       <PlatformBadge platform={v.platform} size={16} />
                       <Tag style={{ margin: 0 }}>{mode === 'graphic' ? '图文向' : '短视频'}</Tag>
+                      {v.viral_score > 0 && (
+                        <Tag color="red" style={{ margin: 0 }}>🔥 {v.viral_score.toFixed(0)}分</Tag>
+                      )}
                     </div>
                     <Text strong className="inspire-card-title" ellipsis={{ tooltip: v.title }}>
                       {v.title}
                     </Text>
-                    {v.hot_point ? (
+                    {v.description ? (
                       <Paragraph type="secondary" className="inspire-card-hot" ellipsis={{ rows: 3 }}>
                         <FireOutlined style={{ color: 'var(--wr-accent)', marginRight: 6 }} />
-                        {v.hot_point}
+                        {v.description}
                       </Paragraph>
                     ) : (
-                      <Paragraph type="secondary" className="inspire-card-hot">暂无爆点解读</Paragraph>
+                      <Paragraph type="secondary" className="inspire-card-hot">暂无简介</Paragraph>
                     )}
-                    {v.topic && (
-                      <div className="inspire-topic">
-                        <Text type="secondary" style={{ fontSize: 11 }}>复刻选题</Text>
-                        <Text style={{ fontSize: 13, display: 'block', marginTop: 4 }}>{v.topic}</Text>
-                      </div>
+                    <div className="inspire-card-stats">
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        👁 {(v.play_count || 0).toLocaleString()} · ❤ {(v.digg_count || 0).toLocaleString()} · 💬 {(v.comment_count || 0).toLocaleString()}
+                      </Text>
+                    </div>
+                    {v.author && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>作者：{v.author}</Text>
                     )}
                     <div className="inspire-card-actions">
                       <Button
                         size="small"
                         icon={<PlayCircleOutlined />}
-                        disabled={!v.url}
-                        onClick={() => v.url && window.open(v.url, '_blank', 'noopener')}
+                        disabled={!v.video_url}
+                        onClick={() => v.video_url && window.open(v.video_url, '_blank', 'noopener')}
                       >
                         原帖
                       </Button>
@@ -289,16 +278,16 @@ export default function InspirationPlaza() {
           <Text type="secondary" style={{ fontSize: 12 }}>
             参考爆款：{remaking?.item.title}
           </Text>
-          {remaking?.item.hot_point && (
+          {remaking?.item.description && (
             <div className="inspire-topic">
-              <Text style={{ fontSize: 12 }}>🔥 {remaking.item.hot_point}</Text>
+              <Text style={{ fontSize: 12 }}>📝 {remaking.item.description.slice(0, 100)}</Text>
             </div>
           )}
           <Text style={{ fontSize: 13 }}>确认或改写选题后进入步骤引导：</Text>
           <Input.TextArea
             rows={3}
             value={topicDraft}
-            onChange={(e) => setTopicDraft(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTopicDraft(e.target.value)}
             maxLength={160}
             showCount
             placeholder="你的差异化选题"

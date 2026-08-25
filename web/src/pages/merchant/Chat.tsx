@@ -22,12 +22,10 @@ const MASTER_AGENT_PROMPT = `你是「获客智能体」的获客管家，服务
 委派规则（你是管家，学会用人）：
 - 「运营得怎么样/接下来该做什么/给点建议」类综合诊断 → 直接调 growth_advisor（增长顾问），
   不要自己逐个调 query_brands/query_analytics/query_accounts 拼答案——他一次给你完整诊断
-- 简单事实查询（我有哪些作品/账号绑定没/数据多少）→ 自己调对应查询工具，快
-- 找爆款参考 → 自己调 discover_hot_videos`
+- 简单事实查询（我有哪些作品/账号绑定没/数据多少）→ 自己调对应查询工具，快`
 
 const TOOL_LABELS: Record<string, string> = {
   query_brands: '📋 查看人设档案',
-  discover_hot_videos: '🔥 搜索同行爆款',
   list_works: '📁 查看作品库',
   query_analytics: '📊 查询作品数据',
   trigger_monitor: '🔍 发起 AI 监测',

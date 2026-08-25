@@ -653,6 +653,18 @@ func (r *GormInspirationVideoRepository) FindByID(ctx context.Context, id string
 	return inspirationVideoFromPO(po), nil
 }
 
+func (r *GormInspirationVideoRepository) Update(ctx context.Context, video entity.InspirationVideo) error {
+	po := inspirationVideoToPO(video)
+	po.UpdatedAt = time.Now()
+	return r.db.WithContext(ctx).Model(&InspirationVideoPO{}).Where("id = ?", video.ID).
+		Updates(map[string]any{
+			"is_pinned":      po.IsPinned,
+			"is_recommended": po.IsRecommended,
+			"admin_note":     po.AdminNote,
+			"updated_at":     po.UpdatedAt,
+		}).Error
+}
+
 func (r *GormInspirationVideoRepository) UpdateMetrics(ctx context.Context, videoID string, metrics entity.MetricsUpdate) error {
 	return r.db.WithContext(ctx).Model(&InspirationVideoPO{}).Where("id = ?", videoID).
 		Updates(map[string]any{
@@ -694,9 +706,10 @@ func (r *GormInspirationVideoRepository) CountByBrand(ctx context.Context) ([]po
 		AvgScore  float64
 	}
 	if err := r.db.WithContext(ctx).Table("brand_inspirations bi").
-		Select("bi.brand_id, '' as brand_name, COUNT(*) as count, AVG(iv.viral_score) as avg_score").
+		Select("bi.brand_id, COALESCE(gb.name, '') as brand_name, COUNT(*) as count, AVG(iv.viral_score) as avg_score").
 		Joins("JOIN inspiration_videos iv ON iv.id = bi.video_id").
-		Group("bi.brand_id").Find(&results).Error; err != nil {
+		Joins("LEFT JOIN geo_brands gb ON gb.id = bi.brand_id").
+		Group("bi.brand_id, gb.name").Find(&results).Error; err != nil {
 		return nil, err
 	}
 	out := make([]port.BrandCount, 0, len(results))

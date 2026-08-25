@@ -317,7 +317,7 @@ func (uc *BrandUseCase) GenerateKeywords(ctx context.Context, tenantID, brandID 
 	// 本地意图关键词（本地生活 P0 补全）：品牌有门店时注入位置，
 	// 要求生成含"城市/区+品类"的本地搜索词（如"望京 川菜馆""朝阳区 聚餐餐厅"）——
 	// 实体业态的命脉搜索入口，纯 LLM 凭卖点生成不出来。
-	if localCtx := uc.buildLocalKeywordContext(ctx, brandID); localCtx != "" {
+	if localCtx := uc.buildLocalKeywordContext(ctx, tenantID, brandID); localCtx != "" {
 		userPrompt += fmt.Sprintf(`
 门店位置：%s
 
@@ -386,12 +386,12 @@ func (uc *BrandUseCase) GenerateKeywords(ctx context.Context, tenantID, brandID 
 // 未注入仓储/品牌无门店时返回空串（行为与改造前一致——不强制本地化）。
 // 业务分流（P0-2）：online 品牌（线上业务）无地理约束——跳过本地化，监测走品类词。
 // 位置优先级：商圈 > 区 > 城市（P1 商圈补全后，"望京"比"朝阳区"更贴近真实搜索意图）。
-func (uc *BrandUseCase) buildLocalKeywordContext(ctx context.Context, brandID string) string {
+func (uc *BrandUseCase) buildLocalKeywordContext(ctx context.Context, tenantID, brandID string) string {
 	if uc.storeRepo == nil || brandID == "" {
 		return ""
 	}
 	// online 品牌：无门店/无地理约束，跳过（线上业务监测走品类词，非本地词）
-	if b, err := uc.brandRepo.FindByID(ctx, "", brandID); err == nil && !b.IsLocal() {
+	if b, err := uc.brandRepo.FindByID(ctx, tenantID, brandID); err == nil && !b.IsLocal() {
 		return ""
 	}
 	store, err := uc.storeRepo.FindPrimaryByBrand(ctx, brandID)

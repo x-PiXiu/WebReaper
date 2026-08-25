@@ -16,7 +16,6 @@ import (
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
-	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/works"
 	"webreaper/internal/usecase/indexing"
@@ -67,7 +66,6 @@ type Router struct {
 	geoAdviceUC   *geo.AdviceUseCase         // 行动建议用例（可选，P5-05）
 	geoCitationUC *geo.CitationUseCase       // 内容引用统计用例（可选，P5-02）
 	geoHealthUC   *geo.HealthUseCase         // 健康报告聚合用例（可选，v3 归位：单一事实源）
-	geoHotVideoUC *hotvideo.HotVideoUseCase  // 热门同款视频发现（可选，人设档案 tab）
 	geoIndustryUC *geo.IndustryUseCase       // 行业全景聚合用例（可选，v3 P2：admin 看板）
 	metrics       port.MetricsCollector      // 运营指标采集（可选，R3；nil=不采集）
 	inputTipper   port.InputTipper           // 地址联想（可选，P1；未注入→空列表降级）
@@ -118,10 +116,15 @@ type Router struct {
 	// 灵感广场用例（热门视频采集+展示）——通过 SetInspiration 注入，可选
 	inspirationUC       *inspiration.UseCase
 	inspirationVideoRepo port.InspirationVideoRepository
+	brandRepo            port.BrandRepository // 用于灵感数据租户隔离校验
 	// 爬虫管理用例（管理后台爬虫配置/账号管理）——通过 SetCrawlerAdmin 注入，可选
 	crawlerConfigRepo   port.CrawlerConfigRepository
 	crawlerAccountRepo  port.CrawlerAccountRepository
 	crawlerTaskLogRepo  port.CrawlerTaskLogRepository
+	// 品牌发布配置——通过 SetPublishConfig 注入，可选
+	publishConfigRepo  port.BrandPublishConfigRepository
+	publishBindingRepo port.AccountBrandBindingRepository
+	publishUsageRepo   port.PublishUsageRepository
 }
 
 // SetKeywordDistill 注入关键词蒸馏用例（可选；未注入则蒸馏端点不注册）。
@@ -190,11 +193,6 @@ func (r *Router) SetGEO(brand *geo.BrandUseCase, monitor *geo.MonitorUseCase, ra
 // SetGEOHealth 注入健康报告聚合用例（可选；未注入则健康报告端点不注册）。
 func (r *Router) SetGEOHealth(uc *geo.HealthUseCase) {
 	r.geoHealthUC = uc
-}
-
-// SetGEOHotVideo 注入热门同款视频用例（可选；未注入则热门同款端点不注册）。
-func (r *Router) SetGEOHotVideo(uc *hotvideo.HotVideoUseCase) {
-	r.geoHotVideoUC = uc
 }
 
 // SetGEOIndustry 注入行业全景聚合用例（可选；未注入则行业看板端点不注册）。
@@ -323,6 +321,9 @@ func (r *Router) registerInspirationRoutes(api *gin.RouterGroup) {
 		return
 	}
 	ih := NewInspirationHandler(r.inspirationUC, r.inspirationVideoRepo)
+	if r.brandRepo != nil {
+		ih.SetBrandRepo(r.brandRepo)
+	}
 	api.GET("/inspirations", ih.HandleList)
 	api.GET("/inspirations/:id", ih.HandleGet)
 	api.GET("/inspirations/platforms", ih.HandleListPlatforms)
@@ -368,10 +369,31 @@ func (r *Router) registerCrawlerAdminRoutes(api *gin.RouterGroup) {
 	}
 }
 
+// registerPublishConfigRoutes 注册品牌发布配置路由（商户端，需要登录）。
+func (r *Router) registerPublishConfigRoutes(api *gin.RouterGroup) {
+	if r.publishConfigRepo == nil && r.publishBindingRepo == nil {
+		return
+	}
+	pch := NewPublishConfigHandler(r.publishConfigRepo, r.publishBindingRepo, r.publishUsageRepo)
+
+	// 品牌发布配置
+	api.GET("/merchant/brands/:id/publish-config", pch.HandleGetBrandPublishConfig)
+	api.PUT("/merchant/brands/:id/publish-config", pch.HandleUpdateBrandPublishConfig)
+	api.DELETE("/merchant/brands/:id/publish-config/:platform", pch.HandleDeleteBrandPublishConfig)
+
+	// 账号品牌绑定
+	api.POST("/merchant/brands/:id/publish-config/bindings", pch.HandleBindAccount)
+	api.DELETE("/merchant/brands/:id/publish-config/bindings/:accountId", pch.HandleUnbindAccount)
+
+	// 发布统计
+	api.GET("/merchant/brands/:id/publish-stats", pch.HandleGetPublishStats)
+}
+
 // SetInspiration 注入灵感广场用例（可选；未注入则灵感端点不注册）。
-func (r *Router) SetInspiration(uc *inspiration.UseCase, videoRepo port.InspirationVideoRepository) {
+func (r *Router) SetInspiration(uc *inspiration.UseCase, videoRepo port.InspirationVideoRepository, brandRepo port.BrandRepository) {
 	r.inspirationUC = uc
 	r.inspirationVideoRepo = videoRepo
+	r.brandRepo = brandRepo
 }
 
 // SetCrawlerAdmin 注入爬虫管理仓储（可选；未注入则爬虫管理端点不注册）。
@@ -379,6 +401,13 @@ func (r *Router) SetCrawlerAdmin(configRepo port.CrawlerConfigRepository, accoun
 	r.crawlerConfigRepo = configRepo
 	r.crawlerAccountRepo = accountRepo
 	r.crawlerTaskLogRepo = taskLogRepo
+}
+
+// SetPublishConfig 注入品牌发布配置仓储（可选；未注入则发布配置端点不注册）。
+func (r *Router) SetPublishConfig(configRepo port.BrandPublishConfigRepository, bindingRepo port.AccountBrandBindingRepository, usageRepo port.PublishUsageRepository) {
+	r.publishConfigRepo = configRepo
+	r.publishBindingRepo = bindingRepo
+	r.publishUsageRepo = usageRepo
 }
 
 // NewRouter 创建路由器（零参数——所有依赖通过 SetXxx 可选注入）。
@@ -520,6 +549,7 @@ func (r *Router) Engine() *gin.Engine {
 	r.registerMerchantBillingRoutes(api)
 	r.registerInspirationRoutes(api)
 	r.registerCrawlerAdminRoutes(api)
+	r.registerPublishConfigRoutes(api)
 	r.registerAdminRoutes(api, geoHandler)
 	return e
 }

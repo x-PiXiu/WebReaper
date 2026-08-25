@@ -43,9 +43,6 @@ func (r *Router) registerGEORoutes(api *gin.RouterGroup) *GEOHandler {
 	if r.geoHealthUC != nil {
 		geoHandler.SetHealthUC(r.geoHealthUC)
 	}
-	if r.geoHotVideoUC != nil {
-		geoHandler.SetHotVideoUC(r.geoHotVideoUC)
-	}
 	// 行业全景聚合（v3 P2：注册进 handler，admin 路由组挂端点）
 	if r.geoIndustryUC != nil {
 		geoHandler.SetIndustryUC(r.geoIndustryUC)
@@ -113,10 +110,6 @@ func (r *Router) registerGEORoutes(api *gin.RouterGroup) *GEOHandler {
 	}
 	// 行动建议（P5-05：给老板"下一步做什么"）
 	api.GET("/merchant/brands/:id/advice", geoHandler.HandleAdvice)
-	// 热门同款视频发现（人设档案 tab：LLM+搜索发现，24h 缓存）
-	if geoHandler.hotVideoUC != nil {
-		api.GET("/merchant/brands/:id/hot-videos", geoHandler.HandleListHotVideos)
-	}
 	// 内容引用统计（P5-02：每篇被 AI 引用几次）
 	api.GET("/merchant/brands/:id/citations", geoHandler.HandleContentCitations)
 	// 地址联想（P1 输入提示：门店建档表单边输入边联想）

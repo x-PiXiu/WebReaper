@@ -20,6 +20,8 @@ const PLATFORMS = [
   { key: 'kuaishou', name: '快手', color: 'var(--wr-warning)', desc: '短视频平台，下沉市场覆盖广' },
   { key: 'xiaohongshu', name: '小红书', color: 'var(--wr-danger)', desc: '种草社区，本地生活/装修类精准触达' },
   { key: 'zhihu', name: '知乎', color: 'var(--wr-primary)', desc: '知识问答社区，长文 SEO 效果好' },
+  { key: 'bilibili', name: 'B站', color: 'var(--wr-primary)', desc: '视频社区，年轻用户聚集地' },
+  { key: 'weixin', name: '视频号', color: 'var(--wr-success)', desc: '微信生态，私域流量入口' },
 ]
 
 // 健康度 → 显示配置（账号池表格用）
@@ -62,6 +64,9 @@ export default function Distribution() {
   // D: 可编辑发布标题/正文（发布前可调整，不再只读 selectedContent）
   const [publishTitle, setPublishTitle] = useState('')
   const [publishContentText, setPublishContentText] = useState('')
+  // 定时发布
+  const [scheduledAt, setScheduledAt] = useState<string>('')
+  const [isScheduled, setIsScheduled] = useState(false)
 
   // 选中内容变化时，初始化可编辑标题/正文
   useEffect(() => {
@@ -220,6 +225,8 @@ export default function Distribution() {
     setPublishLinks([])
     try {
       const results: PublishJob[] = []
+      // 定时发布时间
+      const scheduledAtISO = isScheduled && scheduledAt ? new Date(scheduledAt).toISOString() : undefined
       // 标题截断/素材按平台能力约束处理（constraints 从服务端下发——前端零硬编码）
       const titleFor = (platform: string): string => {
         const max = channelByPlatform.get(platform)?.constraints?.[publishForm]?.title_max_runes || 0
@@ -237,6 +244,7 @@ export default function Distribution() {
             title: titleFor(platform), content: publishContentText, mode: publishMode,
             content_type: publishForm,
             media_urls: needsMedia(platform) ? mediaUrls : undefined,
+            scheduled_at: scheduledAtISO,
           }))
         }
       } else {
@@ -248,6 +256,7 @@ export default function Distribution() {
             title: titleFor(acc.platform), content: publishContentText, mode: publishMode,
             content_type: publishForm,
             media_urls: needsMedia(acc.platform) ? mediaUrls : undefined,
+            scheduled_at: scheduledAtISO,
           }))
         }
       }
@@ -284,7 +293,7 @@ export default function Distribution() {
     {
       title: '登录方式', dataIndex: 'login_method', key: 'method', width: 100,
       render: (m: string) => {
-        const labels: Record<string, string> = { zhihu: '知乎App', wechat: '微信', qq: 'QQ', weibo: '微博', xiaohongshu: '小红书' }
+        const labels: Record<string, string> = { zhihu: '知乎App', wechat: '微信', qq: 'QQ', weibo: '微博', xiaohongshu: '小红书', douyin: '抖音App', kuaishou: '快手App', bilibili: 'B站App', weixin: '微信扫码' }
         return <Tag>{labels[m] || m || '-'}</Tag>
       },
     },
@@ -614,8 +623,26 @@ export default function Distribution() {
                   </div>
                 )
               })()}
+              {/* 定时发布选项 */}
+              <div style={{ marginBottom: 12 }}>
+                <Switch
+                  checked={isScheduled}
+                  onChange={setIsScheduled}
+                  checkedChildren="定时发布"
+                  unCheckedChildren="立即发布"
+                />
+                {isScheduled && (
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    style={{ marginLeft: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--wr-border)' }}
+                    min={new Date().toISOString().slice(0, 16)}
+                  />
+                )}
+              </div>
               <Button type="primary" size="large" block loading={publishing} onClick={handlePublish}>
-                {publishing ? '发布中...' : `发布到 ${selectedAccountIds.length} 个平台`}
+                {publishing ? '发布中...' : isScheduled ? '定时发布' : `发布到 ${selectedAccountIds.length} 个平台`}
               </Button>
             </div>
           )}

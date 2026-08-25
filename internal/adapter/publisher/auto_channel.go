@@ -211,6 +211,19 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		log.Printf("[PublishAuto:zhihu] 正文已填充（%d 字符）", len([]rune(trimmed)))
 	}
 
+	// DRY_RUN：走完填表后截图返回、不点发布（真机验证选择器，绝不发出内容）
+	if publishDryRun {
+		_ = os.MkdirAll("data", 0o755)
+		var shot []byte
+		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil && len(shot) > 0 {
+			p := filepath.Join("data", fmt.Sprintf("publish-dryrun-%s.png", job.ID))
+			if wErr := os.WriteFile(p, shot, 0o644); wErr == nil {
+				log.Printf("[PublishAuto:zhihu] DRY_RUN 完成（未发布）——截图 %s", p)
+			}
+		}
+		return "dryrun://zhihu", nil
+	}
+
 	// 5. 等待发布按钮可点击 + 点击。
 	// 【修复】原代码点击 disabled 按钮静默无效还误判成功。新逻辑：轮询等待
 	// 按钮 enabled（正文填入后 DraftJS 校验通过自动激活），最多等 12 秒。
@@ -438,6 +451,19 @@ func (c *XiaohongshuAutoChannel) publishImage(sessionCtx context.Context, job en
 			return "", fmt.Errorf("正文填充校验失败：编辑器内容为空（ProseMirror 可能拒绝输入）")
 		}
 		log.Printf("[PublishAuto:xiaohongshu] 正文已填充（%d 字符）", len([]rune(contentText)))
+	}
+
+	// DRY_RUN：走完上传+填表后截图返回、不点发布（与抖音/知乎同款安全闸门）
+	if publishDryRun {
+		_ = os.MkdirAll("data", 0o755)
+		var shot []byte
+		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil && len(shot) > 0 {
+			p := filepath.Join("data", fmt.Sprintf("publish-dryrun-%s.png", job.ID))
+			if wErr := os.WriteFile(p, shot, 0o644); wErr == nil {
+				log.Printf("[PublishAuto:xiaohongshu] DRY_RUN 完成（未发布）——截图 %s", p)
+			}
+		}
+		return "dryrun://xiaohongshu", nil
 	}
 
 	// ⑥ 点发布：Shadow DOM 坐标穿透 + CDP 鼠标点击。

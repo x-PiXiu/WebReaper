@@ -134,6 +134,7 @@ function QRStatusIndicator({ status, platform }: { status?: string; platform: st
     return <Space><CheckCircleOutlined style={{ color: 'var(--wr-accent)' }} /><Text style={{ color: 'var(--wr-accent)' }}>已扫码，请在手机确认登录</Text></Space>
   }
   if (status === 'expired') return <Text type="warning">二维码已过期，请关闭后重新获取</Text>
+  if (status === 'cancelled') return <Text type="secondary">扫码已取消</Text>
   if (status === 'success') {
     return <Space><CheckCircleOutlined style={{ color: 'var(--wr-success)' }} /><Text style={{ color: 'var(--wr-success)' }}>登录成功，正在绑定...</Text></Space>
   }

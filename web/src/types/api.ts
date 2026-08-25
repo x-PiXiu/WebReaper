@@ -387,23 +387,6 @@ export interface OptimizedContent {
   created_at: string
 }
 
-// ---- 热门同款视频（人设档案 tab：LLM+搜索发现）----
-export interface HotVideo {
-  title: string
-  url: string
-  platform: string      // douyin / kuaishou / xiaohongshu / bilibili / web
-  hot_point: string     // 为什么火（可抄的点）
-  topic: string         // 拍摄同款选题建议（预填创作）
-  cover_url?: string
-  author?: string
-  play_count?: number
-  digg_count?: number
-  comment_count?: number
-  publish_time?: string // RFC3339
-  source?: string       // search / douyin
-  created_at?: string
-}
-
 // ---- 作品库三源聚合（我的作品页）----
 export interface WorkItem {
   id: string
@@ -724,6 +707,7 @@ export interface CrawlerAccount {
   id: number
   platform: string               // douyin/kuaishou/bilibili
   account_name: string
+  cookie?: string                // 创建时传入（明文，后端加密存储）
   cookie_encrypted: string       // 掩码（管理后台展示）
   user_agent: string
   proxy_address: string
@@ -821,6 +805,36 @@ export interface InspirationVideo {
   admin_note: string
   created_at: string
   updated_at: string
+}
+
+// 品牌发布配置
+export interface BrandPublishConfig {
+  id: string
+  tenant_id: string
+  brand_id: string
+  platform: string
+  account_ids: string[]
+  rate_limit: {
+    max_per_day: number
+    max_per_hour: number
+    min_interval: number
+  }
+  default_tags: string[]
+  default_persona: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+// 账号品牌绑定
+export interface AccountBrandBinding {
+  id: string
+  tenant_id: string
+  account_id: string
+  brand_id: string
+  platform: string
+  is_default: boolean
+  created_at: string
 }
 
 // ---- 经济系统（订阅 / 计费 / 配额）----

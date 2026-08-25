@@ -1,19 +1,16 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Dropdown, Empty, Spin } from 'antd'
+import { Button, Empty, Spin } from 'antd'
 import {
   VideoCameraOutlined, ThunderboltOutlined, FileTextOutlined,
   RightOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
-import { useBrandContext } from '../../../hooks/useBrands'
 import { useComposeDraft } from '../../../store/composeDraft'
 import { useComposeTaskPoll } from '../../../hooks/useComposeTaskPoll'
 import { composeProgressLabel, hasComposeDraft, composeResumePath } from '../../../utils/composeProgress'
 import { PageHeader } from '../../../components/PageHeader'
 import { GrowthStagesNav } from '../../../components/GrowthStagesNav'
-import { PlatformBadge } from '../../../components/PlatformBadge'
-import type { HotVideo } from '../../../types/api'
 
 const WORK_STATUS: Record<string, string> = {
   draft: '草稿',
@@ -59,7 +56,6 @@ function progressSteps(label: string) {
  */
 export default function ComposeHub() {
   const navigate = useNavigate()
-  const { brandId } = useBrandContext()
   const draft = useComposeDraft()
   useComposeTaskPoll()
   const hasDraft = hasComposeDraft(draft)
@@ -76,14 +72,6 @@ export default function ComposeHub() {
     .filter(w => w.status === 'draft' || w.status === 'ready' || w.status === 'generating')
     .slice(0, 5)
 
-  const { data: hotData, isLoading: hotLoading } = useQuery({
-    queryKey: ['hot-videos', brandId],
-    queryFn: () => businessApi.listHotVideos(brandId!),
-    enabled: !!brandId,
-    staleTime: 24 * 3600_000,
-  })
-  const hotList = (hotData?.videos || []).slice(0, 5)
-
   const openMode = (mode: typeof CREATE_MODES[number]) => {
     if (mode.key === 'graphic') {
       draft.setTrack('graphic')
@@ -93,24 +81,6 @@ export default function ComposeHub() {
     }
   }
 
-  const remake = (v: HotVideo, mode: 'video' | 'graphic') => {
-    const topic = v.topic || (mode === 'graphic' ? `写一篇同款：${v.title}` : `拍一条同款：${v.title}`)
-    draft.setTrack(mode)
-    draft.patch({
-      brandId,
-      sourceUrl: v.url || undefined,
-      refTitle: v.title,
-      hotPoint: v.hot_point || undefined,
-      script: topic,
-      transcript: [
-        v.hot_point ? `【为什么火】${v.hot_point}` : '',
-        `【选题】${topic}`,
-        v.url ? `【来源】${v.url}` : '',
-      ].filter(Boolean).join('\n'),
-      selectedTitle: v.title.slice(0, 40),
-    })
-    navigate(mode === 'graphic' ? '/m/compose/graphic' : '/m/compose/lipsync')
-  }
 
   const openWork = (w: (typeof pending)[0]) => {
     if (w.status === 'ready' || w.status === 'published') {
@@ -254,46 +224,13 @@ export default function ComposeHub() {
             <h3>同赛道灵感</h3>
             <Link to="/m/inspire">灵感广场</Link>
           </div>
-          {!brandId ? (
-            <div className="ch-panel-empty">
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选好人设后显示爆款灵感">
-                <Link to="/m/brands">去账号人设</Link>
-              </Empty>
-            </div>
-          ) : hotLoading ? (
-            <div className="ch-panel-empty"><Spin tip="拉取爆款…" /></div>
-          ) : hotList.length === 0 ? (
-            <div className="ch-panel-empty">
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无灵感，可去灵感广场刷新" />
-            </div>
-          ) : (
-            <ul className="ch-list ch-list--clean">
-              {hotList.map((v, i) => (
-                <li key={(v.url || v.title) + i}>
-                  <div className="ch-list-row ch-list-row--clean ch-list-row-static">
-                    <div className="ch-list-main">
-                      <span className="ch-list-title">{v.title}</span>
-                      <span className="ch-list-meta">
-                        <PlatformBadge platform={v.platform} size={14} className="ch-list-platform" />
-                        {v.hot_point ? ` · ${v.hot_point.slice(0, 28)}${v.hot_point.length > 28 ? '…' : ''}` : ''}
-                      </span>
-                    </div>
-                    <Dropdown
-                      menu={{
-                        items: [
-                          { key: 'video', label: '复刻为视频', onClick: () => remake(v, 'video') },
-                          { key: 'graphic', label: '复刻为图文', onClick: () => remake(v, 'graphic') },
-                        ],
-                      }}
-                      trigger={['click']}
-                    >
-                      <button type="button" className="ch-list-remake">复刻</button>
-                    </Dropdown>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="ch-panel-empty">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="去灵感广场发现爆款视频">
+              <Link to="/m/inspire">
+                <Button type="primary">浏览灵感</Button>
+              </Link>
+            </Empty>
+          </div>
         </section>
       </div>
     </div>

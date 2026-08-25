@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -64,12 +65,24 @@ func NewChromedpQRLogin(headed bool) *ChromedpQRLogin {
 	return &ChromedpQRLogin{sessions: make(map[string]*loginSession), headed: headed}
 }
 
+// qrToggleConfig 显示二维码前需点击的切换开关配置（快手：默认密码登录页）。
+type qrToggleConfig struct {
+	Selector string // 开关元素选择器（用业务语义 class，非 svelte-* 构建哈希）
+	Text     string // 开关文本需包含的内容（区分"扫码登录"/"密码登录"双向开关）
+}
+
 // platformConfig 平台登录页配置。
 type platformConfig struct {
-	LoginURL     string            // 登录页地址
-	TabText      string            // 扫码登录按钮的文本（用于通过文字内容点击）
-	AuthCookies  []string          // 认证 Cookie 名——出现任一即判定登录成功
-	LoginMethods map[string]string // 登录方式 → 第三方按钮 SVG class 片段（如 wechat→ZDI--Wechat24）
+	LoginURL         string            // 登录页地址
+	TabText          string            // 扫码登录按钮的文本（用于通过文字内容点击）
+	AuthCookies      []string          // 认证 Cookie 名——出现任一即判定登录成功
+	CookieURLs       []string          // 认证 cookie 所在域（按 URL 查询，覆盖登录跳转/iframe 跨域）
+	LoginMethods     map[string]string // 登录方式 → 第三方按钮 SVG class 片段（如 wechat→ZDI--Wechat24）
+	QRSelectors      []string          // 平台专属二维码选择器（稳定锚点：组件 id / aria-label；阶段0精准提取）
+	PreQRClick       *qrToggleConfig   // 阶段0前的切换开关点击（幂等：二维码已可见则跳过）
+	CookieMinLen     int               // 认证 cookie 值长度阈值（<此值视为访客；0=不启用启发式）
+	CookieCompanions []string          // 伴随 cookie——存在则豁免长度启发式（如抖音 sid_guard 仅登录后签发）
+	SuccessURLPrefix string            // 登录成功跳转页前缀——命中且离开 LoginURL 即判成功（cookie 检测失效的平台用）
 }
 
 var platformConfigs = map[string]platformConfig{
@@ -77,6 +90,7 @@ var platformConfigs = map[string]platformConfig{
 		LoginURL:    "https://www.zhihu.com/signin",
 		TabText:     "扫码登录",
 		AuthCookies: []string{"z_c0"},
+		CookieURLs:  []string{"https://www.zhihu.com"},
 		// 知乎支持多种登录方式：默认知乎App扫码，也可选微信/QQ/微博
 		// 按钮通过 SVG class 区分：ZDI--Wechat24 / ZDI--Qq24 / ZDI--Weibo24
 		LoginMethods: map[string]string{
@@ -90,36 +104,102 @@ var platformConfigs = map[string]platformConfig{
 		LoginURL:    "https://www.xiaohongshu.com",
 		TabText:     "",
 		AuthCookies: []string{"id_token"},
+		CookieURLs:  []string{"https://www.xiaohongshu.com"},
+		// web_session 访客约 38 字符/登录 100+——长度启发式区分访客与登录态。
+		CookieMinLen: 50,
 		LoginMethods: map[string]string{
 			"xiaohongshu": "", // 小红书只有自身扫码登录
 		},
 	},
 	// 抖音创作者中心（获客智能体转型：视频分发主战场）
 	// 登录页默认显示二维码；可能先弹滑块验证——Agent 处理后回到二维码流程。
+	// 二维码 DOM（2026-08 实测）：#douyin_login_comp_scan_code → #animate_qrcode_container
+	//   → div.XI37I0dP > img.RhjdbXj8[aria-label="二维码"]，src 为 base64 PNG data URL
+	//   （中央叠抖音 logo SVG，QR 容错内不影响 gozxing 解码）。class 是构建哈希会变，
+	//   只锚定组件 id 和 aria-label；旧版 canvas 渲染由通用管线（A2 穷举）兜底。
 	"douyin": {
 		LoginURL:    "https://creator.douyin.com/creator-micro/home",
 		TabText:     "",
 		AuthCookies: []string{"sessionid", "sessionid_ss"},
+		CookieURLs:  []string{"https://www.douyin.com", "https://creator.douyin.com"},
 		LoginMethods: map[string]string{
 			"douyin": "", // 抖音App扫码（默认）
 		},
+		// sessionid 固定 32 字符 hex（登录后也是 32），靠长度必误杀——
+		// sid_guard 只在扫码登录成功后签发，用它豁免长度启发式。
+		CookieMinLen:     50,
+		CookieCompanions: []string{"sid_guard"},
+		QRSelectors: []string{
+			`#douyin_login_comp_scan_code img[aria-label="二维码"]`, // 组件根 + 语义属性（最稳）
+			`#animate_qrcode_container img`, // 二维码动画容器内的唯一 img
+			`img[aria-label="二维码"]`,        // 组件 id 改版时的语义兜底
+		},
 	},
 	// 快手创作者中心（需要先跳转到登录页，再点击扫码登录 tab）
+	// 登录页是 Svelte 应用（svelte-* class 为构建哈希会变，不能依赖），默认密码登录。
+	// 二维码 DOM（2026-08 实测）：点击 .platform-switch-tips 文本"扫码登录"切换后渲染
+	//   .qrcode > img[alt="qrcode"]（180x180，src 为 base64 PNG，data-cdn-hooked 标记 CDN 改写）；
+	//   艺术字样式 gozxing 可能解不出，手机可扫——锚点命中即采信。
+	// .qrcode-status（qrcode-status-scan 等）可观测扫码状态，登录判定仍走 cookie 轮询。
 	"kuaishou": {
 		LoginURL:    "https://passport.kuaishou.com/pc/account/login/?sid=kuaishou.web.cp.api&callback=https%3A%2F%2Fcp.kuaishou.com%2Frest%2Finfra%2Fsts%3FfollowUrl%3Dhttps%253A%252F%252Fcp.kuaishou.com%252Fprofile%26setRootDomain%3Dtrue",
 		TabText:     "扫码登录",
-		AuthCookies: []string{"passToken", "kuaishou.server.webday7_st"},
+		// 创作者中心认证 cookie（2026-08 实测登录后种在 .kuaishou.com 父域）：
+		// kuaishou.web.cp.api_st（session token）/ _ph（pass token）——登录 URL 的
+		// sid=kuaishou.web.cp.api 前缀化命名。旧名 passToken/kuaishou.server.webday7_st
+		// 是老版主站 cookie，创作者中心不种。访客期无 _st/_ph，出现即登录态。
+		AuthCookies: []string{"kuaishou.web.cp.api_st", "kuaishou.web.cp.api_ph"},
+		CookieURLs:  []string{"https://www.kuaishou.com", "https://passport.kuaishou.com", "https://cp.kuaishou.com"},
 		LoginMethods: map[string]string{
 			"kuaishou": "", // 快手App扫码（默认）
 		},
+		PreQRClick: &qrToggleConfig{
+			Selector: ".platform-switch-tips", // 业务语义 class（稳定）
+			Text:     "扫码登录",               // 区分反向开关"密码登录"，防切走
+		},
+		QRSelectors: []string{
+			`img[alt="qrcode"]`, // alt 语义锚点（最稳）
+			`.qrcode img`,       // 业务 class 容器
+		},
 	},
 	// B站创作者中心
+	// 二维码 DOM（2026-08 实测，Vue + qrcode 库）：先画 canvas 再转 img——canvas 被
+	//   display:none 隐藏（隐藏元素截图必空白，曾消耗管线重试），真码在旁边的
+	//   img[alt="Scan me!"]（src 为完整 base64 PNG）；父容器 title 属性带完整扫码
+	//   链接（含 qrcode_key 参数，业务语义稳定）。data-v-* 是 Vue scoped 哈希不可依赖。
 	"bilibili": {
 		LoginURL:    "https://member.bilibili.com/platform/home",
 		TabText:     "扫码登录",
 		AuthCookies: []string{"SESSDATA", "bili_jct"},
+		CookieURLs:  []string{"https://www.bilibili.com", "https://passport.bilibili.com", "https://member.bilibili.com"},
 		LoginMethods: map[string]string{
 			"bilibili": "", // B站App扫码（默认）
+		},
+		QRSelectors: []string{
+			`img[alt="Scan me!"]`,           // alt 语义锚点（最稳）
+			`.login-scan__qrcode img`,        // BEM 业务 class 容器
+			`div[title*="qrcode_key"] img`,   // title 含扫码链接的容器（qrcode_key 业务参数）
+		},
+	},
+	// 视频号助手
+	// 二维码 DOM（2026-08 实测）：微信开放平台标准登录组件，img.js_qrcode_img 的
+	//   src 为相对路径 /connect/qrcode/<token>。前端跨域加载该 URL 会被防盗链拦截——
+	//   由服务端下载转 base64 返回（见 acceptAnchorQRImage 的 URL 分支）。
+	"weixin": {
+		LoginURL:    "https://channels.weixin.qq.com/platform/login",
+		TabText:     "",
+		AuthCookies: []string{"slave_sid", "slave_user"},
+		CookieURLs:  []string{"https://channels.weixin.qq.com", "https://open.weixin.qq.com"},
+		// 2026-08 实测：登录前后 cookie 集合恒为 sessionid+wxuin（登录态存于服务端
+		// session，浏览器侧无新增 cookie），slave_sid/slave_user 已不存在——cookie
+		// 检测原理性失效。从 /platform/login 跳到 /platform 是唯一登录信号。
+		SuccessURLPrefix: "https://channels.weixin.qq.com/platform",
+		LoginMethods: map[string]string{
+			"weixin": "", // 微信扫码（默认）
+		},
+		QRSelectors: []string{
+			`img.js_qrcode_img`,  // 微信开放平台登录组件标准 class（跨版本稳定）
+			`img.web_qrcode_img`, // 业务 class 兜底
 		},
 	},
 }
@@ -206,7 +286,8 @@ const findQRElementJS = `((method) => {
     const hasQRClass = cls.includes('qr') || cls.includes('code') || cls.includes('qrcode') || cls.includes('qrimg')
       || parentCls.includes('qr') || parentCls.includes('qrcode') || parentCls.includes('qr-code')
       || ariaLabel.includes('二维码') || ariaLabel.includes('qrcode')  // 抖音用 aria-label="二维码"
-      || altText.includes('scan me');  // B站用 alt="Scan me!"
+      || altText.includes('scan me')  // B站用 alt="Scan me!"
+      || altText.includes('qrcode');   // 快手用 alt="qrcode"
 
     // class 含 qr 的图片直接返回（QQ 的 qrImg、微信的 qrcode_img、微博父容器 qr-code）
     // 抖音的 img class="RhjdbXj8" 通过 aria-label="二维码" 匹配
@@ -327,6 +408,8 @@ const findQRContainerJS = `(() => {
     '[id*="qrcode"]', '[id*="qr-code"]', '[id*="qr_code"]',
     '[class*="scan-code"]', '[class*="code-container"]', '[class*="code_container"]',
     '[class*="web-login"]', '[class*="login-qr"]', '[class*="login_qr"]',
+    // 抖音登录组件：id="douyin_login_comp_scan_code" / id="animate_qrcode_container"
+    '[id*="scan_code"]', '[id*="scan-code"]', '[id*="qrcode_container"]',
   ];
   for (const sel of kwSelectors) {
     try {
@@ -398,6 +481,49 @@ const findQRContainerJS = `(() => {
 
   return JSON.stringify({ found: false });
 })()`
+
+// findQRBySelectorJS 按平台专属选择器精准提取二维码（阶段0）。
+// 选择器来自平台实测 DOM 的稳定锚点（组件 id / aria-label），返回与 findQRElementJS
+// 兼容的结果结构：img 命中直接返回 src（data URL 或 http URL）；命中非 img 容器则
+// 标记后返回 container-screenshot（复用 processQRDetection 的截图+解码验证管线）。
+// 入参 selectors 是 JSON 序列化的字符串数组，按优先级排列，任一命中即返回。
+const findQRBySelectorJS = `((selectors) => {
+  for (const sel of selectors) {
+    try {
+      const el = document.querySelector(sel);
+      if (!el) continue;
+      if (el.tagName === 'IMG') {
+        const src = el.getAttribute('src') || '';
+        if (!src.startsWith('data:') && !src.startsWith('http') && !src.startsWith('/')) continue;
+        return JSON.stringify({ found: true, type: 'img', width: el.naturalWidth || 0, height: el.naturalHeight || 0, className: (el.className||'').toString().slice(0,80), dataURL: src });
+      }
+      const r = el.getBoundingClientRect();
+      if (r.width < 60 || r.height < 60) continue;
+      el.setAttribute('data-qr-container', '1');
+      return JSON.stringify({ found: true, type: 'container-screenshot', width: Math.round(r.width), height: Math.round(r.height), className: (el.className||'').toString().slice(0,80), jsPath: 'document.querySelector("[data-qr-container=\\"1\\"]")' });
+    } catch(e) {} // 无效选择器/跨域等，尝试下一个
+  }
+  return JSON.stringify({ found: false });
+})`
+
+// clickQRToggleJS 幂等点击二维码切换开关：任一二维码选择器已命中则跳过（防把已切的
+// 扫码模式反向切走），否则点击文本匹配且可见的开关元素。返回 JSON：{skipped, clicked}。
+const clickQRToggleJS = `((qrSels, clickSel, text) => {
+  try {
+    for (const s of qrSels) { if (document.querySelector(s)) return JSON.stringify({skipped: true}); }
+  } catch(e) {}
+  let clicked = false;
+  try {
+    document.querySelectorAll(clickSel).forEach(el => {
+      if (clicked) return;
+      if (text && !((el.textContent || '').trim().includes(text))) return;
+      if (el.offsetParent === null) return; // 不可见不点
+      el.click();
+      clicked = true;
+    });
+  } catch(e) {}
+  return JSON.stringify({skipped: false, clicked});
+})`
 
 // clickTabByTextJS 通过文本内容点击扫码登录按钮的 JavaScript。
 // 返回值：true=找到并点击，false=未找到
@@ -492,6 +618,18 @@ func (q *ChromedpQRLogin) StartLogin(_ context.Context, platform, method string)
 // runSession 后台管理扫码登录会话的完整生命周期。
 func (q *ChromedpQRLogin) runSession(ctx context.Context, sessionCancel context.CancelFunc, sessionID string, pc platformConfig, method string) {
 	defer sessionCancel()
+	// 终结收尾：无论以何种状态结束（success/expired/error），统一关闭浏览器进程。
+	// 修复泄漏：用户不点叉而直接关页面时无人调 DELETE，超时后若只有 sessionCancel
+	// 则 browserCtx/allocCtx 永不释放，Chrome 进程常驻到服务退出。
+	// map entry 保留——前端仍可轮询到最终状态（含 success 后 usecase 读取账号名）；
+	// DELETE Cleanup 幂等（cancel 闭包可重复调用），负责删除 entry。
+	defer func() {
+		q.mu.Lock()
+		if sess := q.sessions[sessionID]; sess != nil && sess.cancel != nil {
+			sess.cancel()
+		}
+		q.mu.Unlock()
+	}()
 
 	log.Printf("[QRLogin:%s] runSession 启动", sessionID)
 
@@ -592,8 +730,162 @@ func (q *ChromedpQRLogin) captureQRCode(ctx context.Context, sessionID string, p
 		}
 	}
 
+	// 阶段0：平台专属选择器精准提取（抖音等已知 DOM 结构的平台）。
+	// 比通用启发式快且准：不依赖 method（爬虫场景 method=cookie 同样生效），
+	// 也不会被装饰 canvas 消耗重试次数。失败不阻断，落回原多级管线。
+	if q.captureQRBySelector(ctx, sessionID, pc) {
+		return
+	}
+
 	// 默认登录方式：在原页面检测二维码
 	q.captureQRFromPage(ctx, sessionID, method, pc)
+}
+
+// captureQRBySelector 阶段0：按 platformConfig.QRSelectors 精准提取二维码。
+// 短重试覆盖页面渲染/滑块验证的窗口期；任一选择器命中且通过解码验证即成功。
+func (q *ChromedpQRLogin) captureQRBySelector(ctx context.Context, sessionID string, pc platformConfig) bool {
+	if len(pc.QRSelectors) == 0 {
+		return false
+	}
+	selectorsJSON, err := json.Marshal(pc.QRSelectors)
+	if err != nil {
+		return false
+	}
+	js := fmt.Sprintf(`(%s)(%s)`, findQRBySelectorJS, selectorsJSON)
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		if q.isSessionClosed(sessionID) {
+			return false
+		}
+		// 前置点击（快手：默认密码登录页需先点"扫码登录"开关；幂等，二维码已在则跳过）
+		if pc.PreQRClick != nil {
+			q.clickQRToggle(ctx, sessionID, pc)
+		}
+		detectCtx, detectCancel := context.WithTimeout(ctx, 8*time.Second)
+		var resultJSON string
+		err := chromedp.Run(detectCtx,
+			chromedp.Sleep(2*time.Second), // 等渲染 + 滑块验证窗口
+			chromedp.Evaluate(js, &resultJSON),
+		)
+		detectCancel()
+		if err != nil {
+			log.Printf("[QRLogin:%s] 专属选择器提取尝试 %d：JS 执行失败: %v", sessionID, attempt, err)
+			continue
+		}
+		det, parseErr := parseQRDetection(resultJSON)
+		if parseErr != nil {
+			log.Printf("[QRLogin:%s] 专属选择器提取尝试 %d：结果解析失败: %v (raw=%s)", sessionID, attempt, parseErr, resultJSON)
+			continue
+		}
+		if !det.Found {
+			log.Printf("[QRLogin:%s] 专属选择器提取尝试 %d/3：未命中（页面可能仍在渲染或被滑块遮挡）", sessionID, attempt)
+			continue
+		}
+		log.Printf("[QRLogin:%s] 专属选择器命中：type=%s class=%s", sessionID, det.Type, det.Class)
+		if det.Type == "img" {
+			// 稳定锚点命中的 img 直接采信（解码仅作增强，见 acceptAnchorQRImage）
+			if q.acceptAnchorQRImage(ctx, sessionID, det.DataURL) {
+				return true
+			}
+			continue
+		}
+		// 容器命中（img 选择器全部失效时的兜底）：维持截图+解码验证的严格标准
+		if q.processQRDetection(ctx, sessionID, det) {
+			return true
+		}
+	}
+	return false
+}
+
+// clickQRToggle 执行 PreQRClick 配置的扫码开关点击（幂等：二维码已可见则跳过）。
+func (q *ChromedpQRLogin) clickQRToggle(ctx context.Context, sessionID string, pc platformConfig) {
+	selectorsJSON, err := json.Marshal(pc.QRSelectors)
+	if err != nil {
+		return
+	}
+	js := fmt.Sprintf(`(%s)(%s, %q, %q)`, clickQRToggleJS, selectorsJSON, pc.PreQRClick.Selector, pc.PreQRClick.Text)
+	clickCtx, clickCancel := context.WithTimeout(ctx, 5*time.Second)
+	var resultJSON string
+	err = chromedp.Run(clickCtx, chromedp.Evaluate(js, &resultJSON))
+	clickCancel()
+	if err != nil {
+		log.Printf("[QRLogin:%s] 扫码开关点击 JS 失败: %v", sessionID, err)
+		return
+	}
+	var res struct {
+		Skipped bool `json:"skipped"`
+		Clicked bool `json:"clicked"`
+	}
+	if jErr := json.Unmarshal([]byte(resultJSON), &res); jErr != nil {
+		log.Printf("[QRLogin:%s] 扫码开关点击结果解析失败: %v (raw=%s)", sessionID, jErr, resultJSON)
+		return
+	}
+	switch {
+	case res.Skipped:
+		// 二维码已可见，无需点击（重复点击会切回密码登录）
+	case res.Clicked:
+		log.Printf("[QRLogin:%s] 已点击扫码登录开关（%s 文本含 %q）", sessionID, pc.PreQRClick.Selector, pc.PreQRClick.Text)
+	default:
+		log.Printf("[QRLogin:%s] 未找到可点击的扫码登录开关（页面未渲染完或已在扫码模式）", sessionID)
+	}
+}
+
+// acceptAnchorQRImage 阶段0专属：稳定锚点（组件 id / aria-label）命中的 img 直接采信。
+// 解码成功则裁剪成干净二维码（增强；实测 2026-08 真实样本可解出 api.amemv.com 扫码链接，
+// 中央 40x40 logo 面积 ~9% 在 QR 容错内）。解不出仍放行——锚点双重命中使误判风险可忽略，
+// 且有快手先例（样式化二维码 gozxing 解不出但手机可扫，URL 直传）；唯一拦截条件是空白图。
+func (q *ChromedpQRLogin) acceptAnchorQRImage(ctx context.Context, sessionID, src string) bool {
+	if src == "" {
+		return false
+	}
+	if strings.HasPrefix(src, "data:image/") {
+		commaIdx := strings.Index(src, ",")
+		if commaIdx < 0 {
+			return false
+		}
+		raw, err := base64.StdEncoding.DecodeString(src[commaIdx+1:])
+		if err != nil || len(raw) <= 200 {
+			// 阈值 200：快手艺术字二维码 PNG 实测 ~510 字节，原 500 贴边误杀
+			return false
+		}
+		if isBlankImage(raw) {
+			log.Printf("[QRLogin:%s] 锚点命中的 img 是空白图（可能被篡改/未渲染），拒绝", sessionID)
+			return false
+		}
+		if text := decodeQRText(raw); text != "" {
+			log.Printf("[QRLogin:%s] 锚点二维码解码确认 → %s（裁剪后返回）", sessionID, truncURL(text))
+			q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(cropToQR(raw)))
+			return true
+		}
+		log.Printf("[QRLogin:%s] 锚点二维码 gozxing 解不出（可能样式化，手机可扫），返回原始图", sessionID)
+		q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(raw))
+		return true
+	}
+	if strings.HasPrefix(src, "http") || strings.HasPrefix(src, "/") {
+		// 相对 URL 必须补全 origin：前端只认 http 开头，否则会错误拼成 data URL 前缀
+		if strings.HasPrefix(src, "/") {
+			originCtx, originCancel := context.WithTimeout(ctx, 3*time.Second)
+			var origin string
+			_ = chromedp.Run(originCtx, chromedp.Location(&origin))
+			originCancel()
+			if origin == "" {
+				return false
+			}
+			src = strings.TrimRight(origin, "/") + src
+		}
+		// 优先服务端下载转 base64：视频号 /connect/qrcode/ 等平台图片 URL 有防盗链，
+		// 前端跨域 <img> 加载会挂——服务端带 Referer 下载后内联返回最可靠。
+		if raw, ok := downloadImage(src); ok && len(raw) > 200 && !isBlankImage(raw) {
+			log.Printf("[QRLogin:%s] 锚点二维码 URL 已下载转 base64（%d 字节，规避前端跨域防盗链）", sessionID, len(raw))
+			q.setSessionQRImage(sessionID, base64.StdEncoding.EncodeToString(raw))
+			return true
+		}
+		// 下载失败退回 URL 直传（前端尽力显示；快手等无防盗链平台可行）
+		log.Printf("[QRLogin:%s] 锚点二维码 URL 下载失败，直传 URL 由前端加载: %s", sessionID, truncURL(src))
+		q.setSessionQRImage(sessionID, src)
+		return true
+	}
+	return false
 }
 
 // processQRDetection 处理 JS 检测结果，返回是否成功提取二维码。
@@ -696,8 +988,10 @@ func (q *ChromedpQRLogin) captureQRFromPage(ctx context.Context, sessionID, meth
 	chromedp.Run(ctx, chromedp.Evaluate(`() => window.location.href`, &currentURL))
 	log.Printf("[QRLogin:%s] 当前页面 URL: %s", sessionID, currentURL)
 
-	// 切换到扫码 tab（仅默认登录方式，第三方登录不需要点这个）
-	if pc.TabText != "" && (method == "" || method == "zhihu" || method == "xiaohongshu" || method == "kuaishou" || method == "bilibili") {
+	// 切换到扫码 tab。不按 method 过滤：爬虫场景 method=cookie 同样需要点击
+	// （历史 bug：白名单枚举平台名，cookie 不在内导致快手爬虫绑定不点 tab）；
+	// 第三方登录路径在 captureQRCode 已提前 return，不会误触。
+	if pc.TabText != "" {
 		log.Printf("[QRLogin:%s] 尝试点击扫码 tab（文本=%q）", sessionID, pc.TabText)
 		clickCtx, clickCancel := context.WithTimeout(ctx, 10*time.Second)
 		var clickResult bool
@@ -916,10 +1210,19 @@ func truncURL(s string) string {
 	return s
 }
 
-// downloadImage 服务端下载图片 URL（验证 http 形式的 img 二维码用）。
-func downloadImage(url string) ([]byte, bool) {
+// downloadImage 服务端下载图片 URL。带 Referer（同源推导）+ UA——
+// 微信开放平台等二维码图片有 Referer 校验，裸 GET 会被拒。
+func downloadImage(imgURL string) ([]byte, bool) {
+	req, err := http.NewRequest("GET", imgURL, nil)
+	if err != nil {
+		return nil, false
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	if u, pErr := url.Parse(imgURL); pErr == nil {
+		req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
+	}
 	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, false
 	}
@@ -1075,6 +1378,32 @@ func (q *ChromedpQRLogin) isSessionClosed(sessionID string) bool {
 func (q *ChromedpQRLogin) pollLoginSuccess(ctx context.Context, sessionID string, pc platformConfig) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	lastURL := ""
+	// currentLocation 查询当前页面 URL（变化时打日志——登录跳转是关键诊断信号）。
+	currentLocation := func() string {
+		locCtx, locCancel := context.WithTimeout(ctx, 3*time.Second)
+		var loc string
+		_ = chromedp.Run(locCtx, chromedp.Location(&loc))
+		locCancel()
+		if loc != lastURL {
+			log.Printf("[QRLogin:%s] 页面跳转: %s → %s", sessionID, truncURL(lastURL), truncURL(loc))
+			lastURL = loc
+		}
+		return loc
+	}
+	// finishLogin 登录成功的统一收尾（cookie 检测与 URL 跳转检测共用）。
+	// extractAccountName 的 DOM 抓取依赖浏览器——本函数同步返回后 runSession
+	// 才会关浏览器，时序安全。
+	finishLogin := func(cookie string, expiresAt time.Time, platform, method string) {
+		log.Printf("[QRLogin:%s] 登录成功！过期时间: %s", sessionID, expiresAt.Format("2006-01-02 15:04"))
+		q.setSessionSuccess(sessionID, cookie, expiresAt, "")
+		accountName := q.extractAccountName(ctx, platform, method, cookie)
+		q.mu.Lock()
+		if s, ok := q.sessions[sessionID]; ok && s.status == "success" {
+			s.accountName = accountName
+		}
+		q.mu.Unlock()
+	}
 
 	for {
 		select {
@@ -1107,38 +1436,80 @@ func (q *ChromedpQRLogin) pollLoginSuccess(ctx context.Context, sessionID string
 			}
 
 			checkCtx, checkCancel := context.WithTimeout(ctx, 8*time.Second)
-			loggedIn, cookie, expiresAt, err := q.checkAuthCookies(checkCtx, pc.AuthCookies)
+			loc := currentLocation()
+
+			// 判定① URL 跳转检测：配置了 SuccessURLPrefix 且页面已跳到平台首页
+			//（同时排除仍停留在登录页）——视频号等平台登录态存于服务端 session，
+			// cookie 集合登录前后不变，跳转是唯一外部登录信号（2026-08 实测）。
+			if pc.SuccessURLPrefix != "" && strings.HasPrefix(loc, pc.SuccessURLPrefix) && !strings.HasPrefix(loc, pc.LoginURL) {
+				cookie, cErr := q.fetchCookieString(checkCtx, pc)
+				if cErr == nil && cookie != "" {
+					checkCancel()
+					finishLogin(cookie, time.Now().Add(24*time.Hour), sess.platform, sess.method)
+					return
+				}
+				log.Printf("[QRLogin:%s] 登录跳转已命中但取 cookie 失败: %v", sessionID, cErr) // 下轮重试
+			}
+
+			// 判定② 常规认证 cookie 检测
+			loggedIn, cookie, expiresAt, err := q.checkAuthCookies(checkCtx, pc, pc.AuthCookies)
 			checkCancel()
 			if err != nil {
 				continue
 			}
 			if loggedIn {
-				log.Printf("[QRLogin:%s] 检测到认证 Cookie，登录成功！过期时间: %s", sessionID, expiresAt.Format("2006-01-02 15:04"))
-				// 先设置 success 状态（前端立即拿到登录成功）
-				q.setSessionSuccess(sessionID, cookie, expiresAt, "")
-				// 同步提取账号名——直接用 checkAuthCookies 返回的 cookie 字符串调 API
-				accountName := q.extractAccountName(sess.platform, sess.method, cookie)
-				q.mu.Lock()
-				if s, ok := q.sessions[sessionID]; ok && s.status == "success" {
-					s.accountName = accountName
-				}
-				q.mu.Unlock()
+				finishLogin(cookie, expiresAt, sess.platform, sess.method)
 				return
 			}
 		}
 	}
 }
 
-// checkAuthCookies 检查浏览器是否已设置认证 Cookie。
-// ⚠️ 关键：必须先调 network.Enable() 激活 Network 域，否则 GetCookies 返回空列表。
-// 返回：(是否登录, 完整cookie字符串, 认证cookie过期时间, 错误)
-func (q *ChromedpQRLogin) checkAuthCookies(ctx context.Context, authCookieNames []string) (bool, string, time.Time, error) {
+// fetchCookieString 拉取平台相关域的全量 cookie 并拼接成字符串。
+// 用于 URL 跳转判定成功的场景（视频号）：登录态存于服务端 session，当前 cookie
+// 集合（sessionid+wxuin）即登录凭证，无需按名字匹配认证 cookie。
+func (q *ChromedpQRLogin) fetchCookieString(ctx context.Context, pc platformConfig) (string, error) {
 	var cookies []*network.Cookie
 	err := chromedp.Run(ctx,
 		network.Enable(),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			var err error
-			cookies, err = network.GetCookies().Do(ctx)
+			getCookies := network.GetCookies()
+			if len(pc.CookieURLs) > 0 {
+				getCookies = getCookies.WithURLs(pc.CookieURLs)
+			}
+			cookies, err = getCookies.Do(ctx)
+			return err
+		}),
+	)
+	if err != nil {
+		return "", err
+	}
+	var parts []string
+	for _, c := range cookies {
+		parts = append(parts, c.Name+"="+c.Value)
+	}
+	return strings.Join(parts, "; "), nil
+}
+
+// checkAuthCookies 检查浏览器是否已设置认证 Cookie。
+// 用 network.GetCookies().WithUrls(平台域名列表)：作用于当前 browser context
+// （incognito 正确——storage.GetCookies 无 context id 时查默认 context 恒返回空，
+// 2026-08 实测踩坑），且按 URL 跨域查询——覆盖登录跳转链（B站 passport→member、
+// 快手 passport→cp）和跨域 iframe（视频号扫码组件在 open.weixin.qq.com）。
+// CookieURLs 未配置时退化为按当前页面 URL 查询（旧行为）。
+// 返回：(是否登录, 完整cookie字符串, 认证cookie过期时间, 错误)
+func (q *ChromedpQRLogin) checkAuthCookies(ctx context.Context, pc platformConfig, authCookieNames []string) (bool, string, time.Time, error) {
+	var cookies []*network.Cookie
+	err := chromedp.Run(ctx,
+		network.Enable(),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var err error
+			getCookies := network.GetCookies()
+			if len(pc.CookieURLs) > 0 {
+				getCookies = getCookies.WithURLs(pc.CookieURLs)
+			}
+			cookies, err = getCookies.Do(ctx)
 			return err
 		}),
 	)
@@ -1154,29 +1525,29 @@ func (q *ChromedpQRLogin) checkAuthCookies(ctx context.Context, authCookieNames 
 		cookieMap[c.Name] = c.Value
 		expiresMap[c.Name] = c.Expires
 		parts = append(parts, c.Name+"="+c.Value)
-		allNames = append(allNames, c.Name)
+		allNames = append(allNames, c.Name+"@"+c.Domain)
 	}
 
 	log.Printf("[QRLogin] 当前 cookie（%d 个）: %s", len(cookies), strings.Join(allNames, ", "))
 
 	for _, name := range authCookieNames {
 		if v, ok := cookieMap[name]; ok && v != "" {
-			// ⚠️ 值长度校验：访客 session 的 cookie 值通常很短（<50 字符），
-			// 真正登录后的认证 cookie 值很长（如 z_c0 是 100+ 字符的 JWT token，
-			// web_session 登录后 100+ 字符，访客 session 约 38 字符）。
-			// 用这个区分"访客 cookie"和"登录 cookie"。
-			if len(v) < 50 {
-				// 长度校验的适用性按平台而异：小红书 web_session 访客 38/登录 100+ 适用；
-				// 但抖音 sessionid 固定 32 字符 hex（登录后也是 32）——单靠长度必误杀。
-				// 改用登录伴随 cookie 判定：sid_guard/uid_tt 只在扫码登录成功后签发，访客没有。
-				if _, ok2 := cookieMap["sid_guard"]; ok2 {
-					log.Printf("[QRLogin] cookie %s 值短（%d 字符）但 sid_guard 存在，判定为登录态", name, len(v))
-				} else {
-					log.Printf("[QRLogin] cookie %s 存在但值太短（%d 字符）且无 sid_guard，视为访客 session，跳过", name, len(v))
+			// 值长度启发式（可配置）：访客 session 的 cookie 值通常很短（<50 字符），
+			// 真正登录后的认证 cookie 值很长。仅需要区分访客/登录态的平台启用，
+			// 伴随 cookie（如抖音 sid_guard 只在扫码登录后签发）可豁免。
+			if pc.CookieMinLen > 0 && len(v) < pc.CookieMinLen {
+				exempt := false
+				for _, comp := range pc.CookieCompanions {
+					if _, ok2 := cookieMap[comp]; ok2 {
+						exempt = true
+						break
+					}
+				}
+				if !exempt {
+					log.Printf("[QRLogin] cookie %s 存在但值太短（%d 字符，阈值 %d）且无伴随 cookie，视为访客 session，跳过", name, len(v), pc.CookieMinLen)
 					continue
 				}
-			} else {
-				log.Printf("[QRLogin] cookie %s 值长度 %d，判定为登录态", name, len(v))
+				log.Printf("[QRLogin] cookie %s 值短（%d 字符）但有伴随 cookie，判定为登录态", name, len(v))
 			}
 			// 提取该认证 cookie 的过期时间
 			// Expires 是 Unix 时间戳（秒），-1 表示 session cookie（浏览器关闭即过期）
@@ -1195,48 +1566,25 @@ func (q *ChromedpQRLogin) checkAuthCookies(ctx context.Context, authCookieNames 
 }
 
 // extractAccountName 登录成功后获取账号显示名。
-// 知乎：用 cookie 直接调用 api.zhihu.com/people/self 获取用户信息。
-// 小红书：暂用默认名（后续可用小红书 API 获取用户名）。
-// cookieStr 是 checkAuthCookies 返回的完整 cookie 字符串。
-func (q *ChromedpQRLogin) extractAccountName(platform, method, cookieStr string) string {
+// 提取链：平台 API/cookie（知乎/B站 API、抖音/快手 cookie）→ 页面 DOM 昵称
+//（登录成功后页面停在各自首页，此刻浏览器尚未关闭）→ 降级登录方式标签。
+// ctx 是会话浏览器 context，供 DOM 抓取用。
+func (q *ChromedpQRLogin) extractAccountName(ctx context.Context, platform, method, cookieStr string) string {
 	var name string
-
 	switch platform {
 	case "zhihu":
-		// 直接用 cookie 字符串调用知乎 API
-		apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer apiCancel()
-
-		req, _ := http.NewRequestWithContext(apiCtx, "GET", "https://api.zhihu.com/people/self", nil)
-		req.Header.Set("Cookie", cookieStr)
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			log.Printf("[QRLogin] 知乎 API 请求失败: %v", err)
-		} else {
-			defer resp.Body.Close()
-			body, _ := io.ReadAll(resp.Body)
-			log.Printf("[QRLogin] 知乎 API 响应状态: %d", resp.StatusCode)
-			log.Printf("[QRLogin] 知乎 API 响应内容: %s", string(body))
-
-			var userInfo struct {
-				Name     string `json:"name"`
-				Headline string `json:"headline"`
-				ID       string `json:"id"`
-				URLToken string `json:"url_token"`
-			}
-			if json.Unmarshal(body, &userInfo) == nil && userInfo.Name != "" {
-				name = userInfo.Name
-				log.Printf("[QRLogin] 知乎用户: name=%s headline=%s id=%s url_token=%s",
-					userInfo.Name, userInfo.Headline, userInfo.ID, userInfo.URLToken)
-			}
-		}
-
-	case "xiaohongshu":
-		// 小红书暂用默认名（后续可用小红书 API 获取用户名）
-		name = ""
+		name = q.fetchZhihuName(cookieStr)
+	case "douyin":
+		name = q.fetchDouyinName(cookieStr)
+	case "kuaishou":
+		name = q.fetchKuaishouName(cookieStr)
+	case "bilibili":
+		name = q.fetchBilibiliName(cookieStr)
+	}
+	// API/cookie 提取失败（小红书/视频号无此路径，抖音/快手 cookie 常缺昵称字段）
+	// → 从登录成功页的 DOM 抓昵称
+	if name == "" {
+		name = q.fetchNameFromDOM(ctx)
 	}
 
 	// 生成显示名：包含登录方式标识
@@ -1250,11 +1598,157 @@ func (q *ChromedpQRLogin) extractAccountName(platform, method, cookieStr string)
 	return name
 }
 
+// findNicknameJS 登录成功页上按通用启发式抓取用户昵称。
+// 候选：class 含 nickname/user-name/username 等业务命名的元素（含 title 属性），
+// 过滤导航类文本与异常长度——选择器无法穷举各平台改版，宁可抓不到也不抓错。
+const findNicknameJS = `(() => {
+  const sels = [
+    '[class*="nickname"]', '[class*="Nickname"]',
+    '[class*="user-name"]', '[class*="username"]', '[class*="user_name"]',
+    '[class*="account-name"]', '[class*="accountName"]',
+  ];
+  const seen = new Set();
+  for (const sel of sels) {
+    let els = [];
+    try { els = Array.from(document.querySelectorAll(sel)); } catch(e) {}
+    for (const el of els) {
+      if (seen.has(el)) continue;
+      seen.add(el);
+      let t = (el.getAttribute('title') || el.textContent || '').trim();
+      if (!t) continue;
+      if (t.includes('\\n')) t = t.split('\\n')[0].trim();
+      if (t.length < 1 || t.length > 30) continue;
+      if (/登录|注册|首页|消息|通知|发布|创作|数据中心|帮助|设置|退出|账号管理/.test(t)) continue;
+      if (/^[\\d.]+[万亿]?$/.test(t)) continue; // 纯数字（粉丝数/ID）
+      return JSON.stringify({name: t});
+    }
+  }
+  return JSON.stringify({name: ''});
+})()`
+
+// fetchNameFromDOM 在登录成功页上抓取昵称（浏览器此刻仍开启——finishLogin
+// 同步执行完毕后 runSession 才关浏览器）。失败返回空串，由调用方降级。
+func (q *ChromedpQRLogin) fetchNameFromDOM(ctx context.Context) string {
+	domCtx, domCancel := context.WithTimeout(ctx, 5*time.Second)
+	var resultJSON string
+	err := chromedp.Run(domCtx,
+		chromedp.Sleep(time.Second), // 等登录后页面渲染
+		chromedp.Evaluate(findNicknameJS, &resultJSON),
+	)
+	domCancel()
+	if err != nil {
+		return ""
+	}
+	var res struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal([]byte(resultJSON), &res) != nil {
+		return ""
+	}
+	if res.Name != "" {
+		log.Printf("[QRLogin] DOM 昵称抓取成功: %s", res.Name)
+	}
+	return res.Name
+}
+
+// fetchZhihuName 从知乎 API 获取用户名。
+func (q *ChromedpQRLogin) fetchZhihuName(cookieStr string) string {
+	apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer apiCancel()
+
+	req, _ := http.NewRequestWithContext(apiCtx, "GET", "https://api.zhihu.com/people/self", nil)
+	req.Header.Set("Cookie", cookieStr)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[QRLogin] 知乎 API 请求失败: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var userInfo struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(body, &userInfo) == nil && userInfo.Name != "" {
+		log.Printf("[QRLogin] 知乎用户: %s", userInfo.Name)
+		return userInfo.Name
+	}
+	return ""
+}
+
+// fetchDouyinName 从抖音 cookie 中提取昵称。
+func (q *ChromedpQRLogin) fetchDouyinName(cookieStr string) string {
+	// 抖音 cookie 中的 nickname 是 URL 编码的中文（%E6%98%8E...），需解码
+	for _, part := range strings.Split(cookieStr, ";") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) == 2 && kv[0] == "nickname" && kv[1] != "" {
+			if decoded, err := url.QueryUnescape(kv[1]); err == nil {
+				return decoded
+			}
+			return kv[1]
+		}
+	}
+	return ""
+}
+
+// fetchKuaishouName 从快手 cookie 中提取昵称。
+func (q *ChromedpQRLogin) fetchKuaishouName(cookieStr string) string {
+	// 创作者中心 cookie 通常无昵称字段（2026-08 实测 14 个 cookie 均为 ID/风控），
+	// 保留旧字段尝试 + URL 解码，命中不了由 DOM 抓取兜底。
+	for _, part := range strings.Split(cookieStr, ";") {
+		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(kv) == 2 && kv[0] == "user_name" && kv[1] != "" {
+			if decoded, err := url.QueryUnescape(kv[1]); err == nil {
+				return decoded
+			}
+			return kv[1]
+		}
+	}
+	return ""
+}
+
+// fetchBilibiliName 从 B站 API 获取用户名。
+func (q *ChromedpQRLogin) fetchBilibiliName(cookieStr string) string {
+	apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer apiCancel()
+
+	req, _ := http.NewRequestWithContext(apiCtx, "GET", "https://api.bilibili.com/x/web-interface/nav", nil)
+	req.Header.Set("Cookie", cookieStr)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[QRLogin] B站 API 请求失败: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var userInfo struct {
+		Data struct {
+			Uname string `json:"uname"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(body, &userInfo) == nil && userInfo.Data.Uname != "" {
+		log.Printf("[QRLogin] B站用户: %s", userInfo.Data.Uname)
+		return userInfo.Data.Uname
+	}
+	return ""
+}
+
 // methodDisplayName 生成登录方式标识（如"知乎-微信"、"知乎-App"、"小红书"）。
 func methodDisplayName(platform, method string) string {
 	platformNames := map[string]string{
 		"zhihu":       "知乎",
 		"xiaohongshu": "小红书",
+		"douyin":      "抖音",
+		"kuaishou":    "快手",
+		"bilibili":    "B站",
+		"weixin":      "视频号",
 	}
 	platformName := platformNames[platform]
 	if platformName == "" {
@@ -1299,12 +1793,15 @@ func (q *ChromedpQRLogin) setSessionStatus(sessionID, status, cookie string) {
 }
 
 // PollStatus 前端轮询登录状态和二维码图片。
+// session 不存在（用户取消后的 DELETE 清理/服务重启/迟到轮询）返回 cancelled 状态
+// 而非错误——「会话已终结」是正常生命周期，返回 500 会让前端拦截器弹全局错误提示
+// （修复：点叉取消后迟到的轮询 GET 报 "session not found" 50000）。
 func (q *ChromedpQRLogin) PollStatus(_ context.Context, sessionID string) (port.QRLoginResult, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	sess, ok := q.sessions[sessionID]
 	if !ok {
-		return port.QRLoginResult{Status: "error", Error: "session not found"}, fmt.Errorf("session not found: %s", sessionID)
+		return port.QRLoginResult{Status: "cancelled"}, nil
 	}
 	result := port.QRLoginResult{
 		Status:      sess.status,
@@ -1312,6 +1809,7 @@ func (q *ChromedpQRLogin) PollStatus(_ context.Context, sessionID string) (port.
 		Cookie:      sess.cookie,
 		ExpiresAt:   sess.expiresAt,
 		AccountName: sess.accountName,
+		Method:      sess.method,
 		Error:       sess.errMsg,
 	}
 	// 首次轮询到 waiting 状态时打日志（便于排查前端是否收到图片）

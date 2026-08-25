@@ -19,7 +19,6 @@ import (
 	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/geo"
-	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/port"
 	"webreaper/internal/usecase/works"
@@ -45,6 +44,11 @@ func textItem(id, title, content string) entity.DataItem {
 }
 
 func marshal(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// brandIDArgs 通用品牌 ID 参数（多个工具复用）。
+type brandIDArgs struct {
+	BrandID string `json:"brand_id"`
+}
 
 // ---- ① query_brands 查品牌/人设档案 ----
 
@@ -83,58 +87,7 @@ func (t *QueryBrandsTool) ToolDeclaration() port.ToolDecl {
 	return port.ToolDecl{Name: "query_brands", Description: t.Description(), Properties: map[string]port.PropSpec{}}
 }
 
-// ---- ② discover_hot_videos 热门同款发现 ----
-
-type DiscoverHotVideosTool struct{ uc *hotvideo.HotVideoUseCase }
-
-func NewDiscoverHotVideosTool(uc *hotvideo.HotVideoUseCase) *DiscoverHotVideosTool {
-	return &DiscoverHotVideosTool{uc: uc}
-}
-
-func (t *DiscoverHotVideosTool) Name() string { return "discover_hot_videos" }
-func (t *DiscoverHotVideosTool) Description() string {
-	return "发现与品牌同赛道、最近很火的爆款短视频（真实搜索+播放点赞数据+拍摄同款选题建议）。" +
-		"用户说「看看同行都在拍什么」「有什么爆款可以抄」「帮我找参考视频」时调用。" +
-		"参数：brand_id（品牌 ID，可从 query_brands 获取）。"
-}
-
-type hotVideosArgs struct {
-	BrandID string `json:"brand_id"`
-}
-
-func (t *DiscoverHotVideosTool) Execute(ctx context.Context, argsJSON string) (entity.DataItem, error) {
-	tenantID, err := tenantOrErr(ctx)
-	if err != nil {
-		return entity.DataItem{}, err
-	}
-	var args hotVideosArgs
-	_ = json.Unmarshal([]byte(argsJSON), &args)
-	if args.BrandID == "" {
-		return entity.DataItem{}, fmt.Errorf("brand_id is required（可先调 query_brands 获取）")
-	}
-	videos, err := t.uc.ListHotVideos(ctx, tenantID, args.BrandID, false)
-	if err != nil {
-		return entity.DataItem{}, err
-	}
-	var sb strings.Builder
-	for i, v := range videos {
-		fmt.Fprintf(&sb, "%d. %s\n   播放：%s | 同款选题：%s\n   链接：%s\n",
-			i+1, v.Title, v.Platform, v.Topic, v.URL)
-	}
-	return textItem(fmt.Sprintf("hv-%d", time.Now().UnixNano()), fmt.Sprintf("热门同款（%d 条）", len(videos)), sb.String()), nil
-}
-
-func (t *DiscoverHotVideosTool) ToolDeclaration() port.ToolDecl {
-	return port.ToolDecl{
-		Name: "discover_hot_videos", Description: t.Description(),
-		Properties: map[string]port.PropSpec{
-			"brand_id": {Type: "string", Description: "品牌 ID（query_brands 可查）"},
-		},
-		Required: []string{"brand_id"},
-	}
-}
-
-// ---- ③ list_works 作品库 ----
+// ---- ② list_works 作品库 ----
 
 type ListWorksTool struct{ uc *works.WorksUseCase }
 
@@ -247,7 +200,7 @@ func (t *TriggerMonitorTool) Execute(ctx context.Context, argsJSON string) (enti
 	if err != nil {
 		return entity.DataItem{}, err
 	}
-	var args hotVideosArgs
+	var args brandIDArgs
 	_ = json.Unmarshal([]byte(argsJSON), &args)
 	if args.BrandID == "" {
 		return entity.DataItem{}, fmt.Errorf("brand_id is required")
@@ -460,7 +413,7 @@ func (t *QueryKnowledgeTool) Execute(ctx context.Context, argsJSON string) (enti
 	if err != nil {
 		return entity.DataItem{}, err
 	}
-	var args hotVideosArgs
+	var args brandIDArgs
 	_ = json.Unmarshal([]byte(argsJSON), &args)
 	if args.BrandID == "" {
 		return entity.DataItem{}, fmt.Errorf("brand_id is required")
@@ -593,7 +546,6 @@ func (t *GrowthAdvisorTool) ToolDeclaration() port.ToolDecl {
 // 编译期断言：全部实现 port.CrawlerTool。
 var (
 	_ port.CrawlerTool = (*QueryBrandsTool)(nil)
-	_ port.CrawlerTool = (*DiscoverHotVideosTool)(nil)
 	_ port.CrawlerTool = (*ListWorksTool)(nil)
 	_ port.CrawlerTool = (*QueryAnalyticsTool)(nil)
 	_ port.CrawlerTool = (*TriggerMonitorTool)(nil)

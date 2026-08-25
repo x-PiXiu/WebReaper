@@ -61,12 +61,15 @@ type PublishJobRepository interface {
 
 // QRLoginResult 是一次扫码登录轮询的结果。
 type QRLoginResult struct {
-	Status      string    // preparing / waiting / scanned / success / expired / error
+	Status      string    // preparing / waiting / scanned / success / expired / cancelled / error
 	QRImage     string    // 二维码截图 base64（preparing 阶段后台截好图后通过此字段返回）
 	Cookie      string    // 仅 status=success 时有值（原始 cookie 字符串，由用例层加密入库）
 	ExpiresAt   time.Time // 仅 status=success 时有值（认证 cookie 的过期时间）
 	AccountName string    // 仅 status=success 时有值（登录后的账号显示名）
+	Method      string    // 会话实际使用的登录方式（StartLogin 解析后的值，前端未传时以此为准）
 	Error       string    // 仅 status=error 时有值（失败原因）
+	// cancelled：会话已终结且不存在（用户取消清理后迟到的轮询/服务重启）。
+	// 正常生命周期状态，非错误——前端据此停止轮询，不弹错误提示。
 }
 
 // QRLoginSession 扫码登录会话接口（浏览器自动化适配器实现）。
@@ -183,4 +186,28 @@ type AutoPublishChannel interface {
 type PublishChannelRegistry interface {
 	Get(platform string) (PublishChannel, error)
 	List() []PublishChannel
+}
+
+// BrandPublishConfigRepository 品牌发布配置仓储。
+type BrandPublishConfigRepository interface {
+	FindByBrand(ctx context.Context, tenantID, brandID string) ([]entity.BrandPublishConfig, error)
+	FindByPlatform(ctx context.Context, tenantID, brandID, platform string) (*entity.BrandPublishConfig, error)
+	Save(ctx context.Context, config *entity.BrandPublishConfig) error
+	Delete(ctx context.Context, tenantID, brandID, platform string) error
+}
+
+// AccountBrandBindingRepository 账号品牌绑定仓储。
+type AccountBrandBindingRepository interface {
+	FindByBrand(ctx context.Context, tenantID, brandID string) ([]entity.AccountBrandBinding, error)
+	FindByAccount(ctx context.Context, accountID string) ([]entity.AccountBrandBinding, error)
+	Bind(ctx context.Context, binding *entity.AccountBrandBinding) error
+	Unbind(ctx context.Context, tenantID, accountID, brandID string) error
+}
+
+// PublishUsageRepository 发布使用量仓储。
+type PublishUsageRepository interface {
+	GetDailyUsage(ctx context.Context, tenantID, brandID, platform string) (int, error)
+	GetHourlyUsage(ctx context.Context, tenantID, brandID, platform string) (int, error)
+	GetLastPublishTime(ctx context.Context, tenantID, brandID, platform string) (*time.Time, error)
+	IncrementUsage(ctx context.Context, tenantID, brandID, platform string) error
 }

@@ -172,6 +172,12 @@ func (uc *AccountUseCase) PollQRLoginWithScene(ctx context.Context, tenantID, se
 	if result.Cookie == "" {
 		return PollQRLoginResult{Status: "error"}, fmt.Errorf("登录成功但 cookie 为空")
 	}
+	// 前端未显式传登录方式时（非知乎平台弹窗不选方式），用会话实际解析的
+	// method（StartLogin 从平台 LoginMethods 取的默认值）——否则 LoginMethod
+	// 入库为空，前端"登录方式"列显示空白。
+	if method == "" {
+		method = result.Method
+	}
 	encCookie, encErr := uc.vault.Encrypt(result.Cookie)
 	if encErr != nil {
 		return PollQRLoginResult{Status: "error"}, fmt.Errorf("加密 cookie 失败: %w", encErr)
@@ -368,6 +374,10 @@ func platformDisplayName(platform string) string {
 		return "抖音账号"
 	case "kuaishou":
 		return "快手账号"
+	case "bilibili":
+		return "B站账号"
+	case "weixin":
+		return "视频号账号"
 	default:
 		return platform + " 账号"
 	}

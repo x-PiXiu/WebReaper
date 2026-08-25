@@ -10,7 +10,6 @@ import (
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/geo"
-	"webreaper/internal/usecase/hotvideo"
 	"webreaper/internal/usecase/port"
 )
 
@@ -36,7 +35,6 @@ type GEOHandler struct {
 	healthUC   *geo.HealthUseCase        // 健康报告聚合（可选注入，v3 归位：单一事实源）
 	industryUC *geo.IndustryUseCase      // 行业全景聚合（可选注入，v3 P2：admin 看板）
 	inputTipper port.InputTipper         // 地址联想（可选注入，P1；未注入→空列表降级）
-	hotVideoUC  *hotvideo.HotVideoUseCase // 热门同款视频发现（可选注入，人设档案 tab）
 }
 
 func NewGEOHandler(br *geo.BrandUseCase, mo *geo.MonitorUseCase, ra *geo.RankUseCase, co *geo.ContentUseCase, du *geo.DiagnoseUseCase) *GEOHandler {
@@ -76,62 +74,6 @@ func (h *GEOHandler) SetCitationUC(uc *geo.CitationUseCase) {
 // SetHealthUC 注入健康报告聚合用例（可选；未注入则健康报告端点不注册）。
 func (h *GEOHandler) SetHealthUC(uc *geo.HealthUseCase) {
 	h.healthUC = uc
-}
-
-// SetHotVideoUC 注入热门同款视频用例（可选；未注入则热门同款端点不注册）。
-func (h *GEOHandler) SetHotVideoUC(uc *hotvideo.HotVideoUseCase) {
-	h.hotVideoUC = uc
-}
-
-// HandleListHotVideos GET /merchant/brands/:id/hot-videos —— 品牌同赛道热门视频
-// 支持两种模式：
-//   - ?force=true：实时搜索+LLM 筛选（24h 缓存；结果自动落库积累）
-//   - 默认/带筛选参数：从 DB 列出（支持 ?platform=&q=&sort_by=&limit=&offset= 搜索/排序/分页）
-func (h *GEOHandler) HandleListHotVideos(c *gin.Context) {
-	if h.hotVideoUC == nil {
-		fail(c, fmt.Errorf("热门同款视频功能未启用"))
-		return
-	}
-	tenantID := middleware.CurrentTenantID(c)
-	brandID := c.Param("id")
-	force := c.Query("force") == "true"
-	platform := c.Query("platform")
-	keyword := c.Query("q")
-	sortBy := c.Query("sort_by")
-
-	// 带筛选参数或非强制 → 优先从 DB 读（定时采集积累的历史数据）
-	if !force && (platform != "" || keyword != "" || sortBy != "" || c.Query("limit") != "") {
-		limit := 20
-		offset := 0
-		if v := c.Query("limit"); v != "" {
-			fmt.Sscanf(v, "%d", &limit)
-		}
-		if v := c.Query("offset"); v != "" {
-			fmt.Sscanf(v, "%d", &offset)
-		}
-		videos, total, err := h.hotVideoUC.ListFromDB(c.Request.Context(), brandID, hotvideo.ListOptions{
-			Platform: platform, Keyword: keyword, SortBy: sortBy,
-			Limit: limit, Offset: offset,
-		})
-		if err != nil {
-			fail(c, err); return
-		}
-		if videos == nil {
-			videos = []entity.HotVideo{}
-		}
-		success(c, gin.H{"videos": videos, "total": total})
-		return
-	}
-
-	// 默认/force → 实时搜索（结果自动落库）
-	videos, err := h.hotVideoUC.ListHotVideos(c.Request.Context(), tenantID, brandID, force)
-	if err != nil {
-		fail(c, err); return
-	}
-	if videos == nil {
-		videos = []entity.HotVideo{}
-	}
-	success(c, gin.H{"videos": videos})
 }
 
 // SetIndustryUC 注入行业全景聚合用例（可选；未注入则行业看板端点不注册）。
