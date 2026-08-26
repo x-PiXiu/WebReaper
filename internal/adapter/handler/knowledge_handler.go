@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -165,12 +167,31 @@ func (r *Router) HandleSearchKnowledgeMaterials(c *gin.Context) {
 	if n, err := strconv.Atoi(c.Query("num")); err == nil && n > 0 && n <= 10 {
 		num = n
 	}
-	refs, err := r.knowledgeUC.SearchMaterials(c.Request.Context(), industry, query, num)
-	if err != nil {
-		fail(c, err)
+	// 30 秒硬超时兜底：Milvus/embedding 不可达时 SDK 内部可能不响应 context cancel
+	// ——goroutine 隔离 + select 确保响应一定发出（管理后台不挂死）
+	type searchResult struct {
+		refs []entity.MaterialRef
+		err  error
+	}
+	done := make(chan searchResult, 1)
+	timer := time.NewTimer(30 * time.Second)
+	go func() {
+		searchCtx, searchCancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer searchCancel()
+		refs, err := r.knowledgeUC.SearchMaterials(searchCtx, industry, query, num)
+		done <- searchResult{refs, err}
+	}()
+	select {
+	case res := <-done:
+		if res.err != nil {
+			fail(c, res.err)
+			return
+		}
+		success(c, res.refs)
+	case <-timer.C:
+		fail(c, fmt.Errorf("知识库检索超时（30 秒）——Milvus 向量库或 embedding API 不可达。请检查管理后台「知识库配置」中的向量库地址与 API 配额"))
 		return
 	}
-	success(c, refs)
 }
 
 // HandleGetKnowledgeCrawlInterval GET /api/v1/admin/knowledge/crawl-interval —— 读采集间隔（分钟）。

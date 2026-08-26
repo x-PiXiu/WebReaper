@@ -420,7 +420,10 @@ func main() {
 		// Milvus 工厂（vector_db=milvus 时按运行时配置连接；连接失败明确报错，不静默降级）
 		milvusFactory := func(ctx context.Context, cfg entity.EmbeddingRuntimeConfig) (port.VectorStore, error) {
 			addr := net.JoinHostPort(cfg.MilvusHost, cfg.MilvusPort)
-			cli, err := milvusclient.NewClient(ctx, milvusclient.Config{Address: addr})
+			// Milvus 连接加超时：SDK 内部 dial 不响应 context cancel——不可达时永久挂死
+			dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
+			defer dialCancel()
+			cli, err := milvusclient.NewClient(dialCtx, milvusclient.Config{Address: addr})
 			if err != nil {
 				return nil, fmt.Errorf("milvus 连接失败（%s）: %w", addr, err)
 			}

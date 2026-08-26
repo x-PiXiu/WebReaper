@@ -24,7 +24,7 @@ var newHTTPEmbedder = func(apiKey, baseURL, model string, dimensions ...int) por
 type CachedEmbedder struct {
 	load     port.EmbeddingConfigProvider
 	ttl      time.Duration
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	inner    port.Embedder // 当前生效的向量化器（nil=未配置）
 	cachedAt time.Time
 	lastErr  error // 最近一次构建错误（诊断用）
@@ -72,19 +72,30 @@ func (e *CachedEmbedder) Dimension() int {
 // current 获取当前向量化器（TTL 缓存 + 双检锁；配置变化时重建）。
 // 未配置/构建失败也按 TTL 缓存——避免每次调用都重读配置（生成链路高频调用）。
 func (e *CachedEmbedder) current(ctx context.Context) (port.Embedder, error) {
+	// 快路径：TTL 内直接返回（读锁语义——Go sync.RWMutex 不适合这里，
+	// 用 double-check + 短锁：先无锁读时间戳，过期才抢锁重建）
+	e.mu.RLock()
+	if time.Since(e.cachedAt) < e.ttl {
+		inner, err := e.inner, e.lastErr
+		e.mu.RUnlock()
+		return inner, err
+	}
+	e.mu.RUnlock()
+
+	// 慢路径：抢写锁（double-check 防止并发重复重建）
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if time.Since(e.cachedAt) < e.ttl {
 		return e.inner, e.lastErr
 	}
+	// 配置加载（可能走 DB/Redis——移出锁的「网络慢」场景，但 429 频率低可接受）
 	cfg, err := e.load.Load(ctx)
 	if err != nil {
 		e.lastErr = err
-		e.cachedAt = time.Now() // 失败也缓存：TTL 内不重复打配置源
+		e.cachedAt = time.Now()
 		return nil, err
 	}
 	if !cfg.IsConfigured() {
-		// 未配置：清空内部实现（Embed 返回明确错误，调用方降级）
 		e.inner = nil
 		e.cachedAt = time.Now()
 		e.lastErr = nil
