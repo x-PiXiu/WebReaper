@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Button, Empty, Modal, Popconfirm, Typography, Upload, message } from 'antd'
+import { Button, Empty, Modal, Popconfirm, Typography, Upload } from 'antd'
 import { MODAL_W } from '../ui/modalFit'
 import { UploadOutlined, SoundOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
 import { MEDIA_ASSETS_QUERY_KEY, normalizeMediaAssets, useMediaAssets } from '../hooks/useMediaAssets'
 import type { MediaAsset } from '../types/api'
+import { message } from '../utils/antdApp'
 
 const { Dragger } = Upload
 const { Text } = Typography

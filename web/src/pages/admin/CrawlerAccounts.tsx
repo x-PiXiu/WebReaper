@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Typography, Card, Space, message, Tag, Modal, Table, Button, Select, Form, Input } from 'antd'
+import { Typography, Card, Space, Tag, Modal, Table, Button, Select, Form, Input } from 'antd'
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, QrcodeOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { CrawlerAccount } from '../../types/api'
+import { message, modal } from '../../utils/antdApp'
 
 const { Text } = Typography
 
@@ -222,7 +223,7 @@ export default function CrawlerAccounts() {
             danger
             icon={<DeleteOutlined />}
             onClick={() => {
-              Modal.confirm({
+              modal.confirm({
                 centered: true,
                 title: '确认删除',
                 content: `确定删除账号 "${record.account_name}" 吗？`,

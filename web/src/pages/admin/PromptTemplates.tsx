@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Typography, Card, Space, message, Tag, Modal, Input, Table, Button } from 'antd'
+import { Typography, Card, Space, Tag, Modal, Input, Table, Button } from 'antd'
 import { ThunderboltOutlined, EditOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input

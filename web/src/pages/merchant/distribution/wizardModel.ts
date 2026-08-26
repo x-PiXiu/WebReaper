@@ -218,8 +218,7 @@ export function localAdaptPreview(
 }
 
 /**
- * 组装实际可被当前 publish handler 消费的正文。
- * handler 暂未绑定 tags/category/store_address——客户端注入，行为对齐 usecase 意图。
+ * 组装发布正文：门店地址等仍可在正文尾部追加（tags/category 已由 publish handler 独立字段消费）。
  */
 export function buildPublishContent(draft: WizardDraft, platform: string): string {
   let body = draft.content || ''

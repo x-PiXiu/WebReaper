@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Typography, Card, Space, message, Tag, Table, Button, Form, Select, InputNumber, Switch, Modal, Input } from 'antd'
+import { Typography, Card, Space, Tag, Table, Button, Form, Select, InputNumber, Switch, Modal, Input } from 'antd'
 import { ReloadOutlined, SettingOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { CrawlerConfig } from '../../types/api'
+import { message, modal } from '../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -132,7 +133,7 @@ export default function CrawlerConfigs() {
           </Button>
           <Button size="small" type="primary" icon={<ReloadOutlined />}
             onClick={() => {
-              Modal.confirm({
+              modal.confirm({
                 centered: true,
                 title: '手动触发采集',
                 content: `确定立即采集 ${record.platform} 平台的数据吗？`,

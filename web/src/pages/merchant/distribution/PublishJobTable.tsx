@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Typography, Table, Tag, Space, Button, Empty, message } from 'antd'
+import { Typography, Table, Tag, Space, Button, Empty } from 'antd'
 import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import WorkDetailDrawer, { type WorkDetailData } from '../../../components/WorkDetailDrawer'
 import type { PublishJob } from '../../../types/api'
+import { message } from '../../../utils/antdApp'
 
 const { Text } = Typography
 
@@ -15,9 +16,16 @@ export function statusConfig(status: string) {
     case 'published': return { color: 'var(--wr-success)', label: '已发布', icon: <CheckCircleOutlined /> }
     case 'running': return { color: 'var(--wr-primary)', label: '自动发布中', icon: <LoadingOutlined /> }
     case 'pending': return { color: 'var(--wr-warning)', label: '待确认', icon: <ClockCircleOutlined /> }
+    case 'scheduled': return { color: 'var(--wr-primary)', label: '已排期', icon: <ClockCircleOutlined /> }
     case 'failed': return { color: 'var(--wr-danger)', label: '失败', icon: <CloseCircleOutlined /> }
     default: return { color: 'var(--wr-text-muted)', label: status, icon: <ClockCircleOutlined /> }
   }
+}
+
+const TRANSPORT_META: Record<string, { label: string; color: string }> = {
+  link: { label: '半自动', color: 'default' },
+  rpa: { label: '全自动', color: 'blue' },
+  api: { label: '官方接口', color: 'green' },
 }
 
 // 发布记录表格（社媒分发页③区）：列表 + 跳转/复测提及率/标记已发布。
@@ -66,10 +74,30 @@ export default function PublishJobTable({
       render: (m: string) => <Text type="secondary" style={{ fontSize: 12 }}>{m === 'semi-auto' ? '半自动' : m}</Text>,
     },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 110,
-      render: (s: string) => {
+      title: '通道', dataIndex: 'transport', key: 'transport', width: 90,
+      render: (t?: string) => {
+        if (!t) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
+        const meta = TRANSPORT_META[t] || { label: t, color: 'default' }
+        return <Tag color={meta.color} style={{ margin: 0 }}>{meta.label}</Tag>
+      },
+    },
+    {
+      title: '状态', dataIndex: 'status', key: 'status', width: 140,
+      render: (s: string, r: PublishJob) => {
         const cfg = statusConfig(s)
-        return <Space><span style={{ color: cfg.color }}>{cfg.icon}</span><Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.label}</Text></Space>
+        return (
+          <Space direction="vertical" size={0}>
+            <Space>
+              <span style={{ color: cfg.color }}>{cfg.icon}</span>
+              <Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.label}</Text>
+            </Space>
+            {s === 'scheduled' && r.scheduled_at && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                📅 定时 {new Date(r.scheduled_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </Text>
+            )}
+          </Space>
+        )
       },
     },
     {

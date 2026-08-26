@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Input, Space, Typography, message } from 'antd'
+import { Alert, Button, Input, Space, Typography } from 'antd'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
+import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
 

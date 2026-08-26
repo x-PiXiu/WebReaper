@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Button, Card, Col, Empty, Progress, Row, Select, Space, Spin, Tag, Tooltip, Typography, Collapse, message } from 'antd'
+import { Button, Card, Col, Empty, Progress, Row, Select, Space, Spin, Tag, Tooltip, Typography, Collapse } from 'antd'
 import { EnvironmentOutlined, PlusOutlined, ReloadOutlined, TrophyOutlined, CompassOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { useBrandContext } from '../../hooks/useBrands'
 import { useNavigate } from 'react-router-dom'
 import type { Brand } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

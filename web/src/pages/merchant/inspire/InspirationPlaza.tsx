@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  Button, Empty, Input, Modal, Segmented, Select, Space, Spin, Tag, Typography, message,
-} from 'antd'
+import { Button, Empty, Input, Modal, Segmented, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../../../utils/antdApp'
 import {
   EditOutlined, FireOutlined, PlayCircleOutlined, VideoCameraOutlined,
 } from '@ant-design/icons'
@@ -55,12 +54,25 @@ export default function InspirationPlaza() {
     staleTime: 5 * 60_000,
   })
 
+  const { data: platformData } = useQuery({
+    queryKey: ['inspiration-platforms'],
+    queryFn: () => businessApi.listInspirationPlatforms(),
+    staleTime: 30 * 60_000,
+  })
+
   const videos = data?.items || []
 
   const platforms = useMemo(() => {
-    const set = new Set(videos.map((v) => v.platform).filter(Boolean))
-    return Array.from(set)
-  }, [videos])
+    const fromApi = platformData?.platforms?.filter(Boolean) || []
+    if (fromApi.length > 0) return fromApi
+    return Array.from(new Set(videos.map((v) => v.platform).filter(Boolean)))
+  }, [platformData, videos])
+
+  const isTransferring = (v: InspirationVideo) => {
+    if (v.local_video_url) return false
+    if (!v.created_at) return false
+    return Date.now() - new Date(v.created_at).getTime() < 5 * 60_000
+  }
 
   const filtered = useMemo(() => {
     return videos.filter((v) => {
@@ -242,14 +254,16 @@ export default function InspirationPlaza() {
                           播放
                         </Button>
                       ) : (
-                        <Button
-                          size="small"
-                          icon={<PlayCircleOutlined />}
-                          disabled={!v.video_url}
-                          onClick={() => v.video_url && window.open(v.video_url, '_blank', 'noopener')}
-                        >
-                          原帖
-                        </Button>
+                        <Tooltip title={isTransferring(v) ? '视频正在转存中，稍后可站内播放' : undefined}>
+                          <Button
+                            size="small"
+                            icon={<PlayCircleOutlined />}
+                            disabled={!v.video_url}
+                            onClick={() => v.video_url && window.open(v.video_url, '_blank', 'noopener')}
+                          >
+                            原帖
+                          </Button>
+                        </Tooltip>
                       )}
                       <Button
                         size="small"
@@ -260,6 +274,11 @@ export default function InspirationPlaza() {
                       >
                         复刻视频
                       </Button>
+                      <Tooltip title="爆款风格复刻即将上线">
+                        <Button size="small" disabled>
+                          复刻风格
+                        </Button>
+                      </Tooltip>
                       <Button
                         size="small"
                         icon={<EditOutlined />}
@@ -283,7 +302,7 @@ export default function InspirationPlaza() {
         cancelText="取消"
         onOk={confirmRemake}
         onCancel={() => setRemaking(null)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Space direction="vertical" style={{ width: '100%' }} size={10}>
           <Text type="secondary" style={{ fontSize: 12 }}>

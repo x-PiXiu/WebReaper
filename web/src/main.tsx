@@ -4,6 +4,7 @@ import { App as AntdApp, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
+import AntdAppApiBridge from './components/AntdAppApiBridge'
 import ErrorBoundary from './components/ErrorBoundary'
 import { queryClient } from './queryClient'
 import { useThemeStore } from './store/theme'
@@ -110,8 +111,11 @@ function ThemedApp({ children }: { children: React.ReactNode }) {
 
   return (
     <ConfigProvider locale={zhCN} theme={config} modal={modalDefaults}>
-      {/* AntdApp 让 Modal.confirm / message 等静态方法也能吃到 ConfigProvider */}
-      <AntdApp>{children}</AntdApp>
+      {/* AntdApp + 桥接：业务/拦截器用 utils/antdApp，避免静态 message/Modal 警告 */}
+      <AntdApp>
+        <AntdAppApiBridge />
+        {children}
+      </AntdApp>
     </ConfigProvider>
   )
 }

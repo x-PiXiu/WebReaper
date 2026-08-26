@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Col, Input, Popconfirm, Row, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Button, Card, Col, Input, Popconfirm, Row, Select, Space, Table, Tag, Typography } from 'antd'
 import { DeleteOutlined, PushpinOutlined, StarOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { InspirationVideo } from '../../types/api'
 import PageLoading from '../../components/PageLoading'
+import { message } from '../../utils/antdApp'
 
 const { Text, Title } = Typography
 

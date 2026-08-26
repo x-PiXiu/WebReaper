@@ -1,10 +1,8 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  Card, Typography, Tag, Space, Button, Descriptions, Switch, Input,
-  Select, Alert, Spin, Empty, Tabs, Collapse, Table, Form, InputNumber, Modal, Popconfirm, Tooltip, message,
-} from 'antd'
+import { Card, Typography, Tag, Space, Button, Descriptions, Switch, Input, Select, Alert, Spin, Empty, Tabs, Collapse, Table, Form, InputNumber, Modal, Popconfirm, Tooltip } from 'antd'
+import { message } from '../../utils/antdApp'
 import {
   CloudServerOutlined, RobotOutlined, AudioOutlined, SearchOutlined, WalletOutlined,
   ReloadOutlined, SaveOutlined,

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Space, Tag, Switch, Button, Select, InputNumber, Card, Typography, message } from 'antd'
+import { Space, Tag, Switch, Button, Select, InputNumber, Card, Typography } from 'antd'
 import { RadarChartOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
+import { message } from '../utils/antdApp'
 
 const { Text } = Typography
 

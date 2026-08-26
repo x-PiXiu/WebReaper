@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Modal } from 'antd'
 import { MODAL_W } from '../../ui/modalFit'
@@ -58,7 +58,7 @@ export function WizardShell({
     <div className="wz-root cf-root cf-platform-douyin">
       <header className="cf-top">
         <div className="cf-top-left">
-          <Link to="/m/compose" className="cf-crumb">创作台</Link>
+          <Link to="/m/compose" className="cf-crumb">工作台</Link>
           <span className="cf-crumb-sep">/</span>
           <span className="cf-crumb-cur">{breadcrumb}</span>
         </div>
@@ -108,7 +108,7 @@ export function WizardShell({
 
           <footer className="cf-foot cf-foot-inset">
             <button type="button" className="cf-btn-ghost" onClick={onBack}>
-              ← {backLabel || (stepIndex === 0 ? '返回创作台' : steps[stepIndex - 1].label)}
+              ← {backLabel || (stepIndex === 0 ? '返回工作台' : steps[stepIndex - 1].label)}
             </button>
             <div className="cf-foot-right">
               {nextHint && nextDisabled ? <span className="cf-hint">{nextHint}</span> : null}
@@ -136,7 +136,7 @@ export function WizardShell({
         onCancel={() => setPreviewOpen(false)}
         width={MODAL_W.md}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         className="cf-preview-modal wr-modal-preview"
       >
         <div className="cf-preview-drawer-inner cf-platform-douyin">

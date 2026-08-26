@@ -21,7 +21,7 @@ export default function ProtectedRoute({ children, role }: { children: React.Rea
 
   // 角色守卫：商户访问管理端（或反之）时跳回自己的首页
   if (role && currentRole && role !== currentRole) {
-    const home = currentRole === 'admin' ? '/admin' : '/m/dashboard'
+    const home = currentRole === 'admin' ? '/admin' : '/m/compose'
     return <Navigate to={home} replace />
   }
 

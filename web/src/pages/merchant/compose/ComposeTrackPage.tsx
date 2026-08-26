@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { message } from 'antd'
 import { GRAPHIC_FLOW_STEPS, VIDEO_FLOW_STEPS } from '../../../config/product'
 import { useComposeDraft, type ComposeTrack } from '../../../store/composeDraft'
 import { useBrandContext } from '../../../hooks/useBrands'
@@ -17,6 +16,7 @@ import { VideoAssetsStep } from './steps/VideoAssetsStep'
 import { VideoProduceStep } from './steps/VideoProduceStep'
 import { GraphicAssetsStep } from './steps/GraphicAssetsStep'
 import { GraphicProduceStep } from './steps/GraphicProduceStep'
+import { message } from '../../../utils/antdApp'
 
 type Props = { track: ComposeTrack }
 
@@ -58,11 +58,14 @@ export default function ComposeTrackPage({ track }: Props) {
       if (media) q.set('mediaUrls', media)
       if (draft.coverUrl) q.set('coverUrl', draft.coverUrl)
     } else {
-      q.set('contentType', 'article')
+      // 图文种草 → 平台矩阵 image（小红书图文），非长文 article
+      q.set('contentType', 'image')
       const imgs = [...(draft.imageUrls || []), draft.coverUrl].filter(Boolean) as string[]
       if (imgs.length) q.set('mediaUrls', imgs.join(','))
     }
     if (draft.selectedTitle) q.set('title', draft.selectedTitle)
+    const bodyText = (draft.rewritten || draft.script || draft.transcript || '').trim()
+    if (bodyText) q.set('content', bodyText.slice(0, 8000))
     const bid = brandId || draft.brandId
     if (bid) q.set('brandId', bid)
     touchDraft()

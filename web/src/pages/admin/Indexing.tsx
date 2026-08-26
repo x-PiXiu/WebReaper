@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Card, Typography, Button, Input, Form, message, Table, Tag, Space, Popconfirm, Alert, Row, Col } from 'antd'
+import { Card, Typography, Button, Input, Form, Table, Tag, Space, Popconfirm, Alert, Row, Col } from 'antd'
 import { CloudUploadOutlined, ReloadOutlined, KeyOutlined, SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { IndexingSubmitLog } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

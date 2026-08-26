@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Typography, Table, Tag, Button, Space, message, Modal, Form, Input, InputNumber, Switch, Select, Tooltip, Card } from 'antd'
+import { Typography, Table, Tag, Button, Space, Modal, Form, Input, InputNumber, Switch, Select, Tooltip, Card } from 'antd'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationSpec, GenerationModeView } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

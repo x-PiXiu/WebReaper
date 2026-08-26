@@ -3081,7 +3081,8 @@ html.light .cf-phone {
   flex-wrap: wrap;
   gap: 8px;
 }
-.ch-hub-quick a {
+.ch-hub-quick a,
+.ch-hub-quick .ch-hub-quick-link {
   font-size: 13px;
   color: var(--wr-text-secondary);
   text-decoration: none;
@@ -3089,8 +3090,11 @@ html.light .cf-phone {
   border-radius: 10px;
   border: 1px solid var(--wr-border);
   background: var(--wr-bg-elevated);
+  cursor: pointer;
+  font: inherit;
 }
-.ch-hub-quick a:hover {
+.ch-hub-quick a:hover,
+.ch-hub-quick .ch-hub-quick-link:hover {
   color: var(--wr-text-primary);
   border-color: var(--wr-border-hover);
 }
@@ -4023,4 +4027,169 @@ html.light .cf-phone {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* —— 工作区导览（自定义聚光灯，非 Ant Tour 默认样式） —— */
+.wr-onboard {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  pointer-events: none;
+}
+.wr-onboard-mask {
+  position: absolute;
+  inset: 0;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: default;
+  pointer-events: auto;
+}
+.wr-onboard-spot {
+  position: fixed;
+  border-radius: 14px;
+  border: 1px solid rgba(45, 212, 191, 0.42);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 0 0 9999px rgba(7, 7, 10, 0.78);
+  transition:
+    top 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    left 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+.wr-onboard-panel {
+  position: fixed;
+  z-index: 2;
+  pointer-events: auto;
+  animation: wr-onboard-in 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.wr-onboard-panel.is-center .wr-onboard-panel-inner {
+  text-align: center;
+}
+.wr-onboard-panel.is-center .wr-onboard-foot {
+  align-items: center;
+}
+.wr-onboard-panel.is-center .wr-onboard-actions {
+  justify-content: center;
+}
+.wr-onboard-panel-inner {
+  padding: 22px 24px 20px;
+  border-radius: 18px;
+  border: 1px solid var(--wr-border);
+  background: color-mix(in srgb, var(--wr-bg-elevated) 88%, transparent);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  box-shadow: var(--wr-shadow-md);
+}
+.wr-onboard-kicker {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--wr-text-muted);
+}
+.wr-onboard-title {
+  margin: 0 0 8px;
+  font-family: 'Instrument Serif', 'Noto Serif SC', Georgia, serif;
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--wr-text-primary);
+}
+.wr-onboard-lead {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--wr-text-secondary);
+}
+.wr-onboard-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--wr-border);
+}
+.wr-onboard-dots {
+  display: flex;
+  gap: 6px;
+}
+.wr-onboard-dot {
+  width: 20px;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--wr-border-hover);
+  transition: background 0.25s ease, width 0.25s ease;
+}
+.wr-onboard-dot.is-active {
+  width: 28px;
+  background: var(--wr-primary);
+}
+.wr-onboard-dot.is-done {
+  background: color-mix(in srgb, var(--wr-primary) 45%, var(--wr-border-hover));
+}
+.wr-onboard-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wr-onboard-skip,
+.wr-onboard-back {
+  border: none;
+  background: none;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--wr-text-muted);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.wr-onboard-skip:hover,
+.wr-onboard-back:hover {
+  color: var(--wr-text-secondary);
+  background: var(--wr-bg-hover);
+}
+.wr-onboard-next {
+  border: 1px solid var(--wr-primary-border);
+  background: var(--wr-primary-bg);
+  color: var(--wr-text-primary);
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+.wr-onboard-next:hover {
+  border-color: var(--wr-primary);
+  background: color-mix(in srgb, var(--wr-primary-bg) 70%, var(--wr-primary) 30%);
+  box-shadow: var(--wr-shadow-glow);
+}
+@keyframes wr-onboard-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.wr-onboard-panel.is-center {
+  animation: wr-onboard-in-center 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes wr-onboard-in-center {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
 }

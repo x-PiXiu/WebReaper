@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, Typography, Input, Switch, Button, Space, Tag, message, Alert, Descriptions, Tooltip, Form, Select } from 'antd'
+import { Card, Typography, Input, Switch, Button, Space, Tag, Alert, Descriptions, Tooltip, Form, Select } from 'antd'
 import { CloudServerOutlined, SaveOutlined, KeyOutlined, SafetyCertificateOutlined, SearchOutlined, WalletOutlined } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import type { ProviderConfig } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

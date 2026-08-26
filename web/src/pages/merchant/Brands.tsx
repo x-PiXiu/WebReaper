@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Typography, Button, Modal, Form, Input, Select, AutoComplete, Space, message, Popconfirm, Empty, Checkbox, Spin, Tag, Tooltip, Tabs, Collapse, Progress } from 'antd'
+import { Typography, Button, Modal, Form, Input, Select, AutoComplete, Space, Popconfirm, Empty, Checkbox, Spin, Tag, Tooltip, Tabs, Collapse, Progress } from 'antd'
 import { PlusOutlined, DeleteOutlined, BulbOutlined, EnvironmentOutlined, RadarChartOutlined, RobotOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -16,6 +16,7 @@ import InspirationTab from './brands/InspirationTab'
 import PublishConfigTab from './brands/PublishConfigTab'
 import PublishHistoryTab from './brands/PublishHistoryTab'
 import type { Brand, CompetitorSuggestion } from '../../types/api'
+import { message, modal } from '../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -252,7 +253,7 @@ export default function Brands() {
         setSelectedBrand(created)
       }
       // 成功即下一步：GEO 旅程是 品牌→关键词→监测→内容，创建完成直接引导去添加关键词
-      Modal.success({
+      modal.success({
         centered: true,
         title: `人设「${values.name}」创建成功`,
         content: '资料可以随时回来补齐。下一步：去内容合成分步做出第一条成片。',
@@ -465,9 +466,15 @@ export default function Brands() {
                             { value: 'online', label: '线上业务（无门店）' },
                           ]} />
                         </Form.Item>
-                        <Form.Item label="行业" name="industry" tooltip="如 餐饮/美业——合成内容时会参考同行业表达习惯；可留空">
+                        <Form.Item
+                          label="行业"
+                          name="industry"
+                          tooltip="如 餐饮/美业——合成内容时会参考同行业表达习惯；可留空"
+                          rules={[{ max: 20, message: '行业名称 ≤20 字' }]}
+                        >
+                          {/* AutoComplete 内部是受控 BaseSelect，勿在子 Input 上挂 maxLength（会刷控制台警告且未必生效） */}
                           <AutoComplete options={INDUSTRY_OPTIONS.map((v) => ({ value: v }))} placeholder="如 餐饮、美业/美容美发">
-                            <Input maxLength={20} />
+                            <Input />
                           </AutoComplete>
                         </Form.Item>
                         <Form.Item label="官网地址" name="website_url"
@@ -791,9 +798,15 @@ export default function Brands() {
               key: 'optional',
               label: <span style={{ fontSize: 13 }}>选填：完善资料，让合成更贴合（推荐填写）</span>,
               children: (<>
-                <Form.Item label="行业" name="industry" style={{ marginBottom: 12 }} tooltip="如 餐饮/美业——合成时会参考同行业表达习惯；可留空">
+                <Form.Item
+                  label="行业"
+                  name="industry"
+                  style={{ marginBottom: 12 }}
+                  tooltip="如 餐饮/美业——合成时会参考同行业表达习惯；可留空"
+                  rules={[{ max: 20, message: '行业名称 ≤20 字' }]}
+                >
                   <AutoComplete options={INDUSTRY_OPTIONS.map((v) => ({ value: v }))} placeholder={watchedCreateBizType === 'online' ? '如 SaaS/软件工具、电商/零售' : '如 餐饮、美业/美容美发'}>
-                    <Input maxLength={20} />
+                    <Input />
                   </AutoComplete>
                 </Form.Item>
                 <Form.Item label="人设定位" name="positioning" style={{ marginBottom: 12 }} tooltip="一句话说清你是谁、服务谁" rules={[{ max: 200, message: '人设定位 ≤200 字' }, CLEAN_TEXT_VALIDATOR]}>

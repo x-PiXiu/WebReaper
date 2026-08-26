@@ -99,7 +99,7 @@ export function AppShell({
   // 角色切换入口：admin 在用户界面时显示「管理后台」，在管理后台时显示「返回用户界面」
   const inAdmin = location.pathname.startsWith('/admin')
   const showRoleSwitch = role === 'admin'
-  const roleSwitchTarget = inAdmin ? '/m/dashboard' : '/admin'
+  const roleSwitchTarget = inAdmin ? '/m/compose' : '/admin'
 
   const handleLogout = () => {
     clearAuth()
@@ -161,7 +161,7 @@ export function AppShell({
     })),
     ...(searchReady ? [
       { value: '快捷 · 灵感广场', label: '快捷 · 灵感广场', target: '/m/inspire' },
-      { value: '快捷 · 创作台', label: '快捷 · 创作台', target: '/m/compose' },
+      { value: '快捷 · 工作台', label: '快捷 · 工作台', target: '/m/compose' },
       { value: '快捷 · 爆款对标', label: '快捷 · 爆款对标', target: '/m/compose/benchmark' },
       { value: '快捷 · 口播数字人', label: '快捷 · 口播数字人', target: '/m/compose/avatar' },
       { value: '快捷 · 一键发布', label: '快捷 · 一键发布', target: '/m/distribution' },
@@ -229,6 +229,7 @@ export function AppShell({
           </div>
         </div>
 
+        <div data-tour="merchant-nav">
         <Menu
           theme={themeMode === 'dark' ? 'dark' : 'light'}
           mode="inline"
@@ -237,6 +238,7 @@ export function AppShell({
           style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 14, padding: '0 12px' }}
           items={toMenuItems(menuItems)}
         />
+        </div>
       </Sider>
 
       <Layout style={{ background: 'var(--wr-bg-base)' }}>
@@ -282,6 +284,7 @@ export function AppShell({
               </Button>
             )}
             {!inAdmin && (
+              <div data-tour="merchant-search">
               <AutoComplete
                 className="wr-header-search"
                 options={searchOptions}
@@ -298,6 +301,7 @@ export function AppShell({
                   style={{ background: 'var(--wr-input-bg)', borderRadius: 8 }}
                 />
               </AutoComplete>
+              </div>
             )}
           </div>
 

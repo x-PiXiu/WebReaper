@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Upload, message } from 'antd'
+import { Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
+import { message } from '../../utils/antdApp'
 
 type Props = {
   accept: string

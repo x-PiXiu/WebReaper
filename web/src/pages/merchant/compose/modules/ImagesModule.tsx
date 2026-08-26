@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Input, Space, Typography, message, Upload } from 'antd'
+import { Alert, Button, Input, Space, Typography, Upload } from 'antd'
 import { PictureOutlined, PlusOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
 
@@ -36,6 +37,7 @@ export default function ImagesModule() {
         type: 'image',
         text: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感，不要水印`,
         aspect_ratio: '9:16',
+        params: { model: 'viduq2' },
       })
       message.success('配图任务已提交，完成后可在多媒体台取回 URL 填入下方')
       navigate('/m/compose/tools?tab=media')
@@ -133,9 +135,11 @@ export default function ImagesModule() {
           </Button>
           <Button
             onClick={() => {
-              const q = new URLSearchParams({ contentType: 'article' })
+              const q = new URLSearchParams({ contentType: 'image' })
               if (list.filter(Boolean).length) q.set('mediaUrls', list.filter(Boolean).join(','))
               if (draft.selectedTitle) q.set('title', draft.selectedTitle)
+              const body = (draft.rewritten || draft.script || '').trim()
+              if (body) q.set('content', body.slice(0, 8000))
               if (brandId || draft.brandId) q.set('brandId', brandId || draft.brandId!)
               navigate(`/m/distribution?${q.toString()}`)
             }}

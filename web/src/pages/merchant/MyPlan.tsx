@@ -1,4 +1,4 @@
-import { Typography, Card, Row, Col, Tag, Button, Progress, Space, Table, message, Modal, Empty, Statistic } from 'antd'
+import { Typography, Card, Row, Col, Tag, Button, Progress, Space, Table, Modal, Empty, Statistic } from 'antd'
 import { CrownOutlined, CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import PageLoading from '../../components/PageLoading'
 import { useEffect, useRef, useState } from 'react'
@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Plan } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text, Title } = Typography
 

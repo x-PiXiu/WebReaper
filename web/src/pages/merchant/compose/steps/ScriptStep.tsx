@@ -1,10 +1,14 @@
-import { useState } from 'react'
-import { Button, Input, Space, message } from 'antd'
+import { useEffect, useRef, useState } from 'react'
+import { Button, Input, Space, Typography } from 'antd'
 import { ThunderboltOutlined, HighlightOutlined } from '@ant-design/icons'
 import { useComposeDraft, type ComposeTrack } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { useComposeWorkSync } from '../../../../hooks/useComposeWorkSync'
 import { businessApi } from '../../../../api/business'
+import { generateContentStream } from '../../../../api/contentStream'
+import { message } from '../../../../utils/antdApp'
+
+const { Text } = Typography
 
 const { TextArea } = Input
 
@@ -14,7 +18,11 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
   const draft = useComposeDraft()
   const { rememberContentId } = useComposeWorkSync()
   const [busy, setBusy] = useState(false)
+  const [genHint, setGenHint] = useState('')
+  const abortRef = useRef<AbortController | null>(null)
   const isGraphic = track === 'graphic'
+
+  useEffect(() => () => abortRef.current?.abort(), [])
   const format = isGraphic ? 'xiaohongshu' : 'script'
   const text = draft.script || draft.rewritten || draft.transcript || ''
   const setText = (v: string) => draft.patch({ script: v, rewritten: v, lastUpdatedAt: new Date().toISOString() })
@@ -53,7 +61,12 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
       message.warning('请先选择人设')
       return
     }
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setBusy(true)
+    setGenHint('正在检索品牌资料…')
+    draft.patch({ script: '', rewritten: '', lastUpdatedAt: new Date().toISOString() })
     try {
       const brand = brands.find((b) => b.id === brandId)
       const topic = [
@@ -64,11 +77,23 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
           ? '写一篇差异化种草图文：分段清晰、适度 emoji、结尾行动号召'
           : '写一条差异化口播稿：结构清晰、卖点突出、结尾行动号召',
       ].filter(Boolean).join('\n')
-      const res = await businessApi.generateContent(brandId, {
-        topic: topic || (isGraphic ? '门店种草图文' : '品牌口播获客'),
-        brand_info: brand ? `${brand.name}：${brand.positioning || ''}` : '',
-        format,
-      })
+      let streamed = false
+      const res = await generateContentStream(
+        brandId,
+        {
+          topic: topic || (isGraphic ? '门店种草图文' : '品牌口播获客'),
+          brand_info: brand ? `${brand.name}：${brand.positioning || ''}` : '',
+          format,
+        },
+        (acc) => {
+          if (!streamed) {
+            streamed = true
+            setGenHint('AI 正在撰写正文…')
+          }
+          draft.patch({ rewritten: acc, script: acc, brandId, lastUpdatedAt: new Date().toISOString() })
+        },
+        controller.signal,
+      )
       const out = res.optimized_text || ''
       draft.patch({
         rewritten: out,
@@ -79,10 +104,13 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
       })
       if (res.id) rememberContentId(res.id, res.title)
       message.success('已按主题生成')
-    } catch {
-      /* */
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return
+      message.error((e as Error).message || '生成失败，请稍后重试')
     } finally {
       setBusy(false)
+      setGenHint('')
+      abortRef.current = null
     }
   }
 
@@ -130,6 +158,11 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
             生成标题
           </Button>
         </Space>
+        {genHint ? (
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+            {genHint}
+          </Text>
+        ) : null}
       </div>
 
       {(draft.refTitle || draft.hotPoint) && (

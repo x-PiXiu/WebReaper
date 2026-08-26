@@ -1,4 +1,4 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Select, Empty, Tabs, Row, Col } from 'antd'
+import { Typography, Table, Tag, Space, Button, Popconfirm, Select, Empty, Tabs, Row, Col } from 'antd'
 import { DeleteOutlined, EyeOutlined, SwapOutlined, FileTextOutlined, GlobalOutlined, EditOutlined, InboxOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -6,6 +6,7 @@ import { businessApi } from '../../api/business'
 import { scoreColor } from '../../utils/geo'
 import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
 import type { Brand, OptimizedContent } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

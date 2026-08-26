@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
-import { Form, Input, Button, message } from 'antd'
+import { Form, Input, Button } from 'antd'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/auth'
+import { message } from '../utils/antdApp'
 
 type Mode = 'login' | 'register'
 
@@ -52,7 +53,7 @@ export default function Login() {
       // 回跳来源页（路由守卫记录的 from）——OAuth 回调等深链场景：登录后回到原页面而非首页。
       // 仅接受站内相对路径（防开放重定向）；无来源时走角色默认首页
       const from = (location.state as { from?: string } | null)?.from
-      const fallback = res.role === 'admin' ? '/admin' : '/m/dashboard'
+      const fallback = res.role === 'admin' ? '/admin' : '/m/compose'
       navigate(from && from.startsWith('/') ? from : fallback, { replace: true })
     } catch {
     } finally {

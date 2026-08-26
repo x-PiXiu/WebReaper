@@ -1,6 +1,6 @@
 ﻿import { useState, useMemo, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Typography, Button, Table, Tag, Space, message, Input, Select, Upload, Checkbox, Empty, Spin, Popconfirm, Modal, Collapse } from 'antd'
+import { Card, Typography, Button, Table, Tag, Space, Input, Select, Upload, Checkbox, Empty, Spin, Popconfirm, Modal, Collapse } from 'antd'
 import { UploadOutlined, RadarChartOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -8,6 +8,7 @@ import { mapWithConcurrency, settleSummary } from '../../utils/async'
 import { intentLabel, questionIntentLabel } from '../../utils/geoTerms'
 import { useBrandStore } from '../../store/brand'
 import type { Brand, Keyword } from '../../types/api'
+import { message, modal } from '../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -101,7 +102,7 @@ export default function Keywords({ embedded }: { embedded?: boolean }) {
         setRecoList([])
         setRecoChecked([])
         if (failed > 0) message.warning(`已添加 ${ok} 个，${failed} 个失败`)
-        Modal.success({
+        modal.success({
           centered: true,
           title: `已添加 ${ok} 个问题`,
           content: '问题已入库——去问问 AI，看看这些问题上 AI 怎么回答。',
@@ -168,7 +169,7 @@ export default function Keywords({ embedded }: { embedded?: boolean }) {
     if (failed > 0) {
       message.warning(`已添加 ${ok} 个，${failed} 个失败（可重新勾选后重试）`)
     } else {
-      Modal.success({
+      modal.success({
         centered: true,
         title: `已添加 ${ok} 个关键词`,
         content: '已入库——去问问 AI，看看这些词上 AI 会不会提到你。',

@@ -2,10 +2,8 @@ import { useState, useMemo, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, message,
-  Table, Modal, Empty, Popconfirm, Tooltip, Alert, Badge, Collapse, AutoComplete,
-} from 'antd'
+import { Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, Table, Modal, Empty, Popconfirm, Tooltip, Alert, Badge, Collapse, AutoComplete } from 'antd'
+import { message } from '../../utils/antdApp'
 import {
   VideoCameraOutlined, PictureOutlined, AudioOutlined, RobotOutlined, AppstoreOutlined,
   ReloadOutlined, PlayCircleOutlined, SoundOutlined,
@@ -17,6 +15,7 @@ import AssetPicker from '../../components/AssetPicker'
 import VoicePicker from '../../components/VoicePicker'
 import { useBrandContext } from '../../hooks/useBrands'
 import type { GenerationTask, GenerationType, ModelCapability, MediaAsset, PromptRef } from '../../types/api'
+import RetryHint from '../../components/RetryHint'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -27,7 +26,7 @@ const SUBTYPE_META: Record<string, { category: string; label: string; desc: stri
   img2video: { category: 'video', label: '图生视频', desc: '参考图 + 提示词生成视频' },
   start_end2video: { category: 'video', label: '首尾帧', desc: '首帧 + 尾帧生成过渡视频' },
   reference2video: { category: 'video', label: '参考生视频', desc: '主体/参考图模式（q2-pro 支持视频参考）' },
-  multiframe: { category: 'video', label: '智能多帧', desc: '首帧 + 2-9 个关键帧生成长视频' },
+  multiframe: { category: 'video', label: '智能多帧', desc: '传 3-9 张关键帧生效；仅 2 张会自动走首尾帧' },
   text2image: { category: 'image', label: '文生图', desc: '提示词生成图片（可附参考图）' },
   text2audio: { category: 'audio', label: '音乐生成', desc: '提示词生成 2-10 秒音乐' },
   sound_effect: { category: 'audio', label: '音效生成', desc: '时间轴事件驱动生成音效' },
@@ -35,8 +34,11 @@ const SUBTYPE_META: Record<string, { category: string; label: string; desc: stri
   voice_clone: { category: 'audio', label: '声音克隆', desc: '引用音频复刻音色（voice_id 永久复用）' },
   lip_sync: { category: 'video', label: '对口型', desc: '出镜视频 + 音频/文本生成口型匹配成片' },
   digital_human: { category: 'digital_human', label: '数字人', desc: '人像图 + 文本/音频生成口播视频' },
-  subject: { category: 'other', label: '主体创建', desc: '创建主体素材，供参考生视频复用' },
+  subject: { category: 'other', label: '主体创建', desc: '注册数字分身形象，生成视频时可复用同一人物' },
 }
+
+/** 能力名不符或实际走 TTS——卡片隐藏，不向用户展示 */
+const HIDDEN_SUBTYPES = new Set(['text2audio', 'sound_effect'])
 
 const CATEGORIES = [
   { key: 'video', label: '视频', icon: <VideoCameraOutlined /> },
@@ -60,13 +62,6 @@ const STATE_META: Record<string, { color: string; label: string }> = {
   cancelled: { color: 'warning', label: '已取消' },
 }
 const ACTIVE_STATES = ['created', 'queueing', 'processing']
-
-// 失败分类 → 处理建议（后端 ClassifyError 三分类）
-const ERR_CODE_HINT: Record<string, string> = {
-  RetryAuto: '临时错误，系统将自动重试',
-  RetryManual: '可稍后重新生成',
-  RetryTerminal: '参数或配额问题，请调整后重试',
-}
 
 const STYLE_OPTIONS = [
   { value: 'general', label: '通用' },
@@ -226,7 +221,6 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     },
   })
 
-
   const submitMutation = useMutation({
     mutationFn: async (data: Parameters<typeof businessApi.submitGenerationTask>[0]) => {
       if (!data.brand_id) throw new Error('请先选择人设/品牌')
@@ -256,7 +250,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     [modelEntries, category],
   )
   const currentModel = useMemo(() => modelEntries.find(e => e.model === model), [modelEntries, model])
-  const modes = currentModel?.endpoints || []
+  const modes = (currentModel?.endpoints || []).filter((m) => !HIDDEN_SUBTYPES.has(m.sub_type))
   const cap = useMemo(() => modes.find(m => m.sub_type === subType)?.capability, [modes, subType])
 
   const selectModel = (m: string) => {
@@ -264,11 +258,17 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     setParams({})
     setCanvasIdx(0)
     const entry = modelEntries.find(e => e.model === m)
-    setSubType(entry?.endpoints[0]?.sub_type || '')
+    const first = entry?.endpoints.find((ep) => !HIDDEN_SUBTYPES.has(ep.sub_type))
+    setSubType(first?.sub_type || '')
   }
 
   // 快速开始：点模式卡片 = 自动选好该模式的最佳模型（支持端点最多的），用户只管写提示词
   const pickMode = (st: string) => {
+    // 主体创建 → 资产库一键注册（本页表单已不是主路径）
+    if (st === 'subject') {
+      navigate('/m/assets?create=subject')
+      return
+    }
     const candidates = modelEntries.filter(e => e.endpoints.some(ep => ep.sub_type === st))
     if (candidates.length === 0) return
     const best = [...candidates].sort((a, b) => b.endpoints.length - a.endpoints.length)[0]
@@ -395,7 +395,15 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     if (subType === 'tts' && !clean.text) { message.warning('请输入合成文本'); return }
     // 统一 submit 不传音色（文档 type=audio + text）；音色选择不阻断提交
     if (subType === 'voice_clone' && !submitRefs.some(r => r.kind === 'audio') && !clean.audio_url) { message.warning('请引用音频素材（声音克隆的原料）'); return }
-    if (subType === 'digital_human' && !submitRefs.some(r => r.kind === 'image') && !clean.image) { message.warning('请引用人像图片'); return }
+    if (subType === 'digital_human') {
+      const hasImage = submitRefs.some(r => r.kind === 'image') || !!clean.image
+      if (!hasImage) { message.warning('请引用人像图片'); return }
+      const hasAudio = submitRefs.some(r => r.kind === 'audio') || !!clean.audio_url
+      if (!hasAudio) {
+        message.warning('数字人口播需要「人像图 + 音频」。请先配音，或改用「图生视频」模式')
+        return
+      }
+    }
     if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { message.warning('请至少添加一个音效事件'); return }
     if (subType === 'lip_sync') {
       const hasVideo = submitRefs.some(r => r.kind === 'video') || clean.video_url
@@ -412,6 +420,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       message.warning('请先选择人设/品牌后再生成')
       return
     }
+    if (model) clean.model = model
     submitMutation.mutate({
       brand_id: brandId,
       sub_type: subType,
@@ -450,11 +459,13 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     )
   }
 
-  // 分层渲染：默认集（服务端已过滤后的可用模式，按 TIER_DEFAULT 排序）+ 其余进折叠
-  const availableSts = new Set(modelEntries.flatMap((e) => e.endpoints.map((ep) => ep.sub_type)))
+  // 分层渲染：默认集（服务端已过滤后的可用模式，按 TIER_DEFAULT 排序）+ 其余进折叠；隐藏名实不符能力
+  const availableSts = new Set(
+    modelEntries.flatMap((e) => e.endpoints.map((ep) => ep.sub_type)).filter((st) => !HIDDEN_SUBTYPES.has(st)),
+  )
   const quickModes = TIER_DEFAULT.filter((st) => availableSts.has(st))
   const moreModes = [...TIER_ADVANCED, ...Object.keys(SUBTYPE_META).filter((st) => !TIER_DEFAULT.includes(st) && !TIER_ADVANCED.includes(st))]
-    .filter((st) => availableSts.has(st))
+    .filter((st) => availableSts.has(st) && !HIDDEN_SUBTYPES.has(st))
 
   // ---- 画布：当前模式所有成功产物（多结果缩略条——即梦式）----
   interface CanvasItem { taskId: string; url: string; cover?: string; type: string; createdAt: string }
@@ -621,6 +632,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       case 'keyframes': {
         const frames: any[] = (get('image_settings') as any[]) || []
         const setFrames = (next: any[]) => set('image_settings', next)
+        const filledCount = frames.filter((f) => f.key_image).length || frames.length
         return (
           <div key="keyframes" style={{ marginBottom: 12 }}>
             <div style={{ marginBottom: 6 }}>
@@ -633,6 +645,14 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
                 <Button size="small" icon={<PlusOutlined />} onClick={() => frames.length < 9 && setFrames([...frames, { key_image: '', prompt: '', duration: 5 }])} />
               </Space>
             </div>
+            {(frames.length === 2 || filledCount === 2) && (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 8, fontSize: 12 }}
+                message="检测到 2 张图，将按首尾帧模式生成；传 3-9 张关键帧才走智能多帧"
+              />
+            )}
             {frames.map((f, i) => (
               <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
                 <Text type="secondary" style={{ fontSize: 12, width: 26 }}>#{i + 1}</Text>
@@ -1052,14 +1072,16 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       },
     },
     {
-      title: '状态', key: 'state', width: 130,
+      title: '状态', key: 'state', width: 180,
       render: (_: unknown, r: GenerationTask) => {
         const meta = STATE_META[r.state] || { color: 'default', label: r.state }
-        const hint = ERR_CODE_HINT[r.err_code]
         return (
-          <Tooltip title={r.state === 'failed' ? (r.err_msg || r.err_code || '失败') : hint}>
-            <Tag color={meta.color}>{meta.label}</Tag>
-          </Tooltip>
+          <Space direction="vertical" size={2}>
+            <Tooltip title={r.state === 'failed' ? (r.err_msg || r.err_code || '失败') : undefined}>
+              <Tag color={meta.color}>{meta.label}</Tag>
+            </Tooltip>
+            {r.state === 'failed' && <RetryHint code={r.retry_hint} />}
+          </Space>
         )
       },
     },

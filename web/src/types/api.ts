@@ -588,6 +588,8 @@ export interface GenerationTask {
   state: string                  // created / queueing / processing / success / failed / cancelled
   err_code: string
   err_msg: string
+  /** 失败处理建议：RetryAuto / RetryManual / RetryTerminal（由后端从 err_code 派生） */
+  retry_hint?: string
   params: Record<string, unknown>
   creations: GenerationCreation[]
   credits: number

@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Row, Col, AutoComplete, Space, Spin, Table, Tag, Typography, message } from 'antd'
+import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Row, Col, AutoComplete, Space, Spin, Table, Tag, Typography } from 'antd'
 import { PlusOutlined, ReloadOutlined, DeleteOutlined, EnvironmentOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
 import type { Brand, StoreLocation } from '../../../types/api'
+import { message } from '../../../utils/antdApp'
 
 const { Text } = Typography
 

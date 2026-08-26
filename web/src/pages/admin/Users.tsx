@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Table, Tag, Typography, Button, Modal, Form, Input, Space, message, Popconfirm, Row, Col, Empty } from 'antd'
+import { Table, Tag, Typography, Button, Modal, Form, Input, Space, Popconfirm, Row, Col, Empty } from 'antd'
 import { PlusOutlined, TeamOutlined, CrownOutlined, ShopOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { UserView } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

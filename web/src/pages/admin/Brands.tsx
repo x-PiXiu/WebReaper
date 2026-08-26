@@ -1,8 +1,9 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Empty, Row, Col, Tooltip } from 'antd'
+import { Typography, Table, Tag, Space, Button, Popconfirm, Empty, Row, Col, Tooltip } from 'antd'
 import { DeleteOutlined, AppstoreOutlined, TagOutlined, EnvironmentOutlined, BulbOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Brand } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

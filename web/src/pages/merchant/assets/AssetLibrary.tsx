@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Tag, Typography, Upload, message,
-} from 'antd'
+import { Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Tag, Typography, Upload } from 'antd'
+import { message } from '../../../utils/antdApp'
 import {
   SoundOutlined, PictureOutlined, VideoCameraOutlined, FileTextOutlined, UserOutlined,
   PlusOutlined, DeleteOutlined,
@@ -15,7 +15,12 @@ import AssetPicker from '../../../components/AssetPicker'
 import type { GenerationTask, ModelCapability } from '../../../types/api'
 import VoicePicker from '../../../components/VoicePicker'
 import { MODAL_W, modalBodyScroll } from '../../../ui/modalFit'
-import { submitUnified } from '../../../api/generationSubmit'
+import {
+  DEFAULT_TEXT2IMAGE_MODEL,
+  mergeSubmitParams,
+  submitGenerationTaskCompat,
+  submitUnified,
+} from '../../../api/generationSubmit'
 
 const { Text } = Typography
 
@@ -74,6 +79,7 @@ function taskParams(t: GenerationTask): Record<string, any> {
  * 其他 tab = 真实数据（MediaAsset 素材/AI 产物 + 作品库文章）。
  */
 export default function AssetLibrary() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [tab, setTab] = useState<TabKey>('digital_human')
   const [q, setQ] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
@@ -118,6 +124,17 @@ export default function AssetLibrary() {
     }
     return Array.from(ids)
   }, [genTasks])
+
+  // 从向导/Creation「创建分身」深链打开创建弹窗
+  useEffect(() => {
+    if (searchParams.get('create') === 'subject') {
+      setTab('digital_human')
+      setCreateOpen(true)
+      const next = new URLSearchParams(searchParams)
+      next.delete('create')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   const filtered = useMemo(() => {
     const prefix = tab === 'audio' ? 'audio/' : tab === 'image' ? 'image/' : tab === 'video' ? 'video/' : ''
@@ -205,6 +222,9 @@ export default function AssetLibrary() {
                     <Tag color={s.state === 'success' ? 'green' : s.state === 'failed' ? 'red' : 'processing'}>
                       {s.state === 'success' ? '就绪' : s.state === 'failed' ? '失败' : '创建中'}
                     </Tag>
+                    {s.state === 'success' && s.serverId && (
+                      <Tag color="success" style={{ margin: 0 }}>已注册 ✓</Tag>
+                    )}
                     <Tag style={{ margin: 0 }} color={s.kind === 'scene' ? 'cyan' : undefined}>
                       {s.kind === 'scene' ? '场景' : s.hasVideo ? `视频主体${s.imageCount > 0 ? '（仅视频生效）' : ''}` : `${s.imageCount} 张图`}
                     </Tag>
@@ -588,11 +608,12 @@ function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }:
   }
 
   const handleGenerate = async () => {
+    let voiceCloneId: string | undefined
     if (type === 'voice') {
       if (!audioFile) { message.warning('请上传参考音频'); return }
       if (!text.trim()) { message.warning('请输入试听文本'); return }
-      const vid = (voiceName.trim() || `voice_${Date.now().toString(36)}`).replace(/[^a-zA-Z0-9_-]/g, '_')
-      if (!/^[a-zA-Z]/.test(vid) || vid.length < 8) {
+      voiceCloneId = (voiceName.trim() || `voice_${Date.now().toString(36)}`).replace(/[^a-zA-Z0-9_-]/g, '_')
+      if (!/^[a-zA-Z]/.test(voiceCloneId) || voiceCloneId.length < 8) {
         message.warning('音色 ID 需以英文字母开头，且至少 8 位（字母/数字/-/_）')
         return
       }
@@ -618,13 +639,21 @@ function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }:
 
     setGenerating(true)
     try {
+      const effectiveModel = model || models[0]?.model
+        || (type === 'image' ? DEFAULT_TEXT2IMAGE_MODEL : undefined)
       let result: GenerationTask
       if (type === 'image') {
-        result = await submitUnified({
+        result = await submitGenerationTaskCompat({
           brand_id: brandId,
-          text: text.trim(),
-          type: 'image',
-          materials: refImages.length ? refImages.map((r) => r.id) : undefined,
+          sub_type: 'text2image',
+          model: effectiveModel || DEFAULT_TEXT2IMAGE_MODEL,
+          params: { prompt: text.trim() },
+          refs: refImages.map((r, i) => ({
+            id: r.id,
+            url: r.url,
+            kind: 'image' as const,
+            name: r.url.split('/').pop() || `ref-${i + 1}`,
+          })),
         })
       } else if (type === 'video') {
         result = await submitUnified({
@@ -634,12 +663,17 @@ function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }:
           duration: duration || undefined,
           quality: resolution || undefined,
           aspect_ratio: aspectRatio || undefined,
+          params: mergeSubmitParams(effectiveModel ? { model: effectiveModel } : undefined),
         })
       } else if (type === 'audio') {
         result = await submitUnified({
           brand_id: brandId,
           text: text.trim(),
           type: 'audio',
+          params: mergeSubmitParams(
+            effectiveModel ? { model: effectiveModel } : undefined,
+            voiceId ? { voice_setting_voice_id: voiceId } : undefined,
+          ),
         })
       } else {
         const uploaded = await businessApi.uploadAsset(audioFile!)
@@ -648,6 +682,7 @@ function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }:
           text: text.trim(),
           type: 'voice',
           materials: [uploaded.id],
+          params: mergeSubmitParams({ voice_id: voiceCloneId }),
         })
       }
 
@@ -696,7 +731,7 @@ function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }:
       open={open}
       onCancel={onClose}
       width={MODAL_W.lg}
-      destroyOnClose
+      destroyOnHidden
       title={title}
       styles={{ body: { ...modalBodyScroll.body, paddingTop: 8 } }}
       footer={
@@ -865,7 +900,7 @@ function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }:
                 type="info"
                 showIcon
                 style={{ marginTop: 8, marginBottom: 8 }}
-                message="统一生成接口按文档使用系统默认音色（type=audio），暂不支持指定 voice_id"
+                message="已选音色将通过 voice_setting_voice_id 提交；未选则使用系统默认"
               />
               <div style={{ marginTop: 8 }}>
                 <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} />

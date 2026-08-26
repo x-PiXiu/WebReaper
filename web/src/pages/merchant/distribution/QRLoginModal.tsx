@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Modal, Space, Spin, Button, Typography, message } from 'antd'
+import { Modal, Space, Spin, Button, Typography } from 'antd'
 import { CheckCircleOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
+import { message } from '../../../utils/antdApp'
 
 const { Text, Paragraph } = Typography
 

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+ï»¿import { useMemo } from 'react'
 import { Empty, Modal, Spin } from 'antd'
 import { MODAL_W } from '../../ui/modalFit'
 import { useMediaAssets } from '../../hooks/useMediaAssets'
@@ -24,7 +24,7 @@ export function AssetPicker({ open, onClose, onPick, kind = 'image', title = 'ä»
   }, [list, kind])
 
   return (
-    <Modal open={open} title={title} onCancel={onClose} footer={null} width={MODAL_W.xl} destroyOnClose>
+    <Modal open={open} title={title} onCancel={onClose} footer={null} width={MODAL_W.xl} destroyOnHidden>
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
       ) : assets.length === 0 ? (

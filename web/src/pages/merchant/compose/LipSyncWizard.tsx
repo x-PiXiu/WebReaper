@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import {
-  Alert, Button, Input, Radio, Segmented, Tag, Typography, message,
-} from 'antd'
+import { Alert, Button, Input, Radio, Segmented, Tag, Typography } from 'antd'
+import { message } from '../../../utils/antdApp'
 import {
   LinkOutlined, EditOutlined, UploadOutlined, VideoCameraOutlined, UserOutlined,
   RocketOutlined, CheckCircleOutlined, SoundOutlined, ExportOutlined,
 } from '@ant-design/icons'
+import { transcriptLines } from '../../../utils/transcript'
+import { checkMaterialFileSize, friendlyGenerationError } from '../../../utils/generationErrors'
+import { extractShareUrl, isKuaishouUrl } from '../../../utils/shareUrl'
 import { businessApi } from '../../../api/business'
 import type { GenerationTask } from '../../../types/api'
 import VoicePicker from '../../../components/VoicePicker'
@@ -31,8 +33,27 @@ const WIZARD_STEPS: WizardStepDef[] = [
   { key: 'produce', label: '成片', title: '生成成片', tip: '系统将自动完成语音合成、画面生成与对口型', nextLabel: '去发布' },
 ]
 
-/** 正常语速 ≈4 字/秒（时长估算提示——D2） */
-const estSeconds = (text: string) => Math.ceil((text || '').length / 4)
+/** 正常语速 ≈180 字/分钟 ≈3 字/秒（口播时长估算） */
+const estSeconds = (text: string) => Math.ceil((text || '').length / 3)
+
+/** 读取本地视频时长（秒） */
+function readVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const v = document.createElement('video')
+    v.preload = 'metadata'
+    v.onloadedmetadata = () => {
+      const d = v.duration
+      URL.revokeObjectURL(url)
+      resolve(Number.isFinite(d) ? d : 0)
+    }
+    v.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(0)
+    }
+    v.src = url
+  })
+}
 
 type SourceMode = 'link' | 'upload' | 'manual' | null
 type ScriptVersion = 'rewrite' | 'clean'
@@ -68,6 +89,7 @@ export default function LipSyncWizard() {
   // ① 文案来源
   const [sourceMode, setSourceMode] = useState<SourceMode>(null)
   const [shareUrl, setShareUrl] = useState('')
+  const [extractLineCount, setExtractLineCount] = useState(0)
   const [extracting, setExtracting] = useState(false)
   // ② 文案
   const [, setRawText] = useState(presetState?.rawText || draft.wizardCleanText || '')
@@ -83,6 +105,7 @@ export default function LipSyncWizard() {
   )
   const [realVideoUrl, setRealVideoUrl] = useState(draft.wizardRealVideoUrl || '')
   const [realVideoName, setRealVideoName] = useState('')
+  const [realVideoSec, setRealVideoSec] = useState(0)
   const [intent, setIntent] = useState(draft.wizardIntent || '')
   // ④ 音色
   const [voiceId, setVoiceId] = useState(draft.wizardVoiceId || '')
@@ -176,16 +199,23 @@ export default function LipSyncWizard() {
     setExtracting(true); setError('')
     try {
       const r = await businessApi.extractTranscript(payload)
+      const lines = transcriptLines(r.raw_text, r.raw_text_lines)
+      setExtractLineCount(lines.length)
       setRawText(r.raw_text)
       const rw = await businessApi.rewriteScript({ raw_text: r.raw_text, topic: topic || '口播获客' })
       setCleanText(rw.clean)
       setRewriteText(rw.rewrite || rw.clean)
       setScript(rw.rewrite || rw.clean)
       setScriptVersion('rewrite')
-      message.success('提取完成，文案已生成')
+      message.success(`提取完成，共 ${lines.length} 句`)
       goStep(1)
     } catch (e: any) {
-      setError(e?.response?.data?.msg || e?.message || '提取失败')
+      const raw = e?.response?.data?.msg || e?.message || '提取失败'
+      setError(friendlyGenerationError(raw))
+      // 链接解析类失败：引导切到上传，避免用户反复试链接
+      if (/详情解析|分享链|unexpected end of JSON|Cookie|风控/i.test(raw)) {
+        message.info('链接提取暂不可用，可改用下方「上传视频」')
+      }
     } finally { setExtracting(false) }
   }
 
@@ -264,7 +294,7 @@ export default function LipSyncWizard() {
       message.success('成片完成')
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     } catch (e: any) {
-      setError(e?.response?.data?.msg || e?.message || '成片失败')
+      setError(friendlyGenerationError(e?.response?.data?.msg || e?.message || '成片失败'))
       setFailedStage(pipelineStage)
     } finally {
       setProducing(false)
@@ -273,6 +303,11 @@ export default function LipSyncWizard() {
   }
 
   const scriptSec = estSeconds(script)
+  const scriptMin = scriptSec / 60
+  const durationMismatch = presence === 'real' && realVideoSec > 0 && scriptSec > 0
+    && (Math.max(realVideoSec, scriptSec) / Math.min(realVideoSec, scriptSec) > 2)
+  const longAvatarScript = presence === 'avatar' && script.length > 60
+  const kuaishouHint = sourceMode === 'link' && isKuaishouUrl(shareUrl)
   const stepKey = WIZARD_STEPS[step]?.key || 'source'
 
   const pipelineStages = useMemo((): PipelineStage[] => {
@@ -332,6 +367,9 @@ export default function LipSyncWizard() {
         if (brandId) q.set('brandId', brandId)
         q.set('mediaUrls', resultUrl)
         q.set('contentType', 'video')
+        if (script.trim()) q.set('content', script.trim().slice(0, 8000))
+        const pubTitle = (draft.selectedTitle || topic || '').trim()
+        if (pubTitle) q.set('title', pubTitle)
         navigate(`/m/distribution?${q.toString()}`)
       } else if (!producing) {
         produce()
@@ -410,7 +448,7 @@ export default function LipSyncWizard() {
       nextHint={nextHint()}
       nextLoading={extracting || rewriting || producing || initRewriting}
       nextLabel={footerNextLabel}
-      backLabel={step === 0 ? '返回创作台' : undefined}
+      backLabel={step === 0 ? '返回工作台' : undefined}
       alerts={alerts}
     >
       {step === 0 && (
@@ -454,8 +492,29 @@ export default function LipSyncWizard() {
                 value={shareUrl}
                 onChange={e => setShareUrl(e.target.value)}
                 loading={extracting}
-                onSearch={() => shareUrl.trim() && doExtract({ share_url: shareUrl.trim() })}
+                onSearch={() => {
+                  if (!shareUrl.trim()) return
+                  if (isKuaishouUrl(shareUrl)) {
+                    message.info('快手暂不支持链接提取，请下载视频后用上传方式')
+                    return
+                  }
+                  const link = extractShareUrl(shareUrl)
+                  if (!link) {
+                    message.warning('未识别到抖音/B站链接。请粘贴完整分享口令（需含 https://v.douyin.com/…），或改用上传视频')
+                    return
+                  }
+                  if (link !== shareUrl.trim()) setShareUrl(link)
+                  doExtract({ share_url: link })
+                }}
               />
+              <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+                可直接粘贴抖音「复制链接」整段口令，系统会自动抽出链接
+              </Text>
+              {kuaishouHint && (
+                <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+                  快手暂不支持链接提取，请下载视频后用上传方式
+                </Text>
+              )}
             </div>
           )}
 
@@ -466,6 +525,12 @@ export default function LipSyncWizard() {
                 hint="支持 mp4 / mov / mp3 / wav，上传后自动提取文案"
                 loading={extracting}
                 onUpload={async (file) => {
+                  const sizeCheck = checkMaterialFileSize(file)
+                  if (!sizeCheck.ok) {
+                    message.error(sizeCheck.error)
+                    return
+                  }
+                  if (sizeCheck.warning) message.warning(sizeCheck.warning)
                   const r = await businessApi.uploadAsset(file)
                   await doExtract({ asset_url: r.url })
                 }}
@@ -503,7 +568,13 @@ export default function LipSyncWizard() {
           />
           <div className="wz-script-toolbar">
             <span className="wz-duration-ring">
-              约 <strong>{scriptSec}</strong> 秒口播
+              预计口播约 <strong>{scriptMin >= 1 ? `${scriptMin.toFixed(1)} 分钟` : `${scriptSec} 秒`}</strong>
+              {extractLineCount > 0 && (
+                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>提取 {extractLineCount} 句</Text>
+              )}
+              {scriptMin > 10 && (
+                <Text type="danger" style={{ marginLeft: 8, fontSize: 12 }}>文案过长，建议精简</Text>
+              )}
             </span>
             <Button loading={rewriting} onClick={doRewrite} disabled={!script.trim()}>
               AI 润色/改写
@@ -544,21 +615,53 @@ export default function LipSyncWizard() {
                   hint={`文案约 ${scriptSec} 秒，出镜视频时长最好相近`}
                   fileName={realVideoName || (realVideoUrl ? '已上传出镜视频' : undefined)}
                   onUpload={async (file) => {
+                    const sizeCheck = checkMaterialFileSize(file)
+                    if (!sizeCheck.ok) {
+                      message.error(sizeCheck.error)
+                      return
+                    }
+                    if (sizeCheck.warning) message.warning(sizeCheck.warning)
+                    const dur = await readVideoDuration(file)
                     const r = await businessApi.uploadAsset(file)
                     setRealVideoUrl(r.url)
                     setRealVideoName(file.name)
-                    message.success('出镜视频已上传')
+                    setRealVideoSec(dur)
+                    message.success(dur > 0 ? `出镜视频已上传（时长 ${Math.round(dur)} 秒）` : '出镜视频已上传')
                   }}
                 />
+                {realVideoSec > 0 && (
+                  <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+                    视频时长 {Math.round(realVideoSec)} 秒 · 文案预计 {scriptSec} 秒
+                  </Text>
+                )}
+                {durationMismatch && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginTop: 8 }}
+                    message="视频时长与文案时长差距较大，建议匹配（可循环拍摄多段或精简文案）"
+                  />
+                )}
               </>
             ) : (
               <>
                 <Alert type="info" showIcon message="选择资产库里的数字分身，一句话描述场景" />
+                {longAvatarScript && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 8 }}
+                    message="文案较长，将生成长视频（等待分段功能上线前建议压缩到 60 字内获得最佳效果）"
+                  />
+                )}
                 <div className="wz-subject-picks">
                   {subjects.length === 0 ? (
-                    <Text type="warning">
-                      还没有数字分身——<a href="/m/assets" target="_blank" rel="noreferrer">去资产库创建</a>
-                    </Text>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                      <Text type="warning">还没有数字分身</Text>
+                      <Button type="primary" size="small" onClick={() => navigate('/m/assets?create=subject')}>
+                        去创建数字分身
+                      </Button>
+                    </div>
                   ) : subjects.map(s => (
                     <Radio.Button
                       key={s.id}

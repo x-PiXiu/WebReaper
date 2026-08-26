@@ -1,11 +1,12 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Modal, Space, Tag, Typography, message } from 'antd'
+import { Button, Modal, Space, Tag, Typography } from 'antd'
 import { LinkOutlined, ReloadOutlined, SoundOutlined } from '@ant-design/icons'
 import { LazyLine } from './charts/LazyCharts'
 import { businessApi } from '../api/business'
 import { PlatformBadge } from './PlatformBadge'
 import { MODAL_W, modalBodyScroll } from '../ui/modalFit'
+import { message } from '../utils/antdApp'
 
 const { Text, Title } = Typography
 
@@ -83,7 +84,7 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
       width={MODAL_W.lg}
       title={work.title}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
       styles={{ body: { ...modalBodyScroll.body, background: 'var(--wr-bg)' } }}
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>

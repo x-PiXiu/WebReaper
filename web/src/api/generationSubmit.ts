@@ -3,8 +3,12 @@ import type { GenerationTask, PromptRef } from '../types/api'
 
 /**
  * 与 Docs/API/统一生成API文档.md 对齐的统一提交载荷。
- * 仅传文档字段：brand_id / text / materials / template / type / duration / quality / aspect_ratio
- * （aspect_ratio 文档有、当前 handler 可能未透传——仍发送，后端补齐后零改动）
+ *
+ * 核心契约（傻瓜式）：brand_id + text + materials + type → 后端选端点/模型。
+ * 扩展字段：
+ *   - params.model / voice_setting_*：高级透传（服务端白名单合并）
+ *   - sub_type：仅 subject 等显式覆盖场景
+ *   - watermark / off_peak：可选计费开关
  */
 export type UnifiedSubmitPayload = {
   brand_id: string
@@ -15,8 +19,30 @@ export type UnifiedSubmitPayload = {
   duration?: number
   quality?: string
   aspect_ratio?: string
+  /** 高级参数；文生图建议带 model=viduq2（规避 BE 默认落到需参考图的 viduq1） */
   params?: Record<string, unknown>
   sub_type?: string
+  watermark?: boolean
+  off_peak?: boolean
+}
+
+/** 文生图默认模型（支持 0 张参考图的纯文生图） */
+export const DEFAULT_TEXT2IMAGE_MODEL = 'viduq2'
+
+/** 合并统一提交高级参数（model / seed / voice_setting_* 等——服务端 params 白名单合并） */
+export function mergeSubmitParams(
+  ...parts: Array<Record<string, unknown> | undefined | null>
+): Record<string, unknown> | undefined {
+  const merged: Record<string, unknown> = {}
+  for (const p of parts) {
+    if (!p) continue
+    for (const [k, v] of Object.entries(p)) {
+      if (v === undefined || v === null || v === '') continue
+      if (Array.isArray(v) && v.length === 0) continue
+      merged[k] = v
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 /** 旧高级提交形态（已删除 POST /generation/tasks）→ 映射到统一 submit */
@@ -120,6 +146,10 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
     const v = (params as Record<string, unknown>)[k]
     if (v !== undefined && v !== null && v !== '') adv[k] = v
   }
+  // Creation 等高级表单在顶层传 model / off_peak / watermark
+  if (data.model && !adv.model) adv.model = data.model
+  if (data.off_peak && adv.off_peak === undefined) adv.off_peak = data.off_peak
+  if (data.watermark && adv.watermark === undefined) adv.watermark = data.watermark
 
   const materialIds = new Set<string>(refIds(data.refs))
   const urlKeys = ['audio_url', 'video_url', 'image', 'image_url'] as const
@@ -134,6 +164,26 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
     for (const u of images) {
       if (typeof u === 'string' && u.trim()) materialIds.add(await ensureMaterialId(u.trim()))
     }
+  }
+
+  // 文生图：默认 viduq2（0 张参考图可用）；参考图只传可访问的 http(s)/media URL，禁止 data: 撑爆 params_json
+  if (sub === 'text2image') {
+    if (!adv.model) adv.model = DEFAULT_TEXT2IMAGE_MODEL
+    const imgUrls: string[] = []
+    const pushUrl = (u: string) => {
+      const s = u.trim()
+      if (!s || s.startsWith('data:') || s.startsWith('blob:')) return
+      imgUrls.push(s)
+    }
+    if (Array.isArray(images)) {
+      for (const u of images) {
+        if (typeof u === 'string') pushUrl(u)
+      }
+    }
+    for (const r of data.refs || []) {
+      if ((!r.kind || r.kind === 'image') && r.url) pushUrl(r.url)
+    }
+    if (imgUrls.length) adv.images = imgUrls
   }
 
   const materials = [...materialIds]
@@ -165,13 +215,20 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
     quality,
     aspect_ratio,
     params: Object.keys(adv).length ? adv : undefined,
+    watermark: data.watermark,
+    off_peak: data.off_peak,
   }
 }
 
-/** 统一提交（POST /api/v1/generation/submit）——严格文档字段 */
+/** 统一提交（POST /api/v1/generation/submit）——傻瓜式主路径 */
 export async function submitUnified(payload: UnifiedSubmitPayload): Promise<GenerationTask> {
   if (!payload.brand_id) {
     throw new Error('请先选择人设/品牌后再生成')
+  }
+  // 文生图兜底模型：后端若未读 params.model，仍尽量降低落到 viduq1 的概率（管理后台默认配置对齐前）
+  let params = payload.params
+  if (payload.type === 'image') {
+    params = mergeSubmitParams({ model: DEFAULT_TEXT2IMAGE_MODEL }, params)
   }
   return apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', {
     brand_id: payload.brand_id,
@@ -182,8 +239,10 @@ export async function submitUnified(payload: UnifiedSubmitPayload): Promise<Gene
     duration: payload.duration,
     quality: payload.quality,
     aspect_ratio: payload.aspect_ratio,
-    params: payload.params,
+    params,
     sub_type: payload.sub_type,
+    watermark: payload.watermark,
+    off_peak: payload.off_peak,
   })
 }
 

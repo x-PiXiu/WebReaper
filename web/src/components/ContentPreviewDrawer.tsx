@@ -1,4 +1,4 @@
-import { Modal, Tag, Space, Typography } from 'antd'
+﻿import { Modal, Tag, Space, Typography } from 'antd'
 import { scoreColor, scoreLevel } from '../utils/geo'
 import type { OptimizedContent } from '../types/api'
 import { MODAL_W, modalBodyScroll } from '../ui/modalFit'
@@ -20,7 +20,7 @@ export default function ContentPreviewDrawer({
       width={MODAL_W.xxl}
       open={!!content}
       onCancel={onClose}
-      destroyOnClose
+      destroyOnHidden
       footer={null}
       className="wr-modal-preview"
       styles={{ body: modalBodyScroll.body }}

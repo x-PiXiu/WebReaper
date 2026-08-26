@@ -1,6 +1,7 @@
-import { Alert, Button, Input, Space, message } from 'antd'
+import { Alert, Button, Input, Space } from 'antd'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
+import { message } from '../../../../utils/antdApp'
 
 /** Step 3 发视频：确认成片并准备发布 */
 export function VideoProduceStep() {

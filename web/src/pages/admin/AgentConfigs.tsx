@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Card, Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, Switch, message, Tabs } from 'antd'
+import { Card, Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, Select, Space, Switch, Tabs } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { AgentConfig, LLMConfig, ToolView } from '../../types/api'
+import { message, modal } from '../../utils/antdApp'
 
 const { Text } = Typography
 
@@ -76,7 +77,7 @@ export default function AgentConfigs() {
   }
 
   const handleDeleteAgent = async (name: string) => {
-    Modal.confirm({
+    modal.confirm({
       centered: true,
       title: `删除 Agent「${name}」？`,
       content: '删除后，使用该 Agent 的历史会话不受影响，但新对话将不再显示此角色。',
@@ -138,7 +139,7 @@ export default function AgentConfigs() {
   }
 
   const handleDeleteLLM = async (name: string) => {
-    Modal.confirm({
+    modal.confirm({
       centered: true,
       title: `删除 LLM 配置「${name}」？`,
       content: '引用此配置的 Agent 将回退到默认 LLM。',

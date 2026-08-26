@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Button, Input, Space, Typography, message, Alert } from 'antd'
+import { Button, Input, Space, Typography, Alert } from 'antd'
 import { PictureOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { COVER_STYLES } from '../../../../data/coverStyles'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
 
@@ -41,6 +42,7 @@ export default function CoverModule() {
           ? `小红书封面图，竖屏，大标题「${title}」，清爽种草风`
           : `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目，适合抖音`,
         aspect_ratio: '9:16',
+        params: { model: 'viduq2' },
       })
       message.success('封面图任务已提交，请到多媒体工作台取回 URL 填入下方')
       navigate('/m/compose/tools?tab=media')
@@ -98,7 +100,7 @@ export default function CoverModule() {
             className="ip-btn-primary"
             onClick={() => {
               const q = new URLSearchParams()
-              q.set('contentType', isGraphic ? 'article' : 'video')
+              q.set('contentType', isGraphic ? 'image' : 'video')
               if (isGraphic) {
                 const imgs = [...(draft.imageUrls || []), draft.coverUrl].filter(Boolean) as string[]
                 if (imgs.length) q.set('mediaUrls', imgs.join(','))
@@ -109,6 +111,8 @@ export default function CoverModule() {
               }
               if (brandId || draft.brandId) q.set('brandId', brandId || draft.brandId!)
               if (draft.selectedTitle) q.set('title', draft.selectedTitle)
+              const body = (draft.rewritten || draft.script || '').trim()
+              if (body) q.set('content', body.slice(0, 8000))
               navigate(`/m/distribution?${q.toString()}`)
             }}
           >

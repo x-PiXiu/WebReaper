@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Input, Select, Space, Typography, message } from 'antd'
+import { Alert, Button, Input, Select, Space, Typography } from 'antd'
 import { RobotOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { ensureMaterialId, submitUnified } from '../../../../api/generationSubmit'
 import { useMediaAssets } from '../../../../hooks/useMediaAssets'
+import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input

@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { PlatformBadge } from '../../../components/PlatformBadge'
+import { getPlatformLabel } from '../../../data/platforms'
 
 const { Text, Paragraph } = Typography
 
@@ -36,9 +37,14 @@ export default function InspirationTab({ brandId }: Props) {
     staleTime: 5 * 60_000,
   })
 
-  const videos = data?.items || []
+  const { data: platformData } = useQuery({
+    queryKey: ['inspiration-platforms'],
+    queryFn: () => businessApi.listInspirationPlatforms(),
+    staleTime: 30 * 60_000,
+  })
 
-  const platforms = ['douyin', 'kuaishou', 'bilibili', 'xiaohongshu']
+  const videos = data?.items || []
+  const platforms = platformData?.platforms?.filter(Boolean) || []
 
   if (isLoading) {
     return (
@@ -64,7 +70,7 @@ export default function InspirationTab({ brandId }: Props) {
             onChange={setPlatform}
             options={[
               { value: 'all', label: '全部平台' },
-              ...platforms.map(p => ({ value: p, label: p })),
+              ...platforms.map((p) => ({ value: p, label: getPlatformLabel(p) })),
             ]}
           />
           <Button

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Button, Card, Checkbox, Divider, Empty, Input, Segmented, Select, Space, Spin, Tag, Tooltip, Typography, message } from 'antd'
+import { Button, Card, Checkbox, Divider, Empty, Input, Segmented, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined, RobotOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
 import { useBrandContext } from '../../../hooks/useBrands'
 import { engineLabel, MENTION_RATE_TIP } from '../../../utils/geoTerms'
 import type { Keyword, MonitoringResult, EngineOption } from '../../../types/api'
+import { message } from '../../../utils/antdApp'
 
 const { Text, Paragraph } = Typography
 

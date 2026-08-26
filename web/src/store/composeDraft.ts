@@ -114,7 +114,7 @@ export const COMPOSE_MODULES: ComposeModuleDef[] = [
   // 发图文专属
   { key: 'images', path: '/m/compose/images', label: '图文配图', desc: '配图生成与素材挑选', status: 'ready', track: 'graphic' },
   { key: 'cover-graphic', path: '/m/compose/cover?track=graphic', label: '图文封面', desc: '笔记/帖子封面图', status: 'ready', track: 'graphic' },
-  { key: 'publish-graphic', path: '/m/distribution?contentType=article', label: '发布图文', desc: '发小红书/公众号等图文渠道', status: 'ready', track: 'graphic' },
+  { key: 'publish-graphic', path: '/m/distribution?contentType=image', label: '发布图文', desc: '发小红书等图文渠道', status: 'ready', track: 'graphic' },
 ]
 
 export function modulesForTrack(track: ComposeTrack) {

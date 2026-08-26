@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Button, Input, Space, Typography, Upload, message, Alert, Select } from 'antd'
+import { Button, Input, Space, Typography, Upload, Alert, Select } from 'antd'
 import { LinkOutlined, UploadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { extractShareUrl, isKuaishouUrl } from '../../../../utils/shareUrl'
+import { message } from '../../../../utils/antdApp'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -51,14 +53,24 @@ export default function BenchmarkModule() {
       message.warning('请先粘贴爆款链接')
       return
     }
+    if (isKuaishouUrl(url)) {
+      message.info('快手暂不支持链接提取，请下载视频后用上传方式')
+      return
+    }
+    const link = extractShareUrl(url)
+    if (!link) {
+      message.warning('未识别到抖音/B站链接。请粘贴完整分享口令（需含 https://v.douyin.com/…）')
+      return
+    }
+    if (link !== url.trim()) setUrl(link)
     setBusy(true)
     try {
       const r = await businessApi.extractTranscript({
-        share_url: url.trim(),
+        share_url: link,
         title: draft.refTitle || undefined,
       })
-      draft.patch({ sourceUrl: url.trim() })
-      applyTranscript(r.raw_text || '', url.trim())
+      draft.patch({ sourceUrl: link })
+      applyTranscript(r.raw_text || '', link)
     } catch {
       /* 拦截器 */
     } finally {

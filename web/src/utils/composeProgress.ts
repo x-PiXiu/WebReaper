@@ -53,8 +53,9 @@ export function composeProgressLabel(draft: ComposeDraft, track: ComposeTrack) {
 
 export function composeResumePath(draft: ComposeDraft): string {
   if (draft.track === 'graphic') return '/m/compose/graphic'
+  if (draft.track === 'video') return '/m/compose/lipsync'
   if (draft.track === 'lipsync' || (draft.wizardStep ?? 0) > 0) return '/m/compose/lipsync'
-  return '/m/compose/lipsync'
+  return '/m/compose'
 }
 
 export function validateComposeStep(
@@ -76,6 +77,18 @@ export function validateComposeStep(
     const images = (draft.imageUrls || []).filter(Boolean)
     if (images.length === 0 && !(draft.imageTaskIds || []).length) {
       return { ok: false, hint: '请至少上传或生成一张配图' }
+    }
+  }
+  // 成片确认步：必须有可发布产物，避免空着手进发布向导
+  if (stepIndex === 2 && track === 'video') {
+    if (!(draft.editedVideoUrl || draft.avatarVideoUrl)) {
+      return { ok: false, hint: '请先完成口播成片（数字人成片或手动填入视频地址）' }
+    }
+  }
+  if (stepIndex === 2 && track === 'graphic') {
+    const images = (draft.imageUrls || []).filter(Boolean)
+    if (images.length === 0) {
+      return { ok: false, hint: '请至少保留一张配图再去发布' }
     }
   }
   return { ok: true }

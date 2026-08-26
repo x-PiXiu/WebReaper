@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Alert, Button, Form, Input, Modal, message } from 'antd'
+﻿import { useState } from 'react'
+import { Alert, Button, Form, Input, Modal } from 'antd'
 import { AppShell, type NavItem } from './MainLayout'
 import { useAuthStore } from '../store/auth'
 import { businessApi } from '../api/business'
+import { message } from '../utils/antdApp'
 
 // 管理后台布局：菜单按功能域分组（AntD Menu 的 group 类型渲染）。
 //   - 平台管理：SaaS 运营（总览/商户/品牌/内容/计费）
@@ -96,7 +97,7 @@ export default function AdminLayout() {
         open={pwOpen}
         onCancel={() => setPwOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={handleChangePassword}>
           <Form.Item label="当前密码" name="old_password" rules={[{ required: true, message: '请输入当前密码' }]}>

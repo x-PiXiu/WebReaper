@@ -12,7 +12,6 @@ const NotFound = lazy(() => import('./pages/NotFound'))
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
 const Chat = lazy(() => import('./pages/merchant/Chat'))
 const AgentConfigs = lazy(() => import('./pages/admin/AgentConfigs'))
-const MerchantHome = lazy(() => import('./pages/merchant/Home'))
 const Brands = lazy(() => import('./pages/merchant/Brands'))
 const Distribution = lazy(() => import('./pages/merchant/Distribution'))
 const Checkup = lazy(() => import('./pages/merchant/checkup/Checkup'))
@@ -82,7 +81,7 @@ function RedirectPreserve({ to }: { to: string }) {
 }
 
 function homePath(role: string | null | undefined) {
-  return role === 'admin' ? '/admin' : '/m/dashboard'
+  return role === 'admin' ? '/admin' : '/m/compose'
 }
 
 export default function App() {
@@ -92,9 +91,9 @@ export default function App() {
         <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
 
         <Route element={<ProtectedRoute><MerchantLayout /></ProtectedRoute>}>
-          {/* 工作台语义化路径：/m/dashboard（/m 保留重定向，兼容旧链接/书签） */}
-          <Route path="/m" element={<Navigate to="/m/dashboard" replace />} />
-          <Route path="/m/dashboard" element={<LazyPage><MerchantHome /></LazyPage>} />
+          {/* 商户首页 = 工作台（原创作台）；/m/dashboard 兼容旧链接 */}
+          <Route path="/m" element={<Navigate to="/m/compose" replace />} />
+          <Route path="/m/dashboard" element={<Navigate to="/m/compose" replace />} />
           <Route path="/m/brands" element={<LazyPage><Brands /></LazyPage>} />
           <Route path="/m/assets" element={<LazyPage><AssetLibrary /></LazyPage>} />
           <Route path="/m/inspire" element={<LazyPage><InspirationPlaza /></LazyPage>} />

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Card, Typography, Button, Input, Form, message, Table, Tag, Space, Popconfirm, Alert, Select, InputNumber, Row, Col, Tooltip } from 'antd'
+import { Card, Typography, Button, Input, Form, Table, Tag, Space, Popconfirm, Alert, Select, InputNumber, Row, Col, Tooltip } from 'antd'
 import { SaveOutlined, ReloadOutlined, DeleteOutlined, DatabaseOutlined, LinkOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { IndustryCrawlConfig, KnowledgeMaterialView } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

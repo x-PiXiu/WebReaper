@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { message } from 'antd'
+import { retryFailureMessage } from '../components/RetryHint'
 import { fetchGenerationTasks, GENERATION_TASKS_KEY } from './useGenerationTasks'
 import { useComposeDraft } from '../store/composeDraft'
 import { isTaskDone, isTaskSuccess, taskCoverUrl, taskPrimaryUrl } from '../utils/generationTask'
+import { message } from '../utils/antdApp'
 
 const POLL_MS = 3000
 
@@ -48,7 +49,7 @@ export function useComposeTaskPoll() {
           if (!isTaskSuccess(task.state)) {
             if (!notified.current.has(`fail-${id}`)) {
               notified.current.add(`fail-${id}`)
-              message.error(`${label}失败：${task.err_msg || task.state}`)
+              message.error(retryFailureMessage(task, `${label}失败`))
             }
             return
           }
@@ -83,7 +84,7 @@ export function useComposeTaskPoll() {
           if (!isTaskSuccess(task.state)) {
             if (!notified.current.has(`fail-${id}`)) {
               notified.current.add(`fail-${id}`)
-              message.error(`配图生成失败：${task.err_msg || task.state}`)
+              message.error(retryFailureMessage(task, '配图生成失败'))
             }
             continue
           }

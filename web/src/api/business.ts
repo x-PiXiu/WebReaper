@@ -403,6 +403,8 @@ export const businessApi = {
     aspect_ratio?: string
     params?: Record<string, unknown> // 高级参数（模型选择/音色等——与 generationSubmit 同通道）
     sub_type?: string // 显式端点覆盖（subject=数字分身主体注册；空=自动选择）
+    watermark?: boolean
+    off_peak?: boolean
   }) => submitUnified(data),
 
   /**
@@ -454,7 +456,7 @@ export const businessApi = {
   // ---- 视频文案提取（向导第①②步）----
   // 提取说话内容：三选一 video_url 直链 / share_url 分享链 / asset_url 本站上传资产
   extractTranscript: (data: { video_url?: string; share_url?: string; asset_url?: string; title?: string }) =>
-    apiClient.post<unknown, { raw_text: string; title: string; method: string }>('/api/v1/generation/transcript/extract', data),
+    apiClient.post<unknown, { raw_text: string; raw_text_lines?: string[]; title: string; method: string }>('/api/v1/generation/transcript/extract', data),
 
   // 原文 → 双产出（clean=用原文按钮 / rewrite=默认填入）
   rewriteScript: (data: { raw_text: string; topic?: string }) =>

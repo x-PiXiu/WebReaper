@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Button, Empty, Input, Segmented, Space, Tag, Typography } from 'antd'
 import { PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
+import RetryHint from '../../../components/RetryHint'
 import type { WorkItem } from '../../../types/api'
 
 const { Text } = Typography
@@ -47,6 +48,13 @@ export default function MyWorks() {
   const { data: works = [], isLoading } = useQuery({
     queryKey: ['merchant-works'],
     queryFn: () => businessApi.listWorks().catch((): WorkItem[] => []),
+  })
+  const { data: failedTasks = [] } = useQuery({
+    queryKey: ['generation-tasks'],
+    queryFn: () => businessApi.listGenerationTasks()
+      .then((r) => r.tasks.filter((t) => t.state === 'failed').slice(0, 8))
+      .catch(() => []),
+    staleTime: 30_000,
   })
 
   const list = useMemo(() => {
@@ -132,6 +140,30 @@ export default function MyWorks() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {failedTasks.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text strong>生成失败任务</Text>
+            <Button type="link" size="small" onClick={() => navigate('/m/compose/tools?tab=media')}>打开任务中心</Button>
+          </div>
+          <div className="ip-works-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+            {failedTasks.map((t) => (
+              <div key={t.id} className="ip-work-card" style={{ padding: 14 }}>
+                <Space wrap style={{ marginBottom: 8 }}>
+                  <Tag color="error">失败</Tag>
+                  <Tag>{t.sub_type}</Tag>
+                  <RetryHint code={t.retry_hint} />
+                </Space>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block' }} ellipsis={{ tooltip: t.err_msg }}>
+                  {t.err_msg || '无错误详情'}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 11, marginTop: 6 }}>{t.model} · {t.created_at?.replace('T', ' ').slice(0, 16)}</Text>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

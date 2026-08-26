@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Typography, Card, Space, message, Tag, Modal, Input, Table, Button, Form, Select, InputNumber, Switch } from 'antd'
+import { Typography, Card, Space, Tag, Modal, Input, Table, Button, Form, Select, InputNumber, Switch } from 'antd'
 import { ThunderboltOutlined, EditOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationTemplate } from '../../types/api'
+import { message, modal } from '../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -168,7 +169,7 @@ export default function AdminGenerationTemplates() {
             danger
             icon={<DeleteOutlined />}
             onClick={() => {
-              Modal.confirm({
+              modal.confirm({
                 centered: true,
                 title: '确认删除',
                 content: `确定要删除模板"${record.name}"吗？`,

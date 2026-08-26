@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Input, Space, Tag, Typography, message } from 'antd'
+import { Button, Input, Space, Tag, Typography } from 'antd'
 import { ThunderboltOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
 

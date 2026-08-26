@@ -10,7 +10,7 @@ type Props = {
   compact?: boolean
 }
 
-/** 获客四步闭环导航（工作台 / 创作台共用） */
+/** 获客四步闭环导航（工作台子流程共用） */
 export function GrowthStagesNav({ current, className, style, compact }: Props) {
   const navClass = [
     className || 'ch-growth',

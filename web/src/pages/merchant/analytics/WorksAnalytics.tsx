@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Col, Empty, Modal, Row, Select, Space, Table, Tabs, Tag, Typography } from 'antd'
@@ -292,7 +292,7 @@ export default function WorksAnalytics() {
         width={MODAL_W.xxl}
         title="AI 效果"
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         className="wr-modal-preview"
         styles={{ body: { ...modalBodyScroll.body, background: 'var(--wr-bg)', paddingTop: 8 } }}
       >

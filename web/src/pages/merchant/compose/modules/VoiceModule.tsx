@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Input, Select, Space, Typography, message } from 'antd'
+import { Alert, Button, Input, Select, Space, Typography } from 'antd'
 import { SoundOutlined } from '@ant-design/icons'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input

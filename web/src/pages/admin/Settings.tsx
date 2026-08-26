@@ -1,7 +1,8 @@
-import { Typography, Switch, Space, message, Alert, Tag, Segmented, Button } from 'antd'
+import { Typography, Switch, Space, Alert, Tag, Segmented, Button } from 'antd'
 import { RadarChartOutlined, EyeOutlined, SwapOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

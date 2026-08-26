@@ -40,7 +40,7 @@ export default function Notifications() {
               全部已读
             </Button>
           )}
-          <Button onClick={() => navigate('/m/dashboard')}>回工作台</Button>
+          <Button onClick={() => navigate('/m/compose')}>回工作台</Button>
         </Space>
       </div>
 

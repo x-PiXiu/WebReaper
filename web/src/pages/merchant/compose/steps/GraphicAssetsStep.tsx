@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Input, Segmented, Space, Upload, message } from 'antd'
+import { Button, Input, Segmented, Space, Upload } from 'antd'
 import { PictureOutlined, PlusOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
@@ -9,6 +9,7 @@ import { AssetPicker } from '../../../../components/compose/AssetPicker'
 import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
 import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
 import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
+import { message } from '../../../../utils/antdApp'
 
 type GraphicTab = 'images' | 'cover'
 
@@ -38,6 +39,7 @@ export function GraphicAssetsStep() {
         type: 'image',
         text: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感`,
         aspect_ratio: '9:16',
+        params: { model: 'viduq2' },
       })
       draft.patch({
         imageTaskIds: [...(draft.imageTaskIds || []), res.id],

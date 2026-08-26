@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Empty, Spin } from 'antd'
+import { Button, Empty, Spin, Tag, Typography } from 'antd'
 import {
   VideoCameraOutlined, ThunderboltOutlined, FileTextOutlined,
   RightOutlined,
@@ -11,6 +11,11 @@ import { useComposeTaskPoll } from '../../../hooks/useComposeTaskPoll'
 import { composeProgressLabel, hasComposeDraft, composeResumePath } from '../../../utils/composeProgress'
 import { PageHeader } from '../../../components/PageHeader'
 import { GrowthStagesNav } from '../../../components/GrowthStagesNav'
+import RetryHint from '../../../components/RetryHint'
+import MerchantOnboardingTour from '../../../components/onboarding/MerchantOnboardingTour'
+import { useMerchantOnboarding } from '../../../hooks/useMerchantOnboarding'
+
+const { Text } = Typography
 
 const WORK_STATUS: Record<string, string> = {
   draft: '草稿',
@@ -52,12 +57,13 @@ function progressSteps(label: string) {
 }
 
 /**
- * 创作台入口：选轨 + 续写草稿 + 待发作品 + 灵感快入口
+ * 工作台入口：选轨 + 续写草稿 + 待发作品 + 灵感快入口
  */
 export default function ComposeHub() {
   const navigate = useNavigate()
   const draft = useComposeDraft()
   useComposeTaskPoll()
+  const { open: tourOpen, finish: finishTour, skip: skipTour, replay: replayTour } = useMerchantOnboarding(true)
   const hasDraft = hasComposeDraft(draft)
   const resumePath = composeResumePath(draft)
   const resumeLabel = draft.track === 'graphic' ? '发图文' : '拍口播'
@@ -67,6 +73,13 @@ export default function ComposeHub() {
   const { data: works = [], isLoading: worksLoading } = useQuery({
     queryKey: ['merchant-works'],
     queryFn: () => businessApi.listWorks().catch(() => []),
+  })
+  const { data: failedTasks = [] } = useQuery({
+    queryKey: ['generation-tasks'],
+    queryFn: () => businessApi.listGenerationTasks()
+      .then((r) => r.tasks.filter((t) => t.state === 'failed').slice(0, 5))
+      .catch(() => []),
+    staleTime: 30_000,
   })
   const pending = works
     .filter(w => w.status === 'draft' || w.status === 'ready' || w.status === 'generating')
@@ -88,7 +101,7 @@ export default function ComposeHub() {
       if (w.content_id) q.set('contentId', w.content_id)
       if (w.media_urls?.length) q.set('mediaUrls', w.media_urls.join(','))
       if (w.brand_id) q.set('brandId', w.brand_id)
-      q.set('contentType', w.kind === 'article' || w.kind === 'image' ? 'article' : 'video')
+      q.set('contentType', w.kind === 'image' ? 'image' : w.kind === 'article' ? 'article' : 'video')
       navigate(`/m/distribution?${q.toString()}`)
     } else {
       navigate(w.kind === 'article' || w.kind === 'image' ? '/m/compose/graphic' : '/m/compose/lipsync')
@@ -97,13 +110,15 @@ export default function ComposeHub() {
 
   return (
     <div className="wr-page-content ch-hub ip-page">
+      <MerchantOnboardingTour open={tourOpen} onClose={skipTour} onFinish={finishTour} />
       <PageHeader
-        kicker="Create"
-        title="创作台"
+        kicker="Workbench"
+        title="工作台"
         lead="选方式开写，续草稿或从灵感复刻。"
         className="ch-hub-header"
         actions={
           <div className="ch-hub-quick">
+            <button type="button" className="ch-hub-quick-link" onClick={replayTour}>导览</button>
             <Link to="/m/inspire">灵感广场</Link>
             <Link to="/m/compose/benchmark">粘贴对标</Link>
             <Link to="/m/works">全部作品</Link>
@@ -111,7 +126,9 @@ export default function ComposeHub() {
         }
       />
 
-      <GrowthStagesNav current="create" compact className="ch-growth ch-growth--hub" />
+      <div data-tour="growth-stages">
+        <GrowthStagesNav current="create" compact className="ch-growth ch-growth--hub" />
+      </div>
 
       <div className="ch-hub-primary">
         {hasDraft && (
@@ -142,7 +159,7 @@ export default function ComposeHub() {
           </button>
         )}
 
-        <div className="ch-action-row">
+        <div className="ch-action-row" data-tour="create-modes">
           {CREATE_MODES.map(mode => {
             const Icon = mode.icon
             const featured = 'featured' in mode && mode.featured
@@ -182,7 +199,7 @@ export default function ComposeHub() {
         <span>我的创作</span>
       </div>
 
-      <div className="ch-panels ch-panels--hub">
+      <div className="ch-panels ch-panels--hub" data-tour="recent-panel">
         <section className="ch-panel ch-panel-works">
           <div className="ch-panel-head">
             <h3>待处理作品</h3>
@@ -232,6 +249,29 @@ export default function ComposeHub() {
             </Empty>
           </div>
         </section>
+
+        {failedTasks.length > 0 && (
+          <section className="ch-panel ch-panel-failed">
+            <div className="ch-panel-head">
+              <h3>最近生成失败</h3>
+              <Link to="/m/compose/tools?tab=media">任务中心</Link>
+            </div>
+            <ul className="ch-list ch-list--clean">
+              {failedTasks.map((t) => (
+                <li key={t.id}>
+                  <div className="ch-list-row ch-list-row--clean" style={{ cursor: 'default' }}>
+                    <Tag color="error" style={{ margin: 0 }}>失败</Tag>
+                    <span className="ch-list-title">{t.sub_type} · {t.model}</span>
+                    <RetryHint code={t.retry_hint} />
+                    <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ tooltip: t.err_msg }}>
+                      {t.err_msg || '—'}
+                    </Text>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </div>
   )

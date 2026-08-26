@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import {
-  Alert, Button, Empty, Input, Select, Space, Spin, Steps, Switch, Tag, Tooltip, Typography, message,
-} from 'antd'
+import { Alert, Button, Empty, Input, Select, Space, Spin, Steps, Switch, Tag, Tooltip, Typography } from 'antd'
+import { message } from '../../../utils/antdApp'
 import {
   ArrowDownOutlined, ArrowUpOutlined, CheckCircleOutlined, LinkOutlined, CloudUploadOutlined,
 } from '@ant-design/icons'
@@ -121,13 +120,13 @@ export default function PublishWizard(props: {
     if (!initial) return
     setDraft((prev) => {
       const next = { ...prev, ...initial }
-      if (initial.mediaURLs?.length || initial.contentId || initial.title) {
+      if (initial.mediaURLs?.length || initial.contentId || initial.title || initial.content) {
         if (initial.mediaURLs?.length && !initial.accountIDs?.length) next.step = 1
       }
       saveDraft(next)
       return next
     })
-  }, [initial?.contentId, initial?.mediaURLs?.join(','), initial?.contentType]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initial?.contentId, initial?.mediaURLs?.join(','), initial?.contentType, initial?.content]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: publishStats } = useQuery({
     queryKey: ['publish-stats', brandId],
@@ -351,7 +350,6 @@ export default function PublishWizard(props: {
         content_type: draft.contentType,
         content_id: draft.contentId,
         cover_url: draft.coverURL || undefined,
-        // 以下字段 usecase/Plan-14 已设计，handler 尚未全部绑定——仍透传；正文已客户端注入兜底
         tags: draft.tags.length ? draft.tags : undefined,
         category: draft.category || undefined,
         store_address: draft.storeAddress || undefined,
@@ -780,9 +778,22 @@ export default function PublishWizard(props: {
                 ? '全自动发布（浏览器代发，有风控风险）'
                 : '全自动不可用——当前账号×形态仅半自动'}
             </Text>
+            {selectedCanAuto && (
+              <Tooltip title="该平台全自动模式处于验证阶段，首次使用建议先试发一条">
+                <Tag color="orange" style={{ margin: 0, cursor: 'help' }}>验证阶段</Tag>
+              </Tooltip>
+            )}
           </div>
           {hasXhs && draft.mode === 'auto' && (
             <Alert type="warning" showIcon style={{ marginBottom: 14 }} message="小红书审核严格，建议优先半自动" />
+          )}
+          {draft.mode === 'semi-auto' && targetPlatforms.includes('zhihu') && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 14 }}
+              message="知乎需手动粘贴正文（平台限制），点击「前往发布」后请 Ctrl+V"
+            />
           )}
           {draft.mode === 'auto' && selectedCanAuto && (
             <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>

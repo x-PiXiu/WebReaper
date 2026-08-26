@@ -1,8 +1,15 @@
 import axios, { AxiosError } from 'axios'
-import { message as antdMessage, Modal as antdModal } from 'antd'
+import { message as antdMessage, modal as antdModal } from '../utils/antdApp'
 import { getToken, useAuthStore } from '../store/auth'
 import { clearQueryCache } from '../queryClient'
+import { friendlyGenerationError } from '../utils/generationErrors'
 import type { ApiEnvelope } from '../types/api'
+
+function toastBizError(raw: string) {
+  const path = typeof window !== 'undefined' ? window.location.pathname : ''
+  const isGen = path.includes('/compose') || path.includes('/creation') || path.includes('/assets') || path.includes('/quick')
+  antdMessage.error(isGen ? friendlyGenerationError(raw) : (raw || '请求失败'))
+}
 
 // Axios 实例 + 拦截器。
 //
@@ -69,9 +76,10 @@ apiClient.interceptors.response.use(
         promptQuotaExceeded()
         return Promise.reject(new Error('配额已用完'))
       }
-      // 其他业务错误：提示并抛错（msg 已是面向用户的中文文案）
-      antdMessage.error(env.msg || '请求失败')
-      return Promise.reject(new Error(env.msg || `业务错误 ${env.code}`))
+      // 其他业务错误：生成域友好化后提示并抛错
+      const raw = env.msg || '请求失败'
+      toastBizError(raw)
+      return Promise.reject(new Error(friendlyGenerationError(raw)))
     }
     // 非信封响应（如健康检查），原样返回
     return response.data
@@ -92,8 +100,8 @@ apiClient.interceptors.response.use(
       promptQuotaExceeded()
       return Promise.reject(new Error('配额已用完'))
     }
-    const msg = error.response?.data?.msg || error.message || '网络错误'
-    antdMessage.error(msg)
-    return Promise.reject(error)
+    const raw = error.response?.data?.msg || error.message || '网络错误'
+    toastBizError(raw)
+    return Promise.reject(new Error(friendlyGenerationError(raw)))
   },
 )

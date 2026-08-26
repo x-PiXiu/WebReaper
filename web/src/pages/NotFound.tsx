@@ -8,7 +8,7 @@ const { Text } = Typography
 export default function NotFound() {
   const navigate = useNavigate()
   const role = useAuthStore((s) => s.role)
-  const home = role === 'admin' ? '/admin' : '/m/dashboard'
+  const home = role === 'admin' ? '/admin' : '/m/compose'
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--wr-bg-base)' }}>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Card, Typography, Button, Row, Col, Tag, Space, message, Table, Modal, Alert, Popconfirm, Tabs } from 'antd'
+import { Card, Typography, Button, Row, Col, Tag, Space, Table, Modal, Alert, Popconfirm, Tabs } from 'antd'
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -11,6 +11,7 @@ import PublishJobTable from './distribution/PublishJobTable'
 import PublishWizard from './distribution/PublishWizard'
 import type { WizardDraft } from './distribution/wizardModel'
 import type { Account, PublishJob } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text, Paragraph } = Typography
 
@@ -68,7 +69,7 @@ export default function Distribution() {
     queryFn: () => businessApi.listPublishJobs(),
   })
 
-  // 入口预填（口播成片 / 作品库 / GEO 文章）
+  // 入口预填（口播成片 / 图文配图 / 作品库 / GEO 文章）
   const wizardInitial = useMemo((): Partial<WizardDraft> | undefined => {
     const qContentId = searchParams.get('contentId') || undefined
     const qBrandId = searchParams.get('brandId') || undefined
@@ -76,19 +77,23 @@ export default function Distribution() {
     const qCoverUrl = searchParams.get('coverUrl') || ''
     const qContentType = searchParams.get('contentType') || searchParams.get('publishForm')
     const qTitle = searchParams.get('title') || ''
-    if (!qContentId && !qMediaUrls && !qTitle && !qContentType && !qBrandId) return undefined
+    const qContent = searchParams.get('content') || ''
+    if (!qContentId && !qMediaUrls && !qTitle && !qContentType && !qBrandId && !qContent) return undefined
     const contentType =
       qContentType === 'article' || qContentType === 'image' || qContentType === 'video'
         ? qContentType
-        : qMediaUrls ? 'video' : undefined
+        : qMediaUrls
+          ? (qMediaUrls.match(/\.(jpg|jpeg|png|webp)(\?|$)/i) ? 'image' : 'video')
+          : undefined
     return {
       contentId: qContentId,
       brandId: qBrandId,
       title: qTitle,
+      content: qContent,
       coverURL: qCoverUrl,
       mediaURLs: qMediaUrls ? qMediaUrls.split(',').filter(Boolean) : [],
       contentType: contentType as WizardDraft['contentType'] | undefined,
-      step: qMediaUrls ? 1 : qContentId ? 2 : 1,
+      step: qMediaUrls ? 1 : qContentId || qContent ? 2 : 1,
     }
   }, [searchParams])
 
@@ -418,6 +423,14 @@ export default function Distribution() {
           message="内容已准备就绪"
           description="点击下方链接前往各平台发布页完成发布，然后点「标记已发布」。"
         />
+        {publishLinks.some((j) => j.platform === 'zhihu') && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="知乎需手动粘贴正文（平台限制），点击「前往发布」后请 Ctrl+V"
+          />
+        )}
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           {publishLinks.map((job) => (
             <div key={job.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>

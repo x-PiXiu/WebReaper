@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Button, Card, Empty, Input, List, Modal, Popconfirm, Space, Spin, Tag, Typography, Upload, message } from 'antd'
+import { Button, Card, Empty, Input, List, Modal, Popconfirm, Space, Spin, Tag, Typography, Upload } from 'antd'
 import { UploadOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
+import { message } from '../../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input

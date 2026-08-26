@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, Typography, Button, Input, Select, Space, message, Empty, Tag, Row, Col, Spin, Tooltip, Switch, Collapse, Segmented } from 'antd'
+import { Card, Typography, Button, Input, Select, Space, Empty, Tag, Row, Col, Spin, Tooltip, Switch, Collapse, Segmented } from 'antd'
 import { FileTextOutlined, DatabaseOutlined, ClearOutlined, EditOutlined, ThunderboltOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -10,6 +10,7 @@ import { useBrandContext } from '../../hooks/useBrands'
 import PublishToSiteButton from '../../components/PublishToSiteButton'
 import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
 import type { Brand, Keyword, OptimizedContent } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input

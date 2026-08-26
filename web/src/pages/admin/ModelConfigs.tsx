@@ -1,8 +1,9 @@
-import { Typography, Card, Space, message, Tag, Table, Button, Switch, Collapse, Spin } from 'antd'
+import { Typography, Card, Space, Tag, Table, Button, Switch, Collapse, Spin } from 'antd'
 import { SettingOutlined, CheckCircleFilled } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationSpec } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 

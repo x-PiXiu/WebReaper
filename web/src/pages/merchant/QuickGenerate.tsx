@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Tag, Typography, message } from 'antd'
+import { Alert, Button, Input, Tag, Typography } from 'antd'
+import { message } from '../../utils/antdApp'
 import {
   FileImageOutlined, VideoCameraOutlined, AudioOutlined,
   CheckCircleOutlined, ExportOutlined,
@@ -145,6 +146,12 @@ export default function QuickGenerate() {
       setSubmitResult(task)
       message.success('任务已提交')
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err || '')
+      if (/已停用|停用|disabled/i.test(msg)) {
+        message.warning('请联系管理员在后台启用文生视频能力，或先上传一张参考图使用图生视频')
+      }
     },
   })
 

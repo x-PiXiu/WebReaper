@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Input, Button, Spin, Typography, Select, Space, Tag, Popover, Switch, Modal, message as antdMessage } from 'antd'
+import { Input, Button, Spin, Typography, Select, Space, Tag, Popover, Switch, Modal } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'react-router-dom'
 import LazyChatMarkdown from '../../components/markdown/LazyChatMarkdown'
 import { getToken, useAuthStore } from '../../store/auth'
 import { businessApi } from '../../api/business'
 import type { ChatMessage, AgentConfig, EngineOption, ToolView } from '../../types/api'
+import { message as antdMessage } from '../../utils/antdApp'
 
 const { Text } = Typography
 const { TextArea } = Input

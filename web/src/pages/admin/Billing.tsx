@@ -1,9 +1,10 @@
-import { Typography, Table, Tag, Space, Button, message, Popconfirm, Card, Row, Col, Statistic, Modal, Input, InputNumber, Form, Select, Divider, Tabs } from 'antd'
+﻿import { Typography, Table, Tag, Space, Button, Popconfirm, Card, Row, Col, Statistic, Modal, Input, InputNumber, Form, Select, Divider, Tabs } from 'antd'
 import { DollarOutlined, CrownOutlined, TeamOutlined, RiseOutlined, ThunderboltOutlined, FireOutlined, LineChartOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Plan, Subscription, SceneCost } from '../../types/api'
+import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
 
@@ -230,7 +231,7 @@ export default function AdminBilling() {
       />
 
       {/* 套餐编辑 Modal */}
-      <Modal title={planModal?.id ? '编辑套餐' : '新建套餐'} open={!!planModal} onOk={handleSavePlan} onCancel={() => setPlanModal(null)} width={560} destroyOnClose>
+      <Modal title={planModal?.id ? '编辑套餐' : '新建套餐'} open={!!planModal} onOk={handleSavePlan} onCancel={() => setPlanModal(null)} width={560} destroyOnHidden>
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="套餐名称" rules={[{ required: true }]}><Input placeholder="专业版" /></Form.Item>
           <Form.Item name="level" label="层级" rules={[{ required: true }]}>

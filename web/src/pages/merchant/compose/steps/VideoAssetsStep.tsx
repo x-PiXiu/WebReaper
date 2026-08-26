@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Segmented, Select, Space, Upload, message } from 'antd'
+import { Alert, Button, Segmented, Select, Space, Upload } from 'antd'
 import { PictureOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
-import { ensureMaterialId, submitUnified } from '../../../../api/generationSubmit'
+import { DEFAULT_TEXT2IMAGE_MODEL, mergeSubmitParams, ensureMaterialId, submitUnified } from '../../../../api/generationSubmit'
 import { COVER_STYLES } from '../../../../data/coverStyles'
 import { AssetPicker } from '../../../../components/compose/AssetPicker'
 import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
 import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
 import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
+import { message } from '../../../../utils/antdApp'
 
 type AssetTab = 'voice' | 'avatar' | 'cover'
 
@@ -51,6 +52,7 @@ export function VideoAssetsStep() {
         brand_id: bid,
         text,
         type: 'audio',
+        params: mergeSubmitParams(ttsModel ? { model: ttsModel } : undefined),
       })
       draft.patch({ voiceTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
       message.success('配音任务已提交，完成后自动填入')
@@ -113,6 +115,7 @@ export function VideoAssetsStep() {
         type: 'image',
         text: `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目`,
         aspect_ratio: '9:16',
+        params: mergeSubmitParams({ model: DEFAULT_TEXT2IMAGE_MODEL }),
       })
       draft.patch({ coverTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
       message.success('封面生成任务已提交，完成后自动填入')

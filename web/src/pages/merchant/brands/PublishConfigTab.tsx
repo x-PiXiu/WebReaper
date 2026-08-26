@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  Button, Form, Input, InputNumber, Select, Space, Switch, Table, Tag, Typography, message, Modal, Popconfirm,
-} from 'antd'
+import { Button, Form, Input, InputNumber, Select, Space, Switch, Table, Tag, Typography, Modal, Popconfirm } from 'antd'
+import { message } from '../../../utils/antdApp'
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined,
 } from '@ant-design/icons'
