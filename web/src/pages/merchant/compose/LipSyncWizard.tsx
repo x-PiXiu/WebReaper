@@ -692,7 +692,7 @@ export default function LipSyncWizard() {
             type="info"
             showIcon
             style={{ marginBottom: 12 }}
-            message="统一生成接口暂不支持指定音色（文档仅 text+type=audio），将使用系统默认音色"
+            message="音色可选——未选用系统默认音色（后端 voice_setting_voice_id 已通）"
           />
           <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} style={{ maxWidth: 480 }} />
           <Text type="secondary" style={{ fontSize: 12 }}>

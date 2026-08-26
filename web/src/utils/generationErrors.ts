@@ -22,7 +22,7 @@ export function friendlyGenerationError(raw: string | undefined | null): string 
     return '分享链接无法解析。请确认含 https://v.douyin.com/… 的完整口令，或改用上传视频'
   }
   if (/超出本地内联上限|8MB/i.test(msg)) {
-    return '素材超过 8MB 本地内联上限，请压缩后上传或使用更短的片段'
+    return '素材超过上传上限，请压缩后上传或使用更短的片段'
   }
   if (/积分不足|credits/i.test(msg)) {
     return '生成积分不足，请稍后重试或联系管理员'
@@ -33,19 +33,20 @@ export function friendlyGenerationError(raw: string | undefined | null): string 
 
 /** 本地联调：大文件易触发 BE params_json 超长；上传前轻量提示 */
 export const WARN_MATERIAL_BYTES = 2 * 1024 * 1024
-export const BLOCK_MATERIAL_BYTES = 8 * 1024 * 1024
+// BE-GEN-04 已修（params_json 与 base64 分离）——放宽到 180MB（仅受 Vidu 5G 接口上限约束）
+export const BLOCK_MATERIAL_BYTES = 180 * 1024 * 1024
 
 export function checkMaterialFileSize(file: File): { ok: boolean; warning?: string; error?: string } {
   if (file.size > BLOCK_MATERIAL_BYTES) {
     return {
       ok: false,
-      error: `文件约 ${(file.size / 1024 / 1024).toFixed(1)}MB，超过本地生成上限（8MB）。请压缩后再上传`,
+      error: `文件约 ${(file.size / 1024 / 1024).toFixed(1)}MB，超过上传上限（180MB）。请压缩后再上传`,
     }
   }
   if (file.size > WARN_MATERIAL_BYTES) {
     return {
       ok: true,
-      warning: `文件约 ${(file.size / 1024 / 1024).toFixed(1)}MB，本地联调可能失败。建议压缩到 2MB 以内`,
+      warning: `文件约 ${(file.size / 1024 / 1024).toFixed(1)}MB，上传和生成可能较慢`,
     }
   }
   return { ok: true }

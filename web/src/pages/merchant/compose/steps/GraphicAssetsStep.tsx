@@ -39,7 +39,7 @@ export function GraphicAssetsStep() {
         type: 'image',
         text: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感`,
         aspect_ratio: '9:16',
-        params: { model: 'viduq2' },
+        params: undefined, // BE-GEN-01/03 已修
       })
       draft.patch({
         imageTaskIds: [...(draft.imageTaskIds || []), res.id],

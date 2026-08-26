@@ -16,7 +16,6 @@ import type { GenerationTask, ModelCapability } from '../../../types/api'
 import VoicePicker from '../../../components/VoicePicker'
 import { MODAL_W, modalBodyScroll } from '../../../ui/modalFit'
 import {
-  DEFAULT_TEXT2IMAGE_MODEL,
   mergeSubmitParams,
   submitGenerationTaskCompat,
   submitUnified,
@@ -640,13 +639,13 @@ function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }:
     setGenerating(true)
     try {
       const effectiveModel = model || models[0]?.model
-        || (type === 'image' ? DEFAULT_TEXT2IMAGE_MODEL : undefined)
+
       let result: GenerationTask
       if (type === 'image') {
         result = await submitGenerationTaskCompat({
           brand_id: brandId,
           sub_type: 'text2image',
-          model: effectiveModel || DEFAULT_TEXT2IMAGE_MODEL,
+          model: effectiveModel || undefined,
           params: { prompt: text.trim() },
           refs: refImages.map((r, i) => ({
             id: r.id,

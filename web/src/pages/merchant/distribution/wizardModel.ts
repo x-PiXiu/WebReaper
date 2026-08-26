@@ -198,7 +198,7 @@ export function adaptPreviewTitle(title: string, max: number) {
   return chars.slice(0, max).join('') + '…'
 }
 
-/** 本地适配预览（adapt-preview 路由未上线时的降级） */
+/** 本地适配预览（服务端 adapt-preview 已上线——本地降级仅做网络故障兜底） */
 export function localAdaptPreview(
   draft: WizardDraft,
   platforms: string[],

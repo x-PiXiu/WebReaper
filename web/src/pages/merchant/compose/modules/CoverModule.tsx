@@ -42,7 +42,7 @@ export default function CoverModule() {
           ? `小红书封面图，竖屏，大标题「${title}」，清爽种草风`
           : `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目，适合抖音`,
         aspect_ratio: '9:16',
-        params: { model: 'viduq2' },
+        params: undefined, // BE-GEN-01/03 已修
       })
       message.success('封面图任务已提交，请到多媒体工作台取回 URL 填入下方')
       navigate('/m/compose/tools?tab=media')

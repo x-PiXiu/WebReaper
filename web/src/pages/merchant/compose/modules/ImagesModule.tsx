@@ -37,7 +37,7 @@ export default function ImagesModule() {
         type: 'image',
         text: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感，不要水印`,
         aspect_ratio: '9:16',
-        params: { model: 'viduq2' },
+        params: undefined, // BE-GEN-01/03 已修
       })
       message.success('配图任务已提交，完成后可在多媒体台取回 URL 填入下方')
       navigate('/m/compose/tools?tab=media')

@@ -5,7 +5,7 @@ import { PictureOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
-import { DEFAULT_TEXT2IMAGE_MODEL, mergeSubmitParams, ensureMaterialId, submitUnified } from '../../../../api/generationSubmit'
+import { mergeSubmitParams, ensureMaterialId, submitUnified } from '../../../../api/generationSubmit'
 import { COVER_STYLES } from '../../../../data/coverStyles'
 import { AssetPicker } from '../../../../components/compose/AssetPicker'
 import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
@@ -115,7 +115,7 @@ export function VideoAssetsStep() {
         type: 'image',
         text: `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目`,
         aspect_ratio: '9:16',
-        params: mergeSubmitParams({ model: DEFAULT_TEXT2IMAGE_MODEL }),
+        params: mergeSubmitParams(),
       })
       draft.patch({ coverTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
       message.success('封面生成任务已提交，完成后自动填入')

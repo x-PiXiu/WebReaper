@@ -19,7 +19,7 @@ export type UnifiedSubmitPayload = {
   duration?: number
   quality?: string
   aspect_ratio?: string
-  /** 高级参数；文生图建议带 model=viduq2（规避 BE 默认落到需参考图的 viduq1） */
+  /** 高级参数（model/音色/运镜等——服务端 BE-GEN-01 已修，无需前端硬编码默认模型） */
   params?: Record<string, unknown>
   sub_type?: string
   watermark?: boolean
@@ -27,7 +27,6 @@ export type UnifiedSubmitPayload = {
 }
 
 /** 文生图默认模型（支持 0 张参考图的纯文生图） */
-export const DEFAULT_TEXT2IMAGE_MODEL = 'viduq2'
 
 /** 合并统一提交高级参数（model / seed / voice_setting_* 等——服务端 params 白名单合并） */
 export function mergeSubmitParams(
@@ -166,9 +165,8 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
     }
   }
 
-  // 文生图：默认 viduq2（0 张参考图可用）；参考图只传可访问的 http(s)/media URL，禁止 data: 撑爆 params_json
+  // 参考图只传可访问的 http(s)/media URL（BE-GEN-04 已修 params_json 不再内联 base64）
   if (sub === 'text2image') {
-    if (!adv.model) adv.model = DEFAULT_TEXT2IMAGE_MODEL
     const imgUrls: string[] = []
     const pushUrl = (u: string) => {
       const s = u.trim()
@@ -228,7 +226,7 @@ export async function submitUnified(payload: UnifiedSubmitPayload): Promise<Gene
   // 文生图兜底模型：后端若未读 params.model，仍尽量降低落到 viduq1 的概率（管理后台默认配置对齐前）
   let params = payload.params
   if (payload.type === 'image') {
-    params = mergeSubmitParams({ model: DEFAULT_TEXT2IMAGE_MODEL }, params)
+    // BE-GEN-01/03 已修：不再硬编码 viduq2（服务端正确读 params.model + IsDefault 默认）
   }
   return apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', {
     brand_id: payload.brand_id,
