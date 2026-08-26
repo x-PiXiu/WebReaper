@@ -39,6 +39,11 @@ func (h *MediaHandler) HandleUpload(c *gin.Context) {
 	defer file.Close()
 	mime := header.Header.Get("Content-Type")
 	ext := strings.ToLower(filepath.Ext(header.Filename))
+	// 通用 MIME 类型降级：curl/form 上传时常发 application/octet-stream，
+	// 按扩展名修正为实际类型（否则 InferTypeFromMime 返回空，素材类型丢失）
+	if mime == "application/octet-stream" || mime == "application/json" {
+		mime = extToMime(ext)
+	}
 	// 类型白名单与分级大小限制：图片/音频 20MB（Vidu POST body 上限）；视频 200MB
 	//（发布素材——口播成片几十~几百 MB，20MB 必然拒之门外；不进 Vidu 不受其限制）。
 	isVideo := ext == ".mp4" || ext == ".webm" || ext == ".mov"
@@ -119,4 +124,33 @@ func (h *MediaHandler) HandleDelete(c *gin.Context) {
 		return
 	}
 	success(c, gin.H{"deleted": c.Param("id")})
+}
+
+// extToMime 文件扩展名 → MIME 类型映射（上传时 Content-Type 为
+// application/octet-stream 的降级兜底）。
+func extToMime(ext string) string {
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a":
+		return "audio/mp4"
+	case ".wav":
+		return "audio/wav"
+	case ".mp4":
+		return "video/mp4"
+	case ".webm":
+		return "video/webm"
+	case ".mov":
+		return "video/quicktime"
+	default:
+		return "application/octet-stream"
+	}
 }

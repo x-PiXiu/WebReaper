@@ -24,6 +24,7 @@ import (
 	"webreaper/internal/adapter/asropenai"
 	"webreaper/internal/adapter/cache"
 	"webreaper/internal/adapter/integration"
+	"webreaper/internal/adapter/media"
 	"webreaper/internal/adapter/mediaav"
 	"webreaper/internal/adapter/metrics"
 	authadapter "webreaper/internal/adapter/auth"
@@ -1000,10 +1001,17 @@ func main() {
 		var mediaDir string
 		switch cfg.Storage.Type {
 		case "oss":
-			// 云服务器用内网 endpoint（免流量费），本地开发用公网
+			// 云服务器用内网 endpoint（免流量费），本地开发用公网。
+			// 内网端点不可达时（本地开发/跨网络）自动降级到公网端点。
 			ep := cfg.Storage.Endpoint
 			if cfg.Storage.InternalEndpoint != "" {
-				ep = cfg.Storage.InternalEndpoint
+				if conn, dialErr := net.DialTimeout("tcp", cfg.Storage.InternalEndpoint+":80", 2*time.Second); dialErr == nil {
+					conn.Close()
+					ep = cfg.Storage.InternalEndpoint
+					log.Info("OSS 使用内网端点（免流量费）", port.String("endpoint", ep))
+				} else {
+					log.Info("OSS 内网端点不可达，降级公网端点", port.String("internal", cfg.Storage.InternalEndpoint), port.String("public", ep))
+				}
 			}
 			ms, ossErr := storage.NewOSSMediaStore(ep, cfg.Storage.Bucket, cfg.Storage.AccessKey, cfg.Storage.SecretKey, cfg.Storage.PublicDomain)
 			if ossErr != nil {
@@ -1025,6 +1033,8 @@ func main() {
 		if mediaStore != nil {
 			genUC.SetAssetStore(mediaStore)
 			router.SetMedia(mediaStore, mediaDir)
+			// SRP：素材 URL 可达性判断 + base64 内联逻辑提取为 MaterialURLResolver
+			genUC.SetURLResolver(media.NewDefaultMaterialURLResolver(mediaStore, 8))
 		}
 		// 注入端点选择器（统一提交API需要）
 		endpointSelector := generation.NewEndpointSelector(mediaStore, nil)

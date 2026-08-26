@@ -257,3 +257,75 @@ func TestEndpointSelector_Select_ThreeImages(t *testing.T) {
 		t.Errorf("Expected subType 'reference2video', got '%s'", result.SubType)
 	}
 }
+
+func TestConvertPauseMarkers(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "无标点原样返回",
+			input: "你好我是vidu",
+			want:  "你好我是vidu",
+		},
+		{
+			name:  "中文逗号转0.5s停顿",
+			input: "你好，我是vidu",
+			want:  "你好<#0.5#>我是vidu",
+		},
+		{
+			name:  "中文句号转1s停顿",
+			input: "你好。我是vidu",
+			want:  "你好<#1#>我是vidu",
+		},
+		{
+			name:  "省略号转2s停顿",
+			input: "你好。。。我是vidu",
+			want:  "你好<#2#>我是vidu",
+		},
+		{
+			name:  "换行转1.5s停顿",
+			input: "你好\n我是vidu",
+			want:  "你好<#1.5#>我是vidu",
+		},
+		{
+			name:  "混合标点",
+			input: "你好，我是vidu。很高兴见到你！",
+			want:  "你好<#0.5#>我是vidu<#1#>很高兴见到你<#1#>",
+		},
+		{
+			name:  "保留手写标记",
+			input: "你好<#3#>我是vidu",
+			want:  "你好<#3#>我是vidu",
+		},
+		{
+			name:  "手写标记+自然标点混合",
+			input: "你好<#3#>我是vidu，很高兴",
+			want:  "你好<#3#>我是vidu<#0.5#>很高兴",
+		},
+		{
+			name:  "连续逗号取一次停顿",
+			input: "你好，，，我是vidu",
+			want:  "你好<#0.5#>我是vidu",
+		},
+		{
+			name:  "英文标点也处理",
+			input: "Hello. I am vidu!",
+			want:  "Hello<#1#> I am vidu<#1#>",
+		},
+		{
+			name:  "空字符串",
+			input: "",
+			want:  "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := convertPauseMarkers(c.input)
+			if got != c.want {
+				t.Errorf("convertPauseMarkers(%q)\n  got:  %q\n  want: %q", c.input, got, c.want)
+			}
+		})
+	}
+}

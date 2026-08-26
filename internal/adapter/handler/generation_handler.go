@@ -70,18 +70,19 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 	}
 
 	var req struct {
-		BrandID     string         `json:"brand_id"`
-		Text        string         `json:"text"`
-		Materials   []string       `json:"materials"`
-		Template    string         `json:"template"`
-		Type        string         `json:"type"` // 生成类型：video/image/audio/voice
-		Duration    int            `json:"duration"`
-		Quality     string         `json:"quality"`
-		AspectRatio string         `json:"aspect_ratio"` // 画面比例（9:16 等——竖版封面/配图必需，此前全链丢弃致恒 16:9）
-		Params      map[string]any `json:"params"`       // 高级参数透传（seed/style/voice_setting_* 等白名单合并）
-		Watermark   bool           `json:"watermark"`    // 带水印（傻瓜式客户端不传——管理后台默认值通道）
-		OffPeak     bool           `json:"off_peak"`     // 错峰生成（更便宜但更慢；同上）
-		SubType     string         `json:"sub_type"`     // 显式端点覆盖（subject 创建主体等——空=自动选择）
+		BrandID     string              `json:"brand_id"`
+		Text        string              `json:"text"`
+		Materials   []string            `json:"materials"`
+		Template    string              `json:"template"`
+		Type        string              `json:"type"` // 生成类型：video/image/audio/voice
+		Duration    int                 `json:"duration"`
+		Quality     string              `json:"quality"`
+		AspectRatio string              `json:"aspect_ratio"` // 画面比例（9:16 等——竖版封面/配图必需，此前全链丢弃致恒 16:9）
+		Params      map[string]any      `json:"params"`       // 高级参数透传（seed/style/voice_setting_* 等白名单合并）
+		Refs        []entity.PromptRef  `json:"refs"`         // BE-GEN-06：@引用素材（translateRefs 按端点翻译）
+		Watermark   bool                `json:"watermark"`    // 带水印（傻瓜式客户端不传——管理后台默认值通道）
+		OffPeak     bool                `json:"off_peak"`     // 错峰生成（更便宜但更慢；同上）
+		SubType     string              `json:"sub_type"`     // 显式端点覆盖（subject 创建主体等——空=自动选择）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -99,6 +100,7 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 		Quality:     req.Quality,
 		AspectRatio: req.AspectRatio,
 		Params:      req.Params,
+		Refs:        req.Refs, // BE-GEN-06：透传 @引用
 		Watermark:   req.Watermark,
 		OffPeak:     req.OffPeak,
 		SubType:     req.SubType,

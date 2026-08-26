@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -209,12 +210,17 @@ func (uc *UseCase) extract(ctx context.Context, in ExtractInput) (*ExtractResult
 	videoURL := in.VideoURL
 	title := in.Title
 	if videoURL == "" && in.ShareURL != "" {
+		// BE-CRAWL-02：口令全文预处理——从分享文本中抽取 URL，避免 url.Parse 遇到非 URL 文本报错
+		shareURL := extractShareURL(in.ShareURL)
+		if shareURL == "" {
+			return nil, fmt.Errorf("未能从分享文本中提取到有效链接（请粘贴含 https:// 的完整链接）")
+		}
 		if uc.resolver == nil {
 			return nil, fmt.Errorf("分享链解析未启用（可下载视频后直接上传）")
 		}
 		var plat, localPath string
 		var err error
-		videoURL, title, plat, localPath, err = uc.resolver.Resolve(ctx, in.TenantID, in.ShareURL)
+		videoURL, title, plat, localPath, err = uc.resolver.Resolve(ctx, in.TenantID, shareURL)
 		if err != nil {
 			return nil, err
 		}
@@ -413,4 +419,32 @@ func parseScriptJSON(out string) *ScriptResult {
 		return nil
 	}
 	return &res
+}
+
+// shareURLRe 从分享口令/文本中提取 http/https 链接（BE-CRAWL-02）。
+// 抖音口令示例："5.84 :1pm 01/05 v@f.Bg xFU:/ 普通人怎样白手起家 https://v.douyin.com/xxx"
+var shareURLRe = regexp.MustCompile(`https?://[^\s\)\]\}，。；、""''<>]+`)
+
+// extractShareURL 从任意文本中抽取第一个 http/https 链接。
+// 用户粘贴抖音/快手分享口令时，文本中嵌入了短链但前后有中文、标点等非 URL 字符。
+// 返回空字符串表示未找到有效 URL。
+func extractShareURL(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	// 纯 URL（无空格、scheme+host 合法）→ 原样返回（去除尾部中文标点）
+	if !strings.ContainsAny(text, " \t\n") {
+		if u, err := url.Parse(text); err == nil && u.Scheme != "" && u.Host != "" {
+			return strings.TrimRight(text, ",;:!?。；，")
+		}
+	}
+	// 正则提取第一个 http/https 链接
+	m := shareURLRe.FindString(text)
+	if m == "" {
+		return ""
+	}
+	// 去除尾部标点（中英文）
+	m = strings.TrimRight(m, ",;:!?。；，")
+	return m
 }

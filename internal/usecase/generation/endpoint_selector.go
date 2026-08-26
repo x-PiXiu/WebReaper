@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -156,15 +158,19 @@ func (s *EndpointSelectorImpl) selectEndpoint(req entity.UnifiedGenerationReques
 		return "reference2video", params, nil
 	}
 
-	// 情况1: 有视频+音频 → 对口型
-	if stats.VideoCount > 0 && stats.AudioCount > 0 {
+	// 情况1: 有视频+音频 → 对口型（素材库视频 或 params.video_url 直传）
+	hasVideoURL := false
+	if v, ok := req.Params["video_url"].(string); ok && v != "" {
+		hasVideoURL = true
+	}
+	if (stats.VideoCount > 0 || hasVideoURL) && stats.AudioCount > 0 {
 		params := s.buildLipSyncParams(req, stats)
 		params["__sub_type"] = "lip_sync"
 		return "lip_sync", params, nil
 	}
 
 	// 情况2: 有视频+文本 → 对口型（文本驱动）
-	if stats.VideoCount > 0 && hasText {
+	if (stats.VideoCount > 0 || hasVideoURL) && hasText {
 		params := s.buildLipSyncTextParams(req, stats)
 		params["__sub_type"] = "lip_sync"
 		return "lip_sync", params, nil
@@ -273,12 +279,16 @@ func (s *EndpointSelectorImpl) buildText2ImageParams(req entity.UnifiedGeneratio
 
 // buildVoiceCloneParams 构建声音克隆参数。
 func (s *EndpointSelectorImpl) buildVoiceCloneParams(req entity.UnifiedGenerationRequest, stats MaterialStats) entity.GenerationParams {
-	// 生成唯一的 voice_id（8-256位，字母/数字/横线/下划线，首字符必须为英文字母）
-	voiceID := fmt.Sprintf("voice-clone-%d", len(req.Text))
-	if len(voiceID) < 8 {
-		voiceID = voiceID + "-default"
+	// 用户显式指定 voice_id 时优先使用（高级参数白名单已包含 voice_id）；
+	// 否则生成唯一 voice_id（Vidu 要求 8-256 位，字母/数字/横线/下划线，首字母）。
+	voiceID := ""
+	if vid, ok := req.Params["voice_id"].(string); ok && vid != "" {
+		voiceID = vid
 	}
-	
+	if voiceID == "" {
+		voiceID = fmt.Sprintf("vc-%d", time.Now().UnixNano())
+	}
+
 	params := entity.GenerationParams{
 		"text":     req.Text,
 		"voice_id": voiceID,
@@ -326,35 +336,137 @@ func (s *EndpointSelectorImpl) buildReference2VideoParams(req entity.UnifiedGene
 
 // buildLipSyncParams 构建对口型参数（音频驱动）。
 func (s *EndpointSelectorImpl) buildLipSyncParams(req entity.UnifiedGenerationRequest, stats MaterialStats) entity.GenerationParams {
+	videoURL := ""
+	if len(stats.Videos) > 0 {
+		videoURL = stats.Videos[0].SourceURL
+	} else if v, ok := req.Params["video_url"].(string); ok {
+		videoURL = v // params.video_url 直传（OSS 公网 URL）
+	}
 	return entity.GenerationParams{
-		"video_url": stats.Videos[0].SourceURL,
+		"video_url": videoURL,
 		"audio_url": stats.Audios[0].SourceURL,
 	}
 }
 
 // buildLipSyncTextParams 构建对口型参数（文本驱动）。
 func (s *EndpointSelectorImpl) buildLipSyncTextParams(req entity.UnifiedGenerationRequest, stats MaterialStats) entity.GenerationParams {
-	return entity.GenerationParams{
-		"video_url": stats.Videos[0].SourceURL,
-		"text":      req.Text,
-		"voice_id":  "default",
+	videoURL := ""
+	if len(stats.Videos) > 0 {
+		videoURL = stats.Videos[0].SourceURL
+	} else if v, ok := req.Params["video_url"].(string); ok {
+		videoURL = v // params.video_url 直传（OSS 公网 URL）
 	}
+	params := entity.GenerationParams{
+		"video_url": videoURL,
+		"text":      convertPauseMarkers(req.Text), // 傻瓜式停顿：标点 → Vidu <#x#> 标记
+	}
+	// 用户显式指定 voice_id 时优先使用（高级参数白名单已包含 voice_id）；
+	// 否则使用 Vidu 默认中文女声（lip-sync 文本模式要求有效音色 ID，
+	// "default" 不在注册音色中会 400）。
+	if vid, ok := req.Params["voice_id"].(string); ok && vid != "" {
+		params["voice_id"] = vid
+	} else {
+		params["voice_id"] = "female-shaonv" // Vidu 首个中文女声
+	}
+	return params
+}
+
+// convertPauseMarkers 傻瓜式停顿转换：自然标点 → Vidu <#x#> 停顿标记。
+//
+// 用户用标点表达停顿意图，系统自动转换：
+//   - 中文逗号/顿号/分号 → 0.5s 短停顿
+//   - 中文句号/问号/叹号/英文句号/问号/叹号 → 1s 中停顿
+//   - 省略号（3+个点，中英混搭均可） → 2s 长停顿
+//   - 换行符 → 1.5s 段落停顿
+//   - 用户手写 <#x#> → 保留原样（高级用户直接控制）
+//
+// 转换规则：
+//  1. 先保留用户手写的 <#x#> 标记（不重复转换）
+//  2. 按优先级从高到低匹配标点（省略号 > 句号/问号/叹号 > 逗号/顿号 > 换行）
+//  3. 连续标点取最长停顿，不叠加（"...?" → 2s，非 2s+1s）
+func convertPauseMarkers(text string) string {
+	if text == "" {
+		return ""
+	}
+	// ① 保留用户手写的 <#x#> 标记，用占位符保护
+	placeholders := []string{}
+	re := regexp.MustCompile(`<#[\d.]+#>`)
+	protected := re.ReplaceAllStringFunc(text, func(m string) string {
+		idx := len(placeholders)
+		placeholders = append(placeholders, m)
+		return fmt.Sprintf("\x00PAUSE%d\x00", idx)
+	})
+
+	// ② 按优先级从高到低，将标点替换为临时标记（纯文本格式，无歧义）
+	const (
+		p2   = "__PAUSE_2__"   // 省略号
+		p15  = "__PAUSE_1_5__" // 换行
+		p1   = "__PAUSE_1__"   // 句号/问号/叹号
+		p05  = "__PAUSE_0_5__" // 逗号/顿号/分号
+	)
+	// 省略号（3+个中英句号混合）→ 2s
+	protected = regexp.MustCompile(`(?:[。]|[.]){3,}`).ReplaceAllString(protected, p2)
+	// 换行序列 → 1.5s（多个换行只算一次）
+	protected = regexp.MustCompile(`\n+`).ReplaceAllString(protected, p15)
+	// 句号/问号/叹号（中英文）→ 1s
+	protected = regexp.MustCompile(`(?:[。！？]|[.!?])+`).ReplaceAllString(protected, p1)
+	// 逗号/顿号/分号（中文+英文分号）→ 0.5s
+	protected = regexp.MustCompile(`[，、；;]+`).ReplaceAllString(protected, p05)
+
+	// ③ 合并相邻停顿标记：取最大值（"...?" → 2s，"\n," → 1.5s）
+	anyPause := `(?:__PAUSE_2__|__PAUSE_1_5__|__PAUSE_1__|__PAUSE_0_5__)`
+	pauseRe := regexp.MustCompile(anyPause + `(?:` + anyPause + `)*`)
+	protected = pauseRe.ReplaceAllStringFunc(protected, func(group string) string {
+		maxVal := 0.0
+		if strings.Contains(group, "__PAUSE_2__") {
+			maxVal = 2
+		} else if strings.Contains(group, "__PAUSE_1_5__") {
+			maxVal = 1.5
+		} else if strings.Contains(group, "__PAUSE_1__") {
+			maxVal = 1
+		} else if strings.Contains(group, "__PAUSE_0_5__") {
+			maxVal = 0.5
+		}
+		if maxVal == float64(int(maxVal)) {
+			return fmt.Sprintf("<#%d#>", int(maxVal))
+		}
+		return fmt.Sprintf("<#%.1f#>", maxVal)
+	})
+
+	// ④ 恢复用户手写的标记
+	for i, ph := range placeholders {
+		protected = strings.ReplaceAll(protected, fmt.Sprintf("\x00PAUSE%d\x00", i), ph)
+	}
+	return protected
 }
 
 // buildDigitalHumanParams 构建数字人口播参数。
 func (s *EndpointSelectorImpl) buildDigitalHumanParams(req entity.UnifiedGenerationRequest, stats MaterialStats) entity.GenerationParams {
-	return entity.GenerationParams{
+	params := entity.GenerationParams{
 		"image":     stats.Images[0].SourceURL,
 		"audio_url": stats.Audios[0].SourceURL,
 	}
+	// prompt 可选——用于控制数字人表情/动作（Vidu digital-human API 支持）
+	if req.Text != "" {
+		params["prompt"] = req.Text
+	}
+	return params
 }
 
 // buildTTSParams 构建语音合成参数。
 func (s *EndpointSelectorImpl) buildTTSParams(req entity.UnifiedGenerationRequest, stats MaterialStats) entity.GenerationParams {
-	return entity.GenerationParams{
-		"text":                  req.Text,
-		"voice_setting_voice_id": "default",
+	params := entity.GenerationParams{
+		"text": req.Text,
 	}
+	// 用户显式指定音色时优先使用（高级参数白名单已包含 voice_setting_* 前缀族）；
+	// 否则使用 Vidu 默认中文女声（TTS 路由到 Vidu /ent/v2/audio-tts 时需要有效音色 ID，
+	// "default" 不在注册音色中会 400；路由到 MiMo 时由 MiMo provider 转为 mimo_default）。
+	if vid, ok := req.Params["voice_setting_voice_id"].(string); ok && vid != "" {
+		params["voice_setting_voice_id"] = vid
+	} else {
+		params["voice_setting_voice_id"] = "female-shaonv"
+	}
+	return params
 }
 
 // advancedParamKeys 高级参数白名单（merge 的准入集合——adapter 只按已知 key 构造

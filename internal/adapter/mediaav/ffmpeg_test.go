@@ -61,3 +61,51 @@ func TestExtractSubtitleAbsent(t *testing.T) {
 	}
 	t.Log("无字幕轨正确返回 ok=false ✓")
 }
+
+func TestVideoCodecAndIsH264(t *testing.T) {
+	tool := NewFFmpegTool("")
+	if !tool.Available() {
+		t.Skip("ffmpeg 不在 PATH 中")
+	}
+
+	// 生成一个 H.264 测试视频
+	dir := t.TempDir()
+	mp4 := filepath.Join(dir, "test.mp4")
+	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=1",
+		"-c:v", "libx264", "-preset", "ultrafast", mp4)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("生成测试视频失败: %v: %s", err, out)
+	}
+
+	ctx := context.Background()
+
+	codec := tool.VideoCodec(ctx, mp4)
+	if codec != "h264" {
+		t.Errorf("VideoCodec = %q, want \"h264\"", codec)
+	}
+	t.Logf("VideoCodec: %s ✓", codec)
+
+	if !tool.IsH264(ctx, mp4) {
+		t.Error("H.264 视频 IsH264 应返回 true")
+	}
+	t.Log("IsH264: true ✓")
+
+	// 生成一个 VP9 测试视频（非 H.264）
+	webm := filepath.Join(dir, "test.webm")
+	cmd2 := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:d=1",
+		"-c:v", "libvpx-vp9", webm)
+	if out, err := cmd2.CombinedOutput(); err != nil {
+		t.Skipf("VP9 编码不可用，跳过非 H.264 测试: %v: %s", err, out)
+	}
+
+	codec2 := tool.VideoCodec(ctx, webm)
+	if codec2 == "h264" {
+		t.Errorf("VP9 视频 VideoCodec 不应返回 \"h264\"，得到 %q", codec2)
+	}
+	t.Logf("VP9 VideoCodec: %s ✓", codec2)
+
+	if tool.IsH264(ctx, webm) {
+		t.Error("VP9 视频 IsH264 应返回 false")
+	}
+	t.Log("VP9 IsH264: false ✓")
+}

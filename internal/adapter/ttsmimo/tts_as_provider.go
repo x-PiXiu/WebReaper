@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
@@ -69,9 +70,7 @@ func (p *MiMoAsGenerationProvider) Submit(ctx context.Context, endpoint string, 
 	} else {
 		// 标准TTS
 		voiceID, _ := body["voice_setting_voice_id"].(string)
-		if voiceID == "" || voiceID == "default" {
-			voiceID = "mimo_default"
-		}
+		voiceID = mimoVoiceID(voiceID) // Vidu 音色 ID → MiMo 预置音色映射
 		audioData, _, err = p.tts.Synthesize(ctx, text, voiceID)
 	}
 	
@@ -82,7 +81,7 @@ func (p *MiMoAsGenerationProvider) Submit(ctx context.Context, endpoint string, 
 	// 返回同步结果（base64内联，无需轮询）
 	base64Audio := "data:audio/mp3;base64," + base64.StdEncoding.EncodeToString(audioData)
 	return port.SubmitResult{
-		TaskID: "mimo-" + fmt.Sprintf("%d", len(audioData)),
+		TaskID: fmt.Sprintf("mimo-%d", time.Now().UnixNano()),
 		State:  entity.TaskStateSuccess,
 		Creations: []entity.CreationItem{
 			{ID: "audio", URL: base64Audio},
@@ -140,4 +139,23 @@ func (p *MiMoAsGenerationProvider) QueryCredits(ctx context.Context) (int, error
 
 func (p *MiMoAsGenerationProvider) TranslateError(code string) string {
 	return "MiMo错误: " + code
+}
+
+// mimoVoices MiMo TTS 预置音色集合（mimo-v2.5-tts 支持的 9 个音色 ID）。
+var mimoVoices = map[string]bool{
+	"mimo_default": true,
+	"冰糖": true, "茉莉": true, "苏打": true, "白桦": true,
+	"Mia": true, "Chloe": true, "Milo": true, "Dean": true,
+}
+
+// mimoVoiceID 音色 ID 映射：MiMo 预置音色直传；Vidu 音色 ID 或未知值降级为 mimo_default。
+// MiMo 的 audio.voice 字段仅接受 9 个预置音色 ID，不接受 Vidu 的 302 个音色 ID。
+func mimoVoiceID(voiceID string) string {
+	if voiceID == "" || voiceID == "default" {
+		return "mimo_default"
+	}
+	if mimoVoices[voiceID] {
+		return voiceID
+	}
+	return "mimo_default" // Vidu 音色 ID（如 female-shaonv）降级
 }

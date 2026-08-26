@@ -76,6 +76,8 @@ type GenerationUseCase struct {
 	endpointSelector port.EndpointSelector
 	// defaultProvider 默认厂商（当 resolver 未配置或查询失败时使用）
 	defaultProvider string
+	// urlResolver 素材 URL 可达性解析（可选；nil=不转换——SRP：URL 判断+格式转换移至 Adapter 层）
+	urlResolver port.MaterialURLResolver
 }
 
 // NewGenerationUseCase 创建统一生成用例（支持多厂商）。
@@ -226,21 +228,32 @@ func (uc *GenerationUseCase) pickModelFor(ctx context.Context, subType string, s
 // getDefaultModel 从数据库获取默认模型。
 // 当 EndpointAdapter 没有实现 ModelAutoSelector 时使用。
 func (uc *GenerationUseCase) getDefaultModel(ctx context.Context, subType string) string {
-	// BE-GEN-03：优先取 is_default=true 的模型（管理后台 generation_specs 配置），
-	// 此前按字母序取第一个（viduq1 排在 viduq2 前导致默认落到旧模型）
+	// BE-GEN-03 + 新3：优先取 is_default=true 且 max_prompt_len>0 的模型。
+	// 此前按字母序取第一个（viduq1 排在 viduq2 前），且多个 is_default=true
+	// 时可能选中 max_prompt_len=0 的旧模型（如 vidu2.0），导致 prompt 被拒绝。
+	bestDefault := ""
+	bestDefaultPrompt := 0
 	for _, spec := range uc.registry.AllSpecs(ctx) {
-		if spec.SubType == subType && spec.Enabled && spec.IsDefault && spec.Model != "" {
-			return spec.Model
+		if spec.SubType != subType || !spec.Enabled || !spec.IsDefault || spec.Model == "" {
+			continue
 		}
+		cap, err := uc.registry.Capability(ctx, subType, spec.Model)
+		if err != nil {
+			continue
+		}
+		if cap.MaxPromptLen > bestDefaultPrompt {
+			bestDefault = spec.Model
+			bestDefaultPrompt = cap.MaxPromptLen
+		}
+	}
+	if bestDefault != "" {
+		return bestDefault
 	}
 	// 从 registry 获取所有可用模型
 	names, err := uc.registry.Models(ctx, subType)
 	if err != nil || len(names) == 0 {
 		return ""
 	}
-
-	// 默认模型 = 可用列表第一个（Models() 已过滤停用——registry 修复后
-	// DB 停用的模型不再经 defaultCaps 兜底回流，此处选择即安全）
 	if len(names) > 0 {
 		return names[0]
 	}
@@ -945,6 +958,10 @@ type UnifiedSubmitInput struct {
 	// Params 高级参数透传通道（seed/style/voice_setting_* 等白名单 key——
 	// selector 的 applyDefaults 出口合并，用户显式值覆盖默认）
 	Params map[string]any
+	// Refs @引用素材清单（prompt 中 @名称 标记 + 结构化引用——
+	// translateRefs 按端点×能力向量翻译为上游参数格式）。
+	// BE-GEN-06：统一提交此前不传 Refs，导致 @引用 被静默忽略。
+	Refs []entity.PromptRef
 	// Watermark/OffPeak 任务级开关（傻瓜式客户端不暴露——管理后台/默认值控制；
 	// 此前 SubmitInput 有字段但统一提交无通道，勾选静默无效）
 	Watermark bool
@@ -1041,32 +1058,26 @@ func toDataURI(data []byte, mime string) string {
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
-// localizePrivateMaterials 私网素材 URL → base64 data URI（Submit 前统一转换）。
-// 公网 URL 原样保留（生产行为不变）；仅本地/内网部署时生效。
+// localizePrivateMaterials 私网素材 URL → 上游厂商可访问形式（Submit 前统一转换）。
+//
+// 架构演进（SRP）：URL 可达性判断 + 数据格式转换 已提取为 port.MaterialURLResolver
+// 接口（adapter/media/url_resolver.go）。此处委托 urlResolver 处理，Use Case 层
+// 只做流程编排。兼容模式：urlResolver 未注入时回落到内置实现。
 func (uc *GenerationUseCase) localizePrivateMaterials(ctx context.Context, params entity.GenerationParams) error {
-	if uc.asset == nil {
+	resolver := uc.urlResolver
+	if resolver == nil && uc.asset != nil {
+		// 兼容模式：未注入 urlResolver 时使用内置实现（后续迁移完成后移除）
+		resolver = &inlineURLResolver{asset: uc.asset, maxBytes: maxInlineMaterialBytes}
+	}
+	if resolver == nil {
 		return nil
 	}
-	localize := func(rawURL string) (string, bool, error) {
-		if rawURL == "" || !isPrivateHost(rawURL) {
-			return rawURL, false, nil
-		}
-		if !strings.Contains(rawURL, "/media/") {
-			return rawURL, false, nil // 非本站托管（如外部 localhost 服务）——不动，交给厂商报错
-		}
-		data, mime, ok := uc.asset.ReadLocal(ctx, rawURL)
-		if !ok {
-			return rawURL, false, nil // 读不到（OSS 模式等）——原样保留
-		}
-		if len(data) > maxInlineMaterialBytes {
-			return "", false, fmt.Errorf("素材 %s 为 %dMB，超出本地内联上限 8MB——本地开发模式请上传更小的素材，或配置公网可达的 PUBLIC_BASE_URL", truncateURL(rawURL), len(data)>>20)
-		}
-		log.Printf("[LocalizeMaterials][DEBUG] %s → base64 data URI（mime=%s %d字节）", truncateURL(rawURL), mime, len(data))
-		return toDataURI(data, mime), true, nil
+	resolve := func(rawURL string) (string, bool, error) {
+		return resolver.Resolve(ctx, rawURL)
 	}
 	for _, k := range materialURLKeys {
 		if s, ok := params[k].(string); ok {
-			nv, changed, err := localize(s)
+			nv, changed, err := resolve(s)
 			if err != nil {
 				return err
 			}
@@ -1077,7 +1088,7 @@ func (uc *GenerationUseCase) localizePrivateMaterials(ctx context.Context, param
 	}
 	if arr, ok := params["images"].([]string); ok {
 		for i, s := range arr {
-			nv, changed, err := localize(s)
+			nv, changed, err := resolve(s)
 			if err != nil {
 				return err
 			}
@@ -1089,7 +1100,7 @@ func (uc *GenerationUseCase) localizePrivateMaterials(ctx context.Context, param
 	if arr, ok := params["images"].([]any); ok { // JSON 反序列化形态
 		for i, v := range arr {
 			if s, ok := v.(string); ok {
-				nv, changed, err := localize(s)
+				nv, changed, err := resolve(s)
 				if err != nil {
 					return err
 				}
@@ -1100,6 +1111,30 @@ func (uc *GenerationUseCase) localizePrivateMaterials(ctx context.Context, param
 		}
 	}
 	return nil
+}
+
+// inlineURLResolver 内置 URL 解析器（兼容模式，后续迁移完成后移除）。
+type inlineURLResolver struct {
+	asset     port.MediaAssetStore
+	maxBytes  int
+}
+
+func (r *inlineURLResolver) Resolve(ctx context.Context, rawURL string) (string, bool, error) {
+	if rawURL == "" || !isPrivateHost(rawURL) {
+		return rawURL, false, nil
+	}
+	if !strings.Contains(rawURL, "/media/") {
+		return rawURL, false, nil
+	}
+	data, mime, ok := r.asset.ReadLocal(ctx, rawURL)
+	if !ok {
+		return rawURL, false, nil
+	}
+	if len(data) > r.maxBytes {
+		return "", false, fmt.Errorf("素材 %s 为 %dMB，超出本地内联上限 %dMB——请配置公网可达的 PUBLIC_BASE_URL", truncateURL(rawURL), len(data)>>20, r.maxBytes>>20)
+	}
+	log.Printf("[LocalizeMaterials][DEBUG] %s → base64 data URI（mime=%s %d字节）", truncateURL(rawURL), mime, len(data))
+	return toDataURI(data, mime), true, nil
 }
 
 // truncateURL 日志/报错用 URL 截断。
@@ -1115,6 +1150,9 @@ func (uc *GenerationUseCase) SetSettingRepo(sr port.SystemSettingRepository) { u
 
 // SetTemplateRepo 注入生成模板仓储（可选；模板默认参数通道）。
 func (uc *GenerationUseCase) SetTemplateRepo(tr port.TemplateRepository) { uc.templateRepo = tr }
+
+// SetURLResolver 注入素材 URL 解析器（可选；SRP：URL 可达性判断移至 Adapter 层）。
+func (uc *GenerationUseCase) SetURLResolver(r port.MaterialURLResolver) { uc.urlResolver = r }
 
 // applyTemplateDefaults 模板默认参数填充（傻瓜式：客户端不传的参数取模板 default_params——
 // 此前 template 字段全链零消费，管理后台配的 prompt 前缀/风格等默认全部丢失）。
@@ -1229,12 +1267,14 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 	}
 
 	// 3. 调用原有的Submit方法
+	// BE-GEN-06：透传 Refs——translateRefs 按端点×能力向量翻译 @引用
 	return uc.Submit(ctx, SubmitInput{
 		TenantID: in.TenantID,
 		BrandID:  in.BrandID,
 		SubType:  selectResult.SubType,
 		Model:    "", // 空=自动选择
 		Params:   selectResult.Params,
+		Refs:     in.Refs,
 		Watermark: in.Watermark,
 		OffPeak:   in.OffPeak,
 	})

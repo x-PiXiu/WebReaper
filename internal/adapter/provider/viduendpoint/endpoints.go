@@ -34,10 +34,12 @@ func (text2videoAdapter) BuildRequest(ctx context.Context, model string, p entit
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
 	}
+	// seed 和 movement_amplitude 独立读取（非互斥）
 	if v := getInt(p, "seed"); v > 0 {
 		body["seed"] = v
-	} else if v := getFloat(p, "movement_amplitude"); v != 0 {
-		body["movement_amplitude"] = v // 注释声明 q1/2.0 生效——此前从未读取（声明与实现不符）
+	}
+	if v := getFloat(p, "movement_amplitude"); v != 0 {
+		body["movement_amplitude"] = v
 	}
 	if v := getString(p, "style"); v != "" {
 		body["style"] = v
@@ -47,6 +49,15 @@ func (text2videoAdapter) BuildRequest(ctx context.Context, model string, p entit
 	}
 	if getBool(p, "audio") {
 		body["audio"] = true
+	}
+	if getBool(p, "bgm") {
+		body["bgm"] = true
+	}
+	if getBool(p, "watermark") {
+		body["watermark"] = true
+	}
+	if getBool(p, "off_peak") {
+		body["off_peak"] = true
 	}
 	if payload != "" {
 		body["payload"] = payload
@@ -276,6 +287,11 @@ func (multiframeAdapter) BuildRequest(ctx context.Context, model string, p entit
 
 // ---- 数字人 /ent/v2/digital-human ----
 // 参数：model/image[1]/prompt(≤2000)/audio_url 或 text+voice_id（audio_url 优先）/resolution
+//
+// EXPERIMENTAL: Vidu 官方文档已删除此端点（2026-08-26 确认）。
+// API 仍返回 HTTP 200 但 body 为空——端点可能已废弃或正在重构。
+// 功能上可被 lip_sync（视频+音频/文本驱动）替代。
+// 代码保留：若 Vidu 恢复/更新该端点可直接启用。
 
 type digitalHumanAdapter struct{}
 

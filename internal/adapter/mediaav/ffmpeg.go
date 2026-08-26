@@ -59,7 +59,34 @@ func (t *FFmpegTool) probe(bin string) error {
 type ffprobeStreams struct {
 	Streams []struct {
 		CodecType string `json:"codec_type"` // video/audio/subtitle
+		CodecName string `json:"codec_name"` // h264/hevc/vp9/aac/mp3 等
 	} `json:"streams"`
+}
+
+// VideoCodec 返回视频流的编码名称（h264/hevc/vp9 等）；无视频流返回空字符串。
+func (t *FFmpegTool) VideoCodec(ctx context.Context, mediaPath string) string {
+	if !t.Available() {
+		return ""
+	}
+	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(pctx, t.bin("ffprobe"),
+		"-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=codec_name",
+		"-of", "json", mediaPath).Output()
+	if err != nil {
+		return ""
+	}
+	var streams ffprobeStreams
+	if json.Unmarshal(raw, &streams) != nil || len(streams.Streams) == 0 {
+		return ""
+	}
+	return streams.Streams[0].CodecName
+}
+
+// IsH264 视频是否为 H.264 编码（lip-sync 要求）。
+func (t *FFmpegTool) IsH264(ctx context.Context, mediaPath string) bool {
+	return t.VideoCodec(ctx, mediaPath) == "h264"
 }
 
 // ExtractSubtitle 探测软字幕轨并抽取文本（srt → 纯文本拼接）。
