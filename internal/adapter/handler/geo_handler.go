@@ -825,7 +825,9 @@ func (h *GEOHandler) HandleGenerateContentStream(c *gin.Context) {
 		}
 	})
 	if err != nil {
+		// BE-CONTENT-01：错误路径也推 finish（客户端只等 error 不等 finish 会悬挂）
 		writeSSE(c.Writer, map[string]any{"type": "error", "error": err.Error()})
+		writeSSE(c.Writer, map[string]any{"type": "finish"})
 		if flusher != nil {
 			flusher.Flush()
 		}

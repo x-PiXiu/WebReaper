@@ -145,6 +145,17 @@ func (s *EndpointSelectorImpl) selectEndpoint(req entity.UnifiedGenerationReques
 		return s.selectByType(req, stats, hasText)
 	}
 
+	// BE-SUBJ-01：主体一致性路径——params.subjects 含已注册分身 server_id 时
+	// 优先 reference2video（同一分身跨视频脸部一致），而非每次图+音重生成数字人
+	if subjects, ok := req.Params["subjects"]; ok && subjects != nil {
+		params := entity.GenerationParams{
+			"prompt":   req.Text,
+			"subjects": subjects,
+		}
+		params["__sub_type"] = "reference2video"
+		return "reference2video", params, nil
+	}
+
 	// 情况1: 有视频+音频 → 对口型
 	if stats.VideoCount > 0 && stats.AudioCount > 0 {
 		params := s.buildLipSyncParams(req, stats)
@@ -227,7 +238,7 @@ func (s *EndpointSelectorImpl) selectByType(req entity.UnifiedGenerationRequest,
 			return "text2video", params, nil
 		}
 	case "image":
-		params := s.buildText2ImageParams(req)
+		params := s.buildText2ImageParams(req, stats)
 		params["__sub_type"] = "text2image"
 		return "text2image", params, nil
 	case "audio":
@@ -244,10 +255,20 @@ func (s *EndpointSelectorImpl) selectByType(req entity.UnifiedGenerationRequest,
 }
 
 // buildText2ImageParams 构建文生图参数。
-func (s *EndpointSelectorImpl) buildText2ImageParams(req entity.UnifiedGenerationRequest) entity.GenerationParams {
-	return entity.GenerationParams{
+func (s *EndpointSelectorImpl) buildText2ImageParams(req entity.UnifiedGenerationRequest, stats MaterialStats) entity.GenerationParams {
+	params := entity.GenerationParams{
 		"prompt": req.Text,
 	}
+	// BE-GEN-02：参考图写入 images——viduq1 必填 1-7 张；viduq2 可选（0=纯文生图）。
+	// 此前不使用 stats，用户传参考图被丢弃等价于无图请求。
+	if len(stats.Images) > 0 {
+		urls := make([]string, 0, len(stats.Images))
+		for _, img := range stats.Images {
+			urls = append(urls, img.SourceURL)
+		}
+		params["images"] = urls
+	}
+	return params
 }
 
 // buildVoiceCloneParams 构建声音克隆参数。
@@ -346,6 +367,8 @@ var advancedParamKeys = map[string]bool{
 	"image_settings": true, "timing_prompts": true,
 	"speed": true, "volume": true, "ref_photo_url": true, // lip_sync 文本驱动（裸 key 风格）
 	"model": true, "resolution": true, "duration": true, "aspect_ratio": true,
+	"images": true, // BE-GEN-05：compat 路径的参考图 URL 直传
+	"subjects": true, // BE-SUBJ-01：主体 server_id 一致性（reference2video）
 }
 
 // advancedParamAllowed 白名单判定（voice_setting_* 前缀族整体放行——TTS 语速/音量/音色/情感）。

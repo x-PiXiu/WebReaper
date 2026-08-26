@@ -305,7 +305,16 @@ func (s *Searcher) getAwemeDetail(ctx context.Context, tenantID, videoID string)
 		}
 		var dr detailResp
 		if jErr := json.Unmarshal([]byte(raw), &dr); jErr != nil {
-			return fmt.Errorf("详情解析失败: %v", jErr)
+			// BE-CRAWL-01：空 body / 非 JSON 多为爬虫账号 Cookie 过期或平台风控——
+			// 裸 JSON parse 错误用户不可读，转明确提示 + 日志脱敏排查片段
+			trimmed := raw
+			if len(trimmed) > 200 {
+				trimmed = trimmed[:200]
+			}
+			if strings.TrimSpace(raw) == "" {
+				return fmt.Errorf("抖音详情接口返回空响应（爬虫账号 Cookie 可能已过期，请到管理后台重新扫码绑定）")
+			}
+			return fmt.Errorf("抖音详情接口返回异常（可能触发风控或 Cookie 过期，请检查爬虫账号）: %v | 响应片段: %s", jErr, trimmed)
 		}
 		if dr.StatusCode != 0 {
 			return statusErr(dr.StatusCode, "")

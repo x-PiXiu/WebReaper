@@ -226,6 +226,13 @@ func (uc *GenerationUseCase) pickModelFor(ctx context.Context, subType string, s
 // getDefaultModel 从数据库获取默认模型。
 // 当 EndpointAdapter 没有实现 ModelAutoSelector 时使用。
 func (uc *GenerationUseCase) getDefaultModel(ctx context.Context, subType string) string {
+	// BE-GEN-03：优先取 is_default=true 的模型（管理后台 generation_specs 配置），
+	// 此前按字母序取第一个（viduq1 排在 viduq2 前导致默认落到旧模型）
+	for _, spec := range uc.registry.AllSpecs(ctx) {
+		if spec.SubType == subType && spec.Enabled && spec.IsDefault && spec.Model != "" {
+			return spec.Model
+		}
+	}
 	// 从 registry 获取所有可用模型
 	names, err := uc.registry.Models(ctx, subType)
 	if err != nil || len(names) == 0 {
@@ -338,13 +345,11 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		return entity.GenerationTask{}, fmt.Errorf("生成服务未配置")
 	}
 
-	// 私网素材本地化（本地开发模式：Vidu 云端拉不到 localhost/内网 URL——
-	// 本站素材读文件转 base64 data URI 内联；公网部署 URL 原样、行为不变）
-	if in.Params != nil {
-		if err := uc.localizePrivateMaterials(ctx, in.Params); err != nil {
-			return entity.GenerationTask{}, err
-		}
-	}
+	// BE-GEN-04：私网素材 base64 内联与落库分离——
+	// 此处在 Submit 入口做内联会导致 params_json（TEXT 列 64KB）超长（Error 1406）。
+	// 正确时序：落库用原始 URL 的 params 副本 → BuildRequest 出口才做内联（发给 Vidu）。
+	// 公网部署 URL 原样、行为不变。
+	//（内联延迟到 BuildRequest 前，见下方 localizeCall点）
 
 	// 动态选择 provider
 	provider, err := uc.getProvider(ctx, in.SubType)
@@ -365,12 +370,18 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	// 模型自动选择（傻瓜式端点）：model 传空时由端点策略按原始参数挑选
 	//（如 reference2video：图片主体→q3 / 视频主体→q2-pro）。须在翻译层之前——
 	// 翻译层按选定模型的能力向量决定视频引用的映射。
+	// BE-GEN-01：params.model 优先于自动选择（UI 选定模型经白名单合并进 params，
+	// 此处提升到选模层——此前不读导致 UI 选 viduq2 落到字母序 viduq1）
 	model := in.Model
+	if model == "" {
+		if pm, ok := in.Params["model"].(string); ok && pm != "" {
+			model = pm
+		}
+	}
 	if model == "" {
 		if sel, ok := adapter.(port.ModelAutoSelector); ok {
 			model = uc.pickModelFor(ctx, in.SubType, sel, in.Params)
 		}
-		// 如果还是空，尝试从数据库获取默认模型
 		if model == "" {
 			model = uc.getDefaultModel(ctx, in.SubType)
 		}
@@ -422,6 +433,13 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	// 提交（超时后任务可能已创建——先落库再提交，未知状态由轮询对齐）
 	if err := uc.repo.Save(ctx, task); err != nil {
 		return entity.GenerationTask{}, fmt.Errorf("任务保存失败: %w", err)
+	}
+	// BE-GEN-04 补充：BuildRequest 出口做私网素材内联（仅影响发给 Vidu 的 body，
+	// 不落 params_json——落库序列化已在上方用原始 URL 的 params 完成）
+	if params != nil {
+		if lErr := uc.localizePrivateMaterials(ctx, params); lErr != nil {
+			return entity.GenerationTask{}, lErr
+		}
 	}
 	body, bErr := adapter.BuildRequest(ctx, model, params, task.Payload)
 	if bErr != nil {
