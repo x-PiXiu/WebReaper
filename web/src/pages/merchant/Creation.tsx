@@ -48,7 +48,6 @@ const CATEGORIES = [
   { key: 'video', label: '视频', icon: <VideoCameraOutlined /> },
   { key: 'image', label: '图片', icon: <PictureOutlined /> },
   { key: 'audio', label: '音频', icon: <AudioOutlined /> },
-  { key: 'digital_human', label: '数字人', icon: <RobotOutlined /> },
   { key: 'other', label: '其他', icon: <AppstoreOutlined /> },
 ]
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -94,19 +95,36 @@ func (s *EndpointSelectorImpl) getMaterials(ctx context.Context, tenantID string
 		return nil, nil
 	}
 
-	// 构建匹配规则
+	// 构建匹配规则（BE-SUBJ-06：URL 匹配按 /media/ 后完整 path，
+	// 避免 PUBLIC_BASE_URL 与浏览器所见不一致时反查失败）
 	idMap := make(map[string]bool)
 	urlMap := make(map[string]bool)
 	for _, id := range materialIDs {
-		if strings.HasPrefix(id, "/media/") || strings.Contains(id, "/media/") {
-			urlMap[filepath.Base(id)] = true
+		if strings.Contains(id, "/media/") {
+			if u, err := url.Parse(id); err == nil && u.Path != "" {
+				urlMap[u.Path] = true
+			} else {
+				urlMap[filepath.Base(id)] = true // 解析失败降级为文件名匹配
+			}
 		} else {
 			idMap[id] = true
 		}
 	}
 
 	match := func(m entity.MediaAsset) bool {
-		return idMap[m.ID] || (len(urlMap) > 0 && urlMap[filepath.Base(m.SourceURL)])
+		if idMap[m.ID] {
+			return true
+		}
+		if len(urlMap) == 0 {
+			return false
+		}
+		if urlMap[filepath.Base(m.SourceURL)] {
+			return true
+		}
+		if u, err := url.Parse(m.SourceURL); err == nil && urlMap[u.Path] {
+			return true
+		}
+		return false
 	}
 
 	// ① 优先查询 material（用户上传素材）

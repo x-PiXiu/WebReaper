@@ -129,6 +129,10 @@ export async function runLipSyncPipeline(
     if (!portrait) {
       throw new Error('请选择数字分身，或上传人像参考图')
     }
+    // EXPERIMENTAL: Vidu digital_human 端点已废弃（2026-08-27 确认），
+    // 无 server_id 时降级为图+音 → digital_human 可能失败。
+    // 建议用户先创建数字分身获取 server_id。
+    console.warn('[LipSyncPipeline] 无 subjectServerId，降级 digital_human（Vidu 端点已废弃，可能失败）')
     const audioId = await ensureMaterialId(audioUrl)
     const imageId = await ensureMaterialId(portrait)
     const dh = await submitUnified({

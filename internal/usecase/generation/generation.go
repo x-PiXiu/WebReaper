@@ -1054,13 +1054,35 @@ func (uc *GenerationUseCase) submitSubject(ctx context.Context, in UnifiedSubmit
 }
 
 // containsStrAny 列表包含（URL 直传素材匹配用）。
+// BE-SUBJ-06：除全等匹配外，增加 URL path 后缀匹配——浏览器所见 URL 的
+// base（PUBLIC_BASE_URL / localhost:8082）与素材库 SourceURL 不一致时，
+// 按 path 部分（/media/{tenant}/{date}/{file}）匹配仍能命中。
 func containsStrAny(list []string, s string) bool {
+	sPath := urlPathOf(s)
 	for _, x := range list {
 		if x == s {
 			return true
 		}
+		// path 后缀匹配（两端都含 /media/ 时比较 path 部分）
+		if sPath != "" {
+			if xPath := urlPathOf(x); xPath != "" && xPath == sPath {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+// urlPathOf 提取 URL 的 path 部分（含 /media/ 前缀）；非 URL 或无 /media/ 返回空。
+func urlPathOf(rawURL string) string {
+	if !strings.Contains(rawURL, "/media/") {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Path
 }
 
 // ---- 私网素材本地化（本地开发模式：Vidu 云端拉不到 localhost/内网素材 URL）----
