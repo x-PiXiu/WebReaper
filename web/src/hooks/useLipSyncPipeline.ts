@@ -127,27 +127,16 @@ export async function runLipSyncPipeline(
 
     const portrait = input.portraitMaterial
     if (!portrait) {
-      throw new Error('请选择数字分身，或上传人像参考图')
+      throw new Error('请选择数字分身，或切换到「真人出镜」模式上传视频')
     }
-    // EXPERIMENTAL: Vidu digital_human 端点已废弃（2026-08-27 确认），
-    // 无 server_id 时降级为图+音 → digital_human 可能失败。
-    // 建议用户先创建数字分身获取 server_id。
-    console.warn('[LipSyncPipeline] 无 subjectServerId，降级 digital_human（Vidu 端点已废弃，可能失败）')
-    const audioId = await ensureMaterialId(audioUrl)
-    const imageId = await ensureMaterialId(portrait)
-    const dh = await submitUnified({
-      brand_id: input.brandId,
-      materials: [imageId, audioId],
-      text: prompt.slice(0, 200),
-      params: deliverableWorkParams(),
-    })
-    refTaskId = dh.id
-    lipsyncTaskId = dh.id
-    const done = await waitGenerationTask(dh.id)
-    const resultUrl = creationUrl(done)
-    if (!resultUrl) throw new Error('口播视频产物缺失（可重试）')
-    videoUrl = resultUrl
-    return { ttsTaskId, refTaskId, lipsyncTaskId, resultUrl, audioUrl, videoUrl }
+    // Vidu digital_human 端点已废弃（2026-08-27 确认）：
+    // 无 server_id 的图+音降级路径不再支持。引导用户先创建数字分身。
+    if (!input.subjectServerId) {
+      throw new Error(
+        '请先在素材库创建数字分身（上传形象照即可），再选择该分身生成分身口播视频。' +
+        '数字分身能保证跨视频的人物一致性，且不依赖已废弃的数字人接口。',
+      )
+    }
   }
 
   if (input.presence === 'real') {

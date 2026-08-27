@@ -7,6 +7,8 @@ package videolink
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"webreaper/internal/adapter/biliweb"
 	"webreaper/internal/usecase/port"
@@ -39,6 +41,14 @@ func (c *CompositeResolver) SupportedPlatforms() []string {
 	return out
 }
 
+// isKuaishouLink 快手链接识别（v.kuaishou.com 短链 / kuaishou.com 长链）。
+// 快手分享页为 JS 渲染，og:video 不可用——当前不支持自动提取。
+func isKuaishouLink(rawURL string) bool {
+	return strings.Contains(rawURL, "v.kuaishou.com") ||
+		strings.Contains(rawURL, "kuaishou.com/short-video") ||
+		strings.Contains(rawURL, "kuaishou.com/f/")
+}
+
 // Resolve 按链接特征分发。
 func (c *CompositeResolver) Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, string, error) {
 	if biliweb.IsBilibiliLink(rawURL) {
@@ -46,6 +56,10 @@ func (c *CompositeResolver) Resolve(ctx context.Context, tenantID, rawURL string
 			return c.bili.Resolve(ctx, tenantID, rawURL)
 		}
 		return "", "", "", "", nil
+	}
+	// 快手链接：JS 渲染页面，og:video 不可用——提前返回明确提示
+	if isKuaishouLink(rawURL) {
+		return "", "", "", "", fmt.Errorf("暂不支持快手分享链自动提取——请下载视频后直接上传，我们正在接入快手解析")
 	}
 	if c.douyin != nil {
 		if u, t, p, lp, e := c.douyin.Resolve(ctx, tenantID, rawURL); e == nil {

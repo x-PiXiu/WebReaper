@@ -9,6 +9,7 @@ import { PlatformBadge } from '../../components/PlatformBadge'
 import QRLoginModal from './distribution/QRLoginModal'
 import PublishJobTable from './distribution/PublishJobTable'
 import PublishWizard from './distribution/PublishWizard'
+import { PublishResultPanel } from './distribution/PublishResultPanel'
 import type { WizardDraft } from './distribution/wizardModel'
 import type { Account, PublishJob } from '../../types/api'
 import { message } from '../../utils/antdApp'
@@ -148,14 +149,20 @@ export default function Distribution() {
     },
   })
 
+  // 全部完成时提示一次（不清 autoJobIds——保留在结果面板中展示）
+  const notifiedRef = useRef(false)
   useEffect(() => {
     if (autoStatus && autoStatus.every((j) => j.status === 'published' || j.status === 'failed')) {
-      const successCount = autoStatus.filter((j) => j.status === 'published').length
-      const failCount = autoStatus.filter((j) => j.status === 'failed').length
-      if (successCount > 0) message.success(`${successCount} 篇内容自动发布成功`)
-      if (failCount > 0) message.error(`${failCount} 篇发布失败`)
-      setAutoJobIds([])
-      queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
+      if (!notifiedRef.current) {
+        notifiedRef.current = true
+        const successCount = autoStatus.filter((j) => j.status === 'published').length
+        const failCount = autoStatus.filter((j) => j.status === 'failed').length
+        if (successCount > 0) message.success(`${successCount} 篇内容自动发布成功`)
+        if (failCount > 0) message.error(`${failCount} 篇发布失败`)
+        queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
+      }
+    } else {
+      notifiedRef.current = false
     }
   }, [autoStatus, queryClient])
 
@@ -339,7 +346,20 @@ export default function Distribution() {
               key: 'publish',
               label: '发布',
               children: (
-                <PublishWizard
+                <>
+                  {autoJobIds.length > 0 && autoStatus && (
+                    <PublishResultPanel
+                      jobs={autoStatus.map((j) => ({
+                        id: j.id,
+                        platform: (j as Record<string, unknown>).platform as string | undefined,
+                        status: j.status,
+                        error_msg: (j as Record<string, unknown>).error_msg as string | undefined,
+                        external_url: (j as Record<string, unknown>).external_url as string | undefined,
+                      }))}
+                      onDismiss={() => setAutoJobIds([])}
+                    />
+                  )}
+                  <PublishWizard
                   brands={brands}
                   brandId={selectedBrand}
                   setBrandId={setCurrentBrand}
@@ -361,6 +381,7 @@ export default function Distribution() {
                     }
                   }}
                 />
+                </>
               ),
             },
             {
