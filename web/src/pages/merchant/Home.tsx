@@ -7,6 +7,7 @@ import {
   VideoCameraOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useBrands } from '../../hooks/useBrands'
+import { usePublishableWorks } from '../../hooks/usePublishableWorks'
 import { businessApi } from '../../api/business'
 import { useComposeDraft } from '../../store/composeDraft'
 import { composeProgressLabel, hasComposeDraft, composeResumePath } from '../../utils/composeProgress'
@@ -28,10 +29,7 @@ type MetricKey = 'heat' | 'leads' | 'posts'
 export default function MerchantHome() {
   const navigate = useNavigate()
   const { data: brands = [], isLoading } = useBrands()
-  const { data: works = [] } = useQuery({
-    queryKey: ['merchant-works'],
-    queryFn: () => businessApi.listWorks().catch(() => []),
-  })
+  const { works = [] } = usePublishableWorks({ staleTime: 60_000 })
   const { data: summary } = useQuery({
     queryKey: ['analytics-summary'],
     queryFn: () => businessApi.getAnalyticsSummary().catch(() => null),

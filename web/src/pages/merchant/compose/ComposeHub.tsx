@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Empty, Spin, Tag, Typography } from 'antd'
+import { Button, Empty, Spin, Tooltip } from 'antd'
+import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
 import {
   VideoCameraOutlined, ThunderboltOutlined, FileTextOutlined,
   RightOutlined,
@@ -8,14 +9,14 @@ import {
 import { businessApi } from '../../../api/business'
 import { useComposeDraft } from '../../../store/composeDraft'
 import { useComposeTaskPoll } from '../../../hooks/useComposeTaskPoll'
-import { composeProgressLabel, hasComposeDraft, composeResumePath } from '../../../utils/composeProgress'
+import { composeProgressLabel, composeResumeHint, hasComposeDraft, composeResumePath, composeResumeLabel } from '../../../utils/composeProgress'
 import { PageHeader } from '../../../components/PageHeader'
 import { GrowthStagesNav } from '../../../components/GrowthStagesNav'
-import RetryHint from '../../../components/RetryHint'
+import { retryFailureMessage } from '../../../components/RetryHint'
+import { GenerationFailedBar } from '../../../components/compose/GenerationFailedBar'
 import MerchantOnboardingTour from '../../../components/onboarding/MerchantOnboardingTour'
 import { useMerchantOnboarding } from '../../../hooks/useMerchantOnboarding'
-
-const { Text } = Typography
+import { useGenerationTypes } from '../../../hooks/useGenerationTypes'
 
 const WORK_STATUS: Record<string, string> = {
   draft: '草稿',
@@ -29,10 +30,11 @@ const CREATE_MODES = [
     key: 'lipsync',
     icon: VideoCameraOutlined,
     title: '拍同款口播',
-    desc: '文案 · 出镜 · 配音 · 成片',
+    desc: '推荐 · 文案到成片五步向导',
     path: '/m/compose/lipsync',
     featured: true,
     tone: 'teal',
+    requires: ['tts', 'reference2video|lip_sync'] as const,
   },
   {
     key: 'quick',
@@ -49,6 +51,7 @@ const CREATE_MODES = [
     desc: '种草文案与配图封面',
     path: '/m/compose/graphic',
     tone: 'amber',
+    requires: ['text2image'] as const,
   },
 ] as const
 
@@ -66,14 +69,14 @@ export default function ComposeHub() {
   const { open: tourOpen, finish: finishTour, skip: skipTour, replay: replayTour } = useMerchantOnboarding(true)
   const hasDraft = hasComposeDraft(draft)
   const resumePath = composeResumePath(draft)
-  const resumeLabel = draft.track === 'graphic' ? '发图文' : '拍口播'
-  const progressLabel = hasDraft ? composeProgressLabel(draft, draft.track) : ''
+  const resumeLabel = composeResumeLabel(draft)
+  const resumeHint = hasDraft ? composeResumeHint(draft) : ''
+  const progressLabel = hasDraft && (draft.track === 'graphic' || draft.track === 'video')
+    ? composeProgressLabel(draft, draft.track)
+    : ''
   const draftTitle = draft.selectedTitle || '继续编辑草稿'
 
-  const { data: works = [], isLoading: worksLoading } = useQuery({
-    queryKey: ['merchant-works'],
-    queryFn: () => businessApi.listWorks().catch(() => []),
-  })
+  const { works = [], isLoading: worksLoading } = usePublishableWorks()
   const { data: failedTasks = [] } = useQuery({
     queryKey: ['generation-tasks'],
     queryFn: () => businessApi.listGenerationTasks()
@@ -85,7 +88,33 @@ export default function ComposeHub() {
     .filter(w => w.status === 'draft' || w.status === 'ready' || w.status === 'generating')
     .slice(0, 5)
 
+  const { isEnabled, isLoading: typesLoading } = useGenerationTypes()
+
+  const modeDisabled = (mode: typeof CREATE_MODES[number]) => {
+    if (typesLoading || !('requires' in mode) || !mode.requires) return false
+    for (const req of mode.requires) {
+      if (req.includes('|')) {
+        const any = req.split('|').some((s) => isEnabled(s))
+        if (!any) return true
+      } else if (!isEnabled(req)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  const modeDisabledReason = (mode: typeof CREATE_MODES[number]) => {
+    if (mode.key === 'lipsync') {
+      return '口播需要后台启用「语音合成」，以及「参考生视频」或「对口型」'
+    }
+    if (mode.key === 'graphic') {
+      return '发图文配图需要后台启用「文生图」'
+    }
+    return '相关生成能力未在后台启用'
+  }
+
   const openMode = (mode: typeof CREATE_MODES[number]) => {
+    if (modeDisabled(mode)) return
     if (mode.key === 'graphic') {
       draft.setTrack('graphic')
       navigate('/m/compose/graphic')
@@ -136,6 +165,9 @@ export default function ComposeHub() {
             <div className="ch-draft-bar-main">
               <span className="ch-draft-bar-label">继续{resumeLabel}</span>
               <strong className="ch-draft-bar-title">{draftTitle}</strong>
+              {resumeHint && (
+                <span className="ch-draft-bar-hint">{resumeHint}</span>
+              )}
               {progressLabel && (
                 <div className="ch-draft-bar-steps">
                   {progressSteps(progressLabel).map(step => (
@@ -163,20 +195,30 @@ export default function ComposeHub() {
           {CREATE_MODES.map(mode => {
             const Icon = mode.icon
             const featured = 'featured' in mode && mode.featured
-            return (
+            const disabled = modeDisabled(mode)
+            const tile = (
               <button
-                key={mode.key}
                 type="button"
-                className={`ch-action-tile ch-action-tile--${mode.tone}${featured ? ' is-featured' : ''}`}
+                className={`ch-action-tile ch-action-tile--${mode.tone}${featured ? ' is-featured' : ''}${disabled ? ' is-disabled' : ''}`}
                 onClick={() => openMode(mode)}
+                aria-disabled={disabled}
               >
                 {featured && <span className="ch-action-badge">推荐</span>}
                 <span className="ch-action-icon" aria-hidden>
                   <Icon />
                 </span>
                 <span className="ch-action-title">{mode.title}</span>
-                <span className="ch-action-desc">{mode.desc}</span>
+                <span className="ch-action-desc">
+                  {disabled ? modeDisabledReason(mode) : mode.desc}
+                </span>
               </button>
+            )
+            return disabled ? (
+              <Tooltip key={mode.key} title={modeDisabledReason(mode)}>
+                <div className="ch-action-tile-wrap">{tile}</div>
+              </Tooltip>
+            ) : (
+              <div key={mode.key}>{tile}</div>
             )
           })}
         </div>
@@ -256,17 +298,15 @@ export default function ComposeHub() {
               <h3>最近生成失败</h3>
               <Link to="/m/compose/tools?tab=media">任务中心</Link>
             </div>
-            <ul className="ch-list ch-list--clean">
+            <ul className="ch-list ch-list--clean ch-failed-list">
               {failedTasks.map((t) => (
                 <li key={t.id}>
-                  <div className="ch-list-row ch-list-row--clean" style={{ cursor: 'default' }}>
-                    <Tag color="error" style={{ margin: 0 }}>失败</Tag>
-                    <span className="ch-list-title">{t.sub_type} · {t.model}</span>
-                    <RetryHint code={t.retry_hint} />
-                    <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ tooltip: t.err_msg }}>
-                      {t.err_msg || '—'}
-                    </Text>
-                  </div>
+                  <GenerationFailedBar
+                    compact
+                    message={`${t.sub_type} · ${t.model}：${retryFailureMessage(t, '生成失败')}`}
+                    onRetry={() => navigate('/m/compose/tools?tab=media')}
+                    retryLabel="去任务中心"
+                  />
                 </li>
               ))}
             </ul>

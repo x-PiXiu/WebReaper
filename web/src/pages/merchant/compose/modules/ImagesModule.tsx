@@ -6,6 +6,11 @@ import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { CapabilityBanner } from '../../../../components/wizard/CapabilityBanner'
+import { catchGenerationError } from '../../../../utils/generationErrors'
+import { useComposeTaskPoll } from '../../../../hooks/useComposeTaskPoll'
+import { GenerationTaskStatusBar } from '../../../../components/compose/GenerationTaskStatusBar'
+import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
 import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
@@ -18,11 +23,17 @@ export default function ImagesModule() {
   const [busy, setBusy] = useState(false)
   const [prompt, setPrompt] = useState(draft.selectedTitle || draft.refTitle || '')
 
+  useComposeTaskPoll()
+
   useEffect(() => {
     draft.setTrack('graphic')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
   const urls = draft.imageUrls || []
+  const list = useMemo(() => urls.filter(Boolean), [urls])
+  const pendingImages = (draft.imageTaskIds || []).length
+  const activeImageTaskId = pendingImages > 0 ? draft.imageTaskIds?.[0] : undefined
 
   const gen = async () => {
     const bid = brandId || draft.brandId
@@ -32,17 +43,21 @@ export default function ImagesModule() {
     }
     setBusy(true)
     try {
-      await businessApi.submitGeneration({
+      const res = await businessApi.submitGeneration({
         brand_id: bid,
         type: 'image',
         text: `小红书种草配图，竖版清爽，主题「${prompt || '产品种草'}」，真实场景感，不要水印`,
         aspect_ratio: '9:16',
-        params: undefined, // BE-GEN-01/03 已修
+        params: undefined,
       })
-      message.success('配图任务已提交，完成后可在多媒体台取回 URL 填入下方')
-      navigate('/m/compose/tools?tab=media')
-    } catch {
-      /* 拦截器 */
+      draft.patch({
+        imageTaskIds: [...(draft.imageTaskIds || []), res.id],
+        track: 'graphic',
+        lastUpdatedAt: new Date().toISOString(),
+      })
+      message.success('配图任务已提交，完成后自动加入并预览')
+    } catch (e) {
+      catchGenerationError(e)
     } finally {
       setBusy(false)
     }
@@ -52,17 +67,19 @@ export default function ImagesModule() {
     setBusy(true)
     try {
       const asset = await businessApi.uploadAsset(file)
-      draft.patch({ imageUrls: [...urls, asset.url], track: 'graphic' })
+      draft.patch({ imageUrls: [...list, asset.url], track: 'graphic' })
       message.success('已加入配图')
-    } catch {
-      /* */
+    } catch (e) {
+      catchGenerationError(e)
     } finally {
       setBusy(false)
     }
     return false
   }
 
-  const list = useMemo(() => urls, [urls])
+  const removeImage = (index: number) => {
+    draft.patch({ imageUrls: list.filter((_, j) => j !== index) })
+  }
 
   return (
     <div className="wr-page-content ip-page">
@@ -77,7 +94,26 @@ export default function ImagesModule() {
         showIcon
         message="本模块仅服务发图文轨道；视频成片请走「发视频」里的数字人 / 剪辑"
       />
+      <CapabilityBanner required={['text2image']} />
       <div className="wr-glass-card" style={{ padding: 24 }}>
+        <GenerationTaskStatusBar
+          taskId={activeImageTaskId}
+          resultReady={pendingImages === 0 && list.length > 0}
+          doneLabel={`已选 ${list.length} 张配图`}
+          fallbackPending="配图"
+          onClearFailed={() => {
+            const ids = draft.imageTaskIds || []
+            if (ids.length) draft.patch({ imageTaskIds: ids.slice(1) })
+          }}
+          onRetry={gen}
+        />
+        {(pendingImages > 1 || (pendingImages > 0 && list.length === 0)) && (
+          <TaskStatusBar
+            pending
+            pendingLabel={`${pendingImages} 张配图生成中…`}
+          />
+        )}
+
         <Text strong>文生图提示词</Text>
         <Input
           style={{ marginTop: 8, marginBottom: 12 }}
@@ -94,36 +130,18 @@ export default function ImagesModule() {
           </Upload>
         </Space>
 
-        <Text strong>已选配图 URL</Text>
-        <Space direction="vertical" style={{ width: '100%', marginTop: 8 }} size={8}>
-          {list.length === 0 && <Text type="secondary">暂无配图</Text>}
-          {list.map((u, i) => (
-            <Space key={u + i} style={{ width: '100%' }}>
-              <Input
-                value={u}
-                onChange={(e) => {
-                  const next = [...list]
-                  next[i] = e.target.value
-                  draft.patch({ imageUrls: next })
-                }}
-              />
-              <Button
-                danger
-                type="text"
-                onClick={() => draft.patch({ imageUrls: list.filter((_, j) => j !== i) })}
-              >
-                移除
-              </Button>
-            </Space>
-          ))}
-          <Button
-            type="dashed"
-            block
-            onClick={() => draft.patch({ imageUrls: [...list, ''] })}
-          >
-            手动添加一张
-          </Button>
-        </Space>
+        {list.length > 0 ? (
+          <div className="cf-image-grid">
+            {list.map((u, i) => (
+              <div key={u + i} className="cf-image-grid-item">
+                <div className="cf-media-thumb" style={{ backgroundImage: `url(${u})` }} />
+                <Button type="text" size="small" danger onClick={() => removeImage(i)}>移除</Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Text type="secondary">上传或 AI 生成配图后在此预览</Text>
+        )}
 
         <Space style={{ marginTop: 16 }} wrap>
           <Button
@@ -136,7 +154,7 @@ export default function ImagesModule() {
           <Button
             onClick={() => {
               const q = new URLSearchParams({ contentType: 'image' })
-              if (list.filter(Boolean).length) q.set('mediaUrls', list.filter(Boolean).join(','))
+              if (list.length) q.set('mediaUrls', list.join(','))
               if (draft.selectedTitle) q.set('title', draft.selectedTitle)
               const body = (draft.rewritten || draft.script || '').trim()
               if (body) q.set('content', body.slice(0, 8000))

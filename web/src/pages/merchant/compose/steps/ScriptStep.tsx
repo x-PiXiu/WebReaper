@@ -6,11 +6,10 @@ import { useBrandContext } from '../../../../hooks/useBrands'
 import { useComposeWorkSync } from '../../../../hooks/useComposeWorkSync'
 import { businessApi } from '../../../../api/business'
 import { generateContentStream } from '../../../../api/contentStream'
+import { PauseScriptEditor } from '../../../../components/compose/PauseScriptEditor'
 import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
-
-const { TextArea } = Input
 
 /** Step 1：写脚本 / 写图文 */
 export function ScriptStep({ track }: { track: ComposeTrack }) {
@@ -179,16 +178,17 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
         onChange={(e) => draft.patch({ selectedTitle: e.target.value })}
       />
 
-      <TextArea
+      <PauseScriptEditor
         className="cf-editor"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={setText}
         placeholder={
           isGraphic
             ? '在这里写或粘贴种草正文，也可用上方「按主题生成」…'
             : '在这里写或粘贴口播文案，也可用上方「按主题生成」…'
         }
         autoSize={{ minRows: 14, maxRows: 22 }}
+        showPauseToolbar={!isGraphic}
       />
 
       <div className="cf-editor-foot">

@@ -45,15 +45,50 @@ export function composeProgressLabel(draft: ComposeDraft, track: ComposeTrack) {
   const idx = inferComposeStepIndex(draft, track)
   const parts = steps.map((s, i) => {
     if (i < idx) return `${s.label} ✓`
-    if (i === idx) return `${s.label}中`
+    if (i === idx) {
+      if (track === 'video' && i === 1) {
+        const hint = composeVideoAssetHint(draft)
+        if (hint) return hint
+      }
+      return `${s.label}中`
+    }
     return s.label
   })
   return parts.join(' · ')
 }
 
+/** 发视频轨「配素材」步的细粒度进度 */
+function composeVideoAssetHint(draft: ComposeDraft): string | null {
+  const bits: string[] = []
+  if (draft.voiceUrl) bits.push('配音✓')
+  else if (draft.voiceTaskId) bits.push('配音中')
+  if (draft.avatarVideoUrl) bits.push('成片✓')
+  else if (draft.avatarTaskId) bits.push('成片中')
+  if (draft.coverUrl) bits.push('封面✓')
+  else if (draft.coverTaskId) bits.push('封面中')
+  if (bits.length === 0) return null
+  return `配素材（${bits.join(' · ')}）`
+}
+
+export function composeResumeLabel(draft: ComposeDraft): string {
+  if (draft.track === 'graphic') return '发图文'
+  if (draft.track === 'lipsync' || (draft.wizardStep ?? 0) > 0) return '拍口播'
+  if (draft.track === 'video') return '发视频'
+  return '创作'
+}
+
+/** 续写草稿副标题（口播向导步数） */
+export function composeResumeHint(draft: ComposeDraft): string | undefined {
+  if ((draft.wizardStep ?? 0) > 0 || draft.track === 'lipsync') {
+    const step = Math.max(draft.wizardStep ?? 0, 0) + 1
+    return `拍口播向导 · 第 ${step} 步`
+  }
+  return undefined
+}
+
 export function composeResumePath(draft: ComposeDraft): string {
   if (draft.track === 'graphic') return '/m/compose/graphic'
-  if (draft.track === 'video') return '/m/compose/lipsync'
+  if (draft.track === 'video') return '/m/compose/video'
   if (draft.track === 'lipsync' || (draft.wizardStep ?? 0) > 0) return '/m/compose/lipsync'
   return '/m/compose'
 }

@@ -26,7 +26,8 @@ export type UnifiedSubmitPayload = {
   off_peak?: boolean
 }
 
-/** 文生图默认模型（支持 0 张参考图的纯文生图） */
+/** 主体引用（reference2video 一致性——BE-SUBJ-01） */
+export type SubjectRef = { name: string; server_id: string }
 
 /** 合并统一提交高级参数（model / seed / voice_setting_* 等——服务端 params 白名单合并） */
 export function mergeSubmitParams(
@@ -42,6 +43,13 @@ export function mergeSubmitParams(
     }
   }
   return Object.keys(merged).length > 0 ? merged : undefined
+}
+
+/** 标记为可发布成片（工作台合成产物——非素材库中间素材） */
+export function deliverableWorkParams(
+  extra?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  return mergeSubmitParams({ deliverable: true }, extra) ?? { deliverable: true }
 }
 
 /** 旧高级提交形态（已删除 POST /generation/tasks）→ 映射到统一 submit */
@@ -128,10 +136,6 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
   const brand_id = data.brand_id || ''
   const text = pickText(params)
 
-  if (sub === 'subject') {
-    throw new Error('主体创建暂未纳入统一提交接口，请用人像图走数字人口播')
-  }
-
   // 高级参数打包（白名单外的 key 服务端会丢弃；保留字段已被上面的显式提取消费）
   const ADVANCED_KEYS = [
     'seed', 'style', 'movement_amplitude', 'audio', 'audio_type', 'bgm',
@@ -185,6 +189,22 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
   }
 
   const materials = [...materialIds]
+
+  if (sub === 'subject') {
+    return buildSubjectRegisterPayload({
+      brand_id,
+      name: text || (typeof params.name === 'string' ? params.name : ''),
+      imageMaterialIds: materials.filter((m) => !/^https?:\/\//i.test(m)),
+      imageUrls: Array.isArray(params.images)
+        ? params.images.filter((u): u is string => typeof u === 'string' && !!u.trim())
+        : materials.filter((m) => /^https?:\/\//i.test(m)),
+      videoUrl: Array.isArray(params.videos) && typeof params.videos[0] === 'string'
+        ? params.videos[0]
+        : undefined,
+      voice_id: typeof adv.voice_id === 'string' ? adv.voice_id : undefined,
+    })
+  }
+
   const duration = typeof params.duration === 'number' ? params.duration : undefined
   const quality = typeof params.resolution === 'string' ? params.resolution
     : typeof params.quality === 'string' ? params.quality : undefined
@@ -218,16 +238,71 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
   }
 }
 
+/**
+ * 数字分身主体注册（POST /generation/submit + sub_type=subject）。
+ * materials 优先传素材库 ID；params.images/videos 作 URL 直传兜底（需 BE-SUBJ-02）。
+ */
+export function buildSubjectRegisterPayload(input: {
+  brand_id: string
+  name: string
+  imageMaterialIds?: string[]
+  imageUrls?: string[]
+  videoUrl?: string
+  voice_id?: string
+}): UnifiedSubmitPayload {
+  const name = (input.name || '').trim()
+  if (!name) throw new Error('请输入主体名称')
+  const ids = (input.imageMaterialIds || []).filter(Boolean).slice(0, 3)
+  const urls = (input.imageUrls || []).filter(Boolean).slice(0, 3)
+  const video = (input.videoUrl || '').trim()
+  if (ids.length === 0 && urls.length === 0 && !video) {
+    throw new Error('请上传至少 1 张形象照或 1 个主体视频')
+  }
+  const params: Record<string, unknown> = { name }
+  if (input.voice_id) params.voice_id = input.voice_id
+  if (urls.length) params.images = urls
+  if (video) params.videos = [video]
+  const materials = [...ids]
+  if (!materials.length && urls.length) materials.push(...urls)
+  if (!materials.length && video) materials.push(video)
+  return {
+    brand_id: input.brand_id,
+    text: name,
+    materials: materials.length ? materials : undefined,
+    sub_type: 'subject',
+    params,
+  }
+}
+
+/**
+ * 已注册分身 + 口播文案 → reference2video（主体 server_id 一致性）。
+ * 可选附带 audio 素材 ID（服务端当前以 subjects 路径为主，音频供后续扩展）。
+ */
+export function buildSubjectReferencePayload(input: {
+  brand_id: string
+  server_id: string
+  name?: string
+  text: string
+  audioMaterialId?: string
+}): UnifiedSubmitPayload {
+  const subject: SubjectRef = {
+    name: (input.name || '主体').trim() || '主体',
+    server_id: input.server_id.trim(),
+  }
+  return {
+    brand_id: input.brand_id,
+    text: input.text.trim(),
+    materials: input.audioMaterialId ? [input.audioMaterialId] : undefined,
+    params: deliverableWorkParams({ subjects: [subject] }),
+  }
+}
+
 /** 统一提交（POST /api/v1/generation/submit）——傻瓜式主路径 */
 export async function submitUnified(payload: UnifiedSubmitPayload): Promise<GenerationTask> {
   if (!payload.brand_id) {
     throw new Error('请先选择人设/品牌后再生成')
   }
-  // 文生图兜底模型：后端若未读 params.model，仍尽量降低落到 viduq1 的概率（管理后台默认配置对齐前）
-  let params = payload.params
-  if (payload.type === 'image') {
-    // BE-GEN-01/03 已修：不再硬编码 viduq2（服务端正确读 params.model + IsDefault 默认）
-  }
+  const params = payload.params
   return apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', {
     brand_id: payload.brand_id,
     text: payload.text || '',

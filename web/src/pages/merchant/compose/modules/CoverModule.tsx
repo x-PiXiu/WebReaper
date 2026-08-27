@@ -7,6 +7,12 @@ import { useComposeDraft } from '../../../../store/composeDraft'
 import { COVER_STYLES } from '../../../../data/coverStyles'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
+import { CapabilityBanner } from '../../../../components/wizard/CapabilityBanner'
+import { catchGenerationError } from '../../../../utils/generationErrors'
+import { useComposeTaskPoll } from '../../../../hooks/useComposeTaskPoll'
+import { GenerationTaskStatusBar } from '../../../../components/compose/GenerationTaskStatusBar'
+import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
+import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
 import { message } from '../../../../utils/antdApp'
 
 const { Text } = Typography
@@ -18,6 +24,8 @@ export default function CoverModule() {
   const { brandId } = useBrandContext()
   const draft = useComposeDraft()
   const [busy, setBusy] = useState(false)
+
+  useComposeTaskPoll()
 
   useEffect(() => {
     if (params.get('track') === 'graphic') draft.setTrack('graphic')
@@ -35,19 +43,23 @@ export default function CoverModule() {
     }
     setBusy(true)
     try {
-      await businessApi.submitGeneration({
+      const res = await businessApi.submitGeneration({
         brand_id: bid,
         type: 'image',
         text: isGraphic
           ? `小红书封面图，竖屏，大标题「${title}」，清爽种草风`
           : `短视频封面，竖屏 9:16，大标题「${title}」，简洁醒目，适合抖音`,
         aspect_ratio: '9:16',
-        params: undefined, // BE-GEN-01/03 已修
+        params: undefined,
       })
-      message.success('封面图任务已提交，请到多媒体工作台取回 URL 填入下方')
-      navigate('/m/compose/tools?tab=media')
-    } catch {
-      /* 拦截器 */
+      draft.patch({
+        coverTaskId: res.id,
+        track: isGraphic ? 'graphic' : 'video',
+        lastUpdatedAt: new Date().toISOString(),
+      })
+      message.success('封面图任务已提交，完成后自动填入并预览')
+    } catch (e) {
+      catchGenerationError(e)
     } finally {
       setBusy(false)
     }
@@ -68,33 +80,62 @@ export default function CoverModule() {
           ? '当前在发图文轨道——配图请用「图文配图」模块，这里只定封面'
           : '当前在发视频轨道——成片请用数字人 / 剪辑，这里只定视频封面'}
       />
+      <CapabilityBanner required={['text2image']} />
       <div className="wr-glass-card" style={{ padding: 24 }}>
         <Text strong>封面标题</Text>
         <Input style={{ marginTop: 8, marginBottom: 16 }} value={title} onChange={(e) => draft.patch({ selectedTitle: e.target.value })} />
-        <Text strong>模板</Text>
-        <div className="ip-pick-grid" style={{ marginTop: 8 }}>
-          {COVER_STYLES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`ip-pick-card${draft.coverAccent === c.accent ? ' is-active' : ''}`}
-              onClick={() => draft.patch({ coverAccent: c.accent, coverUrl: draft.coverUrl })}
-            >
-              <span className="ip-pick-swatch" style={{ background: `linear-gradient(160deg,#111,${c.accent})` }} />
-              <strong>{c.name}</strong>
-              <span>{c.mood}</span>
-            </button>
-          ))}
-        </div>
-        <Text strong style={{ display: 'block', marginTop: 16 }}>封面图 URL</Text>
-        <Input
-          style={{ marginTop: 8 }}
-          placeholder="生成后的图片地址"
-          value={draft.coverUrl || ''}
-          onChange={(e) => draft.patch({ coverUrl: e.target.value })}
+
+        <GenerationTaskStatusBar
+          taskId={draft.coverTaskId}
+          resultReady={!!draft.coverUrl}
+          doneLabel="封面已就绪"
+          fallbackPending="封面"
+          onClearFailed={() => draft.patch({ coverTaskId: undefined })}
+          onRetry={genImage}
         />
+
+        {draft.coverUrl ? (
+          <MediaResultCard
+            kind="image"
+            url={draft.coverUrl}
+            label={isGraphic ? '图文封面' : '视频封面'}
+            onClear={() => draft.patch({ coverUrl: undefined, coverTaskId: undefined })}
+          />
+        ) : (
+          <>
+            <Text strong>模板</Text>
+            <div className="ip-pick-grid" style={{ marginTop: 8 }}>
+              {COVER_STYLES.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`ip-pick-card${draft.coverAccent === c.accent ? ' is-active' : ''}`}
+                  onClick={() => draft.patch({ coverAccent: c.accent, coverUrl: draft.coverUrl })}
+                >
+                  <span className="ip-pick-swatch" style={{ background: `linear-gradient(160deg,#111,${c.accent})` }} />
+                  <strong>{c.name}</strong>
+                  <span>{c.mood}</span>
+                </button>
+              ))}
+            </div>
+            <Button
+              icon={<PictureOutlined />}
+              loading={busy}
+              onClick={genImage}
+              style={{ marginTop: 16 }}
+            >
+              文生图生成封面
+            </Button>
+          </>
+        )}
+
+        <ManualUrlField
+          value={draft.coverUrl || ''}
+          placeholder="或手动粘贴封面图 URL"
+          onChange={(v) => draft.patch({ coverUrl: v || undefined })}
+        />
+
         <Space style={{ marginTop: 16 }} wrap>
-          <Button icon={<PictureOutlined />} loading={busy} onClick={genImage}>文生图生成封面</Button>
           <Button
             type="primary"
             className="ip-btn-primary"

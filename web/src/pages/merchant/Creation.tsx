@@ -2,20 +2,23 @@ import { useState, useMemo, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, Table, Modal, Empty, Popconfirm, Tooltip, Alert, Badge, Collapse, AutoComplete } from 'antd'
+import { Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, Table, Modal, Empty, Popconfirm, Tooltip, Alert, Badge, Collapse, AutoComplete, Upload } from 'antd'
 import { message } from '../../utils/antdApp'
 import {
   VideoCameraOutlined, PictureOutlined, AudioOutlined, RobotOutlined, AppstoreOutlined,
   ReloadOutlined, PlayCircleOutlined, SoundOutlined,
   PlusOutlined, MinusCircleOutlined, FileImageOutlined, CloseCircleOutlined,
-  ThunderboltOutlined, ApartmentOutlined, SettingOutlined, ExportOutlined,
+  ThunderboltOutlined, ApartmentOutlined, SettingOutlined, ExportOutlined, UploadOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import AssetPicker from '../../components/AssetPicker'
 import VoicePicker from '../../components/VoicePicker'
 import { useBrandContext } from '../../hooks/useBrands'
+import { normalizeUploadedAsset } from '../../hooks/useMediaAssets'
 import type { GenerationTask, GenerationType, ModelCapability, MediaAsset, PromptRef } from '../../types/api'
 import RetryHint from '../../components/RetryHint'
+import { SubjectPicker } from '../../components/compose/SubjectPicker'
+import { useSubjectList } from '../../hooks/useSubjectList'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -33,12 +36,13 @@ const SUBTYPE_META: Record<string, { category: string; label: string; desc: stri
   tts: { category: 'audio', label: '语音合成', desc: '文本合成语音（语速/音量/情绪可控）' },
   voice_clone: { category: 'audio', label: '声音克隆', desc: '引用音频复刻音色（voice_id 永久复用）' },
   lip_sync: { category: 'video', label: '对口型', desc: '出镜视频 + 音频/文本生成口型匹配成片' },
-  digital_human: { category: 'digital_human', label: '数字人', desc: '人像图 + 文本/音频生成口播视频' },
+  digital_human: { category: 'digital_human', label: '数字人', desc: '已不推荐：请用「拍口播」向导 + 数字分身（reference2video）' },
   subject: { category: 'other', label: '主体创建', desc: '注册数字分身形象，生成视频时可复用同一人物' },
 }
 
 /** 能力名不符或实际走 TTS——卡片隐藏，不向用户展示 */
-const HIDDEN_SUBTYPES = new Set(['text2audio', 'sound_effect'])
+/** 名实不符或已废弃——不在模式卡片/下拉中展示 */
+const HIDDEN_SUBTYPES = new Set(['text2audio', 'sound_effect', 'digital_human'])
 
 const CATEGORIES = [
   { key: 'video', label: '视频', icon: <VideoCameraOutlined /> },
@@ -50,7 +54,7 @@ const CATEGORIES = [
 
 // 傻瓜化分层（08 计划 D1 收敛后口径——与 admin 模式开关同源，是否出现由服务端
 // Enabled 过滤决定）：口播主链五端点为默认集；其余模式服务端默认关闭（admin 可开）
-const TIER_DEFAULT = ['reference2video', 'tts', 'lip_sync', 'voice_clone', 'subject']
+const TIER_DEFAULT = ['reference2video', 'tts', 'voice_clone', 'subject']
 const TIER_ADVANCED: string[] = []
 
 const STATE_META: Record<string, { color: string; label: string }> = {
@@ -201,7 +205,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
   const [offPeak, setOffPeak] = useState(false)
   const [watermark, setWatermark] = useState(false)
   const [taskFilter, setTaskFilter] = useState<string>('all')
-  const [picker, setPicker] = useState<{ mode: 'single' | 'multi'; accept: 'image' | 'audio' | 'any'; key: string; title: string; max?: number } | null>(null)
+  const [picker, setPicker] = useState<{ mode: 'single' | 'multi'; accept: 'image' | 'audio' | 'any'; key: 'refs' | 'subjects'; title: string; max?: number } | null>(null)
 
   // 全局品牌上下文（与内容生成/分发页共享）；本页允许清空=不关联品牌
   const { brands, brandId: ctxBrandId } = useBrandContext()
@@ -220,6 +224,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       return list.some(t => ACTIVE_STATES.includes(t.state)) ? 5000 : false
     },
   })
+  const { ready: readySubjects } = useSubjectList()
 
   const submitMutation = useMutation({
     mutationFn: async (data: Parameters<typeof businessApi.submitGenerationTask>[0]) => {
@@ -264,9 +269,12 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
 
   // 快速开始：点模式卡片 = 自动选好该模式的最佳模型（支持端点最多的），用户只管写提示词
   const pickMode = (st: string) => {
-    // 主体创建 → 资产库一键注册（本页表单已不是主路径）
     if (st === 'subject') {
       navigate('/m/assets?create=subject')
+      return
+    }
+    if (st === 'digital_human' || st === 'lip_sync') {
+      navigate('/m/compose/lipsync')
       return
     }
     const candidates = modelEntries.filter(e => e.endpoints.some(ep => ep.sub_type === st))
@@ -306,9 +314,20 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
   // refs 视图
   const refs: PromptRef[] = (params.refs as PromptRef[]) || []
 
-  // 素材选择回调 → 引用统一入 refs（服务端翻译层按端点映射参数）
-  const onAssetPicked = (assets: MediaAsset[]) => {
-    if (!picker) return
+  const subjectServerId = (() => {
+    const subs = (params.subjects as { server_id?: string }[] | undefined) || []
+    return subs[0]?.server_id || ''
+  })()
+
+  const setSubjectServerId = (serverId: string) => {
+    const sub = readySubjects.find((s) => s.serverId === serverId)
+    setParams((prev) => ({
+      ...prev,
+      subjects: [{ name: sub?.name || '主体', server_id: serverId }],
+    }))
+  }
+
+  const addRefsFromAssets = (assets: MediaAsset[], key: 'refs' | 'subjects') => {
     const newRefs = assets.map(a => ({
       id: a.id,
       name: fileNameOf(a.url),
@@ -317,14 +336,12 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     }))
     setParams(prev => {
       const next = { ...prev }
-      if (picker.key === 'refs') {
+      if (key === 'refs') {
         next.refs = [...(prev.refs || []), ...newRefs]
-        // prompt 末尾追加 @名称（服务端翻译层还原为纯名称）
         const prompt = (prev.prompt as string) || ''
         const marks = newRefs.map(r => `@${r.name}`).join(' ')
         next.prompt = prompt ? `${prompt} ${marks}` : marks
-      } else if (picker.key === 'subjects') {
-        // 主体模式：本次选择作为第一个主体的图
+      } else if (key === 'subjects') {
         const subjects = Array.isArray(prev.subjects) ? (prev.subjects as any[]).map(s => ({ ...s })) : []
         if (subjects[0]) {
           subjects[0].images = (subjects[0].images || []).concat(newRefs.map(r => r.url))
@@ -333,6 +350,12 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       }
       return next
     })
+  }
+
+  // 素材选择回调 → 引用统一入 refs（服务端翻译层按端点映射参数）
+  const onAssetPicked = (assets: MediaAsset[]) => {
+    if (!picker) return
+    addRefsFromAssets(assets, picker.key)
   }
 
   const removeRef = (i: number) => {
@@ -410,6 +433,10 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       if (!hasVideo) { message.warning('请引用一个出镜视频（@视频）'); return }
       const hasAudio = submitRefs.some(r => r.kind === 'audio') || clean.audio_url || clean.text
       if (!hasAudio) { message.warning('请引用语音音频或在上方输入正文文本'); return }
+    }
+    if (subType === 'reference2video') {
+      const subs = (clean.subjects as { server_id?: string }[] | undefined) || []
+      if (!subs[0]?.server_id) { message.warning('请选择数字分身'); return }
     }
     if (!clean.prompt && !clean.text && subType !== 'subject' && subType !== 'multiframe' && subType !== 'lip_sync') {
       if (subType !== 'tts' && subType !== 'voice_clone' && subType !== 'sound_effect') {
@@ -670,6 +697,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       }
       case 'subjects': {
         if (!cap.supports_subjects) return null
+        if (subType === 'reference2video') return null
         const subjects: any[] = (get('subjects') as any[]) || []
         const setSubjects = (next: any[]) => set('subjects', next)
         return (
@@ -749,7 +777,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       case 'text2video': return ['duration', 'resolution', 'aspect', 'audio', 'style', 'movement', 'seed']
       case 'img2video': return ['duration', 'resolution', 'movement', 'seed']
       case 'start_end2video': return ['duration', 'resolution', 'movement', 'seed']
-      case 'reference2video': return ['subjects', 'duration', 'resolution', 'aspect', 'movement', 'seed']
+      case 'reference2video': return ['duration', 'resolution', 'aspect', 'movement', 'seed']
       case 'multiframe': return ['keyframes', 'resolution', 'aspect']
       case 'text2image': return ['seed']
       case 'text2audio': return ['duration', 'seed']
@@ -793,7 +821,14 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
               <Tooltip key={m.sub_type} title={SUBTYPE_META[m.sub_type]?.desc}>
                 <Tag.CheckableTag
                   checked={isActive}
-                  onChange={() => { setSubType(m.sub_type); setParams({}) }}
+                  onChange={() => {
+                    if (m.sub_type === 'lip_sync' || m.sub_type === 'digital_human') {
+                      navigate('/m/compose/lipsync')
+                      return
+                    }
+                    setSubType(m.sub_type)
+                    setParams({})
+                  }}
                   style={{
                     fontSize: 12, padding: '3px 12px', borderRadius: 16,
                     border: isActive ? '1px solid var(--wr-primary)' : '1px solid #e5e7eb',
@@ -807,6 +842,34 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
             )
           })}
         </Space>
+      )}
+
+      {subType === 'reference2video' && cap?.supports_subjects && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ marginBottom: 8 }}>
+            <Text strong style={{ fontSize: 13 }}>数字分身</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+              选已注册分身，提示词中可用 @名称 引用
+            </Text>
+          </div>
+          <SubjectPicker
+            subjects={readySubjects}
+            value={subjectServerId}
+            onChange={setSubjectServerId}
+            emptyHint="还没有可用的数字分身——先去资产库创建"
+          />
+        </div>
+      )}
+
+      {subType === 'lip_sync' && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 14 }}
+          message="对口型推荐走「拍口播」向导"
+          description="五步向导自动串联配音、分身与对口型，比在此手动拼参数更简单。"
+          action={<Button size="small" type="link" onClick={() => navigate('/m/compose/lipsync')}>去拍口播</Button>}
+        />
       )}
 
       {/* 主输入 */}
@@ -848,12 +911,31 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       {/* 参考素材（引用）——即梦式横排 */}
       {cap && refKinds.length > 0 && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
             <Text strong style={{ fontSize: 13 }}>参考素材</Text>
-            <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={openRefPicker}>@ 引用</Button>
+            <Space wrap size={6}>
+              {refKinds.includes('image') && (
+                <Upload
+                  accept="image/png,image/jpeg,image/webp"
+                  showUploadList={false}
+                  multiple
+                  beforeUpload={async (file) => {
+                    try {
+                      const asset = normalizeUploadedAsset(await businessApi.uploadAsset(file))
+                      addRefsFromAssets([asset], 'refs')
+                      message.success('已添加参考图')
+                    } catch { /* */ }
+                    return false
+                  }}
+                >
+                  <Button size="small" icon={<UploadOutlined />}>本地上传</Button>
+                </Upload>
+              )}
+              <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={openRefPicker}>从素材库选</Button>
+            </Space>
           </div>
           {refs.length === 0 ? (
-            <Text type="secondary" style={{ fontSize: 12 }}>从素材库引用图片/音频，提交时自动翻译为参数</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>本地上传或从素材库选择（含 AI 生成图），提交时自动写入参数</Text>
           ) : (
             <Space size={6} wrap>
               {refs.map((r, i) => (
@@ -918,7 +1000,9 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
           </Space>
           <Button
             type="primary" size="large" block icon={<ThunderboltOutlined />}
-            loading={submitMutation.isPending} onClick={submit}
+            loading={submitMutation.isPending}
+            disabled={!model || !subType || !cap}
+            onClick={submit}
             style={{ height: 44, borderRadius: 10, fontSize: 15 }}
           >
             立即生成

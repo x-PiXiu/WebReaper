@@ -1,36 +1,41 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Empty, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Tag, Typography, Upload } from 'antd'
+import { useQueryClient } from '@tanstack/react-query'
+import { Button, Empty, Input, Modal, Popconfirm, Segmented, Space, Tag, Typography, Upload } from 'antd'
 import { message } from '../../../utils/antdApp'
 import {
-  SoundOutlined, PictureOutlined, VideoCameraOutlined, FileTextOutlined, UserOutlined,
+  SoundOutlined, PictureOutlined, VideoCameraOutlined, UserOutlined,
   PlusOutlined, DeleteOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
+import { MODAL_W } from '../../../ui/modalFit'
+import { buildSubjectRegisterPayload } from '../../../api/generationSubmit'
 import { useMediaAssets, MEDIA_ASSETS_QUERY_KEY } from '../../../hooks/useMediaAssets'
-import { GENERATION_TASKS_KEY } from '../../../hooks/useGenerationTasks'
+import { GENERATION_TASKS_KEY, useGenerationTasks } from '../../../hooks/useGenerationTasks'
 import { useBrandContext } from '../../../hooks/useBrands'
-import AssetPicker from '../../../components/AssetPicker'
-import type { GenerationTask, ModelCapability } from '../../../types/api'
-import VoicePicker from '../../../components/VoicePicker'
-import { MODAL_W, modalBodyScroll } from '../../../ui/modalFit'
+import { SubjectGridCard } from '../../../components/compose/SubjectCard'
+import type { MediaAsset } from '../../../types/api'
 import {
-  mergeSubmitParams,
-  submitGenerationTaskCompat,
-  submitUnified,
-} from '../../../api/generationSubmit'
+  listSubjectsFromTasks,
+  parseGenerationTaskParams,
+  type ViduSubject,
+} from '../../../utils/subjectTask'
+import VoicePicker from '../../../components/VoicePicker'
+import { GenerateAssetModal } from '../../../components/assets/GenerateAssetModal'
+import { isAudioMedia, isImageMedia, isVideoMedia, inferMediaKind, mediaAssetsFromGenerationTasks, mergeMediaByUrl } from '../../../utils/generationTask'
+import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
+import { ImageCover } from '../../../components/ImageCover'
+import { VideoFrameCover } from '../../../components/VideoFrameCover'
 
 const { Text } = Typography
 
-type TabKey = 'audio' | 'image' | 'video' | 'article' | 'digital_human'
+type TabKey = 'audio' | 'image' | 'video' | 'digital_human'
 
 const TABS = [
   { value: 'digital_human', label: '数字人', icon: <UserOutlined /> },
   { value: 'video', label: '视频', icon: <VideoCameraOutlined /> },
   { value: 'image', label: '图片', icon: <PictureOutlined /> },
   { value: 'audio', label: '音频', icon: <SoundOutlined /> },
-  { value: 'article', label: '文章', icon: <FileTextOutlined /> },
 ] as const
 
 function formatSize(bytes: number) {
@@ -50,32 +55,10 @@ function timeAgo(iso: string) {
   return `${Math.floor(h / 24)} 天前`
 }
 
-interface ViduSubject {
-  taskId: string
-  state: string
-  name: string
-  serverId: string
-  voiceId: string
-  kind: string
-  hasVideo: boolean
-  imageCount: number
-  errMsg: string
-  createdAt: string
-}
-
-/** 解析任务 params（后端存的是 JSON 字符串） */
-function taskParams(t: GenerationTask): Record<string, any> {
-  if (t.params && typeof t.params === 'object') return t.params as Record<string, any>
-  if (typeof t.params === 'string' && t.params) {
-    try { return JSON.parse(t.params) } catch { return {} }
-  }
-  return {}
-}
-
 /**
- * 资产库：统一媒体库（数字人/视频/图片/音频/文章 5 tab）。
+ * 资产库：统一媒体库（数字人 / 视频 / 图片 / 音频 4 tab）。
  * 数字人 tab = Vidu 主体管理（创建→列表→用于 reference2video 视频生成 @引用）。
- * 其他 tab = 真实数据（MediaAsset 素材/AI 产物 + 作品库文章）。
+ * 其他 tab = 上传素材 + AI 转存产物。
  */
 export default function AssetLibrary() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -84,41 +67,25 @@ export default function AssetLibrary() {
   const [createOpen, setCreateOpen] = useState(false)
   const [generateOpen, setGenerateOpen] = useState(false)
   const [generateType, setGenerateType] = useState<'image' | 'video' | 'audio' | 'voice'>('image')
+  const [previewAsset, setPreviewAsset] = useState<MediaAsset | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: assets = [], isLoading } = useMediaAssets()
+  // 图片/视频/音频：含 AI 转存产物（creation）
+  const mediaOwner = tab === 'image' || tab === 'video' || tab === 'audio' ? 'all' : 'material'
+  const { data: assets = [], isLoading } = useMediaAssets(true, mediaOwner)
 
-  const { data: genTasks = [], refetch: refetchSubjects } = useQuery({
-    queryKey: ['generation-tasks'],
-    queryFn: () => businessApi.listGenerationTasks().then(r => r.tasks).catch(() => [] as GenerationTask[]),
-    enabled: tab === 'digital_human' || tab === 'audio' || generateOpen,
-  })
-  const subjects: ViduSubject[] = useMemo(() => {
-    return (genTasks || [])
-      .filter((t: GenerationTask) => t.sub_type === 'subject')
-      .map((t: GenerationTask) => {
-        const p = taskParams(t)
-        return {
-          taskId: t.id,
-          state: t.state,
-          name: (p?.name as string) || t.id.slice(0, 12),
-          serverId: t.provider_task_id || '',
-          voiceId: (p?.voice_id as string) || '',
-          kind: (p?.kind as string) === 'scene' ? 'scene' : 'person',
-          hasVideo: Array.isArray(p?.videos) && p.videos.length > 0,
-          imageCount: Array.isArray(p?.images) ? p.images.length : 0,
-          errMsg: t.err_msg || '',
-          createdAt: t.created_at,
-        }
-      })
-  }, [genTasks])
+  const { tasks: genTasks = [], refetch: refetchSubjects } = useGenerationTasks()
+  const subjects: ViduSubject[] = useMemo(
+    () => listSubjectsFromTasks(genTasks || []),
+    [genTasks],
+  )
 
   // 我的音色库：声音克隆成功的 voice_id（创建数字人可直接绑定）
   const myVoices = useMemo(() => {
     const ids = new Set<string>()
     for (const t of genTasks || []) {
       if (t.sub_type !== 'voice_clone' || t.state !== 'success') continue
-      const vid = taskParams(t).voice_id
+      const vid = parseGenerationTaskParams(t).voice_id
       if (typeof vid === 'string' && vid) ids.add(vid)
     }
     return Array.from(ids)
@@ -136,26 +103,46 @@ export default function AssetLibrary() {
   }, [searchParams, setSearchParams])
 
   const filtered = useMemo(() => {
-    const prefix = tab === 'audio' ? 'audio/' : tab === 'image' ? 'image/' : tab === 'video' ? 'video/' : ''
-    let list = prefix ? assets.filter(a => a.mime.startsWith(prefix)) : []
     const needle = q.trim().toLowerCase()
-    if (needle) list = list.filter(a => a.url.toLowerCase().includes(needle))
-    return list
-  }, [tab, assets, q])
-
-  const { data: works = [] } = useQuery({
-    queryKey: ['merchant-works'],
-    queryFn: () => businessApi.listWorks().catch(() => []),
-    enabled: tab === 'article',
-  })
-  const articles = useMemo(() => works.filter(w => w.kind === 'article'), [works])
+    if (tab === 'audio') {
+      const fromDisk = assets.filter(a => isAudioMedia(a.mime, a.url, a.type))
+      const fromTasks = mediaAssetsFromGenerationTasks(genTasks, 'audio')
+      let list = mergeMediaByUrl(fromDisk, fromTasks)
+      if (needle) {
+        list = list.filter(a =>
+          a.url.toLowerCase().includes(needle)
+          || (a.name || '').toLowerCase().includes(needle),
+        )
+      }
+      return list
+    }
+    if (tab === 'image') {
+      const fromDisk = assets.filter(a => isImageMedia(a.mime, a.url, a.type))
+      const fromTasks = mediaAssetsFromGenerationTasks(genTasks, 'image')
+      let list = mergeMediaByUrl(fromDisk, fromTasks)
+      if (needle) list = list.filter(a => a.url.toLowerCase().includes(needle) || (a.name || '').toLowerCase().includes(needle))
+      return list
+    }
+    if (tab === 'video') {
+      const fromDisk = assets.filter(a => isVideoMedia(a.mime, a.url, a.type))
+      const fromTasks = mediaAssetsFromGenerationTasks(genTasks, 'video')
+      let list = mergeMediaByUrl(fromDisk, fromTasks)
+      if (needle) {
+        list = list.filter(a =>
+          a.url.toLowerCase().includes(needle)
+          || (a.name || '').toLowerCase().includes(needle),
+        )
+      }
+      return list
+    }
+    return []
+  }, [tab, assets, genTasks, q])
 
   const hint = {
     digital_human: '通过 Vidu 主体 API 创建数字分身——上传形象照/主体视频并绑定音色，视频生成中用 server_id 引用',
     video: 'AI 生成的视频产物（Vidu 视频/数字人视频）',
     image: 'AI 生成的图片 / 上传的素材图（封面/图文创作引用源）',
-    audio: '配音/音效素材（视频创作的音频引用源）',
-    article: '内容合成生成的文章作品（可发布到社媒平台）',
+    audio: '配音/音效素材（含 AI 生成转存与上传文件）',
   }[tab]
 
   return (
@@ -210,52 +197,57 @@ export default function AssetLibrary() {
           </Empty>
         ) : (
           <div className="ip-asset-grid">
-            {subjects.map(s => (
-              <div key={s.taskId} className="ip-asset-card">
-                <div className="ip-asset-cover ip-asset-cover--voice" style={{ justifyContent: 'center', alignItems: 'center' }}>
-                  <UserOutlined style={{ fontSize: 48, color: 'var(--wr-accent)' }} />
-                </div>
-                <div className="ip-asset-body">
-                  <Text strong style={{ fontSize: 14 }}>{s.name}</Text>
-                  <div style={{ marginTop: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <Tag color={s.state === 'success' ? 'green' : s.state === 'failed' ? 'red' : 'processing'}>
-                      {s.state === 'success' ? '就绪' : s.state === 'failed' ? '失败' : '创建中'}
-                    </Tag>
-                    {s.state === 'success' && s.serverId && (
-                      <Tag color="success" style={{ margin: 0 }}>已注册 ✓</Tag>
-                    )}
-                    <Tag style={{ margin: 0 }} color={s.kind === 'scene' ? 'cyan' : undefined}>
-                      {s.kind === 'scene' ? '场景' : s.hasVideo ? `视频主体${s.imageCount > 0 ? '（仅视频生效）' : ''}` : `${s.imageCount} 张图`}
-                    </Tag>
-                    {s.voiceId && <Tag style={{ margin: 0 }} color="purple">音色 {s.voiceId}</Tag>}
-                    <span style={{ color: 'var(--wr-text-secondary)' }}>{timeAgo(s.createdAt)}</span>
-                  </div>
-                  {s.state === 'failed' && s.errMsg && (
-                    <Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 6 }} ellipsis={{ tooltip: s.errMsg }}>{s.errMsg}</Text>
-                  )}
-                  {s.state === 'success' && s.serverId && (
-                    <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Text type="secondary" style={{ fontSize: 12 }} copyable={{ text: s.serverId, tooltips: ['复制 server_id', '已复制'] }}>
-                        {s.serverId.slice(0, 16)}{s.serverId.length > 16 ? '…' : ''}
-                      </Text>
-                    </div>
-                  )}
-                  {s.state === 'success' && (
-                    <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                      {s.kind === 'person' && (
-                        <Button size="small" type="primary"
-                          onClick={() => { window.location.href = `/m/compose/lipsync?subject=${encodeURIComponent(s.serverId)}` }}>
-                          去生成口播
+            {subjects.map((s) => (
+              <SubjectGridCard
+                key={s.taskId}
+                subject={s}
+                timeLabel={timeAgo(s.createdAt)}
+                footer={(
+                  <>
+                    {s.state === 'success' && (
+                      <div className="wr-subject-grid-actions">
+                        {s.kind === 'person' && s.serverId && (
+                          <Button
+                            size="small"
+                            type="primary"
+                            onClick={() => {
+                              window.location.href = `/m/compose/lipsync?subject=${encodeURIComponent(s.serverId)}`
+                            }}
+                          >
+                            拍口播
+                          </Button>
+                        )}
+                        <Button
+                          size="small"
+                          onClick={() => message.info(`server_id：${s.serverId.slice(0, 20)}…`)}
+                        >
+                          用于参考生
                         </Button>
-                      )}
-                      <Button size="small"
-                        onClick={() => message.info(`server_id 已复制——创作页参考生模式主体引用粘贴：${s.serverId.slice(0, 20)}…`)}>
-                        用于参考生
-                      </Button>
+                        <Popconfirm
+                          title="删除这个数字人？"
+                          description="仅移除本地记录，Vidu 侧主体不受影响（官方无删除 API）"
+                          okText="删除"
+                          okButtonProps={{ danger: true }}
+                          cancelText="取消"
+                          onConfirm={async () => {
+                            try {
+                              await businessApi.deleteGenerationTask(s.taskId)
+                              message.success('已删除')
+                              refetchSubjects()
+                            } catch { /* 拦截器已提示 */ }
+                          }}
+                        >
+                          <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                        </Popconfirm>
+                      </div>
+                    )}
+                    {s.state !== 'success' && (
                       <Popconfirm
-                        title="删除这个数字人？"
-                        description="仅移除本地记录，Vidu 侧主体不受影响（官方无删除 API）"
-                        okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
+                        title="删除这条记录？"
+                        description={s.state === 'failed' ? '失败记录删除后不可恢复' : '任务仍在创建中，删除前会尝试取消'}
+                        okText="删除"
+                        okButtonProps={{ danger: true }}
+                        cancelText="取消"
                         onConfirm={async () => {
                           try {
                             await businessApi.deleteGenerationTask(s.taskId)
@@ -266,50 +258,10 @@ export default function AssetLibrary() {
                       >
                         <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                       </Popconfirm>
-                    </div>
-                  )}
-                  {s.state !== 'success' && (
-                    <Popconfirm
-                      title="删除这条记录？"
-                      description={s.state === 'failed' ? '失败记录删除后不可恢复' : '任务仍在创建中，删除前会尝试取消'}
-                      okText="删除" okButtonProps={{ danger: true }} cancelText="取消"
-                      onConfirm={async () => {
-                        try {
-                          await businessApi.deleteGenerationTask(s.taskId)
-                          message.success('已删除')
-                          refetchSubjects()
-                        } catch { /* 拦截器已提示 */ }
-                      }}
-                    >
-                      <Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ marginTop: 8 }} />
-                    </Popconfirm>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      )}
-
-      {tab === 'article' && (
-        articles.length === 0 ? (
-          <Empty style={{ padding: 60 }} description="还没有文章——去内容合成写第一篇">
-            <Button type="primary" onClick={() => window.location.href = '/m/compose/tools?tab=article'}>去写文章</Button>
-          </Empty>
-        ) : (
-          <div className="ip-asset-grid">
-            {articles.map(w => (
-              <div key={w.id} className="ip-asset-card">
-                <div className="ip-asset-cover" style={{ background: 'linear-gradient(145deg, #12121a, #1f2937)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <FileTextOutlined style={{ fontSize: 40, color: 'var(--wr-accent)' }} />
-                </div>
-                <div className="ip-asset-body">
-                  <Text strong style={{ fontSize: 13 }} ellipsis={{ tooltip: w.title }}>{w.title}</Text>
-                  <div style={{ marginTop: 6, fontSize: 12 }}>
-                    <Tag>{w.status === 'published' ? '已发布' : w.status === 'ready' ? '待发布' : '草稿'}</Tag>
-                  </div>
-                </div>
-              </div>
+                    )}
+                  </>
+                )}
+              />
             ))}
           </div>
         )
@@ -318,42 +270,87 @@ export default function AssetLibrary() {
       {(tab === 'video' || tab === 'image' || tab === 'audio') && (
         isLoading ? <Empty description="加载中…" style={{ padding: 60 }} /> :
         filtered.length === 0 ? (
-          <Empty style={{ padding: 60 }} description={`暂无${tab === 'video' ? '视频' : tab === 'image' ? '图片' : '音频'}资产`} />
+          <Empty style={{ padding: 60 }} description={
+            tab === 'audio'
+              ? '暂无音频资产——可点「生成音频」或在内容合成里生成配音'
+              : tab === 'video'
+              ? '暂无视频资产——可点「生成视频」或在口播向导里生成成片片段'
+              : `暂无${tab === 'image' ? '图片' : ''}资产`
+          } />
         ) : (
           <div className="ip-asset-grid">
-            {filtered.map(a => (
+            {filtered.map(a => {
+              const kind = inferMediaKind(a.mime, a.url, a.type)
+              return (
               <div key={a.id} className="ip-asset-card">
                 <div
-                  className={`ip-asset-cover ${a.mime.startsWith('audio/') ? 'ip-asset-cover--voice' : ''}`}
-                  style={a.mime.startsWith('image/') ? { background: `linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.45)), url(${a.url}) center/cover`, display: 'flex', alignItems: 'flex-end', padding: 12 } : undefined}
+                  className={`ip-asset-cover ${kind === 'audio' ? 'ip-asset-cover--voice' : ''}`}
+                  style={{
+                    minHeight: kind === 'audio' ? 120 : undefined,
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    justifyContent: 'center',
+                    position: 'relative',
+                    padding: 0,
+                    overflow: 'hidden',
+                  }}
                 >
-                  <Tag style={{ margin: 0 }} color={a.owner_type === 'creation' ? 'cyan' : 'blue'}>
+                  {kind === 'image' && <ImageCover url={a.url} />}
+                  {kind === 'video' && (
+                    <VideoFrameCover url={a.url} poster={a.cover_url} />
+                  )}
+                  {kind === 'audio' && (
+                    <SoundOutlined style={{ fontSize: 32, color: 'rgba(255,255,255,0.85)', margin: 'auto' }} />
+                  )}
+                  <Tag style={{ margin: 0, position: 'absolute', left: 12, bottom: 12, zIndex: 1 }} color={a.owner_type === 'creation' ? 'cyan' : 'blue'}>
                     {a.owner_type === 'creation' ? 'AI 产物' : '上传素材'}
                   </Tag>
+                  {(kind === 'image' || kind === 'video') && (
+                    <div
+                      aria-hidden
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.55))',
+                        pointerEvents: 'none',
+                        zIndex: 0,
+                      }}
+                    />
+                  )}
                 </div>
                 <div className="ip-asset-body">
-                  <Text strong style={{ fontSize: 13 }} ellipsis={{ tooltip: a.url }}>
-                    {a.url.split('/').pop()?.split('?')[0] || '资产'}
+                  <Text strong style={{ fontSize: 13 }} ellipsis={{ tooltip: a.name || a.url }}>
+                    {a.name || a.url.split('/').pop()?.split('?')[0] || '资产'}
                   </Text>
                   <div style={{ display: 'flex', gap: 10, marginTop: 6, fontSize: 12, color: 'var(--wr-text-secondary)' }}>
-                    <span>{a.mime.split('/')[1]?.toUpperCase()}</span>
+                    <span>{(a.mime.split('/')[1] || kind).toUpperCase()}</span>
                     <span>{formatSize(a.size_bytes)}</span>
                     <span>{timeAgo(a.created_at)}</span>
                   </div>
                   <Space style={{ marginTop: 10 }}>
-                    <Button size="small" onClick={() => window.open(a.url, '_blank', 'noopener')}>
-                      {a.mime.startsWith('image/') ? '查看' : '播放'}
+                    <Button size="small" onClick={() => setPreviewAsset(a)}>
+                      {kind === 'image' ? '查看' : '播放'}
                     </Button>
                     <Button size="small" type="text" danger onClick={async () => {
+                      if (a.id.startsWith('gen-task:')) {
+                        message.info('该条目来自生成任务记录，请在工作台任务列表管理')
+                        return
+                      }
                       try { await businessApi.deleteAsset(a.id); message.success('已删除'); queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY }) } catch { }
                     }}>删除</Button>
                   </Space>
                 </div>
               </div>
-            ))}
+            )})}
           </div>
         )
       )}
+
+      <MediaPreviewModal
+        open={!!previewAsset}
+        asset={previewAsset}
+        onClose={() => setPreviewAsset(null)}
+      />
 
       <CreateSubjectModal open={createOpen} voices={myVoices} onClose={() => setCreateOpen(false)}
         onCreated={() => { refetchSubjects(); message.success('数字人创建成功') }} />
@@ -366,7 +363,8 @@ export default function AssetLibrary() {
         onClose={() => setGenerateOpen(false)}
         onGenerated={() => {
           queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY })
-          message.success('素材已生成并入库')
+          queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
+          refetchSubjects()
         }}
       />
     </div>
@@ -401,37 +399,55 @@ function CreateSubjectModal({ open, voices, onClose, onCreated: _onCreated }: {
 }) {
   const [name, setName] = useState('')
   const [kind, setKind] = useState<'person' | 'scene'>('person')
-  const [imageUrls, setImageUrls] = useState<string[]>([])
-  const [videoUrl, setVideoUrl] = useState('')
+  const [imageAssets, setImageAssets] = useState<Array<{ id: string; url: string }>>([])
+  const [videoAsset, setVideoAsset] = useState<{ id: string; url: string } | null>(null)
   const [voiceId, setVoiceId] = useState('')
   const [creating, setCreating] = useState(false)
   const { brandId } = useBrandContext()
   const queryClient = useQueryClient()
 
+  const resetForm = () => {
+    setName('')
+    setKind('person')
+    setImageAssets([])
+    setVideoAsset(null)
+    setVoiceId('')
+  }
+
   const handleCreate = async () => {
     if (!name.trim()) { message.warning(kind === 'scene' ? '请输入场景名称' : '请输入数字人名称'); return }
-    if (imageUrls.length === 0 && !videoUrl) {
+    if (!brandId) { message.warning('请先在顶栏或人设页选择品牌/人设'); return }
+    if (imageAssets.length === 0 && !videoAsset) {
       message.warning(kind === 'scene' ? '请上传 1-3 张场景照片' : '请至少上传 1 张形象照或 1 个主体视频'); return
     }
     setCreating(true)
     try {
-      // 数字分身主体注册（Vidu /ent/v2/subjects 同步端点——一键傻瓜式）：
-      // 形象照已上传素材库（URL 直传），name + voice_id 一并注册，server_id 落任务产物
-      const task = await businessApi.submitGeneration({
-        brand_id: brandId || '',
-        text: name.trim(),
-        materials: imageUrls,
-        sub_type: 'subject',
-        params: voiceId ? { voice_id: voiceId } : undefined,
-      })
+      const task = await businessApi.submitGeneration(buildSubjectRegisterPayload({
+        brand_id: brandId,
+        name: name.trim(),
+        imageMaterialIds: imageAssets.map((a) => a.id),
+        imageUrls: imageAssets.map((a) => a.url),
+        videoUrl: videoAsset?.url,
+        voice_id: voiceId || undefined,
+      }))
       message.success(`数字分身「${name.trim()}」已创建（任务 ${task.id}）——生成视频时可直接复用该形象`)
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
+      resetForm()
       onClose()
     } catch { /* 拦截器已提示 */ } finally { setCreating(false) }
   }
 
   return (
-    <Modal open={open} title="创建主体" okText="创建" cancelText="取消" onOk={handleCreate} onCancel={onClose} confirmLoading={creating} width={MODAL_W.md}>
+    <Modal
+      open={open}
+      title="创建主体"
+      okText="创建"
+      cancelText="取消"
+      onOk={handleCreate}
+      onCancel={() => { resetForm(); onClose() }}
+      confirmLoading={creating}
+      width={MODAL_W.md}
+    >
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
         <Segmented
           value={kind} onChange={v => setKind(v as 'person' | 'scene')}
@@ -458,16 +474,19 @@ function CreateSubjectModal({ open, voices, onClose, onCreated: _onCreated }: {
             customRequest={async ({ file, onSuccess, onError }) => {
               try {
                 const r = await businessApi.uploadAsset(file as File)
-                setImageUrls(prev => [...prev, r.url])
+                setImageAssets((prev) => [...prev, { id: r.id, url: r.url }])
                 onSuccess?.(r)
               } catch (e) { onError?.(e as Error) }
             }}
             onRemove={(file) => {
-              const url = (file.response as any)?.url
-              if (url) setImageUrls(prev => prev.filter(u => u !== url))
+              const id = (file.response as { id?: string } | undefined)?.id
+              const url = (file.response as { url?: string } | undefined)?.url
+              if (id || url) {
+                setImageAssets((prev) => prev.filter((a) => a.id !== id && a.url !== url))
+              }
             }}
           >
-            {imageUrls.length < 3 && <div><PlusOutlined /><div style={{ fontSize: 12, marginTop: 4 }}>上传形象照</div></div>}
+            {imageAssets.length < 3 && <div><PlusOutlined /><div style={{ fontSize: 12, marginTop: 4 }}>上传形象照</div></div>}
           </Upload>
         </div>
         {kind === 'person' && (
@@ -480,13 +499,13 @@ function CreateSubjectModal({ open, voices, onClose, onCreated: _onCreated }: {
             customRequest={async ({ file, onSuccess, onError }) => {
               try {
                 const r = await businessApi.uploadAsset(file as File)
-                setVideoUrl(r.url)
+                setVideoAsset({ id: r.id, url: r.url })
                 onSuccess?.(r)
               } catch (e) { onError?.(e as Error) }
             }}
-            onRemove={() => setVideoUrl('')}
+            onRemove={() => setVideoAsset(null)}
           >
-            <Button icon={<VideoCameraOutlined />}>{videoUrl ? '重新上传' : '上传视频（mp4/avi/mov）'}</Button>
+            <Button icon={<VideoCameraOutlined />}>{videoAsset ? '重新上传' : '上传视频（mp4/avi/mov）'}</Button>
           </Upload>
         </div>
         )}
@@ -511,473 +530,3 @@ function CreateSubjectModal({ open, voices, onClose, onCreated: _onCreated }: {
   )
 }
 
-/** 生成素材弹窗（居中）：参数由 listGenerationTypes 能力向量驱动，对齐 Vidu 端点校验 */
-function GenerateAssetModal({ open, type, myVoices = [], onClose, onGenerated }: {
-  open: boolean
-  type: 'image' | 'video' | 'audio' | 'voice'
-  myVoices?: string[]
-  onClose: () => void
-  onGenerated: () => void
-}) {
-  const { brandId } = useBrandContext()
-  const [text, setText] = useState('')
-  const [model, setModel] = useState('')
-  const [duration, setDuration] = useState<number>()
-  const [resolution, setResolution] = useState('')
-  const [aspectRatio, setAspectRatio] = useState('')
-  const [refImages, setRefImages] = useState<{ id: string; url: string }[]>([])
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [voiceId, setVoiceId] = useState('')
-  const [audioFile, setAudioFile] = useState<File | null>(null)
-  const [voiceName, setVoiceName] = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [taskId, setTaskId] = useState<string | null>(null)
-  const [taskState, setTaskState] = useState<string | null>(null)
-
-  const subType = type === 'image' ? 'text2image'
-    : type === 'video' ? 'text2video'
-    : type === 'audio' ? 'tts'
-    : 'voice_clone'
-
-  const { data: types = [], isLoading: typesLoading } = useQuery({
-    queryKey: ['generation-types'],
-    queryFn: () => businessApi.listGenerationTypes().then(r => r.types),
-    enabled: open,
-  })
-
-  const models = useMemo(() => {
-    const t = types.find(x => x.sub_type === subType)
-    return t?.models || []
-  }, [types, subType])
-
-  const cap: ModelCapability | undefined = useMemo(() => {
-    const entry = models.find(m => m.model === model) || models[0]
-    return entry?.capability
-  }, [models, model])
-
-  // 打开时重置；模型列表到位后选默认并回填能力默认值
-  useEffect(() => {
-    if (!open) return
-    setText('')
-    setVoiceId('')
-    setAudioFile(null)
-    setVoiceName('')
-    setRefImages([])
-    setTaskId(null)
-    setTaskState(null)
-    setGenerating(false)
-  }, [open, type])
-
-  useEffect(() => {
-    if (!open || models.length === 0) return
-    const preferred = type === 'image'
-      ? (models.find(m => m.model === 'viduq2') || models[0])
-      : models[0]
-    setModel(preferred.model)
-    const c = preferred.capability
-    const [dMin, dMax] = c.durations || [0, 0]
-    if (dMax > 0) {
-      const def = dMin === dMax ? dMin : Math.min(Math.max(4, dMin), dMax)
-      setDuration(def)
-    } else {
-      setDuration(undefined)
-    }
-    setResolution(c.resolutions?.[0] || '')
-    setAspectRatio(c.aspect_ratios?.[0] || (type === 'video' ? '16:9' : ''))
-  }, [open, type, models])
-
-  const title = type === 'image' ? '生成图片'
-    : type === 'video' ? '生成视频'
-    : type === 'audio' ? '生成配音'
-    : '克隆音色'
-
-  const lead = type === 'image' ? '一句话描述画面——可选参考图，结果自动入库供封面/图文引用'
-    : type === 'video' ? '文生短视频——时长、清晰度与比例按当前模型能力可选'
-    : type === 'audio' ? '选音色 + 文案，合成可复用的配音素材'
-    : '上传一段人声，克隆后可在配音/数字人中反复使用'
-
-  const maxPrompt = cap?.max_prompt_len
-    || (type === 'image' ? 2000 : type === 'voice' ? 1000 : type === 'audio' ? 10000 : 5000)
-
-  const imageNeedsRef = model === 'viduq1'
-
-  const resetForAnother = () => {
-    setTaskId(null)
-    setTaskState(null)
-  }
-
-  const handleGenerate = async () => {
-    let voiceCloneId: string | undefined
-    if (type === 'voice') {
-      if (!audioFile) { message.warning('请上传参考音频'); return }
-      if (!text.trim()) { message.warning('请输入试听文本'); return }
-      voiceCloneId = (voiceName.trim() || `voice_${Date.now().toString(36)}`).replace(/[^a-zA-Z0-9_-]/g, '_')
-      if (!/^[a-zA-Z]/.test(voiceCloneId) || voiceCloneId.length < 8) {
-        message.warning('音色 ID 需以英文字母开头，且至少 8 位（字母/数字/-/_）')
-        return
-      }
-    } else if (!text.trim()) {
-      message.warning(type === 'audio' ? '请输入要合成的文案' : '请输入描述')
-      return
-    }
-    if ((type === 'image' || type === 'video') && models.length === 0) {
-      message.warning('当前未开通对应生成能力，请联系管理员')
-      return
-    }
-    if (type === 'audio' && !voiceId) {
-      // 统一 submit 暂不透传音色；不阻断，用系统默认
-    }
-    if (type === 'image' && imageNeedsRef && refImages.length === 0) {
-      message.warning('当前模型需要至少 1 张参考图')
-      return
-    }
-    if (!brandId) {
-      message.warning('请先选择人设/品牌')
-      return
-    }
-
-    setGenerating(true)
-    try {
-      const effectiveModel = model || models[0]?.model
-
-      let result: GenerationTask
-      if (type === 'image') {
-        result = await submitGenerationTaskCompat({
-          brand_id: brandId,
-          sub_type: 'text2image',
-          model: effectiveModel || undefined,
-          params: { prompt: text.trim() },
-          refs: refImages.map((r, i) => ({
-            id: r.id,
-            url: r.url,
-            kind: 'image' as const,
-            name: r.url.split('/').pop() || `ref-${i + 1}`,
-          })),
-        })
-      } else if (type === 'video') {
-        result = await submitUnified({
-          brand_id: brandId,
-          text: text.trim(),
-          type: 'video',
-          duration: duration || undefined,
-          quality: resolution || undefined,
-          aspect_ratio: aspectRatio || undefined,
-          params: mergeSubmitParams(effectiveModel ? { model: effectiveModel } : undefined),
-        })
-      } else if (type === 'audio') {
-        result = await submitUnified({
-          brand_id: brandId,
-          text: text.trim(),
-          type: 'audio',
-          params: mergeSubmitParams(
-            effectiveModel ? { model: effectiveModel } : undefined,
-            voiceId ? { voice_setting_voice_id: voiceId } : undefined,
-          ),
-        })
-      } else {
-        const uploaded = await businessApi.uploadAsset(audioFile!)
-        result = await submitUnified({
-          brand_id: brandId,
-          text: text.trim(),
-          type: 'voice',
-          materials: [uploaded.id],
-          params: mergeSubmitParams({ voice_id: voiceCloneId }),
-        })
-      }
-
-      setTaskId(result.id)
-      setTaskState(result.state)
-      message.success('任务已提交')
-      if (result.state === 'success') {
-        onGenerated()
-      } else {
-        pollTask(result.id)
-      }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : ''
-      if (msg && !msg.includes('配额')) message.error(msg)
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  const pollTask = async (id: string) => {
-    const poll = async () => {
-      try {
-        const task = await businessApi.getGenerationTask(id)
-        setTaskState(task.state)
-        if (task.state === 'success') {
-          message.success('生成完成')
-          onGenerated()
-          return
-        }
-        if (task.state === 'failed' || task.state === 'cancelled') {
-          message.error(task.err_msg || '生成失败')
-          return
-        }
-        setTimeout(poll, 2800)
-      } catch {
-        setTimeout(poll, 4000)
-      }
-    }
-    setTimeout(poll, 2800)
-  }
-
-  const busy = generating || (!!taskId && taskState !== 'success' && taskState !== 'failed' && taskState !== 'cancelled')
-
-  return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      width={MODAL_W.lg}
-      destroyOnHidden
-      title={title}
-      styles={{ body: { ...modalBodyScroll.body, paddingTop: 8 } }}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-          <Button onClick={onClose}>{taskState === 'success' ? '关闭' : '取消'}</Button>
-          <Space>
-            {taskState === 'success' && (
-              <Button onClick={resetForAnother}>再生成一份</Button>
-            )}
-            <Button
-              type="primary"
-              className="ip-btn-primary"
-              loading={generating}
-              disabled={busy && taskState !== 'failed'}
-              onClick={handleGenerate}
-            >
-              {generating ? '提交中…' : taskId && busy ? '生成中…' : taskState === 'failed' ? '重试' : '开始生成'}
-            </Button>
-          </Space>
-        </div>
-      }
-    >
-      <p style={{ color: 'var(--wr-text-secondary)', fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>{lead}</p>
-
-      {typesLoading ? (
-        <Text type="secondary">加载模型能力…</Text>
-      ) : models.length === 0 && (type === 'image' || type === 'video') ? (
-        <Alert type="warning" showIcon message="未开通此生成能力" description="管理后台需启用对应端点模型后才能生成。" />
-      ) : (
-        <Space direction="vertical" size={18} style={{ width: '100%' }}>
-          {(type === 'image' || type === 'video' || type === 'audio') && models.length > 1 && (
-            <div>
-              <Text strong style={{ fontSize: 13 }}>模型</Text>
-              <Select
-                style={{ width: '100%', marginTop: 8 }}
-                value={model || models[0]?.model}
-                onChange={setModel}
-                disabled={busy}
-                options={models.map(m => ({
-                  value: m.model,
-                  label: `${m.model}${m.capability?.family ? ` · ${m.capability.family}` : ''}`,
-                }))}
-              />
-            </div>
-          )}
-
-          <div>
-            <Text strong style={{ fontSize: 13 }}>
-              {type === 'audio' ? '合成文案' : type === 'voice' ? '试听文案' : '画面描述'}
-            </Text>
-            <Input.TextArea
-              style={{ marginTop: 8 }}
-              placeholder={
-                type === 'image' ? '例如：午市套餐平铺在木质餐桌上，自然光，竖版种草风，无水印'
-                  : type === 'video' ? '例如：咖啡从拉花杯缓缓倒出，镜头缓慢推进，暖色调'
-                  : type === 'audio' ? '例如：欢迎光临，今日午市套餐限时优惠…'
-                  : '用这段话试听克隆音色，如：你好，欢迎来到我们的门店'
-              }
-              autoSize={{ minRows: 4, maxRows: 8 }}
-              showCount
-              maxLength={maxPrompt}
-              value={text}
-              onChange={e => setText(e.target.value)}
-              disabled={busy}
-            />
-          </div>
-
-          {type === 'video' && cap && (
-            <div style={{
-              padding: 14,
-              borderRadius: 12,
-              background: 'var(--wr-bg-elevated)',
-              border: '1px solid var(--wr-border)',
-            }}>
-              <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>成片参数</Text>
-              <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                {(() => {
-                  const [dMin, dMax] = cap.durations || [0, 0]
-                  if (dMax <= 0) return null
-                  if (dMin === dMax) {
-                    return <Text type="secondary" style={{ fontSize: 12 }}>时长固定 {dMin} 秒</Text>
-                  }
-                  return (
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>时长（{dMin}–{dMax} 秒）</Text>
-                      <div style={{ marginTop: 6 }}>
-                        <InputNumber
-                          min={dMin}
-                          max={dMax}
-                          value={duration}
-                          onChange={v => setDuration(typeof v === 'number' ? v : dMin)}
-                          disabled={busy}
-                          addonAfter="秒"
-                          style={{ width: 140 }}
-                        />
-                      </div>
-                    </div>
-                  )
-                })()}
-                {(cap.resolutions?.length || 0) > 0 && (
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>清晰度</Text>
-                    <Segmented
-                      value={resolution || cap.resolutions![0]}
-                      onChange={v => setResolution(String(v))}
-                      options={cap.resolutions!.map(r => ({ value: r, label: r }))}
-                      disabled={busy}
-                    />
-                  </div>
-                )}
-                {(cap.aspect_ratios?.length || 0) > 0 && (
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>画面比例</Text>
-                    <Segmented
-                      value={aspectRatio || cap.aspect_ratios![0]}
-                      onChange={v => setAspectRatio(String(v))}
-                      options={cap.aspect_ratios!.map(r => ({ value: r, label: r }))}
-                      disabled={busy}
-                    />
-                  </div>
-                )}
-              </Space>
-            </div>
-          )}
-
-          {type === 'image' && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <Text strong style={{ fontSize: 13 }}>
-                  参考图{imageNeedsRef ? '（必填）' : '（可选）'}
-                </Text>
-                <Button size="small" type="dashed" icon={<PlusOutlined />} disabled={busy || refImages.length >= 7} onClick={() => setPickerOpen(true)}>
-                  从素材库选
-                </Button>
-              </div>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                {imageNeedsRef ? '当前模型需 1–7 张参考图' : '不传则为纯文生图；最多 7 张'}
-              </Text>
-              {refImages.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未选参考图" style={{ margin: '8px 0' }} />
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {refImages.map((img, i) => (
-                    <div key={img.id + i} style={{ position: 'relative', width: 72, height: 72 }}>
-                      <img src={img.url} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--wr-border)' }} />
-                      <Button
-                        size="small"
-                        type="text"
-                        danger
-                        icon={<DeleteOutlined />}
-                        disabled={busy}
-                        style={{ position: 'absolute', top: -6, right: -6, background: 'var(--wr-bg)', borderRadius: '50%' }}
-                        onClick={() => setRefImages(prev => prev.filter((_, j) => j !== i))}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {type === 'audio' && (
-            <div>
-              <Text strong style={{ fontSize: 13 }}>音色</Text>
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginTop: 8, marginBottom: 8 }}
-                message="已选音色将通过 voice_setting_voice_id 提交；未选则使用系统默认"
-              />
-              <div style={{ marginTop: 8 }}>
-                <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} />
-              </div>
-            </div>
-          )}
-
-          {type === 'voice' && (
-            <>
-              <div>
-                <Text strong style={{ fontSize: 13 }}>音色 ID</Text>
-                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                  英文字母开头，8–256 位；留空则自动生成
-                </Text>
-                <Input
-                  style={{ marginTop: 8 }}
-                  placeholder="如：shop_host_01"
-                  value={voiceName}
-                  onChange={e => setVoiceName(e.target.value)}
-                  disabled={busy}
-                />
-              </div>
-              <div>
-                <Text strong style={{ fontSize: 13 }}>参考人声</Text>
-                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4, marginBottom: 8 }}>
-                  mp3 / wav / m4a，约 10 秒–5 分钟
-                </Text>
-                <Upload
-                  maxCount={1}
-                  accept="audio/mp3,audio/wav,audio/m4a,audio/mpeg"
-                  beforeUpload={(file) => { setAudioFile(file); return false }}
-                  onRemove={() => setAudioFile(null)}
-                  disabled={busy}
-                  fileList={audioFile ? [{ uid: '-1', name: audioFile.name, status: 'done' }] : []}
-                >
-                  <Button icon={<SoundOutlined />}>{audioFile ? '重新上传' : '上传参考音频'}</Button>
-                </Upload>
-              </div>
-            </>
-          )}
-
-          {taskId && (
-            <div style={{
-              padding: '12px 14px',
-              borderRadius: 10,
-              background: 'var(--wr-bg-elevated)',
-              border: '1px solid var(--wr-border)',
-            }}>
-              <Space wrap>
-                <Tag color={
-                  taskState === 'success' ? 'success'
-                    : taskState === 'failed' || taskState === 'cancelled' ? 'error'
-                    : 'processing'
-                }>
-                  {taskState === 'success' ? '已完成'
-                    : taskState === 'failed' ? '失败'
-                    : taskState === 'cancelled' ? '已取消'
-                    : '生成中'}
-                </Tag>
-                <Text type="secondary" style={{ fontSize: 12 }}>完成后会自动写入素材库</Text>
-              </Space>
-            </div>
-          )}
-        </Space>
-      )}
-
-      <AssetPicker
-        open={pickerOpen}
-        mode="multi"
-        accept="image"
-        title="选择参考图"
-        max={7}
-        onClose={() => setPickerOpen(false)}
-        onSelect={(assets) => {
-          setRefImages(prev => [...prev, ...assets.map(a => ({ id: a.id, url: a.url }))].slice(0, 7))
-          setPickerOpen(false)
-        }}
-      />
-    </Modal>
-  )
-}

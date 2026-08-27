@@ -1,8 +1,9 @@
 // Package works 实现作品库聚合用例（我的作品页——"我的创作资产全景"）。
 //
-// 三源合并（获客智能体作品语义 = 做出来的东西，草稿到发布全貌）：
+// 三源合并（获客智能体作品语义 = 可发布成片，非素材库中间产物）：
 //  1. 文章：OptimizedContent（draft/approved → 草稿；关联发布记录 → 已发布）
-//  2. 多媒体产物：GenerationTask（success 状态的 creations——视频/图片/音频）
+//  2. 成片：GenerationTask（success 且为 deliverable 成片——lip_sync / reference2video / digital_human 等）
+//     素材库文生图/TTS/片段等 success 任务不进作品库（见 isDeliverableTask）
 //  3. 发布状态：PublishJob 按 content_id（文章）与 media_urls 交集（多媒体）关联
 //  4. 互动数据：video_metrics 最新快照（有则填充——"有就显示没有就不显示"）
 package works
@@ -130,12 +131,15 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 		}
 	}
 
-	// 源 2：多媒体产物（success 任务的 creations）
+	// 源 2：可发布成片（success 且非素材库中间产物）
 	tasks, err := uc.taskRepo.List(ctx, tenantID, 200)
 	if err == nil {
 		for _, t := range tasks {
 			if t.State != entity.TaskStateSuccess {
 				continue // 生成中/失败的任务不进作品库（任务列表页管）
+			}
+			if !isDeliverableTask(t) {
+				continue // 文生图/TTS/素材片段等仅进素材库
 			}
 			creations := parseCreations(t.CreationsJSON)
 			if len(creations) == 0 {
@@ -200,6 +204,47 @@ func parseCreations(raw string) []struct{ URL, CoverURL string } {
 		}
 	}
 	return out
+}
+
+// materialSubTypes 素材库生成类端点——产物仅进素材库，不进「我的作品」。
+var materialSubTypes = map[string]bool{
+	"text2image": true, "tts": true, "text2audio": true, "sound_effect": true,
+	"voice_clone": true, "subject": true, "text2video": true, "img2video": true,
+	"start_end2video": true, "multiframe": true,
+}
+
+// deliverableSubTypes 工作台成片类端点——可进「我的作品」待发布。
+var deliverableSubTypes = map[string]bool{
+	"lip_sync": true, "reference2video": true, "digital_human": true,
+}
+
+// isDeliverableTask 判断 success 生成任务是否属于可发布成片（非素材库中间产物）。
+func isDeliverableTask(t entity.GenerationTask) bool {
+	var params map[string]any
+	_ = json.Unmarshal([]byte(t.ParamsJSON), &params)
+	if v, ok := params["deliverable"]; ok {
+		if b, ok := v.(bool); ok && b {
+			return true
+		}
+	}
+	if v, ok := params["work_product"]; ok {
+		if b, ok := v.(bool); ok && b {
+			return true
+		}
+	}
+	sub := strings.ToLower(strings.TrimSpace(t.SubType))
+	if sub == "" {
+		if s, ok := params["__sub_type"].(string); ok {
+			sub = strings.ToLower(strings.TrimSpace(s))
+		}
+	}
+	if deliverableSubTypes[sub] {
+		return true
+	}
+	if materialSubTypes[sub] {
+		return false
+	}
+	return false
 }
 
 // titleFromTask 从任务参数提炼标题（prompt 前缀；无则按类型兜底）。

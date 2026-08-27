@@ -11,11 +11,26 @@ export function retryHintLabel(code?: string): string | undefined {
   return code ? RETRY_HINT_META[code]?.label : undefined
 }
 
-/** 失败 toast 文案：优先 err_msg，其次 retry_hint 建议 */
-export function retryFailureMessage(task: { err_msg?: string; retry_hint?: string; state?: string }, prefix = '失败') {
+/** 失败 toast 文案：优先 err_msg，其次 err_code，再 retry_hint 建议 */
+export function retryFailureMessage(
+  task: { err_msg?: string; err_code?: string; retry_hint?: string; state?: string },
+  prefix = '失败',
+) {
   const hint = retryHintLabel(task.retry_hint)
-  const detail = task.err_msg || hint || task.state || '未知错误'
-  return hint && task.err_msg ? `${prefix}：${task.err_msg}（${hint}）` : `${prefix}：${detail}`
+  const msg = (task.err_msg || '').trim()
+  const code = (task.err_code || '').trim()
+  const detail = msg && msg !== '生成失败'
+    ? msg
+    : code
+      ? `错误码 ${code}`
+      : hint || task.state || '未知错误'
+  if (hint && msg && msg !== '生成失败') {
+    return `${prefix}：${msg}（${hint}）`
+  }
+  if (hint && code && !msg) {
+    return `${prefix}：${detail}（${hint}）`
+  }
+  return `${prefix}：${detail}`
 }
 
 /**

@@ -2,6 +2,7 @@
  * 统一生成接口错误友好化（对照 Docs/Plans/16 BE-GEN-*）。
  * 拦截器与页面 catch 共用——把后端原始 msg 译成可操作的提示。
  */
+import { message } from './antdApp'
 export function friendlyGenerationError(raw: string | undefined | null): string {
   const msg = (raw || '').trim()
   if (!msg) return '生成失败，请稍后重试'
@@ -50,4 +51,15 @@ export function checkMaterialFileSize(file: File): { ok: boolean; warning?: stri
     }
   }
   return { ok: true }
+}
+
+/** 页面 catch：API 错误通常已由 axios 拦截器 toast；仅补充本地/非标准错误 */
+export function catchGenerationError(e: unknown): void {
+  const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : ''
+  if (!raw || raw === '配额已用完') return
+  if (/请先|需要|未选择|未启用/i.test(raw)) {
+    message.warning(raw)
+    return
+  }
+  message.error(friendlyGenerationError(raw))
 }

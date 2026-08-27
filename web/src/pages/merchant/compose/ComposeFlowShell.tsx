@@ -1,8 +1,9 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Modal, Segmented } from 'antd'
 import { MODAL_W } from '../../../ui/modalFit'
 import { EyeOutlined } from '@ant-design/icons'
+import { ComposeFlowFooter } from '../../../components/compose/ComposeFlowFooter'
 import type { FlowStepDef } from '../../../config/product'
 import type { ComposeTrack } from '../../../store/composeDraft'
 
@@ -112,22 +113,15 @@ export function ComposeFlowShell({
             <p className="cf-main-tip">{step.tip}</p>
           </div>
           <div className="cf-workspace">{children}</div>
-          <footer className="cf-foot cf-foot-inset">
-            <button type="button" className="cf-btn-ghost" onClick={onBack}>
-              ← {backLabel || (stepIndex === 0 ? '返回工作台' : steps[stepIndex - 1].label)}
-            </button>
-            <div className="cf-foot-right">
-              {nextHint && nextDisabled ? <span className="cf-hint">{nextHint}</span> : null}
-              <button
-                type="button"
-                className="cf-btn-next"
-                disabled={nextDisabled || nextLoading}
-                onClick={onNext}
-              >
-                {nextLoading ? '处理中…' : step.nextLabel}
-              </button>
-            </div>
-          </footer>
+          <ComposeFlowFooter
+            onBack={onBack}
+            backLabel={backLabel || (stepIndex === 0 ? '返回工作台' : steps[stepIndex - 1].label)}
+            onNext={onNext}
+            nextLabel={step.nextLabel}
+            nextDisabled={nextDisabled}
+            nextHint={nextHint}
+            nextLoading={nextLoading}
+          />
         </main>
 
         <aside className="cf-preview" aria-label="预览区">

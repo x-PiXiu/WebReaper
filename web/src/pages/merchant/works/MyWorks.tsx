@@ -4,8 +4,13 @@ import { useQuery } from '@tanstack/react-query'
 import { Button, Empty, Input, Segmented, Space, Tag, Typography } from 'antd'
 import { PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
-import RetryHint from '../../../components/RetryHint'
-import type { WorkItem } from '../../../types/api'
+import { GenerationFailedBar } from '../../../components/compose/GenerationFailedBar'
+import { retryFailureMessage } from '../../../components/RetryHint'
+import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
+import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
+import { VideoFrameCover } from '../../../components/VideoFrameCover'
+import { ImageCover } from '../../../components/ImageCover'
+import type { GenerationTask, MediaAsset, WorkItem } from '../../../types/api'
 
 const { Text } = Typography
 
@@ -44,11 +49,9 @@ export default function MyWorks() {
   const navigate = useNavigate()
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
+  const [previewAsset, setPreviewAsset] = useState<MediaAsset | null>(null)
 
-  const { data: works = [], isLoading } = useQuery({
-    queryKey: ['merchant-works'],
-    queryFn: () => businessApi.listWorks().catch((): WorkItem[] => []),
-  })
+  const { works = [], isLoading } = usePublishableWorks()
   const { data: failedTasks = [] } = useQuery({
     queryKey: ['generation-tasks'],
     queryFn: () => businessApi.listGenerationTasks()
@@ -72,7 +75,7 @@ export default function MyWorks() {
         <div>
           <p className="ip-kicker">Library</p>
           <h1>我的作品</h1>
-          <p className="ip-lead">文章、视频图片与成片——待发布可直达发布中心</p>
+          <p className="ip-lead">内容合成产出的可发布成片与文章——待发布可直达发布中心</p>
         </div>
         <Button type="primary" size="large" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => navigate('/m/compose')}>
           去内容合成
@@ -106,15 +109,30 @@ export default function MyWorks() {
             const kd = KIND_CONFIG[w.kind] || { label: w.kind, emoji: '📦' }
             return (
               <div key={w.id} className="ip-work-card">
-                <div className="ip-work-cover" style={{
-                  background: w.cover_url
-                    ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.55)), url(${w.cover_url}) center/cover`
-                    : 'linear-gradient(145deg, #12121a, #1f2937)',
-                  display: 'flex', alignItems: 'flex-end', padding: 12,
-                }}>
-                  <Tag color={st.color} style={{ margin: 0 }}>{st.label}</Tag>
+                <div
+                  className="ip-work-cover"
+                  style={{
+                    position: 'relative',
+                    overflow: 'hidden',
+                    background: w.kind === 'video' || w.kind === 'image'
+                      ? undefined
+                      : w.cover_url
+                        ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.55)), url(${w.cover_url}) center/cover`
+                        : 'linear-gradient(145deg, #12121a, #1f2937)',
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    padding: 12,
+                  }}
+                >
+                  {w.kind === 'video' && w.media_urls?.[0] && (
+                    <VideoFrameCover url={w.media_urls[0]} poster={w.cover_url} />
+                  )}
+                  {w.kind === 'image' && (w.cover_url || w.media_urls?.[0]) && (
+                    <ImageCover url={w.cover_url || w.media_urls![0]} />
+                  )}
+                  <Tag color={st.color} style={{ margin: 0, position: 'relative', zIndex: 1 }}>{st.label}</Tag>
                   {w.status === 'published' && w.platforms?.length ? (
-                    <span className="ip-ratio" style={{ marginLeft: 8 }}>{w.platforms.join(' · ')}</span>
+                    <span className="ip-ratio" style={{ marginLeft: 8, position: 'relative', zIndex: 1 }}>{w.platforms.join(' · ')}</span>
                   ) : null}
                 </div>
                 <div className="ip-work-body">
@@ -133,7 +151,21 @@ export default function MyWorks() {
                       </Button>
                     )}
                     {(w.kind === 'video' || w.kind === 'image') && w.media_urls?.[0] && (
-                      <Button size="small" onClick={() => window.open(w.media_urls![0], '_blank', 'noopener')}>预览</Button>
+                      <Button size="small" onClick={() => setPreviewAsset({
+                        id: w.id,
+                        tenant_id: '',
+                        brand_id: w.brand_id || '',
+                        owner_type: 'creation',
+                        type: w.kind,
+                        name: w.title,
+                        url: w.media_urls![0],
+                        mime: w.kind === 'image' ? 'image/jpeg' : 'video/mp4',
+                        size_bytes: 0,
+                        width: 0,
+                        height: 0,
+                        duration: 0,
+                        created_at: w.created_at,
+                      })}>预览</Button>
                     )}
                   </Space>
                 </div>
@@ -143,25 +175,27 @@ export default function MyWorks() {
         </div>
       )}
 
+      <MediaPreviewModal
+        open={!!previewAsset}
+        asset={previewAsset}
+        onClose={() => setPreviewAsset(null)}
+      />
+
       {failedTasks.length > 0 && (
         <div style={{ marginTop: 32 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Text strong>生成失败任务</Text>
             <Button type="link" size="small" onClick={() => navigate('/m/compose/tools?tab=media')}>打开任务中心</Button>
           </div>
-          <div className="ip-works-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-            {failedTasks.map((t) => (
-              <div key={t.id} className="ip-work-card" style={{ padding: 14 }}>
-                <Space wrap style={{ marginBottom: 8 }}>
-                  <Tag color="error">失败</Tag>
-                  <Tag>{t.sub_type}</Tag>
-                  <RetryHint code={t.retry_hint} />
-                </Space>
-                <Text type="secondary" style={{ fontSize: 12, display: 'block' }} ellipsis={{ tooltip: t.err_msg }}>
-                  {t.err_msg || '无错误详情'}
-                </Text>
-                <Text type="secondary" style={{ fontSize: 11, marginTop: 6 }}>{t.model} · {t.created_at?.replace('T', ' ').slice(0, 16)}</Text>
-              </div>
+          <div className="mw-failed-list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {failedTasks.map((t: GenerationTask) => (
+              <GenerationFailedBar
+                key={t.id}
+                compact
+                message={`${t.sub_type} · ${t.model}：${retryFailureMessage(t, '生成失败')}`}
+                onRetry={() => navigate('/m/compose/tools?tab=media')}
+                retryLabel="去任务中心"
+              />
             ))}
           </div>
         </div>

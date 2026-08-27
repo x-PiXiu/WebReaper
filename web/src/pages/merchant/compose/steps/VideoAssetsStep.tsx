@@ -1,22 +1,34 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Segmented, Select, Space, Upload } from 'antd'
+import { useNavigate } from 'react-router-dom'
+import { Alert, Button, Collapse, Input, Segmented, Select, Space, Upload } from 'antd'
 import { PictureOutlined, SoundOutlined, UserOutlined } from '@ant-design/icons'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
-import { mergeSubmitParams, ensureMaterialId, submitUnified } from '../../../../api/generationSubmit'
+import {
+  buildSubjectReferencePayload,
+  deliverableWorkParams,
+  ensureMaterialId,
+  mergeSubmitParams,
+  submitUnified,
+} from '../../../../api/generationSubmit'
 import { COVER_STYLES } from '../../../../data/coverStyles'
 import { AssetPicker } from '../../../../components/compose/AssetPicker'
-import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
+import { GenerationTaskStatusBar } from '../../../../components/compose/GenerationTaskStatusBar'
 import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
 import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
+import { SubjectPicker } from '../../../../components/compose/SubjectPicker'
+import { CapabilityBanner } from '../../../../components/wizard/CapabilityBanner'
+import { useSubjectList } from '../../../../hooks/useSubjectList'
+import { useGenerationTypes } from '../../../../hooks/useGenerationTypes'
+import { catchGenerationError } from '../../../../utils/generationErrors'
 import { message } from '../../../../utils/antdApp'
 
 type AssetTab = 'voice' | 'avatar' | 'cover'
 
 /** Step 2 发视频：配音 / 形象 / 封面（Tab 聚焦） */
 export function VideoAssetsStep() {
+  const navigate = useNavigate()
   const { brandId } = useBrandContext()
   const draft = useComposeDraft()
   const [tab, setTab] = useState<AssetTab>('voice')
@@ -24,17 +36,22 @@ export function VideoAssetsStep() {
   const [ttsModel, setTtsModel] = useState<string>()
   const [avatarImage, setAvatarImage] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [subjectServerId, setSubjectServerId] = useState('')
+  const [intent, setIntent] = useState('')
   const text = draft.rewritten || draft.script || ''
 
-  const { data: types = [] } = useQuery({
-    queryKey: ['generation-types'],
-    queryFn: () => businessApi.listGenerationTypes().then((r) => r.types),
-  })
+  const { isEnabled, types } = useGenerationTypes()
+  const { ready: subjects } = useSubjectList()
 
   const ttsModels = useMemo(() => {
     const t = types.find((x) => x.sub_type === 'tts')
     return (t?.models || []).map((m) => m.model)
   }, [types])
+
+  const selectedSubject = useMemo(
+    () => subjects.find((s) => s.serverId === subjectServerId),
+    [subjects, subjectServerId],
+  )
 
   const runTts = async () => {
     if (!text.trim()) {
@@ -44,6 +61,10 @@ export function VideoAssetsStep() {
     const bid = brandId || draft.brandId
     if (!bid) {
       message.warning('请先选择人设/品牌')
+      return
+    }
+    if (!isEnabled('tts')) {
+      message.warning('语音合成未在后台启用')
       return
     }
     setBusy(true)
@@ -56,14 +77,55 @@ export function VideoAssetsStep() {
       })
       draft.patch({ voiceTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
       message.success('配音任务已提交，完成后自动填入')
-    } catch {
-      /* */
+    } catch (e) {
+      catchGenerationError(e)
     } finally {
       setBusy(false)
     }
   }
 
-  const runAvatar = async () => {
+  const runSubjectAvatar = async () => {
+    if (!text.trim()) {
+      message.warning('需要口播文案')
+      return
+    }
+    const bid = brandId || draft.brandId
+    if (!bid) {
+      message.warning('请先选择人设/品牌')
+      return
+    }
+    if (!subjectServerId) {
+      message.warning('请选择数字分身')
+      return
+    }
+    if (!isEnabled('reference2video')) {
+      message.warning('参考生视频未在后台启用')
+      return
+    }
+    setBusy(true)
+    try {
+      let audioMaterialId: string | undefined
+      if (draft.voiceUrl) {
+        audioMaterialId = await ensureMaterialId(draft.voiceUrl)
+      }
+      const scriptText = [intent.trim(), text.trim()].filter(Boolean).join('，')
+      const res = await submitUnified(buildSubjectReferencePayload({
+        brand_id: bid,
+        server_id: subjectServerId,
+        name: selectedSubject?.name,
+        text: scriptText,
+        audioMaterialId,
+      }))
+      draft.patch({ avatarTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
+      message.success('主体一致性口播已提交，完成后自动填入')
+    } catch (e) {
+      catchGenerationError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runAvatarLegacy = async () => {
     if (!text.trim()) {
       message.warning('需要口播文案')
       return
@@ -78,7 +140,7 @@ export function VideoAssetsStep() {
       return
     }
     if (!draft.voiceUrl) {
-      message.warning('数字人口播需要配音——请先在「配音」Tab 生成')
+      message.warning('降级路径需要配音——请先在「配音」Tab 生成')
       setTab('voice')
       return
     }
@@ -90,12 +152,12 @@ export function VideoAssetsStep() {
         brand_id: bid,
         materials: [imageId, audioId],
         text: text.slice(0, 200),
+        params: deliverableWorkParams(),
       })
       draft.patch({ avatarTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
-      message.success('数字人口播任务已提交（图+音频 → digital_human）')
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : ''
-      if (msg) message.error(msg)
+      message.success('口播任务已提交（图+音频，降级路径）')
+    } catch (e) {
+      catchGenerationError(e)
     } finally {
       setBusy(false)
     }
@@ -119,8 +181,8 @@ export function VideoAssetsStep() {
       })
       draft.patch({ coverTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
       message.success('封面生成任务已提交，完成后自动填入')
-    } catch {
-      /* */
+    } catch (e) {
+      catchGenerationError(e)
     } finally {
       setBusy(false)
     }
@@ -128,6 +190,7 @@ export function VideoAssetsStep() {
 
   return (
     <div className="cf-panel cf-assets">
+      <CapabilityBanner required={['tts', 'reference2video', 'lip_sync']} className="wz-draft-banner" />
       <Segmented
         className="cf-asset-tabs"
         value={tab}
@@ -141,11 +204,12 @@ export function VideoAssetsStep() {
 
       {tab === 'voice' && (
         <section className="cf-asset-block">
-          <TaskStatusBar
-            pending={!!draft.voiceTaskId && !draft.voiceUrl}
-            done={!!draft.voiceUrl}
-            pendingLabel="配音生成中，完成后自动填入"
+          <GenerationTaskStatusBar
+            taskId={draft.voiceTaskId}
+            resultReady={!!draft.voiceUrl}
             doneLabel="配音已就绪"
+            fallbackPending="配音"
+            onClearFailed={() => draft.patch({ voiceTaskId: undefined })}
           />
           {draft.voiceUrl ? (
             <MediaResultCard
@@ -161,8 +225,15 @@ export function VideoAssetsStep() {
                 value={ttsModel || ttsModels[0]}
                 onChange={setTtsModel}
                 options={ttsModels.map((m) => ({ value: m, label: m }))}
+                disabled={!isEnabled('tts')}
               />
-              <Button type="primary" className="ip-btn-primary" loading={busy} onClick={runTts}>
+              <Button
+                type="primary"
+                className="ip-btn-primary"
+                loading={busy}
+                onClick={runTts}
+                disabled={!isEnabled('tts')}
+              >
                 生成配音
               </Button>
             </Space>
@@ -177,11 +248,12 @@ export function VideoAssetsStep() {
 
       {tab === 'avatar' && (
         <section className="cf-asset-block">
-          <TaskStatusBar
-            pending={!!draft.avatarTaskId && !draft.avatarVideoUrl}
-            done={!!draft.avatarVideoUrl}
-            pendingLabel="口播成片生成中，完成后自动填入"
+          <GenerationTaskStatusBar
+            taskId={draft.avatarTaskId}
+            resultReady={!!draft.avatarVideoUrl}
             doneLabel="成片已就绪"
+            fallbackPending="口播成片"
+            onClearFailed={() => draft.patch({ avatarTaskId: undefined })}
           />
           {draft.avatarVideoUrl ? (
             <MediaResultCard
@@ -192,46 +264,94 @@ export function VideoAssetsStep() {
             />
           ) : (
             <>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="推荐：数字分身 + 主体一致性（reference2video）"
+                description="完整五步流程（音色、出镜方式、分段）请使用「拍口播」向导。"
+                action={
+                  <Button size="small" type="primary" onClick={() => navigate('/m/compose/lipsync')}>
+                    打开拍口播
+                  </Button>
+                }
+              />
               {!draft.voiceUrl && (
                 <Alert
                   type="warning"
                   showIcon
                   style={{ marginBottom: 12 }}
-                  message="数字人口播需要先有配音（图+音频 → digital_human）"
+                  message="可选：先在「配音」Tab 生成配音，主体成片将附带音频"
                   action={<Button size="small" onClick={() => setTab('voice')}>去配音</Button>}
                 />
               )}
-              <Space wrap style={{ width: '100%' }}>
-                <Button type="primary" className="ip-btn-primary" loading={busy} onClick={runAvatar}>
-                  提交口播成片
-                </Button>
-              </Space>
-              <div className="cf-avatar-pick">
-                {avatarImage ? (
-                  <div className="cf-media-thumb" style={{ backgroundImage: `url(${avatarImage})` }} />
-                ) : (
-                  <div className="cf-media-thumb cf-media-thumb-empty">形象预览</div>
-                )}
-                <Space wrap>
-                  <Upload
-                    accept="image/*"
-                    showUploadList={false}
-                    beforeUpload={async (file) => {
-                      try {
-                        const asset = await businessApi.uploadAsset(file)
-                        setAvatarImage(asset.url)
-                        message.success('形象已上传')
-                      } catch {
-                        /* */
-                      }
-                      return false
-                    }}
-                  >
-                    <Button size="small">上传形象</Button>
-                  </Upload>
-                  <Button size="small" onClick={() => setPickerOpen(true)}>素材库</Button>
-                </Space>
-              </div>
+              <SubjectPicker
+                subjects={subjects}
+                value={subjectServerId}
+                onChange={setSubjectServerId}
+                className="wz-subject-picks--block"
+              />
+              <Input
+                placeholder="场景意图（可选，如：在厨房边做菜边对镜头讲解）"
+                value={intent}
+                onChange={(e) => setIntent(e.target.value)}
+                maxLength={200}
+                style={{ marginBottom: 12 }}
+              />
+              <Button
+                type="primary"
+                className="ip-btn-primary"
+                loading={busy}
+                disabled={!isEnabled('reference2video') || !subjectServerId}
+                onClick={runSubjectAvatar}
+              >
+                提交主体一致性成片
+              </Button>
+              <Collapse
+                ghost
+                style={{ marginTop: 16 }}
+                items={[{
+                  key: 'legacy',
+                  label: '降级：人像图 + 配音（无分身时）',
+                  children: (
+                    <>
+                      <div className="cf-avatar-pick">
+                        {avatarImage ? (
+                          <div className="cf-media-thumb" style={{ backgroundImage: `url(${avatarImage})` }} />
+                        ) : (
+                          <div className="cf-media-thumb cf-media-thumb-empty">形象预览</div>
+                        )}
+                        <Space wrap>
+                          <Upload
+                            accept="image/*"
+                            showUploadList={false}
+                            beforeUpload={async (file) => {
+                              try {
+                                const asset = await businessApi.uploadAsset(file)
+                                setAvatarImage(asset.url)
+                                message.success('形象已上传')
+                              } catch (e) {
+                                catchGenerationError(e)
+                              }
+                              return false
+                            }}
+                          >
+                            <Button size="small">上传形象</Button>
+                          </Upload>
+                          <Button size="small" onClick={() => setPickerOpen(true)}>素材库</Button>
+                        </Space>
+                      </div>
+                      <Button
+                        loading={busy}
+                        style={{ marginTop: 12 }}
+                        onClick={runAvatarLegacy}
+                      >
+                        提交降级口播
+                      </Button>
+                    </>
+                  ),
+                }]}
+              />
             </>
           )}
         </section>
@@ -239,11 +359,12 @@ export function VideoAssetsStep() {
 
       {tab === 'cover' && (
         <section className="cf-asset-block">
-          <TaskStatusBar
-            pending={!!draft.coverTaskId && !draft.coverUrl}
-            done={!!draft.coverUrl}
-            pendingLabel="封面生成中，完成后自动填入"
+          <GenerationTaskStatusBar
+            taskId={draft.coverTaskId}
+            resultReady={!!draft.coverUrl}
             doneLabel="封面已就绪"
+            fallbackPending="封面"
+            onClearFailed={() => draft.patch({ coverTaskId: undefined })}
           />
           {draft.coverUrl ? (
             <MediaResultCard

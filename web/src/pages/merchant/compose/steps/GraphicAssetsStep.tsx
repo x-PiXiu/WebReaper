@@ -7,8 +7,11 @@ import { businessApi } from '../../../../api/business'
 import { COVER_STYLES } from '../../../../data/coverStyles'
 import { AssetPicker } from '../../../../components/compose/AssetPicker'
 import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
+import { GenerationTaskStatusBar } from '../../../../components/compose/GenerationTaskStatusBar'
 import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
 import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
+import { CapabilityBanner } from '../../../../components/wizard/CapabilityBanner'
+import { catchGenerationError } from '../../../../utils/generationErrors'
 import { message } from '../../../../utils/antdApp'
 
 type GraphicTab = 'images' | 'cover'
@@ -25,6 +28,7 @@ export function GraphicAssetsStep() {
 
   const list = useMemo(() => urls.filter(Boolean), [urls])
   const pendingImages = (draft.imageTaskIds || []).length
+  const activeImageTaskId = pendingImages > 0 ? draft.imageTaskIds?.[0] : undefined
 
   const gen = async () => {
     const bid = brandId || draft.brandId
@@ -47,8 +51,8 @@ export function GraphicAssetsStep() {
         lastUpdatedAt: new Date().toISOString(),
       })
       message.success('配图任务已提交，完成后自动加入列表')
-    } catch {
-      /* */
+    } catch (e) {
+      catchGenerationError(e)
     } finally {
       setBusy(false)
     }
@@ -60,6 +64,7 @@ export function GraphicAssetsStep() {
 
   return (
     <div className="cf-panel cf-assets">
+      <CapabilityBanner required={['text2image']} className="wz-draft-banner" />
       <Segmented
         className="cf-asset-tabs"
         value={tab}
@@ -72,12 +77,22 @@ export function GraphicAssetsStep() {
 
       {tab === 'images' && (
         <section className="cf-asset-block">
-          <TaskStatusBar
-            pending={pendingImages > 0}
-            done={list.length > 0 && pendingImages === 0}
-            pendingLabel={`${pendingImages} 张配图生成中…`}
+          <GenerationTaskStatusBar
+            taskId={activeImageTaskId}
+            resultReady={pendingImages === 0 && list.length > 0}
             doneLabel={`已选 ${list.length} 张配图`}
+            fallbackPending="配图"
+            onClearFailed={() => {
+              const ids = draft.imageTaskIds || []
+              if (ids.length) draft.patch({ imageTaskIds: ids.slice(1) })
+            }}
           />
+          {(pendingImages > 1 || (pendingImages > 0 && list.length === 0)) && (
+            <TaskStatusBar
+              pending={pendingImages > 0}
+              pendingLabel={`${pendingImages} 张配图生成中…`}
+            />
+          )}
           <Input
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -96,8 +111,8 @@ export function GraphicAssetsStep() {
                   const asset = await businessApi.uploadAsset(file)
                   draft.patch({ imageUrls: [...list, asset.url], track: 'graphic', lastUpdatedAt: new Date().toISOString() })
                   message.success('已加入配图')
-                } catch {
-                  /* */
+                } catch (e) {
+                  catchGenerationError(e)
                 } finally {
                   setBusy(false)
                 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Radio, Segmented, Tag, Typography } from 'antd'
+import { Alert, Button, Input, Segmented, Tag, Typography } from 'antd'
 import { message } from '../../../utils/antdApp'
 import {
   LinkOutlined, EditOutlined, UploadOutlined, VideoCameraOutlined, UserOutlined,
@@ -11,19 +11,21 @@ import { transcriptLines } from '../../../utils/transcript'
 import { checkMaterialFileSize, friendlyGenerationError } from '../../../utils/generationErrors'
 import { extractShareUrl, isKuaishouUrl } from '../../../utils/shareUrl'
 import { businessApi } from '../../../api/business'
-import type { GenerationTask } from '../../../types/api'
 import VoicePicker from '../../../components/VoicePicker'
 import { useComposeDraft } from '../../../store/composeDraft'
 import { useBrandContext } from '../../../hooks/useBrands'
 import { runLipSyncPipeline, type LipSyncPipelineStage } from '../../../hooks/useLipSyncPipeline'
 import { useGenerationTasks, GENERATION_TASKS_KEY } from '../../../hooks/useGenerationTasks'
+import { useSubjectList } from '../../../hooks/useSubjectList'
+import { parseGenerationTaskParams } from '../../../utils/subjectTask'
+import { PauseScriptEditor } from '../../../components/compose/PauseScriptEditor'
+import { SubjectPicker } from '../../../components/compose/SubjectPicker'
 import {
   WizardShell, PhonePreview, PipelineProgress, MaterialDropzone, CapabilityBanner,
   type WizardStepDef, type PipelineStage,
 } from '../../../components/wizard'
 
 const { Text } = Typography
-const { TextArea } = Input
 
 const WIZARD_STEPS: WizardStepDef[] = [
   { key: 'source', label: '文案来源', title: '从哪里开始？', tip: '粘贴爆款链接提取说话内容，或上传音视频，也可以直接手写', nextLabel: '下一步：确认文案' },
@@ -57,14 +59,6 @@ function readVideoDuration(file: File): Promise<number> {
 
 type SourceMode = 'link' | 'upload' | 'manual' | null
 type ScriptVersion = 'rewrite' | 'clean'
-
-function taskParams(t: GenerationTask): Record<string, any> {
-  if (t.params && typeof t.params === 'object') return t.params as Record<string, any>
-  if (typeof t.params === 'string' && t.params) {
-    try { return JSON.parse(t.params) } catch { return {} }
-  }
-  return {}
-}
 
 /**
  * 拍同款口播视频向导（08 计划 D2 五步）：
@@ -167,28 +161,16 @@ export default function LipSyncWizard() {
   }, [])
 
   const { tasks } = useGenerationTasks({ refetchInterval: false })
+  const { ready: subjects } = useSubjectList({ refetchInterval: false })
   const myVoices = useMemo(() => {
     const ids = new Set<string>()
     for (const t of tasks) {
       if (t.sub_type !== 'voice_clone' || t.state !== 'success') continue
-      const vid = taskParams(t).voice_id
+      const vid = parseGenerationTaskParams(t).voice_id
       if (typeof vid === 'string' && vid) ids.add(vid)
     }
     return Array.from(ids)
   }, [tasks])
-  const subjects = useMemo(() => tasks
-    .filter(t => t.sub_type === 'subject' && t.state === 'success')
-    .map(t => {
-      const p = taskParams(t)
-      const images = Array.isArray(p.images) ? p.images.filter((u: unknown) => typeof u === 'string') as string[] : []
-      return {
-        id: t.id,
-        serverId: t.provider_task_id,
-        name: p.name || t.id.slice(0, 8),
-        hasVideo: Array.isArray(p.videos) && p.videos.length > 0,
-        portraitUrl: images[0] || t.creations?.[0]?.url || '',
-      }
-    }), [tasks])
 
   const selectedSubject = useMemo(
     () => subjects.find((s) => s.serverId === subjectServerId),
@@ -255,8 +237,8 @@ export default function LipSyncWizard() {
     if (!script.trim()) { message.warning('文案为空'); return }
     const bid = brandId || draft.brandId
     if (!bid) { message.warning('请先选择人设/品牌'); return }
-    if (presence === 'avatar' && !selectedSubject?.portraitUrl && !subjectServerId) {
-      message.warning('请选择带人像图的数字分身')
+    if (presence === 'avatar' && !subjectServerId && !selectedSubject?.portraitUrl) {
+      message.warning('请选择数字分身')
       return
     }
     if (presence === 'real' && !realVideoUrl) {
@@ -274,7 +256,8 @@ export default function LipSyncWizard() {
         presence,
         realVideoUrl,
         portraitMaterial: selectedSubject?.portraitUrl || undefined,
-        subjectServerId,
+        subjectServerId: subjectServerId || undefined,
+        subjectName: selectedSubject?.name,
         intent,
       }, {
         onStage: setPipelineStage,
@@ -315,9 +298,14 @@ export default function LipSyncWizard() {
       { key: 'tts', label: '语音合成', status: 'pending' },
     ]
     if (presence === 'avatar') {
-      stages.push({ key: 'ref', label: '数字分身画面', status: 'pending' })
+      stages.push({
+        key: 'ref',
+        label: subjectServerId ? '主体一致性视频' : '口播画面生成',
+        status: 'pending',
+      })
+    } else {
+      stages.push({ key: 'lipsync', label: '对口型成片', status: 'pending' })
     }
-    stages.push({ key: 'lipsync', label: '对口型成片', status: 'pending' })
 
     const order = stages.map(s => s.key)
     if (resultUrl) {
@@ -337,14 +325,14 @@ export default function LipSyncWizard() {
       ...s,
       status: i < activeIdx ? 'done' : i === activeIdx ? 'active' : 'pending',
     }))
-  }, [presence, producing, pipelineStage, resultUrl, error])
+  }, [presence, producing, pipelineStage, resultUrl, error, subjectServerId])
 
   const canNext = (): boolean => {
     if (step === 0) return false
     if (step === 1) return !!script.trim()
     if (step === 2) {
       if (presence === 'real') return !!realVideoUrl
-      return !!subjectServerId && !!selectedSubject?.portraitUrl
+      return !!subjectServerId || !!selectedSubject?.portraitUrl
     }
     if (step === 3) return true // 音色可选；未选则后端用默认
     return false
@@ -353,9 +341,8 @@ export default function LipSyncWizard() {
   const nextHint = (): string | undefined => {
     if (step === 1 && !script.trim()) return '请先填写口播文案'
     if (step === 2 && presence === 'real' && !realVideoUrl) return '请上传出镜视频'
-    if (step === 2 && presence === 'avatar' && !subjectServerId) return '请选择数字分身'
-    if (step === 2 && presence === 'avatar' && subjectServerId && !selectedSubject?.portraitUrl) {
-      return '该分身缺少人像图，请换一个或去素材库补图'
+    if (step === 2 && presence === 'avatar' && !subjectServerId && !selectedSubject?.portraitUrl) {
+      return '请选择数字分身'
     }
     return undefined
   }
@@ -394,7 +381,7 @@ export default function LipSyncWizard() {
           message="发视频已升级为口播向导——你的文案已自动带入"
         />
       )}
-      {error && (
+      {error && step !== 4 && (
         <Alert
           type="error" showIcon className="wz-draft-banner"
           message={error}
@@ -559,11 +546,11 @@ export default function LipSyncWizard() {
               ]}
             />
           )}
-          <TextArea
+          <PauseScriptEditor
             rows={9}
             showCount
             value={script}
-            onChange={e => setScript(e.target.value)}
+            onChange={setScript}
             placeholder="输入或提取口播文案…"
           />
           <div className="wz-script-toolbar">
@@ -602,14 +589,30 @@ export default function LipSyncWizard() {
             >
               <span className="wz-presence-card-icon"><UserOutlined /></span>
               <strong>数字分身</strong>
-              <span>AI 生成出镜画面，再对口型合成成片</span>
+              <span>选择已注册分身，按主体一致性生成口播视频</span>
             </button>
+          </div>
+
+          <div className="wz-presence-compare" role="note">
+            <div>
+              <strong>真人出镜</strong>
+              <span>上传不说话视频 + 配音，系统对口型（口型与音频严格对齐）</span>
+            </div>
+            <div>
+              <strong>数字分身</strong>
+              <span>选已注册分身 + 文案，系统生成一致性口播（无需真人视频）</span>
+            </div>
           </div>
 
           <div className="wz-presence-detail">
             {presence === 'real' ? (
               <>
-                <Alert type="info" showIcon message="正脸、光线稳定、不说话的视频效果最好" />
+                <Alert
+                  type="info"
+                  showIcon
+                  message="正脸、光线稳定、不说话的视频效果最好"
+                  description="对口型需服务端能访问视频 URL。本地大文件若生成失败，请压缩后重试或部署公网/OSS 素材地址。"
+                />
                 <MaterialDropzone
                   accept="video/mp4,video/quicktime,video/x-msvideo"
                   hint={`文案约 ${scriptSec} 秒，出镜视频时长最好相近`}
@@ -645,7 +648,11 @@ export default function LipSyncWizard() {
               </>
             ) : (
               <>
-                <Alert type="info" showIcon message="选择资产库里的数字分身，一句话描述场景" />
+                <Alert
+                  type="info"
+                  showIcon
+                  message="选择资产库里的数字分身；已选分身将走 reference2video 主体一致性"
+                />
                 {longAvatarScript && (
                   <Alert
                     type="warning"
@@ -654,25 +661,12 @@ export default function LipSyncWizard() {
                     message="文案较长，将生成长视频（等待分段功能上线前建议压缩到 60 字内获得最佳效果）"
                   />
                 )}
-                <div className="wz-subject-picks">
-                  {subjects.length === 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                      <Text type="warning">还没有数字分身</Text>
-                      <Button type="primary" size="small" onClick={() => navigate('/m/assets?create=subject')}>
-                        去创建数字分身
-                      </Button>
-                    </div>
-                  ) : subjects.map(s => (
-                    <Radio.Button
-                      key={s.id}
-                      className="wz-subject-pick"
-                      checked={subjectServerId === s.serverId}
-                      onClick={() => setSubjectServerId(s.serverId)}
-                    >
-                      {s.name}{s.hasVideo ? '（视频分身）' : ''}
-                    </Radio.Button>
-                  ))}
-                </div>
+                <SubjectPicker
+                  subjects={subjects}
+                  value={subjectServerId}
+                  onChange={setSubjectServerId}
+                  highlightServerId={presetSubjectId}
+                />
                 <Input
                   placeholder="场景意图（如：在厨房边做菜边对镜头讲解）"
                   value={intent}
@@ -707,9 +701,18 @@ export default function LipSyncWizard() {
             <Tag color="green">文案 {script.length} 字 · 约 {scriptSec} 秒</Tag>
             <Tag color="green">{presence === 'real' ? '真人出镜' : '数字分身'}</Tag>
             <Tag color={voiceId ? 'green' : 'default'}>{voiceId ? '音色已选' : '默认音色'}</Tag>
+            <Tag color="blue">
+              {presence === 'real'
+                ? '链路：配音 → 对口型（口型与音频对齐）'
+                : '链路：配音 → 主体一致性成片（画面由分身生成）'}
+            </Tag>
           </div>
 
-          <PipelineProgress stages={pipelineStages} />
+          <PipelineProgress
+            stages={pipelineStages}
+            errorMessage={error || undefined}
+            onRetry={error && !producing ? () => { setError(''); setFailedStage(''); produce() } : undefined}
+          />
 
           {!resultUrl && !producing && (
             <div className="wz-produce-actions">

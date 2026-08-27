@@ -2,6 +2,7 @@ import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input, Badge
 import { SearchOutlined, BellOutlined } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { usePublishableWorks } from '../hooks/usePublishableWorks'
 import { useEffect, useState } from 'react'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
@@ -124,12 +125,7 @@ export function AppShell({
 
   // 全局搜索：人设 + 作品库 + 发布任务 + 快捷入口
   const [searchReady, setSearchReady] = useState(false)
-  const { data: works = [] } = useQuery({
-    queryKey: ['merchant-works'],
-    queryFn: () => businessApi.listWorks().catch(() => []),
-    staleTime: 60_000,
-    enabled: !inAdmin,
-  })
+  const { works = [] } = usePublishableWorks({ enabled: !inAdmin, staleTime: 60_000 })
   const { data: brands = [] } = useQuery({
     queryKey: ['geo-brands'],
     queryFn: () => businessApi.listBrands(),

@@ -42,6 +42,7 @@ export function useComposeTaskPoll() {
           id: string | undefined,
           onSuccess: (url: string, cover?: string | null) => void,
           label: string,
+          refreshWorks = false,
         ) => {
           if (!id) return
           const task = byId.get(id)
@@ -58,7 +59,7 @@ export function useComposeTaskPoll() {
           notified.current.add(`ok-${id}`)
           onSuccess(url, taskCoverUrl(task))
           message.success(`${label}已完成，已自动填入`)
-          worksDirty = true
+          if (refreshWorks) worksDirty = true
         }
 
         handle(voiceTaskId, (url) => {
@@ -69,7 +70,7 @@ export function useComposeTaskPoll() {
           next.avatarVideoUrl = url
           next.editedVideoUrl = url
           if (taskCover && !coverUrl) next.coverUrl = taskCover
-        }, '数字人口播')
+        }, '数字人口播', true)
 
         handle(coverTaskId, (url) => {
           next.coverUrl = url
@@ -93,7 +94,6 @@ export function useComposeTaskPoll() {
           notified.current.add(`ok-${id}`)
           if (!newImageUrls.includes(url)) newImageUrls.push(url)
           message.success('配图已生成并加入列表')
-          worksDirty = true
         }
         if (finishedImageIds.length) {
           next.imageTaskIds = (imageTaskIds || []).filter((id) => !finishedImageIds.includes(id))

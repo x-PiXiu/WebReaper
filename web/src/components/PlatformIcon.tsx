@@ -1,4 +1,12 @@
-import * as SimpleIcons from 'simple-icons'
+import {
+  siBilibili,
+  siKuaishou,
+  siQq,
+  siSinaweibo,
+  siWechat,
+  siXiaohongshu,
+  siZhihu,
+} from 'simple-icons/icons'
 import { getPlatformIconSource, getPlatformMeta, normalizePlatform } from '../data/platforms'
 
 type Props = {
@@ -9,15 +17,21 @@ type Props = {
 
 type SimpleIconData = { title: string; hex: string; path: string }
 
-function getSimpleIcon(slug: string): SimpleIconData | null {
-  const icon = (SimpleIcons as Record<string, SimpleIconData | undefined>)[slug]
-  return icon ?? null
+/** 仅导入业务用到的品牌图标，避免 `import *` 打进整包 simple-icons */
+const SIMPLE_ICONS: Record<string, SimpleIconData> = {
+  siKuaishou,
+  siXiaohongshu,
+  siBilibili,
+  siWechat,
+  siSinaweibo,
+  siQq,
+  siZhihu,
 }
 
 /**
  * 各社交平台 Logo
  * - 抖音：官网 favicon（douyin.com）
- * - 其余：simple-icons 官方品牌矢量（https://simpleicons.org）
+ * - 其余：simple-icons 官方品牌矢量（按需导入）
  */
 export function PlatformIcon({ platform, size = 18, className = '' }: Props) {
   const key = normalizePlatform(platform)
@@ -40,7 +54,7 @@ export function PlatformIcon({ platform, size = 18, className = '' }: Props) {
   }
 
   if (source?.type === 'simple-icons') {
-    const icon = getSimpleIcon(source.slug)
+    const icon = SIMPLE_ICONS[source.slug]
     if (icon) {
       return (
         <svg

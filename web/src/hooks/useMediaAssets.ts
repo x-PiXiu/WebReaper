@@ -4,6 +4,32 @@ import type { MediaAsset } from '../types/api'
 
 export const MEDIA_ASSETS_QUERY_KEY = ['media-assets'] as const
 
+type UploadAssetResponse = {
+  id: string
+  url: string
+  mime: string
+  size_bytes: number
+  owner_type: string
+}
+
+/** 上传接口响应 → MediaAsset（引用选择器 / 参考图入参） */
+export function normalizeUploadedAsset(uploaded: UploadAssetResponse): MediaAsset {
+  return {
+    ...uploaded,
+    tenant_id: '',
+    brand_id: '',
+    type: uploaded.mime.startsWith('image/') ? 'image'
+      : uploaded.mime.startsWith('video/') ? 'video'
+      : uploaded.mime.startsWith('audio/') ? 'audio'
+      : 'image',
+    name: uploaded.url.split('/').pop()?.split('?')[0] || uploaded.id,
+    width: 0,
+    height: 0,
+    duration: 0,
+    created_at: new Date().toISOString(),
+  }
+}
+
 /** 统一解析 listAssets 响应（兼容历史缓存中的嵌套对象） */
 export function normalizeMediaAssets(data: unknown): MediaAsset[] {
   if (Array.isArray(data)) return data

@@ -387,7 +387,7 @@ export interface OptimizedContent {
   created_at: string
 }
 
-// ---- 作品库三源聚合（我的作品页）----
+// ---- 作品库三源聚合（我的作品页：文章 + 可发布成片，不含素材库中间产物）----
 export interface WorkItem {
   id: string
   kind: string              // article / video / image / audio
@@ -672,6 +672,7 @@ export interface MediaAsset {
   width: number                  // 图片/视频宽度（新增）
   height: number                 // 图片/视频高度（新增）
   duration: number               // 音频/视频时长（新增）
+  cover_url?: string             // 视频封面（可选；无则前端抓第一帧）
   created_at: string
 }
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Empty, Input, Select, Space, Spin, Steps, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Empty, Input, Select, Space, Spin, Switch, Tag, Tooltip, Typography } from 'antd'
 import { message } from '../../../utils/antdApp'
 import {
   ArrowDownOutlined, ArrowUpOutlined, CheckCircleOutlined, LinkOutlined, CloudUploadOutlined,
@@ -12,11 +12,14 @@ import { businessApi } from '../../../api/business'
 import { scoreColor } from '../../../utils/geo'
 import type { Account, Brand, OptimizedContent, PublishChannelView, PublishJob } from '../../../types/api'
 import {
-  BILIBILI_CATEGORIES, WIZARD_STEPS, channelNeedsCategory, channelNeedsTags, channelShowsTags,
+  BILIBILI_CATEGORIES, channelNeedsCategory, channelNeedsTags, channelShowsTags,
   checkCompleteness, clearDraft, emptyDraft, loadDraft, localAdaptPreview, runeLen, saveDraft,
   strictestTitleLimit, supportsAutoForm, buildPublishContent, effectiveConstraints,
   type PublishForm, type WizardDraft, type WizardStep,
 } from './wizardModel'
+import { PublishConfirmSummary } from './PublishConfirmSummary'
+import { PublishWizardFooter } from './PublishWizardFooter'
+import { PublishWizardSteps } from './PublishWizardSteps'
 
 const { Text, Paragraph } = Typography
 
@@ -446,13 +449,7 @@ export default function PublishWizard(props: {
         {draftHint && <Tag color="success" icon={<CloudUploadOutlined />}>草稿已存</Tag>}
       </div>
 
-      <Steps
-        size="small"
-        current={draft.step - 1}
-        onChange={(i) => go((i + 1) as WizardStep)}
-        items={WIZARD_STEPS.map((s) => ({ title: s.short, description: s.title }))}
-        style={{ marginBottom: 28 }}
-      />
+      <PublishWizardSteps step={draft.step} onChange={go} />
 
       {/* —— ① 平台与形态 —— */}
       {draft.step === 1 && (
@@ -851,6 +848,17 @@ export default function PublishWizard(props: {
             />
           )}
 
+          {!adaptLoading && !adaptError && targetPlatforms.length > 0 && !(adaptPreviews?.previews?.length) && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="暂无平台适配预览"
+              description="将按当前标题与正文发布；可重试获取各平台截断后的标题、描述与标签"
+              action={<Button size="small" onClick={() => refetchAdapt()}>重试预览</Button>}
+            />
+          )}
+
           <Spin spinning={adaptLoading} tip="正在适配各平台文案…">
 
           {limitPlatforms.length > 0 && (
@@ -892,50 +900,14 @@ export default function PublishWizard(props: {
           )}
 
           <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
-            {targetPlatforms.map((p) => {
-              const ch = channelByPlatform.get(p)
-              const adapted = adaptByPlatform.get(p)
-              const q = quotaByPlatform.get(p)
-              return (
-                <div key={p} style={{ padding: 14, borderRadius: 10, background: 'var(--wr-bg-elevated)', border: q?.at_limit ? '1px solid var(--wr-danger)' : '1px solid var(--wr-border)' }}>
-                  <Space style={{ marginBottom: 6 }} wrap>
-                    <PlatformBadge platform={p} size={14} />
-                    <Text strong style={{ fontSize: 13 }}>{ch?.name || PLATFORM_META[p]?.name || p}</Text>
-                    <Tag style={{ margin: 0 }}>{draft.mode === 'auto' ? '全自动' : '半自动'}</Tag>
-                    {adapted?.title_truncated && <Tag color="orange" style={{ margin: 0 }}>标题已截断</Tag>}
-                    {q && q.max_per_day > 0 && (
-                      <Tag color={q.at_limit ? 'error' : 'default'} style={{ margin: 0 }}>
-                        今日 {q.used_today}/{q.max_per_day}
-                      </Tag>
-                    )}
-                  </Space>
-                  {adapted?.error ? (
-                    <Text type="danger" style={{ fontSize: 12 }}>{adapted.error}</Text>
-                  ) : (
-                    <>
-                      <Text style={{ fontSize: 14, display: 'block', marginBottom: 4 }}>{adapted?.title || draft.title || '(无标题)'}</Text>
-                      <Text type="secondary" style={{ fontSize: 12, display: 'block', whiteSpace: 'pre-wrap' }}>
-                        {(adapted?.description || draft.content || '').slice(0, 180)}
-                        {(adapted?.description || draft.content || '').length > 180 ? '…' : ''}
-                      </Text>
-                      {(adapted?.tags?.length || 0) > 0 && (
-                        <Space size={4} wrap style={{ marginTop: 6 }}>
-                          {adapted!.tags!.map((t) => <Tag key={t} style={{ margin: 0 }}>{t}</Tag>)}
-                        </Space>
-                      )}
-                    </>
-                  )}
-                  {draft.mediaURLs.length > 0 && (
-                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
-                      素材 ×{draft.mediaURLs.length}{draft.coverURL ? ' · 有封面' : ''}
-                    </Text>
-                  )}
-                </div>
-              )
-            })}
-            {targetPlatforms.length === 0 && (
-              <Empty description="还没有目标平台" />
-            )}
+            <PublishConfirmSummary
+              draft={draft}
+              targetPlatforms={targetPlatforms}
+              channelByPlatform={channelByPlatform}
+              adaptByPlatform={adaptByPlatform}
+              quotaByPlatform={quotaByPlatform}
+              platformMeta={PLATFORM_META}
+            />
           </div>
           </Spin>
 
@@ -953,26 +925,17 @@ export default function PublishWizard(props: {
         </div>
       )}
 
-      {/* 底部状态栏 */}
-      <div style={{
-        marginTop: 28, paddingTop: 16, borderTop: '1px solid var(--wr-border)',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10,
-      }}>
-        <Space>
-          <Button icon={<CloudUploadOutlined />} loading={savingDraft} onClick={handleSaveDraft}>保存草稿</Button>
-          <Button type="text" onClick={handleClear}>清空</Button>
-        </Space>
-        <Space>
-          <Button disabled={draft.step <= 1} onClick={prev}>上一步</Button>
-          {draft.step < 5 ? (
-            <Button type="primary" className="ip-btn-primary" onClick={next}>下一步</Button>
-          ) : (
-            <Button type="primary" className="ip-btn-primary" loading={publishing} disabled={!canPublish} onClick={handlePublish}>
-              发布
-            </Button>
-          )}
-        </Space>
-      </div>
+      <PublishWizardFooter
+        step={draft.step}
+        onPrev={prev}
+        onNext={next}
+        onSaveDraft={handleSaveDraft}
+        onClear={handleClear}
+        onPublish={handlePublish}
+        savingDraft={savingDraft}
+        publishing={publishing}
+        canPublish={canPublish}
+      />
 
       <AssetPicker
         open={pickerOpen}

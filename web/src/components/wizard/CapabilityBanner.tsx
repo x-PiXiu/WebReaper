@@ -1,6 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
 import { Alert } from 'antd'
-import { businessApi } from '../../api/business'
+import { useGenerationTypes } from '../../hooks/useGenerationTypes'
 
 const CAP_LABELS: Record<string, string> = {
   lip_sync: '对口型',
@@ -21,12 +20,7 @@ type Props = {
  * 通过 listGenerationTypes 判断端点是否在服务端启用。
  */
 export function CapabilityBanner({ required = ['lip_sync', 'tts'], className }: Props) {
-  const { data: types = [], isError } = useQuery({
-    queryKey: ['generation-types'],
-    queryFn: () => businessApi.listGenerationTypes().then(r => r.types),
-    staleTime: 60_000,
-  })
-
+  const { types, isError } = useGenerationTypes()
   const enabled = new Set(types.map(t => t.sub_type))
   const missing = required.filter(s => !enabled.has(s))
 
