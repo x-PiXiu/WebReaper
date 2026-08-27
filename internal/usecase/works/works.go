@@ -185,13 +185,15 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 	return items, nil
 }
 
-// parseCreations 解析 creations JSON（[{url,cover_url}]）。
+// parseCreations 解析 creations JSON（[{url,stored_url,cover_url}]）。
+// BE-WORK-01：优先取 stored_url（永久 OSS 地址），fallback 到 url（24h 临时地址）。
 func parseCreations(raw string) []struct{ URL, CoverURL string } {
 	if raw == "" {
 		return nil
 	}
 	var arr []struct {
 		URL      string `json:"url"`
+		Stored   string `json:"stored_url"`
 		CoverURL string `json:"cover_url"`
 	}
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
@@ -199,8 +201,12 @@ func parseCreations(raw string) []struct{ URL, CoverURL string } {
 	}
 	out := make([]struct{ URL, CoverURL string }, 0, len(arr))
 	for _, a := range arr {
-		if a.URL != "" {
-			out = append(out, struct{ URL, CoverURL string }{a.URL, a.CoverURL})
+		u := a.Stored
+		if u == "" {
+			u = a.URL
+		}
+		if u != "" {
+			out = append(out, struct{ URL, CoverURL string }{u, a.CoverURL})
 		}
 	}
 	return out
@@ -209,13 +215,15 @@ func parseCreations(raw string) []struct{ URL, CoverURL string } {
 // materialSubTypes 素材库生成类端点——产物仅进素材库，不进「我的作品」。
 var materialSubTypes = map[string]bool{
 	"text2image": true, "tts": true, "text2audio": true, "sound_effect": true,
-	"voice_clone": true, "subject": true, "text2video": true, "img2video": true,
-	"start_end2video": true, "multiframe": true,
+	"voice_clone": true, "subject": true, "multiframe": true,
 }
 
 // deliverableSubTypes 工作台成片类端点——可进「我的作品」待发布。
+// BE-WORK-02：text2video/img2video/start_end2video 从 materialSubTypes 移入，
+// 这些端点的产物是最终视频，应出现在「我的作品」中。
 var deliverableSubTypes = map[string]bool{
 	"lip_sync": true, "reference2video": true, "digital_human": true,
+	"text2video": true, "img2video": true, "start_end2video": true,
 }
 
 // isDeliverableTask 判断 success 生成任务是否属于可发布成片（非素材库中间产物）。

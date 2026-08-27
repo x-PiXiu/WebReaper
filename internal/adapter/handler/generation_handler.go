@@ -251,18 +251,32 @@ func (h *GenerationHandler) HandleCallback(c *gin.Context, provider port.Generat
 
 // generationTaskToView 任务 → API 契约（snake_case）。
 // retryHintFromErrCode err_code → 前端失败处理建议 key（RetryAuto 稍后重试 /
-// RetryManual 改参数重试 / RetryTerminal 不可重试）。此前前端拿 Vidu 原码做 key
-// 匹配永不命中，失败建议永不显示。
+// RetryManual 改参数重试 / RetryTerminal 不可重试）。
+//
+// BE-GEN-09：与 usecase.ClassifyError 对齐——此前默认分支过宽（CreditInsufficient
+// 等也标 RetryAuto），且空 err_code 返回 RetryAuto 而非 RetryTerminal。
 func retryHintFromErrCode(errCode string) string {
 	switch {
+	// RetryAuto：限流/内部错误/超时——稍后自动重试
+	case errCode == "TooManyRequests" || errCode == "SystemThrottling" ||
+		errCode == "InternalServiceFailure" || errCode == "OperationInProcess" ||
+		errCode == "LocalStuckTimeout":
+		return "RetryAuto"
+	// RetryManual：积分/风控/内容违规——用户改参数后重试
+	case errCode == "CreditInsufficient" || errCode == "TaskPromptPolicyViolation" ||
+		errCode == "AuditSubmitIllegal" || errCode == "CreationPolicyViolation" ||
+		errCode == "ModelUnavailable" || errCode == "UserCancelled" ||
+		errCode == "TaskNotFound":
+		return "RetryManual"
+	// RetryTerminal：配额耗尽/素材问题/未知错误——不可重试
 	case errCode == "QuotaExceeded":
 		return "RetryTerminal"
-	case strings.HasPrefix(errCode, "TooMany"), errCode == "LocalStuckTimeout", errCode == "":
-		return "RetryAuto"
-	case strings.HasPrefix(errCode, "Invalid"), strings.HasPrefix(errCode, "Auth"), strings.HasPrefix(errCode, "Unauthorized"):
-		return "RetryManual"
 	default:
-		return "RetryAuto"
+		// 空 err_code 或未知错误码：保守标记 RetryAuto（Vidu 未返回原因时仍允许重试）
+		if errCode == "" {
+			return "RetryAuto"
+		}
+		return "RetryTerminal"
 	}
 }
 

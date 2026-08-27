@@ -842,10 +842,13 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 		task.ErrMsg = ""
 		task.FinishedAt = nowPtr(time.Now())
 		// 转存（24h URL 永久化；失败不阻断终态——前端标记"产物待转存"）
+		// BE-ASSET-01：转存失败记录日志，便于排查"任务 success 但无文件"问题
 		if uc.asset != nil {
 			for i := range st.Creations {
 				if stored, sErr := uc.asset.DownloadAndStore(ctx, task.TenantID, st.Creations[i].URL, nil); sErr == nil {
 					st.Creations[i].StoredURL = stored
+				} else {
+					log.Printf("[ApplyStatus][WARN] 转存失败 task=%s url=%s err=%v", task.ID, truncateURL(st.Creations[i].URL), sErr)
 				}
 			}
 			creationsJSON, _ = json.Marshal(st.Creations)
@@ -974,32 +977,75 @@ type UnifiedSubmitInput struct {
 // submitSubject 数字分身主体注册（/ent/v2/subjects 同步端点）。
 // name=Text；形象照取素材图（≤3，URL 直传形态兼容 E4）；voice_id 从 Params。
 // 提交即终态：server_id 在返回任务的 creations[0].id——reference2video 复用。
+//
+// BE-SUBJ-02/03/04/05 修复：
+//   - 优先从 Params 直传 images/videos（前端 buildSubjectRegisterPayload 已写）
+//   - 再从 materials + asset.List 补全（ID/URL 匹配）
+//   - List 失败返回明确错误（不静默吞掉）
+//   - asset==nil 时仍可创建（纯 Params 直传模式）
 func (uc *GenerationUseCase) submitSubject(ctx context.Context, in UnifiedSubmitInput) (entity.GenerationTask, error) {
 	if in.Text == "" {
 		return entity.GenerationTask{}, fmt.Errorf("主体名称（text）必填")
 	}
 	params := entity.GenerationParams{"name": in.Text}
+
+	// ① 优先从 Params 直传（前端 buildSubjectRegisterPayload 已写 images/videos URL）
+	if imgs, ok := in.Params["images"].([]string); ok && len(imgs) > 0 {
+		params["images"] = imgs
+	}
+	if vids, ok := in.Params["videos"].([]string); ok && len(vids) > 0 {
+		params["videos"] = vids
+	}
+
+	// ② 再从 materials + asset.List 补全（ID/URL 匹配）
 	if uc.asset != nil && len(in.Materials) > 0 {
 		assets, err := uc.asset.List(ctx, in.TenantID, entity.AssetTypeMaterial)
-		if err == nil {
-			idMap := map[string]bool{}
-			for _, id := range in.Materials {
-				idMap[id] = true
+		if err != nil {
+			// BE-SUBJ-04：List 失败返回明确错误，不静默吞掉
+			return entity.GenerationTask{}, fmt.Errorf("读取素材库失败: %w", err)
+		}
+		idMap := map[string]bool{}
+		for _, id := range in.Materials {
+			idMap[id] = true
+		}
+		var images, videos []string
+		for _, a := range assets {
+			if !idMap[a.ID] && !containsStrAny(in.Materials, a.SourceURL) {
+				continue
 			}
-			var images []string
-			for _, a := range assets {
-				if (idMap[a.ID] || containsStrAny(in.Materials, a.SourceURL)) && a.Type == entity.MaterialTypeImage && len(images) < 3 {
+			switch a.Type {
+			case entity.MaterialTypeImage:
+				if len(images) < 3 {
 					images = append(images, a.SourceURL)
 				}
+			case entity.MaterialTypeVideo:
+				if len(videos) < 1 {
+					videos = append(videos, a.SourceURL)
+				}
 			}
-			if len(images) > 0 {
+		}
+		// 合并（Params 直传优先，素材库补充）
+		if len(images) > 0 {
+			if existing, ok := params["images"].([]string); ok {
+				params["images"] = append(existing, images...)
+			} else {
 				params["images"] = images
 			}
 		}
+		if len(videos) > 0 {
+			if existing, ok := params["videos"].([]string); ok {
+				params["videos"] = append(existing, videos...)
+			} else {
+				params["videos"] = videos
+			}
+		}
 	}
+
+	// ③ voice_id
 	if v, ok := in.Params["voice_id"].(string); ok && v != "" {
 		params["voice_id"] = v
 	}
+
 	return uc.Submit(ctx, SubmitInput{
 		TenantID: in.TenantID, BrandID: in.BrandID,
 		SubType: "subject", Model: "", Params: params,

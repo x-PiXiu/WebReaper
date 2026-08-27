@@ -41,6 +41,12 @@ func (text2imageAdapter) BuildRequest(ctx context.Context, model string, p entit
 		"model":  model,
 		"prompt": getString(p, "prompt"),
 	}
+	// BE-GEN-07：补充透传 aspect_ratio / resolution / seed
+	ensureStringParam(body, "aspect_ratio", p, "16:9")
+	ensureStringParam(body, "resolution", p, "1080p")
+	if v := getInt(p, "seed"); v > 0 {
+		body["seed"] = v
+	}
 	if imgs := getStrings(p, "images"); len(imgs) > 0 {
 		body["images"] = imgs
 	}

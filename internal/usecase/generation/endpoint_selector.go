@@ -83,6 +83,8 @@ func (s *EndpointSelectorImpl) Select(ctx context.Context, req entity.UnifiedGen
 }
 
 // getMaterials 获取素材信息。
+// BE-ASSET-03：同时查询 material（用户上传）和 creation（生成物转存），
+// 前端可能引用 AI 产物作为参考图/音频。
 func (s *EndpointSelectorImpl) getMaterials(ctx context.Context, tenantID string, materialIDs []string) ([]entity.MediaAsset, error) {
 	if len(materialIDs) == 0 {
 		return nil, nil
@@ -92,15 +94,7 @@ func (s *EndpointSelectorImpl) getMaterials(ctx context.Context, tenantID string
 		return nil, nil
 	}
 
-	// 查询素材库（租户隔离——此前传空租户列出全部租户素材再按 ID 过滤，
-	// 隔离仅靠 ID 不可猜；现从请求上下文取租户）
-	allMaterials, err := s.mediaStore.List(ctx, tenantID, entity.AssetTypeMaterial)
-	if err != nil {
-		return nil, fmt.Errorf("查询素材失败: %w", err)
-	}
-
-	// 过滤出指定素材：ID 直配 或 URL 直传匹配（前端对本站 /media/... 资产免重传，
-	// 直接传原 URL——按路径后缀匹配 SourceURL）
+	// 构建匹配规则
 	idMap := make(map[string]bool)
 	urlMap := make(map[string]bool)
 	for _, id := range materialIDs {
@@ -111,10 +105,45 @@ func (s *EndpointSelectorImpl) getMaterials(ctx context.Context, tenantID string
 		}
 	}
 
+	match := func(m entity.MediaAsset) bool {
+		return idMap[m.ID] || (len(urlMap) > 0 && urlMap[filepath.Base(m.SourceURL)])
+	}
+
+	// ① 优先查询 material（用户上传素材）
+	allMaterials, err := s.mediaStore.List(ctx, tenantID, entity.AssetTypeMaterial)
+	if err != nil {
+		return nil, fmt.Errorf("查询素材失败: %w", err)
+	}
+
 	var materials []entity.MediaAsset
 	for _, m := range allMaterials {
-		if idMap[m.ID] || (len(urlMap) > 0 && urlMap[filepath.Base(m.SourceURL)]) {
+		if match(m) {
 			materials = append(materials, m)
+		}
+	}
+
+	// ② BE-ASSET-03：未命中的 ID 再查 creation（生成物转存）
+	if len(idMap) > 0 {
+		foundIDs := map[string]bool{}
+		for _, m := range materials {
+			foundIDs[m.ID] = true
+		}
+		needCreation := false
+		for id := range idMap {
+			if !foundIDs[id] {
+				needCreation = true
+				break
+			}
+		}
+		if needCreation {
+			creations, cErr := s.mediaStore.List(ctx, tenantID, entity.AssetTypeCreation)
+			if cErr == nil {
+				for _, c := range creations {
+					if match(c) && !foundIDs[c.ID] {
+						materials = append(materials, c)
+					}
+				}
+			}
 		}
 	}
 

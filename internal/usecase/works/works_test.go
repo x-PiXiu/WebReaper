@@ -23,9 +23,9 @@ func TestIsDeliverableTask(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "text2video is material",
+			name: "text2video is deliverable",
 			task: entity.GenerationTask{SubType: "text2video", ParamsJSON: `{}`},
-			want: false,
+			want: true,
 		},
 		{
 			name: "lip_sync is deliverable",
