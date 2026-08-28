@@ -412,36 +412,84 @@ type TimelineLine struct {
 | 6 | 台词定位：**静音/音量低点检测**（三级阈值；无备选方案） | ✅ 已确认 |
 | 7 | 转场特效 / 片段原声混入：**本期不做** | ✅ 已确认（边界） |
 
-## 10. 实施细节补遗（2026-08-29 自查补充——前六项不落实会返工或出安全缺口）
+## 10. 实施细节（2026-08-29 自查补充并完善为执行设计）
 
-### 10.1 P0：安全与正确性
+### 10.1 P0：安全与正确性（执行设计）
 
-1. **compose 下载的 SSRF 防护 + 大小上限**：服务端要下载源成片与片段——必须复用
-   `videotranscript.safeDownload` 同款校验（仅 http/https、DNS 解析拒私网/环回、
-   大小上限 500MB）——compose 输入来自用户提交的 URL，与文案提取链路同级风险
-2. **ffmpeg 并发闸门**：每个 compose 是一个吃 CPU 的编码进程——信号量限 2~3 并发
-   （参照 yt-dlp 闸门模式），排队而非拒绝
-3. **TimelineLine 落库设计**：生成任务表加 `timeline_json` 列（TEXT，NULL=未定位）
-   + 版本化迁移文件（076）；TimelineLine 结构 §5.2 已定
-4. **链式合成的时间轴继承**：compose 产物再 compose 时——音频是直拷的、时间轴
-   理论上不变——**直接复制源任务的 timeline（连同 script），禁止重新检测**；
-   实现为提交时若 source 是 compose 类型则继承其 timeline_json
-5. **台词"句"的语义 = 文案行**（`transcriptLines` 按换行切分，非按句号）：
-   一行含多句时行内标点停顿会触发 M>N 合并逻辑，窗口边界降为字符比例估算精度
-   ——前端配置界面提示"一行一句效果最佳"；验收分级见 §8 第 2 条
+**① compose 下载的 SSRF 防护 + 大小上限**
 
-### 10.2 P1：实施时确定即可
+compose 输入的源成片/片段 URL 来自用户提交，服务端拉取前必须过与
+`videotranscript.safeDownload` 同级的校验（建议直接抽公共辅助避免两份漂移）：
 
-6. **计费/配额策略**：compose 是本地 ffmpeg 无 API 成本——建议计入任务数但
-   不计费（配额维度防止滥用编码资源）
-7. **编码参数**：CRF 默认 23（x264）；进度回调用 `-progress pipe:1` 解析
-   `out_time_us` 回填任务进度（前端进度条数据源）
-8. **帧率适配**：overlay 跟随主输入时钟，片段帧率不一致无需预处理（确认项）
+```go
+// videocompose 用例内（阶段三实现）：
+// 1. url.Parse：仅 http/https
+// 2. net.LookupIP(host)：逐 IP 拒绝 Loopback/Private/LinkLocalUnicast/Unspecified
+// 3. HEAD 预检 Content-Length ≤ 500MB（无 HEAD 降级 GET 流式截断保护）
+// 4. 源成片与每个片段 URL 都过同一套校验（片段数量少直接串行）
+```
 
-### 10.3 P2：小细节
+**② ffmpeg 并发闸门**
 
-9. **首句 start 语义**：取实际检测的语音起点（成片片头静音时不取 0）
-10. **timeline 端点权限**：任务归属租户校验（与现有任务读写一致）
+```go
+// adapter 层包级信号量（参照 ytdlpSem 模式）：
+var composeSem = make(chan struct{}, 2)  // 2~3 并发（依服务器核数调）
+// 用例执行段：select 获取（ctx 取消让位退出）；排队时任务 running +
+// 日志"排队中"（前端进度条显示等待状态而非卡死）
+```
+
+**③ TimelineLine 落库**
+
+```sql
+-- 076_generation_tasks_timeline.sql
+ALTER TABLE generation_tasks ADD COLUMN timeline_json TEXT NULL COMMENT
+  '台词时间轴（静音检测定位产物 JSON 数组；NULL=未定位）';
+ALTER TABLE generation_tasks ADD COLUMN timeline_located_at DATETIME(3) NULL COMMENT
+  '最近一次定位时间（force 重跑时更新）';
+```
+
+- entity.GenerationTask 加 `TimelineJSON string` / `TimelineLocatedAt *time.Time`，
+  PO 映射双向；`NULL` 与空串都视为"未定位"
+- timeline POST 端点写入、GET 端点读取、compose 提交换算——全部走任务表这两列，
+  不引入新表
+
+**④ 链式合成的时间轴继承（禁止重检测）**
+
+```go
+// submitCompose 内（提交时执行一次，运行期不再碰 timeline）：
+if source.Type == "compose" && source.TimelineJSON != "" {
+    task.TimelineJSON = source.TimelineJSON      // 音频直拷→时间轴必然不变
+    task.Params["script"] = source.Params["script"] // 台词行列表随之继承
+}
+// 源为 lipsync/text2video 等首代成片且 timeline 为空 → 校验规则 §5.3-5 报错
+// 引导先调 POST timeline
+```
+
+**⑤ 台词"句" = 文案行 的精度语义**
+
+- 检测器输出随 timeline 增加 `align_mode` 字段：`"direct"`（M==N 直配）/
+  `"estimated"`（触发过合并/拆分）——持久化进 timeline_json 首行元信息
+- 前端配置界面：台词列表顶部固定提示**"插入点按文案行对齐，一行一句效果最佳"**；
+  `estimated` 模式下相关句旁显示"边界为估算"角标
+- 验收分级见 §8 第 2 条（direct ±200ms / estimated ±400ms）
+
+### 10.2 P1：暂不处理（实施时再定，避免超前设计）
+
+| # | 项 | 结论 |
+|---|---|---|
+| 6 | 计费/配额策略 | ⏸ **暂时不处理**——本地 ffmpeg 无 API 成本，首版免费不限 |
+| 7 | 编码参数（CRF/进度回调） | ⏸ **暂时不处理**——用 x264 默认 CRF；进度条首版只显阶段不显百分比 |
+| 8 | 帧率适配 | ✅ 确认项——overlay 跟随主输入时钟，无需处理 |
+
+### 10.3 P2：小细节（执行规则）
+
+**⑨ 首句 start 语义**：解析 silencedetect 输出时——若首个 `silence_start` 为 0
+（片头静音），首语音段起点取首个 `silence_end`；否则首段起点为 0。
+一律取实际检测值，不做任何"假设从 0 开始"。
+
+**⑩ timeline 端点权限**：handler 用 `repo.FindByID(ctx, tenantID, taskID)`
+取任务（与 Cancel/DeleteTask 同款——repo 层已带租户过滤）；非本租户任务
+表现同"不存在"（404），不泄露存在性。
 
 ### 10.4 已核实无需额外工作
 
