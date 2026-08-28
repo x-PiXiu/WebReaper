@@ -64,10 +64,10 @@
 ```
 【作品详情】用户查看成片 → 台词列表逐句展示
       ↓ 用户首次点某句「插入画面」
-① 定位    POST /generation/tasks/:id/timeline（按需，一次）
-          成片抽音轨 → ASR(verbose_json 时间戳) → 台词句序列对齐
-          → 每句 [{index, text, start_ms, end_ms}] 缓存随任务
-      ↓ （之后配置均读缓存，不再调 ASR）
+① 定位    POST /generation/tasks/:id/timeline（按需，一次，纯本地零 API）
+          成片抽音轨 → volumedetect 预分析 → silencedetect 三级阈值检测句间停顿
+          → 语音段与台词句顺序配对 → 每句 [{index, text, start_ms, end_ms}] 缓存随任务
+      ↓ （之后配置均读缓存，不再检测）
 ② 配置    用户在任意多句上挂片段（素材库选择/上传，可增删改）
           前端只记录 {sentence_index, media_url}
       ↓ 用户点「合成成片」
@@ -87,8 +87,33 @@
 #### 流程特征
 
 - **生成管线零改动**：①~⑤ 全部发生在成片之后，TTS/lipsync 现有流程一行不动
-- **按需付费**：不插入片段的用户零额外成本（ASR 只在首次配置时调一次）
+- **按需付费**：不插入片段的用户零额外成本（静音检测纯本地，零 API 成本）
 - **无损链式**：每次 compose 的音频流都是直拷，链式多次合成音频不劣化
+
+### 1.5 上游管线演进（主体形象视频前置——已确认，与本计划的关系）
+
+口播管线上游将进行主体架构改造（独立计划，此处仅记录与本计划相关的已确认结论）：
+
+```
+创建主体 → 自动链式生成 10s 不说话的形象视频（reference2video subjects 模式，
+           duration=10 无音频）→ 形象视频 URL 存主体记录
+口播成片 → lipsync(主体形象视频 + TTS 音频)——不再每次 reference2video
+```
+
+**已确认的关键事实**（2026-08-29 用户确认 + 文档查证）：
+
+1. **Vidu lipsync 自动延长**：输入视频短于音频时 Vidu 会自动延长视频适配音频——
+   10s 形象视频配任意长口播音频直接可行（本计划此前的风险项消除）
+2. **duration 支持查证**：q2 参考生 1-10s（10s 正好上限）、q3 参考生 3-16s
+3. **主体隔离现状**：应用层隔离（任务列表 `WHERE tenant_id` 过滤，b 用户看不到
+   a 的主体）；Vidu 层无隔离（同一企业 API key 下所有主体的 server_id 互通——
+   独立主体表建设时必须显式带 `tenant_id` 列，不能依赖隐式隔离）
+4. **官方主体**：`GET /subjects?ownership=system` 全量拉取展示给所有用户
+   （公共主体，与隔离无关）；个人主体界面只读本地存储，不查 Vidu
+
+**对本计划（B-Roll）的影响：零**——B-Roll 定位在"成片之后的后处理"，
+上游成片方式怎么变（ref 一步成片 / 形象视频+lipsync 两步），产出的都是
+"带音频轨的口播成片"，插入定位与合成逻辑完全不变。
 
 ---
 
@@ -282,16 +307,16 @@ type TimelineLine struct {
 2. 各片段窗口**互不重叠**（重叠拒绝，提示具体冲突句）
 3. `MediaURL` 可达（HEAD 预检，复用素材库校验）
 4. 片段含视频轨校验（ffprobe 预检——纯音频文件拒绝；图片走 loop 输入形态）
-5. 源视频存在且已有时间轴（无时间轴 → 明确报错引导重生成，见 §4 兼容策略）
+5. 源视频存在且已有时间轴（无时间轴 → 报错引导先调 POST timeline 定位）
 
 ### 5.4 API 设计（挂现有统一生成体系，2026-08-29 完善为五端点）
 
 ```
 ① POST /api/v1/generation/tasks/:id/timeline     台词时间轴定位（按需触发）
-     请求: {"force": false}                      （true=重跑 ASR 对齐，忽略缓存）
+     请求: {"force": false}                      （true=重跑静音检测，忽略缓存）
      响应: {"lines": [{"index":0,"text":"...","start_ms":0,"end_ms":3120}, ...],
-            "source": "asr", "located_at": "..."}
-     错误: 成片无音频轨 / ASR 服务商不支持 verbose_json → 可读错误
+            "source": "silence-detect", "located_at": "..."}
+     错误: 成片无音频轨 / 段句数差异超限（源音频不适合自动定位）→ 可读错误
 
 ② GET  /api/v1/generation/tasks/:id/timeline     读取已定位时间轴
      未定位 → 404 + 引导语"请先调用 POST 定位"
