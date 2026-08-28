@@ -531,21 +531,22 @@ func main() {
 	var geoPublishUC *account.PublishUseCase
 	var accountRepos *accountRepos // 提升到外层：平台总览统计需要发布任务计数
 	var socialSearcher *douyinweb.Searcher // 提升到外层：生成域提取管线复用（分享链解析）
+	var cookieVault port.CookieVault // 提升到外层：爬虫管理（cookie 加解密）复用
 	if geoRepos != nil {
 		accountRepos = initAccountRepositories(cfg.DB)
 		if accountRepos != nil {
-			// cookie 加密保险库（需要 PUBLISH_COOKIE_SECRET）
-			var vault port.CookieVault
+			// cookie 加密保险库（需要 PUBLISH_COOKIE_SECRET）——cookieVault 为外层提升变量
 			if cfg.Publish.CookieSecret != "" {
 				v, err := crypto.NewAESCookieVault(cfg.Publish.CookieSecret)
 				if err != nil {
 					log.Error("cookie 加密保险库初始化失败，扫码登录将不可用", port.Err(err))
 				} else {
-					vault = v
+					cookieVault = v
 				}
 			} else {
 				log.Warn("PUBLISH_COOKIE_SECRET 未配置，扫码登录不可用（cookie 无法加密存储）")
 			}
+			vault := cookieVault
 
 			// 扫码登录（浏览器自动化，需要 vault 才有意义）
 			// QR_LOGIN_HEADED=true 时显示浏览器窗口（调试用），默认 false 走灰盒 headless
@@ -884,9 +885,10 @@ func main() {
 		if socialSearcher != nil {
 			douyinResolver = douyinweb.NewLinkResolver(socialSearcher)
 		}
-		// 多平台组合：B站公开 API + 抖音账号基建 + og 兜底（快手已评估放弃：
-		// CDN pkey 会话签名 + 滑块验证码双层风控，2026-08-26 实测）
-		transcriptResolver = videolink.NewComposite(douyinResolver, biliweb.NewResolver())
+		// 多平台组合：B站公开 API + 抖音账号基建 + yt-dlp 通用兜底 + og 兜底
+		//（快手已评估放弃：CDN pkey 会话签名 + 滑块验证码双层风控，2026-08-26 实测）
+		ytdlpResolver := videolink.NewYtDlpResolver(cfg.Publish.YtDlpCmd)
+		transcriptResolver = videolink.NewComposite(douyinResolver, biliweb.NewResolver(), ytdlpResolver)
 		asrClient := asropenai.NewTranscriber(func() asropenai.ASRConfig {
 			// 优先走 CapabilityResolver（新表+旧表统一查询）
 			if cap, err := capResolver.Resolve(context.Background(), "asr"); err == nil && cap.APIKey != "" {
@@ -1081,7 +1083,7 @@ func main() {
 			}
 
 			router.SetInspiration(inspirationUC, inspirationVideoRepo, geoRepos.brand)
-			router.SetCrawlerAdmin(crawlerConfigRepo, crawlerAccountRepo, crawlerTaskLogRepo)
+			router.SetCrawlerAdmin(crawlerConfigRepo, crawlerAccountRepo, crawlerTaskLogRepo, cookieVault)
 			log.Info("灵感广场已启用")
 		}
 

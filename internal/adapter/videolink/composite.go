@@ -18,15 +18,16 @@ import (
 type CompositeResolver struct {
 	douyin port.VideoLinkResolver
 	bili   port.VideoLinkResolver
-	og     *OGResolver // 通用 og:video 兜底（微博/西瓜等——分享页 meta 解析）
+	ytdlp  *YtDlpResolver // yt-dlp 通用兜底（YouTube/微博/西瓜等 1800+ 站点）
+	og     *OGResolver    // 通用 og:video 兜底（微博/西瓜等——分享页 meta 解析）
 }
 
 var _ port.VideoLinkResolver = (*CompositeResolver)(nil)
 
-// NewComposite 创建组合解析器（任一参数可为 nil——nil 平台不可用；
+// NewComposite 创建组合解析器（douyin/bili/ytdlp 任一参数可为 nil——nil 平台不可用；
 // og 兜底内置——平台专属未命中时尝试分享页 og:video）。
-func NewComposite(douyin, bili port.VideoLinkResolver) *CompositeResolver {
-	return &CompositeResolver{douyin: douyin, bili: bili, og: NewOGResolver()}
+func NewComposite(douyin, bili port.VideoLinkResolver, ytdlp *YtDlpResolver) *CompositeResolver {
+	return &CompositeResolver{douyin: douyin, bili: bili, ytdlp: ytdlp, og: NewOGResolver()}
 }
 
 // SupportedPlatforms 支持的平台合集。
@@ -49,33 +50,46 @@ func isKuaishouLink(rawURL string) bool {
 		strings.Contains(rawURL, "kuaishou.com/f/")
 }
 
-// Resolve 按链接特征分发。
-func (c *CompositeResolver) Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, string, error) {
+// Resolve 按链接特征分发（透传候选直链列表）。
+//
+// 分发顺序：B站 → 快手（明确拒绝）→ 抖音（sidecar+chromedp）→ yt-dlp 通用
+// → og:video 兜底。平台专属优先（协议自研、快），yt-dlp 管长尾，og 收尾。
+func (c *CompositeResolver) Resolve(ctx context.Context, tenantID, rawURL string) ([]string, string, string, string, error) {
 	if biliweb.IsBilibiliLink(rawURL) {
 		if c.bili != nil {
 			return c.bili.Resolve(ctx, tenantID, rawURL)
 		}
-		return "", "", "", "", nil
+		return nil, "", "", "", nil
 	}
 	// 快手链接：JS 渲染页面，og:video 不可用——提前返回明确提示
 	if isKuaishouLink(rawURL) {
-		return "", "", "", "", fmt.Errorf("暂不支持快手分享链自动提取——请下载视频后直接上传，我们正在接入快手解析")
+		return nil, "", "", "", fmt.Errorf("暂不支持快手分享链自动提取——请下载视频后直接上传，我们正在接入快手解析")
 	}
 	if c.douyin != nil {
-		if u, t, p, lp, e := c.douyin.Resolve(ctx, tenantID, rawURL); e == nil {
+		u, t, p, lp, e := c.douyin.Resolve(ctx, tenantID, rawURL)
+		if e == nil {
 			return u, t, p, lp, nil
-		} else if c.og != nil {
-			// 抖音专属失败（如账号未绑）→ og 兜底再试
-			if u, t, p, lp, e2 := c.og.Resolve(ctx, tenantID, rawURL); e2 == nil {
-				return u, t, p, lp, nil
+		}
+		// 抖音专属失败 → yt-dlp 通用 → og 依次兜底；全失败返回抖音原始错误（提示最具体）
+		if c.ytdlp != nil {
+			if u2, t2, p2, lp2, e2 := c.ytdlp.Resolve(ctx, tenantID, rawURL); e2 == nil {
+				return u2, t2, p2, lp2, nil
 			}
-			return "", "", "", "", e // 返回原始错误（提示更具体）
-		} else {
-			return "", "", "", "", e
+		}
+		if c.og != nil {
+			if u3, t3, p3, lp3, e3 := c.og.Resolve(ctx, tenantID, rawURL); e3 == nil {
+				return u3, t3, p3, lp3, nil
+			}
+		}
+		return nil, "", "", "", e
+	}
+	if c.ytdlp != nil {
+		if u, t, p, lp, e := c.ytdlp.Resolve(ctx, tenantID, rawURL); e == nil {
+			return u, t, p, lp, nil
 		}
 	}
 	if c.og != nil {
 		return c.og.Resolve(ctx, tenantID, rawURL)
 	}
-	return "", "", "", "", nil
+	return nil, "", "", "", nil
 }

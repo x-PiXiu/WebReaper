@@ -251,6 +251,27 @@ func (c *KuaishouCrawler) IsAlive(ctx context.Context) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// CheckAccountAlive 用指定账号 cookie 检测登录态（按账号健康检测）。
+func (c *KuaishouCrawler) CheckAccountAlive(ctx context.Context, cookie string) (bool, string) {
+	req, err := http.NewRequestWithContext(ctx, "GET", host, nil)
+	if err != nil {
+		return false, "请求构造失败: " + err.Error()
+	}
+	req.Header.Set("User-Agent", c.config.UserAgent)
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, "连接失败: " + err.Error()
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
+	}
+	return true, ""
+}
+
 // GetCapabilities 返回平台支持的能力。
 func (c *KuaishouCrawler) GetCapabilities() entity.PlatformCapabilities {
 	return entity.PlatformCapabilities{

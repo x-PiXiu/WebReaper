@@ -9,6 +9,7 @@ package videolink
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -22,7 +23,7 @@ type OGResolver struct {
 
 var _ interface {
 	SupportedPlatforms() []string
-	Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, string, error)
+	Resolve(ctx context.Context, tenantID, rawURL string) ([]string, string, string, string, error)
 } = (*OGResolver)(nil)
 
 // NewOGResolver 创建（超时 15s——拉分享页 HTML）。
@@ -40,34 +41,38 @@ var (
 	ogTitleRe2  = regexp.MustCompile(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']`)
 )
 
-// Resolve 分享页 HTML → og:video 直链。
-func (r *OGResolver) Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, string, error) {
+// Resolve 分享页 HTML → og:video 直链（单候选）。
+func (r *OGResolver) Resolve(ctx context.Context, tenantID, rawURL string) ([]string, string, string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", "", "", "", err
+		return nil, "", "", "", err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("分享页打开失败: %w", err)
+		return nil, "", "", "", fmt.Errorf("分享页打开失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", "", "", fmt.Errorf("分享页 HTTP %d", resp.StatusCode)
+		return nil, "", "", "", fmt.Errorf("分享页 HTTP %d", resp.StatusCode)
 	}
-	// 读 head 部分（og meta 在 head；限制 256KB 防超大页面）
-	buf := make([]byte, 256<<10)
-	n, _ := resp.Body.Read(buf)
-	html := string(buf[:n])
+	// 读 head 部分（og meta 在 head；限制 256KB 防超大页面）。
+	// 必须读满而非单次 Read——TCP 分包下单次 Read 返回不全，og meta 靠后的
+	// 大页面会被截断漏解析（曾表现为"明明有 og:video 却报未声明"）
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil && len(body) == 0 {
+		return nil, "", "", "", fmt.Errorf("分享页读取失败: %w", err)
+	}
+	html := string(body)
 
 	videoURL := firstMatch(html, ogVideoRe, ogVideoRe2)
 	if videoURL == "" {
-		return "", "", "", "", fmt.Errorf("分享页未声明 og:video（可能需要平台专属解析或 JS 渲染）")
+		return nil, "", "", "", fmt.Errorf("分享页未声明 og:video（可能需要平台专属解析或 JS 渲染）")
 	}
 	// HTML 实体还原（&amp; → &）
 	videoURL = strings.ReplaceAll(videoURL, "&amp;", "&")
 	title := firstMatch(html, ogTitleRe, ogTitleRe2)
-	return videoURL, title, "og-generic", "", nil
+	return []string{videoURL}, title, "og-generic", "", nil
 }
 
 func firstMatch(s string, patterns ...*regexp.Regexp) string {

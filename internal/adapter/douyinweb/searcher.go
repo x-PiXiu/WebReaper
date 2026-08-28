@@ -151,7 +151,12 @@ func (s *Searcher) withVideoPage(ctx context.Context, tenantID, plat, videoID st
 	if err != nil {
 		return err
 	}
+	return s.withVideoPageCookie(ctx, cookie, videoID, fn)
+}
 
+// withVideoPageCookie 用指定 cookie 打开视频页（重试场景复用同一账号——
+// 每次 pickCookie 都 IncrementUsage，换会话重试若重新选号会成倍烧配额）。
+func (s *Searcher) withVideoPageCookie(ctx context.Context, cookie, videoID string, fn func(pctx context.Context) error) error {
 	opts := chromedputil.HeadlessOptions(false)
 	opts = append(opts,
 		chromedp.WindowSize(1280, 800),
@@ -166,7 +171,7 @@ func (s *Searcher) withVideoPage(ctx context.Context, tenantID, plat, videoID st
 
 	videoURL := "https://www.douyin.com/video/" + videoID
 	var currentURL string
-	err = chromedp.Run(sessionCtx,
+	err := chromedp.Run(sessionCtx,
 		network.Enable(),
 		network.SetCookies(parseCookies(cookie, ".douyin.com")),
 		chromedp.Navigate(videoURL),
@@ -294,9 +299,58 @@ func (s *Searcher) GetVideoDetail(ctx context.Context, tenantID, plat, videoID s
 }
 
 // getAwemeDetail 视频页上下文调详情接口（LinkResolver 复用——拿 play_addr 原始数据）。
+//
+// 风控空响应重试（2026-08 实测）：抖音详情 XHR 有概率返回 HTTP 200 + 空 body——
+// 登录 cookie 也会触发（健康检测只验证登录态，拦不到这种接口级风控）。
+// 换全新浏览器会话重新抽签可恢复，故空响应/执行失败时重试（共 3 次，间隔递增）。
+// 重试复用首次选中的账号 cookie（每次 pickCookie 都 IncrementUsage——
+// 重新选号会让一次业务请求烧 3 次配额，实测用量 3→4→5）。
 func (s *Searcher) getAwemeDetail(ctx context.Context, tenantID, videoID string) (*awemeInfo, error) {
+	cookie, err := s.pickCookie(ctx, tenantID, platform)
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		info, err := s.getAwemeDetailOnce(ctx, cookie, videoID)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("[douyinweb] 详情第 %d 次尝试成功 video=%s", attempt, videoID)
+			}
+			return info, nil
+		}
+		lastErr = err
+		if !isRetryableDetailErr(err) || attempt == 3 {
+			break
+		}
+		wait := time.Duration(attempt*8) * time.Second
+		log.Printf("[douyinweb] 详情第 %d 次失败（%v），%s 后换会话重试", attempt, err, wait)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+	return nil, lastErr
+}
+
+// isRetryableDetailErr 哪些详情错误值得换会话重试。
+// 不可重试：视频不存在/无播放地址（重试无意义）；cookie 失效 2483（换会话不解决）。
+func isRetryableDetailErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "空响应") ||
+		strings.Contains(msg, "返回异常") ||
+		strings.Contains(msg, "XHR 执行失败") ||
+		strings.Contains(msg, "打开视频页失败")
+}
+
+// getAwemeDetailOnce 单次尝试：开视频页（指定 cookie）→ 页面上下文同步 XHR 调详情接口。
+func (s *Searcher) getAwemeDetailOnce(ctx context.Context, cookie, videoID string) (*awemeInfo, error) {
 	var out *awemeInfo
-	err := s.withVideoPage(ctx, tenantID, platform, videoID, func(pctx context.Context) error {
+	err := s.withVideoPageCookie(ctx, cookie, videoID, func(pctx context.Context) error {
 		paramsJS := buildParamsJS(map[string]string{"aweme_id": videoID})
 		js := xhrSyncJS("/aweme/v1/web/aweme/detail/", paramsJS)
 		raw, e := evalSync(pctx, js)
@@ -305,16 +359,17 @@ func (s *Searcher) getAwemeDetail(ctx context.Context, tenantID, videoID string)
 		}
 		var dr detailResp
 		if jErr := json.Unmarshal([]byte(raw), &dr); jErr != nil {
-			// BE-CRAWL-01：空 body / 非 JSON 多为爬虫账号 Cookie 过期或平台风控——
-			// 裸 JSON parse 错误用户不可读，转明确提示 + 日志脱敏排查片段
+			// BE-CRAWL-01：空 body / 非 JSON 是接口级风控（登录态有效也会触发——
+			// 与 cookie 失效不同，健康检测通过不代表此接口放行）；
+			// 上层 getAwemeDetail 会换会话重试，此处错误语义保持"可重试"标记
 			trimmed := raw
 			if len(trimmed) > 200 {
 				trimmed = trimmed[:200]
 			}
 			if strings.TrimSpace(raw) == "" {
-				return fmt.Errorf("抖音详情接口返回空响应（爬虫账号 Cookie 可能已过期，请到管理后台重新扫码绑定）")
+				return fmt.Errorf("抖音详情接口返回空响应（触发平台风控）")
 			}
-			return fmt.Errorf("抖音详情接口返回异常（可能触发风控或 Cookie 过期，请检查爬虫账号）: %v | 响应片段: %s", jErr, trimmed)
+			return fmt.Errorf("抖音详情接口返回异常（可能触发风控）: %v | 响应片段: %s", jErr, trimmed)
 		}
 		if dr.StatusCode != 0 {
 			return statusErr(dr.StatusCode, "")
@@ -418,8 +473,20 @@ func (s *Searcher) IsAlive(ctx context.Context, tenantID, plat string) bool {
 	}
 	cookie, err := s.pickCookie(ctx, tenantID, plat)
 	if err != nil {
+		log.Printf("[douyinweb] IsAlive 选账号失败: %v", err)
 		return false
 	}
+	alive, reason := s.CheckCookieAlive(ctx, cookie)
+	if !alive {
+		log.Printf("[douyinweb] IsAlive 不健康: %s", reason)
+	}
+	return alive
+}
+
+// CheckCookieAlive 用指定 cookie 检测抖音登录态（按账号健康检测用）。
+// 与 IsAlive 的区别：不经过账号池选择——unhealthy 账号也能被重新检测救回。
+// 返回失败原因（alive=false 时非空——前端与日志可解释，不再盲猜）。
+func (s *Searcher) CheckCookieAlive(ctx context.Context, cookie string) (bool, string) {
 	opts := chromedputil.HeadlessOptions(false)
 	opts = append(opts, chromedp.WindowSize(1280, 800), chromedp.UserAgent(userAgent))
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -437,9 +504,12 @@ func (s *Searcher) IsAlive(ctx context.Context, tenantID, plat string) bool {
 		chromedp.Sleep(3*time.Second),
 		chromedp.Location(&cur),
 	); e != nil {
-		return false
+		return false, "浏览器检测失败: " + e.Error()
 	}
-	return !strings.Contains(cur, "login")
+	if strings.Contains(cur, "login") {
+		return false, "登录态无效（页面跳转登录页: " + cur + "）"
+	}
+	return true, ""
 }
 
 // statusErr 抖音错误码翻译。

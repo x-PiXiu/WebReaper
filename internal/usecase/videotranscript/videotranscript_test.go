@@ -75,6 +75,35 @@ func TestExtractSSRFBlocked(t *testing.T) {
 	}
 }
 
+func TestSafeDownloadEmptyCandidates(t *testing.T) {
+	uc := NewUseCase(nil, nil, fakeASR{}, nil)
+	if _, _, err := uc.safeDownload(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "无下载候选") {
+		t.Errorf("空候选应报明确错误，得到 %v", err)
+	}
+}
+
+func TestSafeDownloadAllCandidatesFail(t *testing.T) {
+	// 多候选依次尝试（降级编排）：httptest 域名解析到 127.0.0.1 被 SSRF 拒绝
+	// ——每个候选失败后必须继续尝试下一个，全部失败后聚合报告逐候选错误。
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("x"))
+	}))
+	defer srv.Close()
+	uc := NewUseCase(nil, nil, fakeASR{}, nil)
+	_, _, err := uc.safeDownload(context.Background(), []string{srv.URL + "/a", srv.URL + "/b"})
+	if err == nil {
+		t.Fatal("全部候选失败应报错")
+	}
+	if !strings.Contains(err.Error(), "2 个") {
+		t.Errorf("错误应含候选总数，得到 %v", err)
+	}
+	for _, want := range []string{"#1", "#2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("错误应含逐候选编号 %s，得到 %v", want, err)
+		}
+	}
+}
+
 func TestExtractFromFileFFmpegAbsentDirectASR(t *testing.T) {
 	// ffmpeg 不可用 → ≤25MB 文件直传 ASR（降级路径）
 	dir := t.TempDir()

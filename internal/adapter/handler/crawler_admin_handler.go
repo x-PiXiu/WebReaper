@@ -17,6 +17,7 @@ type CrawlerAdminHandler struct {
 	configRepo  port.CrawlerConfigRepository
 	accountRepo port.CrawlerAccountRepository
 	taskLogRepo port.CrawlerTaskLogRepository
+	vault       port.CookieVault // cookie 加解密（健康检测解密 / 手动添加加密）
 }
 
 func NewCrawlerAdminHandler(
@@ -24,12 +25,14 @@ func NewCrawlerAdminHandler(
 	configRepo port.CrawlerConfigRepository,
 	accountRepo port.CrawlerAccountRepository,
 	taskLogRepo port.CrawlerTaskLogRepository,
+	vault port.CookieVault,
 ) *CrawlerAdminHandler {
 	return &CrawlerAdminHandler{
 		uc:          uc,
 		configRepo:  configRepo,
 		accountRepo: accountRepo,
 		taskLogRepo: taskLogRepo,
+		vault:       vault,
 	}
 }
 
@@ -80,10 +83,22 @@ func (h *CrawlerAdminHandler) HandleCreateAccount(c *gin.Context) {
 		req.DailyUsageLimit = 50
 	}
 
+	// cookie 加密落库（与扫码登录保存路径一致——pickCookie 读取时按密文解密，
+	// 明文存储的记录解密必失败，会被账号池静默跳过）
+	encCookie := req.Cookie
+	if h.vault != nil {
+		enc, encErr := h.vault.Encrypt(req.Cookie)
+		if encErr != nil {
+			fail(c, fmt.Errorf("cookie 加密失败: %w", encErr))
+			return
+		}
+		encCookie = enc
+	}
+
 	account := entity.CrawlerAccount{
 		Platform:         req.Platform,
 		AccountName:      req.AccountName,
-		CookieEncrypted:  req.Cookie, // TODO: 加密存储
+		CookieEncrypted:  encCookie,
 		UserAgent:        req.UserAgent,
 		ProxyAddress:     req.ProxyAddress,
 		Status:           entity.CrawlerAccountActive,
@@ -159,6 +174,10 @@ func (h *CrawlerAdminHandler) HandleUpdateAccount(c *gin.Context) {
 }
 
 // HandleCheckAccountHealth POST /admin/crawler-accounts/:id/health —— 手动触发健康检查。
+//
+// 按账号检测：解密该账号自己的 cookie 跑平台登录态验证。
+//（旧实现调平台级 IsPlatformAlive——从账号池选"健康"账号检测，与被点账号无关，
+//  且唯一账号被标 unhealthy 后池子选不出账号，检测永远失败——死锁。）
 func (h *CrawlerAdminHandler) HandleCheckAccountHealth(c *gin.Context) {
 	if h.accountRepo == nil || h.uc == nil {
 		fail(c, fmt.Errorf("服务未配置"))
@@ -171,18 +190,26 @@ func (h *CrawlerAdminHandler) HandleCheckAccountHealth(c *gin.Context) {
 		return
 	}
 
-	_, err = h.accountRepo.FindByID(c.Request.Context(), id)
+	acc, err := h.accountRepo.FindByID(c.Request.Context(), id)
 	if err != nil {
 		fail(c, fmt.Errorf("账号不存在"))
 		return
 	}
 
-	// 检测平台连接
-	platform := c.Query("platform")
-	if platform == "" {
-		platform = "douyin"
+	// 解密该账号自己的 cookie（密钥变更/明文脏数据 → 解密失败即不健康，原因可解释）
+	alive := false
+	reason := ""
+	if h.vault == nil {
+		reason = "加密服务未配置"
+	} else {
+		cookie, decErr := h.vault.Decrypt(acc.CookieEncrypted)
+		if decErr != nil {
+			reason = "cookie 解密失败（非加密格式或加密密钥已变更）"
+		} else {
+			alive, reason = h.uc.CheckAccountAlive(c.Request.Context(), acc.Platform, cookie)
+		}
 	}
-	alive := h.uc.IsPlatformAlive(c.Request.Context(), platform)
+
 	result := entity.HealthHealthy
 	if !alive {
 		result = entity.HealthUnhealthy
@@ -195,9 +222,10 @@ func (h *CrawlerAdminHandler) HandleCheckAccountHealth(c *gin.Context) {
 
 	success(c, gin.H{
 		"account_id": id,
-		"platform":   platform,
+		"platform":   acc.Platform,
 		"healthy":    alive,
 		"result":     result,
+		"reason":     reason,
 	})
 }
 

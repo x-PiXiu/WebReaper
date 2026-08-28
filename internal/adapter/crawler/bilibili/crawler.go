@@ -272,6 +272,15 @@ func (c *BilibiliCrawler) IsAlive(ctx context.Context) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// CheckAccountAlive 用指定账号 cookie 检测登录态（按账号健康检测）。
+// B站爬虫走公开 API 不依赖登录 cookie——连接可达即视为健康。
+func (c *BilibiliCrawler) CheckAccountAlive(ctx context.Context, cookie string) (bool, string) {
+	if c.IsAlive(ctx) {
+		return true, ""
+	}
+	return false, "B站连接不可达"
+}
+
 // GetCapabilities 返回平台支持的能力。
 func (c *BilibiliCrawler) GetCapabilities() entity.PlatformCapabilities {
 	return entity.PlatformCapabilities{

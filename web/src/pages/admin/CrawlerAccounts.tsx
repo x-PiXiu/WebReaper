@@ -60,7 +60,12 @@ export default function CrawlerAccounts() {
     mutationFn: ({ id, platform }: { id: number; platform: string }) =>
       businessApi.adminCheckCrawlerAccountHealth(id, platform),
     onSuccess: (data) => {
-      message.success(`健康检查完成: ${data.healthy ? '健康' : '异常'}`)
+      // 后端按账号 ID 解密其 cookie 检测——失败时带 reason（解密失败/跳登录页/连接失败等）
+      if (data.healthy) {
+        message.success('健康检查完成: 健康')
+      } else {
+        message.error(`健康检查异常: ${data.reason || '未知原因'}`)
+      }
       queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
     },
     onError: () => message.error('健康检查失败'),
@@ -108,20 +113,9 @@ export default function CrawlerAccounts() {
           setIsQRModalOpen(false)
           setQrSessionId(null)
 
-          // 扫码登录成功后，同步创建 crawler_accounts 记录
-          // Cookie 已保存在 accounts 表，通过 admin API 创建 crawler_accounts
-          try {
-            await businessApi.adminCreateCrawlerAccount({
-              platform: qrPlatform,
-              account_name: resp.account_name || `平台方账号-${qrPlatform}`,
-              cookie: '从accounts表同步', // 后端会从accounts表读取实际Cookie
-              daily_usage_limit: 50,
-            })
-            message.success('平台方账号添加成功')
-          } catch {
-            // 如果创建失败（可能已存在），不影响登录成功
-          }
-
+          // 后端 PollQRLoginWithScene(scene=crawler) 已在登录成功时自动把
+          // 加密 cookie 保存进 crawler_accounts 表——此处无需再调创建接口
+          //（旧版曾补创建一条占位 cookie 记录，导致列表出现两条重复账号）
           queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
           clearInterval(timer)
         } else if (resp.status === 'expired') {

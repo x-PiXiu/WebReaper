@@ -34,7 +34,7 @@ type Resolver struct {
 
 var _ interface {
 	SupportedPlatforms() []string
-	Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, string, error)
+	Resolve(ctx context.Context, tenantID, rawURL string) ([]string, string, string, string, error)
 } = (*Resolver)(nil)
 
 // NewResolver 创建 B站解析器。
@@ -73,22 +73,22 @@ type playResp struct {
 	} `json:"data"`
 }
 
-// Resolve B站链接 → 播放直链（mp4 durl）+ 标题 + 平台。
-func (r *Resolver) Resolve(ctx context.Context, tenantID, rawURL string) (string, string, string, string, error) {
+// Resolve B站链接 → 候选播放直链列表（mp4 durl）+ 标题 + 平台。
+func (r *Resolver) Resolve(ctx context.Context, tenantID, rawURL string) ([]string, string, string, string, error) {
 	// b23.tv 短链 → 跟随重定向拿最终地址（不读体）
 	if strings.Contains(rawURL, "b23.tv") {
 		final, err := r.followRedirect(ctx, rawURL)
 		if err != nil {
-			return "", "", "", "", fmt.Errorf("B站短链解析失败: %w", err)
+			return nil, "", "", "", fmt.Errorf("B站短链解析失败: %w", err)
 		}
 		rawURL = final
 	}
 	if !IsBilibiliLink(rawURL) {
-		return "", "", "", "", fmt.Errorf("非B站视频链接")
+		return nil, "", "", "", fmt.Errorf("非B站视频链接")
 	}
 	m := bvidRe.FindStringSubmatch(rawURL)
 	if m == nil {
-		return "", "", "", "", fmt.Errorf("链接里找不到 BV 号（可能已删除或非视频内容）")
+		return nil, "", "", "", fmt.Errorf("链接里找不到 BV 号（可能已删除或非视频内容）")
 	}
 	bvid := m[1]
 
@@ -103,10 +103,10 @@ func (r *Resolver) Resolve(ctx context.Context, tenantID, rawURL string) (string
 	// ① view API：cid + 标题
 	vr := &viewResp{}
 	if _, err := r.getJSON(ctx, "https://api.bilibili.com/x/web-interface/view?bvid="+bvid, vr); err != nil {
-		return "", "", "", "", fmt.Errorf("B站视频信息获取失败: %w", err)
+		return nil, "", "", "", fmt.Errorf("B站视频信息获取失败: %w", err)
 	}
 	if vr.Code != 0 || len(vr.Data.Pages) == 0 {
-		return "", "", "", "", fmt.Errorf("B站视频不存在或无分P信息（code=%d）", vr.Code)
+		return nil, "", "", "", fmt.Errorf("B站视频不存在或无分P信息（code=%d）", vr.Code)
 	}
 	if page > len(vr.Data.Pages) {
 		page = 1 // 超范围回落第 1P
@@ -121,12 +121,14 @@ func (r *Resolver) Resolve(ctx context.Context, tenantID, rawURL string) (string
 	var pr playResp
 	playURL := fmt.Sprintf("https://api.bilibili.com/x/player/playurl?bvid=%s&cid=%d&qn=16&fnval=0&platform=html5", bvid, pg.CID)
 	if _, err := r.getJSON(ctx, playURL, &pr); err != nil {
-		return "", "", "", "", fmt.Errorf("B站播放地址获取失败: %w", err)
+		return nil, "", "", "", fmt.Errorf("B站播放地址获取失败: %w", err)
 	}
 	if pr.Code != 0 || len(pr.Data.Durl) == 0 || pr.Data.Durl[0].URL == "" {
-		return "", "", "", "", fmt.Errorf("B站无公开播放地址（可能为会员专属或已下架，code=%d）", pr.Code)
+		return nil, "", "", "", fmt.Errorf("B站无公开播放地址（可能为会员专属或已下架，code=%d）", pr.Code)
 	}
-	return pr.Data.Durl[0].URL, title, platform, "", nil
+	// 注意：B站 durl 多元素是视频分段（顺序拼接才完整）而非 CDN 备选，
+	// 故只取首段——与旧版行为一致；候选列表机制留给抖音类 url_list 语义。
+	return []string{pr.Data.Durl[0].URL}, title, platform, "", nil
 }
 
 // getJSON 带 Referer/UA 请求 B站公开 API 并解析。

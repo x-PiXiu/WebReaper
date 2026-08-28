@@ -150,6 +150,9 @@ func (m *mockCrawler) RefreshMetrics(ctx context.Context, videoIDs []string) ([]
 	return nil, nil
 }
 func (m *mockCrawler) IsAlive(ctx context.Context) bool { return m.alive }
+func (m *mockCrawler) CheckAccountAlive(ctx context.Context, cookie string) (bool, string) {
+	return m.alive, ""
+}
 func (m *mockCrawler) GetCapabilities() entity.PlatformCapabilities {
 	return entity.PlatformCapabilities{SupportSearch: true}
 }

@@ -25,6 +25,7 @@ type douyinwebSearcher interface {
 	SearchHotVideos(ctx context.Context, tenantID, plat, keyword string, limit int) ([]port.SocialVideo, error)
 	GetVideoDetail(ctx context.Context, tenantID, plat, videoID string) (*port.SocialVideo, error)
 	IsAlive(ctx context.Context, tenantID, plat string) bool
+	CheckCookieAlive(ctx context.Context, cookie string) (bool, string)
 }
 
 // CrawlerConfig 爬虫配置。
@@ -111,6 +112,11 @@ func (c *DouyinCrawler) RefreshMetrics(ctx context.Context, videoIDs []string) (
 // IsAlive 检测平台连接是否正常。
 func (c *DouyinCrawler) IsAlive(ctx context.Context) bool {
 	return c.searcher.IsAlive(ctx, "", "douyin")
+}
+
+// CheckAccountAlive 用指定账号 cookie 检测登录态（按账号健康检测）。
+func (c *DouyinCrawler) CheckAccountAlive(ctx context.Context, cookie string) (bool, string) {
+	return c.searcher.CheckCookieAlive(ctx, cookie)
 }
 
 // GetCapabilities 返回平台支持的能力。

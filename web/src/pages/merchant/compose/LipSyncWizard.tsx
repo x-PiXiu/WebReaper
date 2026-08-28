@@ -177,10 +177,26 @@ export default function LipSyncWizard() {
     [subjects, subjectServerId],
   )
 
+  // 链接提取统一走异步轮询：提交 → 3s 间隔轮询直至 done/error（后端任务 TTL 30min）
+  const extractWithPolling = async (payload: { share_url?: string; video_url?: string }) => {
+    const start = await businessApi.extractTranscriptAsync(payload)
+    const deadline = Date.now() + 29 * 60 * 1000
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 3000))
+      const t = await businessApi.getTranscriptTask(start.task_id)
+      if (t.raw_text !== undefined) return t as { raw_text: string; raw_text_lines?: string[]; title: string; method: string }
+      // error 时后端返回 HTTP 400（axios 拦截器已 throw）——能走到这里只会是 pending
+    }
+    throw new Error('提取超时（超过 29 分钟），请尝试较短的视频或下载后上传')
+  }
+
   const doExtract = async (payload: { share_url?: string; asset_url?: string }) => {
     setExtracting(true); setError('')
     try {
-      const r = await businessApi.extractTranscript(payload)
+      // asset_url（本站素材）走同步接口；链接走异步轮询——长视频不再受 120s 连接超时约束
+      const r = payload.asset_url
+        ? await businessApi.extractTranscript(payload)
+        : await extractWithPolling(payload.share_url ? { share_url: payload.share_url } : {})
       const lines = transcriptLines(r.raw_text, r.raw_text_lines)
       setExtractLineCount(lines.length)
       setRawText(r.raw_text)
@@ -448,7 +464,7 @@ export default function LipSyncWizard() {
             >
               <span className="wz-source-card-icon"><LinkOutlined /></span>
               <strong>粘贴分享链接</strong>
-              <span>从抖音 / B站爆款提取说话内容</span>
+              <span>从抖音 / B站等平台爆款提取说话内容</span>
             </button>
             <button
               type="button"
@@ -475,7 +491,7 @@ export default function LipSyncWizard() {
               <Input.Search
                 size="large"
                 enterButton={<><LinkOutlined /> 提取文案</>}
-                placeholder="粘贴抖音 / B站分享链接（其他平台请下载后上传）"
+                placeholder="粘贴抖音 / B站分享链接（也支持 YouTube/微博/西瓜等平台）"
                 value={shareUrl}
                 onChange={e => setShareUrl(e.target.value)}
                 loading={extracting}

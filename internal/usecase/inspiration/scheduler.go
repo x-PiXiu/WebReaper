@@ -292,17 +292,22 @@ func (s *StaggeredScheduler) AddBrand(platform, brandID string, keywords []strin
 type AccountHealthChecker struct {
 	accountRepo port.CrawlerAccountRepository
 	platforms   map[string]port.CrawlerPlatform
+	vault       port.CookieVault // 解密各账号自己的 cookie
 }
 
 // NewAccountHealthChecker 创建健康检查器。
-func NewAccountHealthChecker(accountRepo port.CrawlerAccountRepository, platforms map[string]port.CrawlerPlatform) *AccountHealthChecker {
+func NewAccountHealthChecker(accountRepo port.CrawlerAccountRepository, platforms map[string]port.CrawlerPlatform, vault port.CookieVault) *AccountHealthChecker {
 	return &AccountHealthChecker{
 		accountRepo: accountRepo,
 		platforms:   platforms,
+		vault:       vault,
 	}
 }
 
-// CheckAll 检查所有账号的健康状态。
+// CheckAll 检查所有账号的健康状态（按账号检测：解密各自 cookie 逐个验证）。
+//
+// 不走平台级 IsAlive——那会从账号池选"健康"账号检测（与被检账号无关），
+// 且唯一账号被标 unhealthy 后池子选不出账号、检测永远失败（死锁）。
 func (h *AccountHealthChecker) CheckAll(ctx context.Context) error {
 	accounts, err := h.accountRepo.ListAll(ctx)
 	if err != nil {
@@ -315,10 +320,23 @@ func (h *AccountHealthChecker) CheckAll(ctx context.Context) error {
 			continue
 		}
 
-		alive := crawler.IsAlive(ctx)
+		alive := false
+		reason := ""
+		if h.vault == nil {
+			reason = "加密服务未配置"
+		} else {
+			cookie, decErr := h.vault.Decrypt(acc.CookieEncrypted)
+			if decErr != nil {
+				reason = "cookie 解密失败（非加密格式或密钥已变更）"
+			} else {
+				alive, reason = crawler.CheckAccountAlive(ctx, cookie)
+			}
+		}
+
 		result := entity.HealthHealthy
 		if !alive {
 			result = entity.HealthUnhealthy
+			log.Printf("[health] 账号 %d（%s）不健康: %s", acc.ID, acc.AccountName, reason)
 		}
 
 		if err := h.accountRepo.UpdateHealth(ctx, acc.ID, result); err != nil {

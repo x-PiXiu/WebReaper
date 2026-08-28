@@ -98,6 +98,7 @@ func (c AgentCoreConfig) IsConfigured() bool {
 type PublishConfig struct {
 	CookieSecret  string // 多平台发布 cookie 加密密钥（AES-GCM，从 PUBLISH_COOKIE_SECRET 读取）
 	QRLoginHeaded bool   // 扫码登录是否显示浏览器窗口（调试用，生产保持 false 走灰盒 headless）
+	YtDlpCmd      string // yt-dlp 调用形态（YT_DLP_CMD，空格分词；空=自动探测 yt-dlp/python -m yt_dlp）
 	// 抖音开放平台 OAuth（官方授权绑定——API 通道，替代浏览器扫码 RPA 通道）
 	DouyinClientKey    string
 	DouyinClientSecret string
@@ -348,6 +349,7 @@ func Load() Config {
 		Publish: PublishConfig{
 			CookieSecret:  os.Getenv("PUBLISH_COOKIE_SECRET"),
 			QRLoginHeaded: getenvBool("QR_LOGIN_HEADED", false),
+			YtDlpCmd:      os.Getenv("YT_DLP_CMD"),
 			DouyinClientKey:     os.Getenv("DOUYIN_CLIENT_KEY"),
 			DouyinClientSecret:  os.Getenv("DOUYIN_CLIENT_SECRET"),
 			DouyinOAuthCallback: getenvDefault("DOUYIN_OAUTH_CALLBACK", "http://localhost:8082/api/v1/merchant/accounts/douyin/oauth/callback"),

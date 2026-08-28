@@ -75,6 +75,60 @@ func (h *TranscriptHandler) HandleExtract(c *gin.Context) {
 	h.respond(c, res, err)
 }
 
+// HandleExtractAsync POST /api/v1/generation/transcript/extract/async
+// 长视频防前端超时：立即返回 task_id，前端轮询 HandleGetAsyncTask。
+// 请求体同 HandleExtract（video_url / share_url 二选一；asset_url 不支持异步）。
+func (h *TranscriptHandler) HandleExtractAsync(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("提取服务未配置"))
+		return
+	}
+	var req struct {
+		VideoURL string `json:"video_url"`
+		ShareURL string `json:"share_url"`
+		Title    string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	if req.VideoURL == "" && req.ShareURL == "" {
+		fail(c, fmt.Errorf("请提供视频链接或分享链接"))
+		return
+	}
+	taskID, err := h.uc.ExtractAsync(videotranscript.ExtractInput{
+		TenantID: middleware.CurrentTenantID(c),
+		VideoURL: req.VideoURL, ShareURL: req.ShareURL, Title: req.Title,
+	})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"task_id": taskID, "status": "pending"})
+}
+
+// HandleGetAsyncTask GET /api/v1/generation/transcript/extract/tasks/:id
+// 轮询异步提取任务：done 返回与同步接口同构的 result；error 返回原因。
+func (h *TranscriptHandler) HandleGetAsyncTask(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("提取服务未配置"))
+		return
+	}
+	task, ok := h.uc.GetAsyncTask(c.Param("id"))
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"code": 40400, "msg": "任务不存在或已过期（超过 30 分钟）"})
+		return
+	}
+	switch task.Status {
+	case "done":
+		h.respond(c, task.Result, nil)
+	case "error":
+		c.JSON(http.StatusBadRequest, gin.H{"code": 40000, "msg": task.Err, "status": "error"})
+	default:
+		success(c, gin.H{"status": "pending", "task_id": task.ID})
+	}
+}
+
 func (h *TranscriptHandler) respond(c *gin.Context, res *videotranscript.ExtractResult, err error) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 40000, "msg": err.Error()})

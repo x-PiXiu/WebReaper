@@ -6,11 +6,14 @@
 package videotranscript
 
 import (
+	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"crypto/sha256"
 	"log"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +22,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"webreaper/internal/usecase/port"
@@ -32,10 +36,71 @@ type UseCase struct {
 	ai          port.AIGenerator        // 改写双产出
 	client      *http.Client
 	cache       port.CacheStore         // 可选；提取结果缓存（同 URL 24h 内免重复 ASR 计费）
+	asyncTasks  sync.Map                // 轻量异步任务注册表（taskID → *AsyncTask）
 }
 
 // SetCache 注入缓存（可选；nil=不缓存——每次全量提取）。
 func (uc *UseCase) SetCache(c port.CacheStore) { uc.cache = c }
+
+// ---- 轻量异步任务（长视频防前端超时）----
+//
+// 背景：前端 axios 120s 超时；1 小时级视频（下载数百 MB + 分段 ASR）必然超时，
+// 用户看到"网络错误"但后台仍在跑并计费。异步化后前端立即拿 task_id 轮询，
+// 长视频不再受连接超时约束。内存注册表（服务重启丢任务——前端可重试，可接受）。
+
+// AsyncTask 异步提取任务视图。
+type AsyncTask struct {
+	ID        string        `json:"id"`
+	Status    string        `json:"status"` // pending / done / error
+	Result    *ExtractResult `json:"result,omitempty"`
+	Err       string        `json:"error,omitempty"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+const asyncTaskTTL = 30 * time.Minute
+
+// ExtractAsync 校验输入后立即返回任务 ID，后台 goroutine 执行提取。
+func (uc *UseCase) ExtractAsync(in ExtractInput) (string, error) {
+	if in.VideoURL == "" && in.ShareURL == "" {
+		return "", fmt.Errorf("请提供视频链接或分享链接")
+	}
+	if uc.transcriber == nil {
+		return "", fmt.Errorf("语音识别未配置")
+	}
+	buf := make([]byte, 8)
+	_, _ = rand.Read(buf)
+	id := "vt-" + hex.EncodeToString(buf)
+	uc.asyncTasks.Store(id, &AsyncTask{ID: id, Status: "pending", CreatedAt: time.Now()})
+	go func() {
+		task := &AsyncTask{ID: id, Status: "pending", CreatedAt: time.Now()}
+		defer uc.asyncTasks.Store(id, task)
+		// 后台无请求 ctx——独立超时（下载 10min client 上限 + ASR 余量）
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+		defer cancel()
+		res, err := uc.Extract(ctx, in)
+		if err != nil {
+			task.Status, task.Err = "error", err.Error()
+			return
+		}
+		task.Status, task.Result = "done", res
+	}()
+	return id, nil
+}
+
+// GetAsyncTask 查询异步任务（附带惰性清理过期任务，防注册表无限增长）。
+func (uc *UseCase) GetAsyncTask(id string) (*AsyncTask, bool) {
+	if v, ok := uc.asyncTasks.Load(id); ok {
+		return v.(*AsyncTask), true
+	}
+	now := time.Now()
+	uc.asyncTasks.Range(func(k, v any) bool {
+		if t, ok := v.(*AsyncTask); ok && now.Sub(t.CreatedAt) > asyncTaskTTL {
+			uc.asyncTasks.Delete(k)
+		}
+		return true
+	})
+	return nil, false
+}
 
 // transcriptCacheKey 提取缓存键（视频/分享 URL 哈希——同视频多形态 URL 分别缓存）。
 func transcriptCacheKey(url string) string {
@@ -207,12 +272,24 @@ func (uc *UseCase) Extract(ctx context.Context, in ExtractInput) (result *Extrac
 
 // extract 无缓存的原始提取流程。
 func (uc *UseCase) extract(ctx context.Context, in ExtractInput) (*ExtractResult, error) {
-	videoURL := in.VideoURL
+	videoURLs := []string{}
+	shareSource := "" // 解析链来源 URL（下载全败时重解析拿新直链用）
+	if in.VideoURL != "" {
+		if isPlatformPageURL(in.VideoURL) {
+			// 网页地址误传直链字段——自动转解析链（直下会把 HTML 当视频存盘，
+			// 最终在 ASR 层报不可理解的 Param Incorrect）
+			shareSource = in.VideoURL
+		} else {
+			videoURLs = append(videoURLs, in.VideoURL) // 用户直接提供的直链（单候选）
+		}
+	}
 	title := in.Title
-	if videoURL == "" && in.ShareURL != "" {
+	if len(videoURLs) == 0 && in.ShareURL != "" {
 		// BE-CRAWL-02：口令全文预处理——从分享文本中抽取 URL，避免 url.Parse 遇到非 URL 文本报错
-		shareURL := extractShareURL(in.ShareURL)
-		if shareURL == "" {
+		if shareSource == "" {
+			shareSource = extractShareURL(in.ShareURL)
+		}
+		if shareSource == "" {
 			return nil, fmt.Errorf("未能从分享文本中提取到有效链接（请粘贴含 https:// 的完整链接）")
 		}
 		if uc.resolver == nil {
@@ -220,11 +297,11 @@ func (uc *UseCase) extract(ctx context.Context, in ExtractInput) (*ExtractResult
 		}
 		var plat, localPath string
 		var err error
-		videoURL, title, plat, localPath, err = uc.resolver.Resolve(ctx, in.TenantID, shareURL)
+		videoURLs, title, plat, localPath, err = uc.resolveShare(ctx, in.TenantID, shareSource)
 		if err != nil {
 			return nil, err
 		}
-		uc.debugLog(ctx, "分享链解析完成", "platform", plat, "title_len", len(title), "video_url", truncURLForLog(videoURL))
+		uc.debugLog(ctx, "分享链解析完成", "platform", plat, "title_len", len(title), "candidates", len(videoURLs))
 		// 浏览器上下文已下载（快手 pkey 会话签名场景）——跳过 safeDownload 直接提取
 		if localPath != "" {
 			defer os.Remove(localPath)
@@ -237,12 +314,22 @@ func (uc *UseCase) extract(ctx context.Context, in ExtractInput) (*ExtractResult
 			return uc.extractFromFile(ctx, localPath, size, title)
 		}
 	}
-	if videoURL == "" {
+	if len(videoURLs) == 0 {
 		return nil, fmt.Errorf("请提供视频链接或分享链接")
 	}
 
-	// 下载（SSRF 防护：R1——仅 http/https、私网/环回拒、大小上限、超时）
-	mediaPath, size, err := uc.safeDownload(ctx, videoURL)
+	// 下载（SSRF 防护：R1——仅 http/https、私网/环回拒、大小上限、超时；
+	// 多候选依次尝试——CDN 节点可能个别 403/抽风）。
+	// 解析来的直链全失败时重解析一轮再试（直链有时效 + 节点抽签，实测 B站偶发
+	// 瞬时 412 数分钟后自愈——fresh 直链通常即可恢复）
+	mediaPath, size, err := uc.safeDownload(ctx, videoURLs)
+	if err != nil && shareSource != "" && uc.resolver != nil {
+		uc.debugLog(ctx, "下载全败，重新解析拿新直链重试", "err", err.Error())
+		if urls2, title2, _, _, rErr := uc.resolveShare(ctx, in.TenantID, shareSource); rErr == nil && len(urls2) > 0 {
+			videoURLs, title = urls2, title2
+			mediaPath, size, err = uc.safeDownload(ctx, videoURLs)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -250,6 +337,37 @@ func (uc *UseCase) extract(ctx context.Context, in ExtractInput) (*ExtractResult
 	uc.debugLog(ctx, "视频已下载", "bytes", size)
 
 	return uc.extractFromFile(ctx, mediaPath, size, title)
+}
+
+// resolveShare 解析链 + localPath 快速通道收敛（extract 与重解析共用）。
+func (uc *UseCase) resolveShare(ctx context.Context, tenantID, shareURL string) ([]string, string, string, string, error) {
+	urls, title, plat, localPath, err := uc.resolver.Resolve(ctx, tenantID, shareURL)
+	if err == nil {
+		uc.debugLog(ctx, "候选直链", "first", truncURLForLog(firstOr(urls, "")))
+	}
+	return urls, title, plat, localPath, err
+}
+
+// platformPagePatterns 平台网页地址特征——命中说明是视频详情/分享页而非媒体直链，
+// 应走解析链（名单与 composite 分发支持的平台保持同步）。
+var platformPagePatterns = []string{
+	"douyin.com/video/", "douyin.com/note/", "v.douyin.com", "iesdouyin.com",
+	"bilibili.com/video/", "b23.tv",
+	"kuaishou.com/short-video", "v.kuaishou.com", "kuaishou.com/f/",
+	"youtube.com/watch", "youtu.be/", "youtube.com/shorts/",
+	"weibo.com/tv/", "weibo.com/video/", "weibo.cn/tv/",
+	"ixigua.com/", "xihuan.com/",
+}
+
+// isPlatformPageURL 是否平台网页地址（video_url 字段误传防护）。
+func isPlatformPageURL(u string) bool {
+	u = strings.ToLower(u)
+	for _, p := range platformPagePatterns {
+		if strings.Contains(u, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // extractFromFile 从本地媒体文件提取文本（音视频上传路径复用）。
@@ -309,9 +427,60 @@ func (uc *UseCase) ExtractFromFile(ctx context.Context, tenantID, mediaPath, tit
 	return uc.extractFromFile(ctx, mediaPath, st.Size(), title)
 }
 
-// safeDownload SSRF 防护下载（R1）：
+// safeDownload SSRF 防护下载（R1）：候选直链依次尝试直到成功。
 // 仅 http/https；DNS 解析后拒绝私网/环回/链路本地地址；≤500MB；10 分钟超时。
-func (uc *UseCase) safeDownload(ctx context.Context, rawURL string) (path string, size int64, err error) {
+// 单候选失败（403/超时等）自动降级下一候选——CDN 节点可能个别抽风。
+func (uc *UseCase) safeDownload(ctx context.Context, urls []string) (path string, size int64, err error) {
+	if len(urls) == 0 {
+		return "", 0, fmt.Errorf("无下载候选链接")
+	}
+	var failures []string
+	for i, rawURL := range urls {
+		p, n, e := uc.downloadOne(ctx, rawURL)
+		// 瞬时风控/网关抖动（412/429/5xx）同候选延迟重试一次——实测 B站偶发
+		// 瞬时 412 数分钟内自愈，多数情况立刻重试即可恢复
+		if e != nil && isRetriableDownloadErr(e) {
+			uc.debugLog(ctx, "下载瞬时失败，1.5s 后原候选重试", "attempt", i+1, "err", e.Error())
+			select {
+			case <-ctx.Done():
+				return "", 0, ctx.Err()
+			case <-time.After(1500 * time.Millisecond):
+			}
+			p, n, e = uc.downloadOne(ctx, rawURL)
+		}
+		if e == nil {
+			if i > 0 {
+				uc.debugLog(ctx, "下载候选降级成功", "attempt", i+1, "bytes", n)
+			}
+			return p, n, nil
+		}
+		os.Remove(p) // 半截文件清理（downloadOne 失败时通常已清理，双保险）
+		failures = append(failures, fmt.Sprintf("#%d %v", i+1, e))
+		uc.debugLog(ctx, "下载候选失败，尝试下一个", "attempt", i+1, "err", e.Error())
+	}
+	return "", 0, fmt.Errorf("全部 %d 个下载候选失败：%s", len(urls), strings.Join(failures, "；"))
+}
+
+// httpStatusErr 带 HTTP 状态码的下载错误（safeDownload 按码决定是否重试）。
+type httpStatusErr struct {
+	code int
+}
+
+func (e *httpStatusErr) Error() string { return fmt.Sprintf("下载失败 HTTP %d", e.code) }
+
+// isRetriableDownloadErr 瞬时性失败（值得原候选重试）：412 预检风控、429 限流、5xx 网关。
+// 403 多为防盗链配置问题（重试无益——换候选/重解析才有用），不在此列。
+func isRetriableDownloadErr(err error) bool {
+	var se *httpStatusErr
+	if errors.As(err, &se) {
+		return se.code == http.StatusPreconditionFailed ||
+			se.code == http.StatusTooManyRequests || se.code >= 500
+	}
+	return false
+}
+
+// downloadOne 单候选下载（SSRF 校验 + 防盗链头 + 内容校验 + 500MB 上限）。
+func (uc *UseCase) downloadOne(ctx context.Context, rawURL string) (path string, size int64, err error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", 0, fmt.Errorf("仅支持 http/https 链接")
@@ -330,9 +499,15 @@ func (uc *UseCase) safeDownload(ctx context.Context, rawURL string) (path string
 		return "", 0, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36")
-	// B站 CDN 防盗链（缺失 Referer 返回 403）——抖音 CDN 无此校验不受影响
+	// CDN 防盗链（缺失 Referer 返回 403）：B站 bilivideo/hdslb；抖音 douyinvod
+	// （2026-08 实测：v26-web.douyinvod.com 节点已校验 Referer，缺失必 403，
+	//   v11-weba 节点暂不校验——故表现为"时好时坏"；带上 Referer 全节点通过）
 	if strings.Contains(u.Host, "bilivideo.com") || strings.Contains(u.Host, "hdslb.com") {
 		req.Header.Set("Referer", "https://www.bilibili.com")
+	}
+	if strings.Contains(u.Host, "douyinvod.com") || strings.Contains(u.Host, "douyin.com") ||
+		strings.Contains(u.Host, "snssdk.com") || strings.Contains(u.Host, "iesdouyin.com") {
+		req.Header.Set("Referer", "https://www.douyin.com/")
 	}
 	resp, err := uc.client.Do(req)
 	if err != nil {
@@ -340,14 +515,27 @@ func (uc *UseCase) safeDownload(ctx context.Context, rawURL string) (path string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("下载失败 HTTP %d", resp.StatusCode)
+		return "", 0, &httpStatusErr{code: resp.StatusCode}
+	}
+	// 内容校验（2026-08 实测踩坑：网页地址被当直链下载，167KB HTML 存成 .mp4，
+	// 最终在 ASR 层报不可理解的 Param Incorrect）：
+	//  ① Content-Type 明确是网页/接口响应 → 拒
+	//  ② 首块字节是 HTML 特征 → 拒
+	//  ③ 已知媒体魔数 → 过；未知二进制宽容放行（防误杀冷门容器格式）
+	if ct := resp.Header.Get("Content-Type"); strings.HasPrefix(ct, "text/") || strings.HasPrefix(ct, "application/json") {
+		return "", 0, fmt.Errorf("下载内容不是视频（Content-Type: %s）——链接可能指向网页或已失效", ct)
+	}
+	br := bufio.NewReader(resp.Body)
+	head, _ := br.Peek(512)
+	if looksLikeHTML(head) {
+		return "", 0, fmt.Errorf("下载内容是网页而非视频——链接可能指向网页地址或已失效")
 	}
 	f, err := os.CreateTemp("", "vt-*.mp4")
 	if err != nil {
 		return "", 0, err
 	}
 	defer f.Close()
-	n, err := io.Copy(f, io.LimitReader(resp.Body, 500<<20+1))
+	n, err := io.Copy(f, io.LimitReader(br, 500<<20+1))
 	if err != nil {
 		os.Remove(f.Name())
 		return "", 0, fmt.Errorf("下载中断: %w", err)
@@ -357,6 +545,23 @@ func (uc *UseCase) safeDownload(ctx context.Context, rawURL string) (path string
 		return "", 0, fmt.Errorf("视频超过 500MB 上限")
 	}
 	return f.Name(), n, nil
+}
+
+// looksLikeHTML 首块字节是否 HTML 特征（大小写不敏感；足以拦截误下网页场景）。
+func looksLikeHTML(head []byte) bool {
+	if len(head) == 0 {
+		return false
+	}
+	lower := strings.ToLower(string(head))
+	return strings.Contains(lower, "<!doctype") || strings.Contains(lower, "<html") || strings.Contains(lower, "<head")
+}
+
+// firstOr 列表首元素，空列表返回缺省值。
+func firstOr(list []string, def string) string {
+	if len(list) > 0 {
+		return list[0]
+	}
+	return def
 }
 
 // ---- 文案双产出（D2 第②步：清洗版 + 改写版）----

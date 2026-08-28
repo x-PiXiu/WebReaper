@@ -14,9 +14,13 @@ import (
 func TestResolveBilibiliLive(t *testing.T) {
 	r := NewResolver()
 	raw := "https://www.bilibili.com/video/BV1aw9jBeEHr?spm_id_from=333.788.player.switch&vd_source=44a7275750b2578f268240dcf3c10b55&p=2"
-	videoURL, title, plat, _, err := r.Resolve(context.Background(), "t", raw)
+	urls, title, plat, _, err := r.Resolve(context.Background(), "t", raw)
 	if err != nil {
 		t.Skipf("网络不可达或接口变更: %v", err)
+	}
+	videoURL := ""
+	if len(urls) > 0 {
+		videoURL = urls[0]
 	}
 	if plat != "bilibili" || videoURL == "" {
 		t.Fatalf("解析结果异常: plat=%s url=%q", plat, videoURL)

@@ -169,6 +169,17 @@ func (uc *UseCase) IsPlatformAlive(ctx context.Context, platform string) bool {
 	return crawler.IsAlive(ctx)
 }
 
+// CheckAccountAlive 用指定账号 cookie 检测平台登录态（按账号健康检测）。
+// 与 IsPlatformAlive 的区别：不经过账号池选择——unhealthy 账号也能被
+// 重新检测救回（手动健康检查用，避免死锁：被标不健康→池子不再选→检测永远失败）。
+func (uc *UseCase) CheckAccountAlive(ctx context.Context, platform, cookie string) (bool, string) {
+	crawler, ok := uc.platforms[platform]
+	if !ok {
+		return false, "平台 " + platform + " 未接入"
+	}
+	return crawler.CheckAccountAlive(ctx, cookie)
+}
+
 // ListPlatforms 列出所有已注册的平台。
 func (uc *UseCase) ListPlatforms() []string {
 	platforms := make([]string, 0, len(uc.platforms))

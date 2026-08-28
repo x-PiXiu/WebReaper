@@ -35,6 +35,12 @@ type CrawlerPlatform interface {
 	// IsAlive 检测平台连接是否正常（Cookie 有效性）。
 	IsAlive(ctx context.Context) bool
 
+	// CheckAccountAlive 用指定账号 cookie 检测登录态（按账号健康检测）。
+	// 与 IsAlive 的区别：不经过账号池选择——unhealthy 账号也能被重新检测救回
+	//（手动/定时健康检查用，避免"账号被标不健康→账号池不再选它→检测永远失败"死锁）。
+	// 返回 (是否健康, 失败原因)——alive=false 时 reason 非空（前端与日志可解释）。
+	CheckAccountAlive(ctx context.Context, cookie string) (alive bool, reason string)
+
 	// GetCapabilities 返回平台支持的能力（搜索/详情/评论/刷新）。
 	GetCapabilities() entity.PlatformCapabilities
 }

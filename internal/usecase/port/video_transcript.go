@@ -14,11 +14,13 @@ import "context"
 type VideoLinkResolver interface {
 	// SupportedPlatforms 支持的平台标识（douyin/kuaishou…）。
 	SupportedPlatforms() []string
-	// Resolve 解析分享链/网页链：返回可直接下载的视频直链 + 标题 + 平台。
+	// Resolve 解析分享链/网页链：返回候选视频直链列表 + 标题 + 平台。
+	// 候选按优先级排序——平台 CDN 节点可能个别抽风（如抖音 v26 节点 403），
+	// 下载层依次尝试直到成功；单平台实现也应把 url_list 全量返回。
 	// 不支持的链接返回错误（调用方提示改用直接上传）。
 	// localPath 非空 = 解析器已在自身上下文完成下载（如快手 chromedp：CDN pkey
 	// 签名绑定浏览器会话，URL 离开上下文即失效）——调用方跳过 safeDownload 直接用。
-	Resolve(ctx context.Context, tenantID, rawURL string) (videoURL, title, platform, localPath string, err error)
+	Resolve(ctx context.Context, tenantID, rawURL string) (videoURLs []string, title, platform, localPath string, err error)
 }
 
 // MediaAVTool 本地媒体处理（ffmpeg/ffprobe 封装——字幕探测与音轨剥离）。

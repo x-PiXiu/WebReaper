@@ -123,6 +123,7 @@ type Router struct {
 	crawlerConfigRepo   port.CrawlerConfigRepository
 	crawlerAccountRepo  port.CrawlerAccountRepository
 	crawlerTaskLogRepo  port.CrawlerTaskLogRepository
+	crawlerVault        port.CookieVault // cookie 加解密（账号健康检测解密/手动添加加密）
 	// 品牌发布配置——通过 SetPublishConfig 注入，可选
 	publishConfigRepo  port.BrandPublishConfigRepository
 	publishBindingRepo port.AccountBrandBindingRepository
@@ -347,7 +348,7 @@ func (r *Router) registerCrawlerAdminRoutes(api *gin.RouterGroup) {
 	adminGroup := api.Group("/admin")
 	adminGroup.Use(middleware.RequireRole("admin"))
 
-	cah := NewCrawlerAdminHandler(r.inspirationUC, r.crawlerConfigRepo, r.crawlerAccountRepo, r.crawlerTaskLogRepo)
+	cah := NewCrawlerAdminHandler(r.inspirationUC, r.crawlerConfigRepo, r.crawlerAccountRepo, r.crawlerTaskLogRepo, r.crawlerVault)
 
 	// 平台方账号管理
 	adminGroup.GET("/crawler-accounts", cah.HandleListAccounts)
@@ -406,10 +407,11 @@ func (r *Router) SetInspiration(uc *inspiration.UseCase, videoRepo port.Inspirat
 }
 
 // SetCrawlerAdmin 注入爬虫管理仓储（可选；未注入则爬虫管理端点不注册）。
-func (r *Router) SetCrawlerAdmin(configRepo port.CrawlerConfigRepository, accountRepo port.CrawlerAccountRepository, taskLogRepo port.CrawlerTaskLogRepository) {
+func (r *Router) SetCrawlerAdmin(configRepo port.CrawlerConfigRepository, accountRepo port.CrawlerAccountRepository, taskLogRepo port.CrawlerTaskLogRepository, vault port.CookieVault) {
 	r.crawlerConfigRepo = configRepo
 	r.crawlerAccountRepo = accountRepo
 	r.crawlerTaskLogRepo = taskLogRepo
+	r.crawlerVault = vault
 }
 
 // SetPublishConfig 注入品牌发布配置仓储（可选；未注入则发布配置端点不注册）。

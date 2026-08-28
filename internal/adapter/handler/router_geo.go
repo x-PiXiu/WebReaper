@@ -209,6 +209,9 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	if r.transcriptUC != nil {
 		th := NewTranscriptHandler(r.transcriptUC, r.mediaStore)
 		api.POST("/generation/transcript/extract", th.HandleExtract)
+		// 异步模式（长视频防前端 120s 超时）：提交返回 task_id，轮询 tasks/:id 取结果
+		api.POST("/generation/transcript/extract/async", th.HandleExtractAsync)
+		api.GET("/generation/transcript/extract/tasks/:id", th.HandleGetAsyncTask)
 		api.POST("/generation/transcript/rewrite", th.HandleRewrite)
 	}
 	// 模板管理（客户端查询可用模板）

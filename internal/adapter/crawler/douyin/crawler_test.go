@@ -39,6 +39,10 @@ func (m *mockSearcher) IsAlive(ctx context.Context, tenantID, plat string) bool 
 	return m.alive
 }
 
+func (m *mockSearcher) CheckCookieAlive(ctx context.Context, cookie string) (bool, string) {
+	return m.alive, ""
+}
+
 func TestDouyinCrawler_Platform(t *testing.T) {
 	c := NewDouyinCrawler(&mockSearcher{}, nil)
 	if c.Platform() != "douyin" {
