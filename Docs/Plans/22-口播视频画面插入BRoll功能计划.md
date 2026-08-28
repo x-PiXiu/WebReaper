@@ -199,6 +199,16 @@ ffmpeg 需要 `between(t, START, END)` 的秒数，产品语义是"第 N 句台�
 
 ### C2 实施要点
 
+**对齐示例（一句话讲透原理）**：台词文字是已知的（生成时输入），ASR 补的只是
+"每句话在音频的哪个时间段被说出来"——
+
+| 台词句（已知） | ASR 返回段（带时间戳） | 对齐结果 |
+|---|---|---|
+| 第0句"大家好今天给大家介绍" | `{text:"大家好今天给大家介绍", start:0.00, end:3.12}` | `start_ms=0, end_ms=3120` |
+| 第1句"我们家的酸菜鱼是现杀的" | `{text:"我们家的酸菜鱼是现杀的", start:3.40, end:6.85}` | `start_ms=3400, end_ms=6850` |
+
+识别内容有误差不影响——找的是**已知文字**的位置（编辑距离兜底），不是在猜内容。
+
 1. **ASR 接口扩展**：`port.SpeechTranscriber` 新增 `TranscribeTimestamped(ctx, audioPath, mime, fileSize) ([]TranscriptSegment, error)`
    （`TranscriptSegment{text, start_ms, end_ms}`）——adapter 层 OpenAI 兼容请求加
    `response_format=verbose_json` 并解析 `segments[]`（硅基流动 whisper 类通用支持；
