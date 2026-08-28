@@ -168,9 +168,20 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 	//   ③ input.InsertText 批量插入正文（CDP Input.insertText，内核层 trusted，
 	//      原生支持中文/长文本/换行，DraftJS 无法区分真人键盘 → 接受）
 	//   ④ 校验：读编辑器 textContent 非空才继续
-	const editorSel = `.public-DraftEditor-content[contenteditable="true"]`
+	// 编辑器候选链（2026-08-28 DRY_RUN 实测：知乎编辑器疑似从 DraftJS 换代——
+	// .public-DraftEditor-content 聚焦无效（"添加正文"占位符不消失），补 ProseMirror/
+	// tiptap/通用 contenteditable 候选，waitFirstVisible 多策略探测）
+	editorSel := waitFirstVisible(sessionCtx, 10*time.Second,
+		`.public-DraftEditor-content[contenteditable="true"]`, `.tiptap.ProseMirror`,
+		`.ProseMirror[contenteditable="true"]`, `.ql-editor[contenteditable="true"]`,
+		`[contenteditable="true"]`)
+	if editorSel == "" {
+		diagScreenshot(sessionCtx, "zhihu", "fail")
+		return "", fmt.Errorf("未定位到正文编辑器（DraftJS/ProseMirror 候选均未命中）")
+	}
+	log.Printf("[PublishAuto:zhihu] 编辑器选择器=%s", editorSel)
 	err = chromedp.Run(sessionCtx,
-		// ① 聚焦编辑器（.public-DraftEditor-content 是 DraftJS 框架标准类，极稳定）
+		// ① 聚焦编辑器（候选链首个可见者）
 		chromedp.Click(editorSel, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
 		// ② 清空草稿残留：selectAll（选区操作安全）+ Backspace（trusted 删除）
@@ -201,7 +212,7 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 	// ④ 校验：编辑器 textContent 非空（防 DraftJS 静默拒绝导致按钮仍 disabled）
 	var contentText string
 	if cerr := chromedp.Run(sessionCtx,
-		chromedp.Evaluate(`document.querySelector('.public-DraftEditor-content')?.textContent || ''`, &contentText),
+		chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%q)?.textContent || ''`, editorSel), &contentText),
 	); cerr == nil {
 		trimmed := strings.TrimSpace(contentText)
 		if len([]rune(trimmed)) == 0 {
@@ -211,8 +222,13 @@ func (c *ZhihuAutoChannel) PublishAuto(ctx context.Context, job entity.PublishJo
 		log.Printf("[PublishAuto:zhihu] 正文已填充（%d 字符）", len([]rune(trimmed)))
 	}
 
-	// DRY_RUN：走完填表后截图返回、不点发布（真机验证选择器，绝不发出内容）
+	// DRY_RUN（完成标准：发布按钮就绪才算成功——探测不点击）
 	if publishDryRun {
+		if ready, detail := probePublishButton(sessionCtx, "zhihu"); ready {
+			log.Printf("[PublishAuto:zhihu] ✅ DRY_RUN 完成：发布按钮已就绪 %s（未点击）", detail)
+		} else {
+			log.Printf("[PublishAuto:zhihu] ❌ DRY_RUN 失败：发布按钮未就绪 %s", detail)
+		}
 		_ = os.MkdirAll("data", 0o755)
 		var shot []byte
 		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil && len(shot) > 0 {

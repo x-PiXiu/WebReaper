@@ -124,6 +124,15 @@ func (r *GormPublishJobRepository) Save(ctx context.Context, j entity.PublishJob
 	return r.db.WithContext(ctx).Save(&po).Error
 }
 
+// ReapStaleJobs 僵尸任务清扫：running 超过 maxAge 的任务标记 failed（服务重启杀掉
+// 的 goroutine 会留下永久 running——污染任务列表；RPA 会话上限 8 分钟，30 分钟足够安全）。
+func (r *GormPublishJobRepository) ReapStaleJobs(ctx context.Context, maxAge time.Duration) (int64, error) {
+	res := r.db.WithContext(ctx).Model(&PublishJobPO{}).
+		Where("status = ? AND created_at < ?", entity.PublishStatusRunning, time.Now().Add(-maxAge)).
+		Updates(map[string]any{"status": entity.PublishStatusFailed, "error_msg": "任务超时中断（服务重启或会话超时）——僵尸任务自动清扫"})
+	return res.RowsAffected, res.Error
+}
+
 func (r *GormPublishJobRepository) UpdateStatus(ctx context.Context, tenantID, id, status, externalURL, errorMsg string) error {
 	q := applyTenantScope(r.db.WithContext(ctx), tenantID)
 	updates := map[string]any{"status": status, "external_url": externalURL, "error_msg": errorMsg}

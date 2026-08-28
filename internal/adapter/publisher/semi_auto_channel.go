@@ -96,6 +96,7 @@ func NewChannelRegistry() *ChannelRegistry {
 	r.Register(NewKuaishouAutoChannel())   // 快手
 	r.Register(NewBilibiliAutoChannel())   // B站
 	r.Register(NewWeixinAutoChannel())     // 视频号
+	r.Register(NewYouTubeAutoChannel())    // YouTube（panda 移植；账号 cookie 手动导入）
 	return r
 }
 

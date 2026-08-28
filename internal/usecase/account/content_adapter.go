@@ -63,7 +63,7 @@ var DefaultPlatformConfigs = map[string]PlatformContentConfig{
 	},
 	"weixin": {
 		Platform:           "weixin",
-		MaxTitleLength:     40,
+		MaxTitleLength:     16, // panda 实测：视频号标题 UI 上限 16 字且仅汉字（RPA 层同步清洗）
 		MaxDescriptionLength: 50000,
 		MaxTagCount:        0,
 		AllowEmoji:         false,
@@ -83,6 +83,17 @@ var DefaultPlatformConfigs = map[string]PlatformContentConfig{
 		RequireCTA:         true,
 		DefaultTags:        []string{"#推荐", "#好看", "#视频"},
 		CTATemplates:       []string{"\n\n👍 觉得有用点个赞吧", "\n\n❤️ 喜欢的话关注我"},
+	},
+	"youtube": {
+		Platform:           "youtube",
+		MaxTitleLength:     100, // YouTube 标题上限 100 字符
+		MaxDescriptionLength: 5000,
+		MaxTagCount:        0, // 标签融进描述（# 前缀无话题语义）
+		AllowEmoji:         true,
+		EmojiDensity:       0.03,
+		MaxNewLines:        0,
+		RequireCTA:         false, // 海外平台语境不适配中文 CTA 模板
+		DefaultTags:        []string{},
 	},
 	"zhihu": {
 		Platform:           "zhihu",

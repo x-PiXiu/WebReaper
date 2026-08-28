@@ -48,6 +48,7 @@ func publishJobToPO(e entity.PublishJob) PublishJobPO {
 		ScheduledAt: timeToPtr(e.ScheduledAt), StoreAddress: e.StoreAddress,
 		ContentType: e.ContentType, MediaURLsJSON: mediaURLsToJSON(e.MediaURLs), CoverURL: e.CoverURL,
 		Transport: e.Transport, TagsJSON: mediaURLsToJSON(e.Tags), Category: e.Category,
+		Privacy: e.Privacy,
 	}
 }
 
@@ -69,6 +70,7 @@ func publishJobFromPO(p PublishJobPO) entity.PublishJob {
 		ScheduledAt: ptrToTime(p.ScheduledAt), StoreAddress: p.StoreAddress,
 		ContentType: p.ContentType, MediaURLs: mediaURLsFromJSON(p.MediaURLsJSON), CoverURL: p.CoverURL,
 		Transport: p.Transport, Tags: mediaURLsFromJSON(p.TagsJSON), Category: p.Category,
+		Privacy: p.Privacy,
 	}
 }
 

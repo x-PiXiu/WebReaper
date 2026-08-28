@@ -199,6 +199,8 @@ type PublishJob struct {
 	Transport string
 	// Tags 标签（B站独立标签框等平台级真标签；持久化为 JSON 文本）。
 	Tags []string
+	// Privacy 可见性（YouTube 等平台：public / unlisted / private；空 = 平台默认公开）。
+	Privacy string
 	// Category 平台分区（B站投稿必选）。
 	Category string
 }

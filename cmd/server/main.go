@@ -570,6 +570,11 @@ func main() {
 			// cookie 滚动回写（发布会话后把浏览器最新 cookie 写回账号库——绑定滚动续期）
 			channelRegistry.SetAccountStore(accountRepos.account, vault)
 			geoPublishUC = account.NewPublishUseCase(accountRepos.job, channelRegistry, accountRepos.account, vault)
+			// 僵尸任务清扫（服务启动时一次性）：running 超过 30 分钟的 job 标 failed
+			//（上次进程被杀的 goroutine 残留——不清理会永久污染任务列表）
+			if n, rErr := accountRepos.job.ReapStaleJobs(context.Background(), 30*time.Minute); rErr == nil && n > 0 {
+				log.Info("启动清扫僵尸发布任务", port.Int("count", int(n)))
+			}
 			// 注入发布效果追踪（发布成功后自动触发监测对比提及率）
 			geoPublishUC.SetMonitorTrigger(geoMonitorUCRef)
 			// 注入公开站根地址（发布内容尾部带公开站链接，加速爬虫发现）

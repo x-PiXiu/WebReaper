@@ -50,6 +50,8 @@ type AccountPool interface {
 type PublishJobRepository interface {
 	Save(ctx context.Context, j entity.PublishJob) error
 	UpdateStatus(ctx context.Context, tenantID, id, status, externalURL, errorMsg string) error
+	// ReapStaleJobs 僵尸任务清扫（服务重启残留的永久 running job）。
+	ReapStaleJobs(ctx context.Context, maxAge time.Duration) (int64, error)
 	ListByTenant(ctx context.Context, tenantID string, limit int) ([]entity.PublishJob, error)
 	// Count 统计发布任务总数（平台总览用，admin 看全局）。
 	Count(ctx context.Context) (int, error)

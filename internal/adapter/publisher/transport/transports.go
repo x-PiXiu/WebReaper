@@ -135,6 +135,7 @@ func (r *VaultCredentialResolver) Resolve(ctx context.Context, tenantID, account
 // toLegacyJob TransportRequest → 旧 PublishJob（包装层转换——旧通道签名不变，零改动平移）。
 func toLegacyJob(req port.TransportRequest) entity.PublishJob {
 	return entity.PublishJob{
+		ID:         req.Job.ID,
 		TenantID:    req.Job.TenantID,
 		AccountID:   req.Account.ID,
 		Platform:    req.Account.Platform,
@@ -143,6 +144,9 @@ func toLegacyJob(req port.TransportRequest) entity.PublishJob {
 		ContentType: req.Job.ContentType,
 		MediaURLs:   req.Job.MediaURLs,
 		CoverURL:    req.Job.CoverURL,
+		Tags:        req.Job.Tags,
+		Category:    req.Job.Category,
+		Privacy:     req.Job.Privacy,
 	}
 }
 

@@ -585,6 +585,8 @@ type PublishInput struct {
 	Tags []string
 	// Category 平台分区（B站投稿必选）
 	Category string
+	// Privacy 可见性（youtube: public/unlisted/private；空=默认公开）
+	Privacy string
 }
 
 // appendPublicLink 在发布内容尾部追加公开站链接（纯函数，可单测）。
@@ -668,6 +670,7 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		CoverURL:     in.CoverURL,
 		Tags:         in.Tags,
 		Category:     in.Category,
+		Privacy:      in.Privacy,
 	}
 
 	// 定时发送：ScheduledAt 在未来 → 仅落库 pending，到期由调度任务执行发布
@@ -779,8 +782,9 @@ func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob
 			selected = t
 			req = port.TransportRequest{
 				Job: port.PublishJobRequest{
-					TenantID: job.TenantID, Title: job.Title, Content: job.Content,
+					ID: job.ID, TenantID: job.TenantID, Title: job.Title, Content: job.Content,
 					ContentType: job.ContentType, MediaURLs: job.MediaURLs, CoverURL: job.CoverURL,
+					Tags: job.Tags, Category: job.Category, Privacy: job.Privacy,
 				},
 				Account:  port.AccountView{ID: acc.ID, Platform: acc.Platform, DisplayName: acc.DisplayName, AuthType: acc.AuthType},
 				Cookie:   cookie,

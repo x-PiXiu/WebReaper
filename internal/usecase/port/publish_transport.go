@@ -35,12 +35,16 @@ type TransportRequest struct {
 
 // PublishJobRequest 通道无关的发布内容描述。
 type PublishJobRequest struct {
+	ID          string // 任务 ID（截图命名/日志追踪——通道层需要）
 	TenantID    string
 	Title       string
 	Content     string
 	ContentType string   // article/image/video/audio
 	MediaURLs   []string // 媒体 URL（图片[]/视频[mp4]）
 	CoverURL    string
+	Tags        []string // 标签（B站独立标签框等）
+	Category    string   // 平台分区（B站投稿必选）
+	Privacy     string   // 可见性（youtube: public/unlisted/private）
 }
 
 // AccountView 账号的通道视角（不携带密文——凭证走 resolver 单独解析）。

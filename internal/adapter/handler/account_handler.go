@@ -331,6 +331,7 @@ func (h *AccountHandler) HandlePublish(c *gin.Context) {
 		ScheduledAt  string   `json:"scheduled_at"`  // ISO 时间（空=立即发布）
 		Tags         []string `json:"tags"`          // 标签（B站独立标签框等）
 		Category     string   `json:"category"`      // 平台分区（B站必选）
+		Privacy      string   `json:"privacy"`       // 可见性（youtube: public/unlisted/private；空=公开）
 		StoreAddress string   `json:"store_address"` // 门店地址（本地生活曝光信号）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -360,6 +361,7 @@ func (h *AccountHandler) HandlePublish(c *gin.Context) {
 		CoverURL:     req.CoverURL,
 		ScheduledAt:  scheduledAt,
 		Tags:         req.Tags,
+		Privacy:      req.Privacy,
 		Category:     req.Category,
 		StoreAddress: req.StoreAddress,
 	})

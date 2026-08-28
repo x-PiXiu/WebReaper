@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 
 	"webreaper/internal/adapter/publisher/humanize"
@@ -124,7 +125,12 @@ func publishBilibiliVideo(ctx context.Context, job entity.PublishJob, cookie str
 
 	ha := humanize.New(sessionCtx)
 	var currentURL string
+	// 2026-08-28 DRY_RUN 实测修复：cookie 注入缺失（重构成 Stealth 版时丢掉了
+	// network.Enable+SetCookies——cookie 参数收了但从未进浏览器，必然回落登录页）。
+	// 与抖音通道同款顺序：Enable → SetCookies(.bilibili.com) → 指纹 → 导航（同一 context）
 	if e := chromedp.Run(sessionCtx,
+		network.Enable(),
+		network.SetCookies(parseCookies(cookie, ".bilibili.com")),
 		chromedp.ActionFunc(func(c context.Context) error { return humanize.InjectFingerprint(c) }),
 		chromedp.Navigate("https://member.bilibili.com/platform/upload/video/frame"),
 		chromedp.Sleep(4*time.Second),
@@ -133,30 +139,23 @@ func publishBilibiliVideo(ctx context.Context, job entity.PublishJob, cookie str
 		return "", "", fmt.Errorf("打开B站发布页失败: %w", e)
 	}
 	if strings.Contains(currentURL, "passport") || strings.Contains(currentURL, "login") {
+		// 2026-08-28 DRY_RUN 排查：预检失败留证（实际跳转 URL + 截图——盲猜不如看页面）
+		log.Printf("[PublishAuto:bilibili] 登录态预检失败，实际 URL=%s", currentURL)
+		_ = os.MkdirAll("data", 0o755)
+		var failShot []byte
+		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&failShot)); e == nil {
+			p := fmt.Sprintf("data/publish-bili-loginfail-%s.png", job.ID)
+			_ = os.WriteFile(p, failShot, 0o644)
+			log.Printf("[PublishAuto:bilibili] 失败截图 %s", p)
+		}
 		return "", "", fmt.Errorf("cookie 失效（重定向登录页），请重新绑定B站账号")
 	}
 	log.Printf("[PublishAuto:bilibili] 登录态预检通过，发布页已打开")
 
-	// ③ 上传视频（B站上传选择器有特殊处理）
-	// 优先使用 .upload-input input[type="file"]，失败后回退到 input[type="file"]
-	var uploadErr error
-	uploadSelectors := []string{
-		`.upload-input input[type="file"]`,
-		`input[type="file"]`,
-	}
-	for _, sel := range uploadSelectors {
-		if e := chromedp.Run(sessionCtx,
-			chromedp.WaitVisible(sel, chromedp.ByQuery),
-			chromedp.SetUploadFiles(sel, []string{videoPath}, chromedp.ByQuery),
-		); e == nil {
-			uploadErr = nil
-			break
-		} else {
-			uploadErr = e
-		}
-	}
-	if uploadErr != nil {
-		return "", "", fmt.Errorf("上传视频失败: %w", uploadErr)
+	// ③ 上传视频（2026-08-28 修复：旧 WaitVisible 对 B站隐藏 input 死等到 5 分钟超时——
+	// 改用 panda 校准的四级降级，presence 判定不阻塞）
+	if e := setUploadFileCascade(sessionCtx, videoPath); e != nil {
+		return "", "", fmt.Errorf("上传视频失败: %w", e)
 	}
 	log.Printf("[PublishAuto:bilibili] 视频已提交上传，等待转码…")
 
@@ -168,47 +167,53 @@ func publishBilibiliVideo(ctx context.Context, job entity.PublishJob, cookie str
 	}
 	log.Printf("[PublishAuto:bilibili] 上传/转码完成（编辑器选择器=%s）", editorSel)
 
-	// ⑤ 填标题
+	// ⑤ 填标题（panda 校准候选链 + 事件派发兜底）
 	title := clampRunes(job.Title, 80)
-	if e := ha.Click(editorSel); e == nil {
-		if te := ha.Type(editorSel, title); te != nil {
-			log.Printf("[PublishAuto:bilibili] 标题填充失败（不阻断）: %v", te)
-		}
-	}
-
-	// 填描述（如果有单独的描述输入框）
-	descSel := `#video-desc-input`
-	if e := chromedp.Run(sessionCtx, chromedp.WaitVisible(descSel, chromedp.ByQuery)); e == nil {
-		desc := clampRunes(job.Content, 250)
-		if e := ha.Click(descSel); e == nil {
-			if te := ha.Type(descSel, desc); te != nil {
-				log.Printf("[PublishAuto:bilibili] 描述填充失败（不阻断）: %v", te)
+	if !fillFirstEditable(sessionCtx, title, append([]string{editorSel}, biliTitleSels...)...) {
+		if e := ha.Click(editorSel); e == nil {
+			if te := ha.Type(editorSel, title); te != nil {
+				log.Printf("[PublishAuto:bilibili] 标题填充失败（不阻断）: %v", te)
 			}
 		}
 	}
 
-	// ⑤b 标签（Plan-14 #4：Tags 字段贯通——B站独立标签框必填 ≥1）。
-	// 多策略候选 + 容错（选择器未真机验证；失败仅日志，DRY_RUN 截图核对）。
+	// 填描述（2026-08-28 修复：旧 #video-desc-input WaitVisible 无独立超时——元素不存在
+	// 死等 5 分钟。改 panda 候选链 + fillFirstEditable（不阻塞，未命中仅日志））
+	if job.Content != "" {
+		if !fillFirstEditable(sessionCtx, clampRunes(job.Content, 250), biliDescSels...) {
+			log.Printf("[PublishAuto:bilibili] 未定位描述输入框（候选均未命中，跳过描述）")
+		}
+	}
+
+	// ⑤b 标签（2026-08-28 DOM 快照实证：input.input-val placeholder="按回车键Enter创建标签"
+	// ——回车确认模式；候选链前排实证选择器）
 	if len(job.Tags) > 0 {
-		tagSel := waitFirstVisible(sessionCtx, 10*time.Second,
-			`.tag-input`, `input[placeholder*="标签"]`, `[class*="tag"] input`)
+		tagSel := waitFirstVisible(sessionCtx, 10*time.Second, biliTagSels...)
+		log.Printf("[PublishAuto:bilibili] 标签框探测结果 sel=%q tags=%d", tagSel, len(job.Tags))
 		if tagSel != "" {
-			// B站标签输入是"打字→回车确认"模式
-			if e := ha.Click(tagSel); e == nil {
-				for i, tag := range job.Tags {
-					if i >= 10 {
-						break // B站标签上限 10 个
-					}
-					if te := ha.Type(tagSel, strings.TrimPrefix(tag, "#")); te != nil {
-						log.Printf("[PublishAuto:bilibili] 标签 %q 填充失败（不阻断）: %v", tag, te)
-						break
-					}
-					_ = chromedp.Run(sessionCtx, chromedp.SendKeys(tagSel, "\r", chromedp.ByQuery))
+			// 2026-08-28 截图实证修复：ha.Type 逐字符 SendKeys 对中文双插入
+			//（keydown.text + input 事件各一次 →「测测试试」）。改 JS 设值（单次无损）
+			// + CDP 回车确认（ASCII 键无双插入问题）
+			var filled int
+			for i, tag := range job.Tags {
+				if i >= 10 {
+					break // B站标签上限 10 个
 				}
-				log.Printf("[PublishAuto:bilibili] 已填 %d 个标签", len(job.Tags))
+				if fillFirstEditable(sessionCtx, strings.TrimPrefix(tag, "#"), tagSel) {
+					chromedp.Sleep(300 * time.Millisecond)
+					_ = chromedp.Run(sessionCtx, chromedp.SendKeys(tagSel, "\r", chromedp.ByQuery))
+					chromedp.Sleep(300 * time.Millisecond)
+					filled++
+				} else {
+					log.Printf("[PublishAuto:bilibili] 标签 %q 设值失败（不阻断）", tag)
+					break
+				}
+			}
+			if filled > 0 {
+				log.Printf("[PublishAuto:bilibili] 已填 %d 个标签（JS设值+回车，选择器=%s）", filled, tagSel)
 			}
 		} else {
-			log.Printf("[PublishAuto:bilibili] 未定位到标签输入框（选择器待真机校准，DRY_RUN 核查）")
+			log.Printf("[PublishAuto:bilibili] 未定位到标签输入框（候选均未命中）")
 		}
 	}
 
@@ -244,8 +249,64 @@ func publishBilibiliVideo(ctx context.Context, job entity.PublishJob, cookie str
 		}
 	}
 
-	// DRY_RUN
+	// ⑤a2 封面上传（panda 校准完整流程）：点「添加封面」→ 图片 input 上传 →
+	// 「封面制作」×2（进入裁剪器）→ 勾选第一个 checkbox → 「完成」确认
+	if job.CoverURL != "" {
+		if coverPaths, coverCleanup, cErr := downloadMediaToTemp([]string{job.CoverURL}); cErr == nil {
+			if uploadCoverImage(sessionCtx, coverPaths[0]) {
+				// 封面制作弹窗交互（panda 实测两连点进入裁剪器）
+				for i := 0; i < 2; i++ {
+					if ok, _ := evalBool(sessionCtx, textVisibleJS("封面制作")); ok {
+						_ = chromedp.Run(sessionCtx, chromedp.Evaluate(`(() => {
+							const els = [...document.querySelectorAll('button, span, div')].filter(e =>
+								e.children.length === 0 && (e.textContent || '').trim() === '封面制作' && e.offsetParent !== null);
+							if (els.length) { els[0].click(); return true; }
+							return false;
+						})()`, nil))
+						chromedp.Sleep(1 * time.Second)
+					}
+				}
+				// 勾选封面 checkbox（2026-08-28 修复：chromedp.Click 内部 WaitVisible
+				// 对遮挡元素死等 ~5 分钟吃光预算——改 JS click 不等待可见性）
+				_, _ = evalBool(sessionCtx, `(() => {
+					const cb = document.querySelector('.bcc-checkbox-checkbox');
+					if (cb) { cb.click(); return true; }
+					return false;
+				})()`)
+				chromedp.Sleep(800 * time.Millisecond)
+				// 完成确认（panda：getByText('完成', {exact:true})，找不到不阻断——封面可能已选）
+				_ = chromedp.Run(sessionCtx, chromedp.Evaluate(`(() => {
+					const els = [...document.querySelectorAll('button, [role=button], span')].filter(e =>
+						e.children.length === 0 && (e.textContent || '').trim() === '完成' && e.offsetParent !== null);
+					if (els.length) { els[els.length-1].click(); return true; }
+					return false;
+				})()`, nil))
+				chromedp.Sleep(1 * time.Second)
+				log.Printf("[PublishAuto:bilibili] 封面流程已走完（panda 校准）")
+			}
+			coverCleanup()
+		} else {
+			log.Printf("[PublishAuto:bilibili] 封面下载失败（跳过）: %v", cErr)
+		}
+	}
+
+	// ⑤b 平台必选项（panda 真机校准）：创作声明——B站 2026 版发布页必选，
+	// 未选择时「立即投稿」被禁用。固定选「个人观点，仅供参考」。
+	selectDeclarationOption(sessionCtx, "请选择符合您视频内容的创作声明", "个人观点，仅供参考", "确定")
+	// ⑤b 创作声明（DOM 快照取证：bcc-select 组件——input[placeholder*=创作声明]
+	// 触发展开 bcc-option 列表；选中后 input.value 显示所选文本）。未选时「立即投稿」被禁用
+	selectBiliDeclaration(sessionCtx, "个人观点，仅供参考")
+	// panda 校准：声明后可能弹「内容无需标注」确认按钮
+	dismissBannerDialog(sessionCtx, "内容无需标注", "内容无需标注")
+
+	// DRY_RUN（完成标准：发布按钮就绪才算成功——探测到可点的「立即投稿」即全链路通，
+	// 绝不点击；截图 + 表单 DOM 快照留证）
 	if publishDryRun {
+		if ready, detail := probePublishButton(sessionCtx, "bilibili"); ready {
+			log.Printf("[PublishAuto:bilibili] ✅ DRY_RUN 完成：发布按钮已就绪 %s（未点击）", detail)
+		} else {
+			log.Printf("[PublishAuto:bilibili] ❌ DRY_RUN 失败：发布按钮未就绪 %s", detail)
+		}
 		_ = os.MkdirAll("data", 0o755)
 		var shot []byte
 		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil {
@@ -253,22 +314,110 @@ func publishBilibiliVideo(ctx context.Context, job entity.PublishJob, cookie str
 			_ = os.WriteFile(p, shot, 0o644)
 			log.Printf("[PublishAuto:bilibili] DRY_RUN 完成（未发布）——截图 %s", p)
 		}
+		var domHTML string
+		if e := chromedp.Run(sessionCtx, chromedp.Evaluate(
+			`document.querySelector('.video-upload-form, [class*="upload-form"], form, body')?.outerHTML || ''`, &domHTML)); e == nil && domHTML != "" {
+			p := fmt.Sprintf("data/publish-dryrun-bilibili-%s.html", job.ID)
+			_ = os.WriteFile(p, []byte(domHTML), 0o644)
+			log.Printf("[PublishAuto:bilibili] 表单 DOM 快照 %s（%d 字节）", p, len(domHTML))
+		}
 		return "dryrun://bilibili", "", nil
 	}
 
-	// ⑥ 点击发布
-	publishBtn := markButtonByText(sessionCtx, "投稿", "取消")
-	if publishBtn != nil {
-		// 回退：尝试 .publish-button
-		chromedp.Run(sessionCtx, chromedp.Click(`.publish-button`, chromedp.ByQuery))
+	// ⑥ 点击发布（2026-08-28 真发实锤：按钮在 micro-app 内嵌 iframe——主文档
+	// markButtonByText 标记不到会死等 5 分钟。全文档穿透 JS click（跨 iframe 的
+	// 坐标点击不可行，JS click 在目标文档内执行）
+	scrollToBottom(sessionCtx)
+	published := false
+	for _, text := range []string{"立即投稿", "投稿"} {
+		if ok, _ := evalBool(sessionCtx, fmt.Sprintf(`(() => {
+			const docs = [document];
+			const walk = (doc) => { for (const f of doc.querySelectorAll('iframe')) {
+				try { if (f.contentDocument) { docs.push(f.contentDocument); walk(f.contentDocument); } } catch (e) {} } };
+			walk(document);
+			for (const m of document.querySelectorAll('micro-app')) { if (m.shadowRoot) docs.push(m.shadowRoot); }
+			for (const doc of docs) {
+				// 2026-08-28 DOM 快照实锤：「立即投稿」是 span.submit-add——不是 button！
+				// 按钮类元素 + 文本叶子（span/div）双通道匹配
+				const bySel = doc.querySelector('span.submit-add, .submit-add, [class*="submit-add"]');
+				if (bySel && bySel.offsetParent !== null) {
+					bySel.scrollIntoView({block: 'center'}); bySel.click(); return true;
+				}
+				const leaves = [...doc.querySelectorAll('button, [role=button], span, div')].filter(b => {
+					const t = (b.textContent || '').trim();
+					return t === %q && b.children.length === 0 && b.offsetParent !== null;
+				});
+				if (leaves.length) {
+					const target = leaves[0].closest('[class*="submit"], [class*="publish"], button') || leaves[0];
+					target.scrollIntoView({block: 'center'}); target.click(); return true;
+				}
+			}
+			return false;
+		})()`, text)); ok {
+			log.Printf("[PublishAuto:bilibili] 已点击「%s」（全文档穿透）", text)
+			published = true
+			break
+		}
 	}
-	log.Printf("[PublishAuto:bilibili] 已点击发布按钮")
+	if !published {
+		// 失败诊断（2026-08-28 真发排查：dump 全文档按钮清单 + 截图——按钮可能
+		// disabled/文本变体/在更深的容器）
+		var btnDump string
+		_ = chromedp.Run(sessionCtx, chromedp.Evaluate(`(() => {
+			const docs = [document];
+			const walk = (doc) => { for (const f of doc.querySelectorAll('iframe')) {
+				try { if (f.contentDocument) { docs.push(f.contentDocument); walk(f.contentDocument); } } catch (e) {} } };
+			walk(document);
+			const out = [];
+			docs.forEach((doc, di) => {
+				for (const b of doc.querySelectorAll('button, [role=button]')) {
+					const t = (b.textContent || '').trim().slice(0, 20);
+					if (t) out.push('[doc' + di + '] ' + t + (b.disabled ? '(禁用)' : '') + (b.offsetParent ? '' : '(隐藏)'));
+				}
+			});
+			return out.slice(0, 30).join(' | ');
+		})()`, &btnDump))
+		log.Printf("[PublishAuto:bilibili] 按钮清单：%s", btnDump)
+		_ = os.MkdirAll("data", 0o755)
+		var shot []byte
+		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil {
+			p := fmt.Sprintf("data/publish-bili-btnfail-%s.png", job.ID)
+			_ = os.WriteFile(p, shot, 0o644)
+			log.Printf("[PublishAuto:bilibili] 按钮失败截图 %s", p)
+		}
+		return "", "", fmt.Errorf("发布按钮未找到（立即投稿/投稿 全文档穿透均未命中）——见按钮清单日志与截图")
+	}
+	_ = ha
 
-	// 等待发布完成
-	time.Sleep(5 * time.Second)
+	// ⑦ 发布结果确认（panda 校准：严格断言「稿件投递成功」文本，30s 超时；
+	// 成功后跳稿件管理页再提取视频链接）
+	confirmCtx, confirmCancel := context.WithTimeout(sessionCtx, 60*time.Second)
+	defer confirmCancel()
+	submitted := false
+	for i := 0; i < 15; i++ {
+		if ok, _ := evalBool(confirmCtx, `(() => {
+			const docs = [document];
+			const walk = (doc) => { for (const f of doc.querySelectorAll('iframe')) {
+				try { if (f.contentDocument) { docs.push(f.contentDocument); walk(f.contentDocument); } } catch (e) {} } };
+			walk(document);
+			for (const m of document.querySelectorAll('micro-app')) { if (m.shadowRoot) docs.push(m.shadowRoot); }
+			return docs.some(doc => [...doc.querySelectorAll('*')].some(e =>
+				e.children.length === 0 && (e.textContent || '').trim().includes('稿件投递成功') && e.offsetParent !== null));
+		})()`); ok {
+			submitted = true
+			break
+		}
+		chromedp.Sleep(2 * time.Second)
+	}
+	if !submitted {
+		// 2026-08-29 设计修正（用户实锤"published 但没发出"）：确认信号缺失时绝不能
+		// 标成功——返回错误让 job 如实 failed（fail-safe：宁可误报失败让人工核对，
+		// 不可误报成功掩盖问题。真发点击本身不可靠——span 点击可能没触发 Vue）
+		return "", "", fmt.Errorf("发布确认信号未捕获（「稿件投递成功」文本 30s 未出现——点击可能未生效或平台拦截，请到B站创作中心人工核对后重试）")
+	}
 
-	// ⑦ 获取发布结果（B站发布后会跳转到稿件管理页）
-	videoURL, err = extractVideoURLAfterPublish(sessionCtx)
+	// 获取发布结果（B站发布后跳稿件管理页）
+	videoURL, err = extractVideoURLAfterPublish(confirmCtx)
 	if err != nil {
 		videoURL = "https://member.bilibili.com/platform/upload/video/frame" // 降级
 	}
@@ -276,6 +425,6 @@ func publishBilibiliVideo(ctx context.Context, job entity.PublishJob, cookie str
 	// 读取最新 cookie
 	newCookie = readBackCookie(sessionCtx)
 
-	log.Printf("[PublishAuto:bilibili] 发布完成，URL=%s", videoURL)
+	log.Printf("[PublishAuto:bilibili] 发布完成（submitted=%v），URL=%s", submitted, videoURL)
 	return videoURL, newCookie, nil
 }

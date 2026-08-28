@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 )
 
@@ -149,15 +150,28 @@ func (h *HumanAction) Click(selector string) error {
 
 	DelayMs(50, 200) // 到达后的小停顿（人确认要点击）
 
-	return chromedp.Run(h.ctx, chromedp.Click(selector))
+	// 按坐标派发真实鼠标事件（2026-08-28 修复：chromedp.Click(selector) 内部
+	// WaitVisible/WaitEnabled——元素被弹层暂时遮挡或视口外时死等（B站标签框实测卡满
+	// 5 分钟）；坐标派发是真实鼠标语义，不等待可点状态。
+	// 注意：DispatchMouseEvent 必须经 chromedp.Run 的 ActionFunc 包装执行——直接
+	// Do(h.ctx) 缺 session executor 报 invalid context（B站标签实测踩坑））
+	return chromedp.Run(h.ctx, chromedp.ActionFunc(func(c context.Context) error {
+		if err := input.DispatchMouseEvent(input.MousePressed, targetX, targetY).
+			WithButton(input.Left).WithClickCount(1).Do(c); err != nil {
+			return err
+		}
+		DelayMs(30, 80)
+		return input.DispatchMouseEvent(input.MouseReleased, targetX, targetY).
+			WithButton(input.Left).WithClickCount(1).Do(c)
+	}))
 }
 
 // Type 逐字符输入（每个字符间随机 50-200ms 延迟，模拟打字速度）。
 func (h *HumanAction) Type(selector, text string) error {
 	Delay(0.3, 1) // 人找到输入框并点击的时间
 
-	// 先点击聚焦
-	if err := chromedp.Run(h.ctx, chromedp.Click(selector)); err != nil {
+	// 先点击聚焦（坐标派发——chromedp.Click 的 WaitVisible 语义对视口外元素死等）
+	if err := h.Click(selector); err != nil {
 		return err
 	}
 	DelayMs(100, 300)

@@ -47,3 +47,8 @@ web/tsconfig.tsbuildinfo
 /data/
 webreaper
 webreaper.exe~
+
+# 发布链路测试产物与临时文件
+server.exe~
+pub_*.json
+realtest_tmp.mp4

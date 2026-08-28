@@ -57,6 +57,7 @@ type PublishJobPO struct {
 	Transport       string      `gorm:"size:16"`   // 实际执行通道：link/rpa/api（空=历史）
 	TagsJSON        string      `gorm:"type:text"` // 标签列表（JSON 数组；B站独立标签框等）
 	Category        string      `gorm:"size:64"`   // 平台分区（B站投稿必选）
+	Privacy         string      `gorm:"size:16"`   // 可见性（youtube: public/unlisted/private；空=默认公开）
 }
 
 func (PublishJobPO) TableName() string { return "geo_publish_jobs" }

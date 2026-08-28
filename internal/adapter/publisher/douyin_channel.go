@@ -205,41 +205,77 @@ func publishKuaishouVideo(ctx context.Context, job entity.PublishJob, cookie str
 	}
 	log.Printf("[PublishAuto:kuaishou] 登录态预检通过，发布页已打开")
 
-	// ③ 上传视频（CDP SetUploadFiles，trusted）
-	if e := chromedp.Run(sessionCtx,
-		chromedp.WaitVisible(`input[type=file]`, chromedp.ByQuery),
-		chromedp.SetUploadFiles(`input[type=file]`, []string{videoPath}, chromedp.ByQuery),
-	); e != nil {
+	// ②b 快手实测修正：满意度调查弹窗先关（遮挡表单）+ 回滚顶部（上传区在视口外）
+	dismissSurveyDialog(sessionCtx, "是否满意")
+	_ = chromedp.Run(sessionCtx, chromedp.Evaluate(`window.scrollTo(0, 0)`, nil))
+	chromedp.Sleep(1 * time.Second)
+	// ③ 上传视频（四级降级：input 直传 → filechooser 拦截 → DOM 注入 → 二次探测）
+	if e := setUploadFileCascade(sessionCtx, videoPath); e != nil {
 		return "", "", fmt.Errorf("上传视频失败: %w", e)
 	}
 	log.Printf("[PublishAuto:kuaishou] 视频已提交上传，等待处理…")
+	// 上传后页面形态留证（选择器校准用——上传区/表单实际形态排查）
+	_ = os.MkdirAll("data", 0o755)
+	var pageShot []byte
+	if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&pageShot)); e == nil {
+		_ = os.WriteFile(fmt.Sprintf("data/publish-kuaishou-page-%s.png", job.ID), pageShot, 0o644)
+	}
 
-	// ④ 上传完成信号：标题输入框出现（快手是独立标题 input——比抖音编辑器更直接）
+	// ④ 上传完成信号：标题输入框或编辑器出现（panda 校准：contenteditable 形态）
 	titleSel := waitFirstVisible(sessionCtx, 120*time.Second,
-		`input[placeholder*="标题"]`, `input[placeholder*="作品"]`, `[class*="title"] input`)
+		`#work-description-edit`, `input[placeholder*="标题"]`, `input[placeholder*="作品"]`,
+		`[contenteditable=true]`, `[class*="title"] input`)
 	if titleSel == "" {
 		return "", "", fmt.Errorf("等待上传完成超时（标题框未出现）——建议 DRY_RUN 核查选择器")
 	}
-	log.Printf("[PublishAuto:kuaishou] 上传完成（标题框选择器=%s）", titleSel)
+	log.Printf("[PublishAuto:kuaishou] 上传完成（表单选择器=%s）", titleSel)
+	waitForProcessingDone(sessionCtx, 15*time.Second)
 
-	// ⑤ 填标题 + 简介（L1 独立控件，SendKeys 即可）
-	if e := ha.Click(titleSel); e == nil {
-		if te := ha.Type(titleSel, clampRunes(job.Title, 80)); te != nil {
-			log.Printf("[PublishAuto:kuaishou] 标题填充失败（不阻断）: %v", te)
+	// ④b 快手发布页广告 Skip（panda 校准：进发布页常弹广告，挡住表单控件）
+	for _, sel := range []string{
+		`div[aria-label="Skip"]`, `[aria-label="跳过"]`, `[class*="skip"]`,
+		`button:has-text("跳过")`, `[class*="close-ad"]`,
+	} {
+		if visible, _ := evalBool(sessionCtx, selVisibleJS(sel)); visible {
+			_ = chromedp.Run(sessionCtx, chromedp.Click(sel, chromedp.ByQuery))
+			chromedp.Sleep(time.Second)
+			break
 		}
 	}
-	descSel := waitFirstVisible(sessionCtx, 10*time.Second,
-		`textarea[placeholder*="简介"]`, `textarea[placeholder*="描述"]`, `[class*="desc"] textarea`)
-	if descSel != "" && job.Content != "" {
-		if e := ha.Click(descSel); e == nil {
-			if te := ha.Type(descSel, clampRunes(job.Content, 1000)); te != nil {
-				log.Printf("[PublishAuto:kuaishou] 简介填充失败（不阻断）: %v", te)
+
+	// ⑤ 填文案（panda 校准：快手是「标题+描述合并进单个 contenteditable」形态——
+	// #work-description-edit 实测目标；必须派发 input 事件框架才识别输入；
+	// 话题 # 前缀追加尾部——panda 快手无独立话题框，标签直接进正文）
+	merged := job.Title
+	if job.Content != "" && job.Content != job.Title {
+		merged = job.Title + "\n" + job.Content
+	}
+	if t := hashtagText(job.Tags); t != "" {
+		merged = merged + "\n" + t
+	}
+	if !fillFirstEditable(sessionCtx, clampRunes(merged, 1000), kuaishouContentSels...) {
+		// 兜底：独立标题框形态（旧版页面）
+		if e := ha.Click(titleSel); e == nil {
+			if te := ha.Type(titleSel, clampRunes(job.Title, 80)); te != nil {
+				log.Printf("[PublishAuto:kuaishou] 标题填充失败（不阻断）: %v", te)
+			}
+		}
+		descSel2 := waitFirstVisible(sessionCtx, 10*time.Second,
+			`textarea[placeholder*="简介"]`, `textarea[placeholder*="描述"]`, `[class*="desc"] textarea`)
+		if descSel2 != "" && job.Content != "" {
+			if e := ha.Click(descSel2); e == nil {
+				_ = ha.Type(descSel2, clampRunes(job.Content, 1000))
 			}
 		}
 	}
 
-	// ⑥ DRY_RUN：截图留证，不点发布
+	// ⑥ DRY_RUN（完成标准：发布按钮就绪——探测到可点的「发布」即全链路通，绝不点击）
 	if publishDryRun {
+		if ready, detail := probePublishButton(sessionCtx, "kuaishou"); ready {
+			log.Printf("[PublishAuto:kuaishou] ✅ DRY_RUN 完成：发布按钮已就绪 %s（未点击）", detail)
+		} else {
+			log.Printf("[PublishAuto:kuaishou] ❌ DRY_RUN 失败：发布按钮未就绪 %s", detail)
+		}
 		_ = os.MkdirAll("data", 0o755)
 		var shot []byte
 		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil {
@@ -250,7 +286,8 @@ func publishKuaishouVideo(ctx context.Context, job entity.PublishJob, cookie str
 		return "", readBackCookieByDomain(sessionCtx, ".kuaishou.com"), nil
 	}
 
-	// ⑦ 点发布（候选文本："发布"排"存草稿"；部分版本是"确认发布"）
+	// ⑦ 点发布（panda 校准：先滚到底；候选文本"发布"排"存草稿"；部分版本是"确认发布"）
+	scrollToBottom(sessionCtx)
 	if e := markButtonByText(sessionCtx, "发布", "存草稿"); e != nil {
 		return "", "", fmt.Errorf("定位发布按钮失败: %w", e)
 	}
@@ -259,11 +296,16 @@ func publishKuaishouVideo(ctx context.Context, job entity.PublishJob, cookie str
 	}
 	log.Printf("[PublishAuto:kuaishou] 已点击发布，等待结果确认…")
 
-	// 确认：发布成功跳内容管理页——URL/DOM 提取视频链接（快手 video/(\w+) 形态待真机校准）
+	// 确认（panda 校准双信号）：URL/DOM 提取视频链接 → 管理页搜索框出现（发布成功跳回
+	// 管理页出现「输入搜索关键词」——panda 实测的间接成功断言）
 	confirmCtx, confirmCancel := context.WithTimeout(sessionCtx, 60*time.Second)
 	defer confirmCancel()
 	if url, e := extractVideoURLAfterPublish(confirmCtx); e == nil && url != "" {
 		return url, readBackCookieByDomain(confirmCtx, ".kuaishou.com"), nil
+	}
+	if ok, _ := evalBool(confirmCtx, textVisibleJS("输入搜索关键词")); ok {
+		log.Printf("[PublishAuto:kuaishou] 已跳回内容管理页（panda 校准信号：发布成功，视频链接待人工补录）")
+		return "", readBackCookieByDomain(confirmCtx, ".kuaishou.com"), nil
 	}
 	return "", readBackCookieByDomain(confirmCtx, ".kuaishou.com"), fmt.Errorf("发布结果确认超时（可能已发出——请到快手创作者中心人工核对）")
 }
@@ -357,36 +399,79 @@ func publishDouyinVideo(ctx context.Context, job entity.PublishJob, cookie strin
 	}
 	log.Printf("[PublishAuto:douyin] 登录态预检通过，发布页已打开")
 
-	// ③ 上传视频（input[type=file] 隐藏控件，CDP SetUploadFiles 是 trusted 事件）
-	if e := chromedp.Run(sessionCtx,
-		chromedp.WaitVisible(`input[type=file]`, chromedp.ByQuery),
-		chromedp.SetUploadFiles(`input[type=file]`, []string{videoPath}, chromedp.ByQuery),
-	); e != nil {
+	// ③ 上传视频（三级降级校准：抖音 input[type=file] 是隐藏元素，
+	// 旧 WaitVisible 会永远超时——presence 判定直传 CDP trusted 事件）
+	if e := setUploadFileCascade(sessionCtx, videoPath); e != nil {
 		return "", "", fmt.Errorf("上传视频失败: %w", e)
 	}
 	log.Printf("[PublishAuto:douyin] 视频已提交上传，等待转码…")
 
-	// ④ 上传/转码完成信号：编辑器出现（视频处理好后表单才可编辑）——多策略候选
+	// ④ 上传/转码完成信号：编辑器或标题框出现（视频处理好后表单才可编辑）——多策略候选
 	editorSel := waitFirstVisible(sessionCtx, 90*time.Second,
 		`[contenteditable=true]`, `.ql-editor`, `[class*="editor"][contenteditable]`, `.ProseMirror`)
 	if editorSel == "" {
 		return "", "", fmt.Errorf("等待上传完成超时（编辑器未出现）——建议 PUBLISH_DRY_RUN 模式核查选择器")
 	}
 	log.Printf("[PublishAuto:douyin] 上传/转码完成（编辑器选择器=%s）", editorSel)
+	// panda 校准：处理中信号可见时额外等待（过早填表会被平台重置）
+	waitForProcessingDone(sessionCtx, 15*time.Second)
+	// 2026-08-28 DRY_RUN 实测：声明弹窗上传完成后自动弹出并遮挡表单——
+	// 必须先处理掉再填文案（内置 30s 轮询等弹窗出现）
+	selectDouyinDeclarationDialog(sessionCtx, "内容为个人观点或见解")
 
-	// ⑤ 填文案（标题+正文合并进描述编辑器；抖音发布页为单编辑器）
-	desc := job.Title
-	if job.Content != "" && job.Content != job.Title {
-		desc = job.Title + " " + job.Content
+	// ⑤ 填文案（panda 真机校准）：优先独立标题 input（11 候选实测链），
+	// 命中则标题/描述分开填；未命中退回编辑器合并填（旧模式兜底）
+	titleFilled := fillFirstEditable(sessionCtx, clampRunes(job.Title, 30), douyinTitleSels...)
+	descFilled := false
+	if titleFilled && job.Content != "" {
+		descFilled = fillFirstEditable(sessionCtx, clampRunes(job.Content, 400), douyinDescSels...)
 	}
-	if e := ha.Click(editorSel); e == nil {
-		if te := ha.Type(editorSel, clampRunes(desc, 400)); te != nil {
-			log.Printf("[PublishAuto:douyin] 文案填充失败（不阻断）: %v", te)
+	if !titleFilled {
+		// 编辑器模式：标题+正文合并（抖音发布页单编辑器形态）
+		desc := job.Title
+		if job.Content != "" && job.Content != job.Title {
+			desc = job.Title + " " + job.Content
+		}
+		if e := ha.Click(editorSel); e == nil {
+			if te := ha.Type(editorSel, clampRunes(desc, 400)); te != nil {
+				log.Printf("[PublishAuto:douyin] 文案填充失败（不阻断）: %v", te)
+			}
+		}
+	}
+	_ = descFilled
+
+	// ⑤a 话题独立填写（panda 校准：# 前缀空格连接 → 话题输入候选链；
+	// 未命中独立话题框则并入描述编辑器——抖音编辑器内 # 文本自带话题语义）
+	if len(job.Tags) > 0 {
+		if !fillHashtags(sessionCtx, job.Tags, douyinTagSels...) {
+			log.Printf("[PublishAuto:douyin] 未定位独立话题框，话题并入编辑器")
+			_ = fillFirstEditable(sessionCtx, " "+hashtagText(job.Tags), `[contenteditable=true]`, `.ql-editor`)
 		}
 	}
 
-	// DRY_RUN：到此为止——截图留证，不点发布
+	// ⑤a2 封面上传（panda 校准：CoverURL 落地 → 图片 input/封面按钮候选链）
+	if job.CoverURL != "" {
+		if coverPaths, coverCleanup, cErr := downloadMediaToTemp([]string{job.CoverURL}); cErr == nil {
+			uploadCoverImage(sessionCtx, coverPaths[0])
+			coverCleanup()
+		} else {
+			log.Printf("[PublishAuto:douyin] 封面下载失败（跳过，用平台自动截帧）: %v", cErr)
+		}
+	}
+
+	// ⑤b 平台必选项与弹窗兜底（弹窗可能在填文案中途才弹出——二次处理；
+	// 内联"请选择自主声明"旧形态保留最后一道兜底）
+	dismissBannerDialog(sessionCtx, "共创中心", "我知道了")
+	selectDouyinDeclarationDialog(sessionCtx, "内容为个人观点或见解")
+	selectDeclarationOption(sessionCtx, "请选择自主声明", "内容为个人观点或见解", "确定")
+
+	// DRY_RUN（完成标准：发布按钮就绪——探测到可点的「发布」即全链路通，绝不点击）
 	if publishDryRun {
+		if ready, detail := probePublishButton(sessionCtx, "douyin"); ready {
+			log.Printf("[PublishAuto:douyin] ✅ DRY_RUN 完成：发布按钮已就绪 %s（未点击）", detail)
+		} else {
+			log.Printf("[PublishAuto:douyin] ❌ DRY_RUN 失败：发布按钮未就绪 %s", detail)
+		}
 		_ = os.MkdirAll("data", 0o755)
 		var shot []byte
 		if e := chromedp.Run(sessionCtx, chromedp.CaptureScreenshot(&shot)); e == nil {
@@ -397,8 +482,9 @@ func publishDouyinVideo(ctx context.Context, job entity.PublishJob, cookie strin
 		return "", readBackCookie(sessionCtx), nil
 	}
 
-	// ⑥ 点发布（按文本定位按钮：含"发布"、排除"存草稿"，标记后 humanize 点击）
-	if e := markButtonByText(sessionCtx, "发布", "存草稿"); e != nil {
+	// ⑥ 点发布（2026-08-29 实测：按钮文案"作品发布"——泛"发布"会命中顶栏/侧栏同名项）
+	scrollToBottom(sessionCtx)
+	if e := markButtonByText(sessionCtx, "作品发布", "存草稿"); e != nil {
 		return "", "", fmt.Errorf("定位发布按钮失败: %w", e)
 	}
 	if e := ha.Click(`[data-wr-publish-btn]`); e != nil {
@@ -461,20 +547,26 @@ func extractAwemeIDFromJSON(body string) string {
 	return ""
 }
 
-// markButtonByText 按可见文本标记发布按钮（排除 exclude 文本），标记后供 humanize.Click。
+// markButtonByText 按可见文本标记发布按钮（表单提交按钮定位——2026-08-29 真发实锤修复）：
+//  ① 排除顶栏/导航区的同名按钮（抖音顶栏全局"发布"入口会抢先命中，点到只是打开发布
+//     菜单而非提交作品——真发"点了没发出"的根因）
+//  ② 精确文本优先（"作品发布"=== 优先于 includes("发布")）
+//  ③ 多个命中取最后一个（表单提交按钮通常在页面底部）
 func markButtonByText(ctx context.Context, include, exclude string) error {
 	var found bool
 	return chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`(() => {
-		const btns = document.querySelectorAll('button, [role=button], .byte-btn');
-		for (const b of btns) {
+		const inNav = (el) => !!el.closest('header, nav, [class*="header"], [class*="nav"], [class*="sidebar"], [class*="menu"]');
+		const btns = [...document.querySelectorAll('button, [role=button], .byte-btn')].filter(b => {
 			const t = (b.textContent || '').trim();
-			if (t.includes(%q) && !t.includes(%q) && b.offsetParent !== null) {
-				b.setAttribute('data-wr-publish-btn', '1');
-				return true;
-			}
-		}
-		return false;
-	})()`, include, exclude), &found))
+			return t.includes(%q) && !t.includes(%q) && b.offsetParent !== null && !inNav(b);
+		});
+		// 精确匹配优先，其次取最后一个（表单底部）
+		const exact = btns.filter(b => (b.textContent || '').trim() === %q);
+		const target = exact.length ? exact[exact.length-1] : (btns.length ? btns[btns.length-1] : null);
+		if (!target) return false;
+		target.setAttribute('data-wr-publish-btn', '1');
+		return true;
+	})()`, include, exclude, include), &found))
 }
 
 // waitFirstVisible 依次等待候选选择器，返回首个可见者（多策略选择器模式——平台改版容错）。
