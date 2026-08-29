@@ -9,6 +9,11 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { queryClient } from './queryClient'
 import { useThemeStore } from './store/theme'
 import './index.css'
+import './styles/creative-studio.css'
+import './styles/digital-human-lib.css'
+import './styles/storyboard-lib.css'
+import './styles/voice-lib.css'
+import './styles/copy-lib.css'
 
 export { clearQueryCache } from './queryClient'
 
@@ -56,8 +61,8 @@ const lightThemeConfig = {
   algorithm: antdTheme.defaultAlgorithm,
   token: {
     // 主色与 index.css 亮色 --wr-primary 统一；语义色对齐 CSS 变量
-    colorPrimary: '#6e5df6',
-    colorInfo: '#6e5df6',
+    colorPrimary: '#7c5cfc',
+    colorInfo: '#7c5cfc',
     colorSuccess: '#16a34a',
     colorWarning: '#d97706',
     colorError: '#dc2626',
@@ -67,24 +72,24 @@ const lightThemeConfig = {
     fontSize: 15,
     controlHeight: 38,
     controlHeightLG: 44,
-    colorBgBase: '#f6f7f9',
+    colorBgBase: '#f5f6fa',
     colorBgContainer: '#ffffff',
     colorBgElevated: '#ffffff',
-    colorBgSpotlight: '#f0f1f3',
-    colorBorder: 'rgba(0,0,0,0.08)',
-    colorBorderSecondary: 'rgba(0,0,0,0.04)',
+    colorBgSpotlight: '#f1f2f7',
+    colorBorder: 'rgba(20,20,40,0.08)',
+    colorBorderSecondary: 'rgba(20,20,40,0.04)',
   },
   components: {
-    Layout: { siderBg: '#ffffff', headerBg: '#ffffff', headerHeight: 60, bodyBg: '#f6f7f9' },
+    Layout: { siderBg: '#ffffff', headerBg: '#ffffff', headerHeight: 60, bodyBg: '#f5f6fa' },
     Menu: {
       itemBg: 'transparent', subMenuItemBg: 'transparent',
-      itemSelectedBg: 'rgba(110,93,246,0.08)', itemHoverBg: 'rgba(0,0,0,0.03)',
-      itemColor: '#71717a', itemSelectedColor: '#6e5df6',
-      itemBorderRadius: 8, itemMarginInline: 8,
+      itemSelectedBg: 'rgba(124,92,252,0.12)', itemHoverBg: 'rgba(20,20,40,0.03)',
+      itemColor: '#6b6b76', itemSelectedColor: '#7c5cfc',
+      itemBorderRadius: 12, itemMarginInline: 8,
     },
     Card: { colorBgContainer: '#ffffff', headerBg: 'transparent' },
-    Table: { headerBg: '#f6f7f9', headerColor: '#52525b', rowHoverBg: '#f6f7f9', borderColor: 'rgba(0,0,0,0.06)' },
-    Button: { fontWeight: 500 },
+    Table: { headerBg: '#f5f6fa', headerColor: '#555563', rowHoverBg: '#f1f2f7', borderColor: 'rgba(20,20,40,0.06)' },
+    Button: { fontWeight: 600 },
     Modal: { contentBg: '#ffffff' },
   },
 }
@@ -106,7 +111,7 @@ function ThemedApp({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', mode)
-    document.body.style.background = mode === 'dark' ? '#0a0a0f' : '#f4f4f5'
+    document.body.style.background = mode === 'dark' ? '#0a0a0f' : '#f5f6fa'
   }, [mode])
 
   return (

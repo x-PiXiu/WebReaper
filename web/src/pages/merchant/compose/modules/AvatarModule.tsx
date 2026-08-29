@@ -1,248 +1,379 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Collapse, Input, Select, Space, Typography, Upload } from 'antd'
-import { RobotOutlined } from '@ant-design/icons'
-import { ComposeModuleHeader } from '../ComposeModuleHeader'
-import { useComposeDraft } from '../../../../store/composeDraft'
-import { useBrandContext } from '../../../../hooks/useBrands'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
-  buildSubjectReferencePayload,
-  deliverableWorkParams,
-  ensureMaterialId,
-  submitUnified,
-} from '../../../../api/generationSubmit'
-import { useMediaAssets } from '../../../../hooks/useMediaAssets'
-import { useSubjectList } from '../../../../hooks/useSubjectList'
-import { useGenerationTypes } from '../../../../hooks/useGenerationTypes'
-import { SubjectPicker } from '../../../../components/compose/SubjectPicker'
-import { AssetPicker } from '../../../../components/compose/AssetPicker'
+  Button,
+  Checkbox,
+  Empty,
+  Input,
+  Popconfirm,
+  Spin,
+} from 'antd'
+import {
+  DeleteOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 import { businessApi } from '../../../../api/business'
-import { catchGenerationError } from '../../../../utils/generationErrors'
+import { CreateSubjectModal } from '../../../../components/compose/CreateSubjectModal'
+import { useSubjectList } from '../../../../hooks/useSubjectList'
+import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
+import type { ViduSubject } from '../../../../utils/subjectTask'
 import { message } from '../../../../utils/antdApp'
+import { CREATIVE_CDN } from '../../../../config/creativeCdn'
 
-const { Text } = Typography
-const { TextArea } = Input
+type Scope = 'all' | 'mine' | 'recommend'
 
-/** 口播数字人：主体一致性 reference2video（与 VideoAssetsStep / 拍口播向导同源） */
+type LibCard = {
+  id: string
+  name: string
+  portraitUrl: string
+  timeLabel: string
+  tag: string
+  duration?: string
+  selectable: boolean
+  ready: boolean
+  serverId?: string
+  subject?: ViduSubject
+  recommend?: boolean
+}
+
+const RECOMMEND_SHOWCASE: LibCard[] = [
+  {
+    id: 'rec-1',
+    name: '数字人-女-坐',
+    portraitUrl: CREATIVE_CDN.pipeline.copy,
+    timeLabel: '精选模板',
+    tag: '公共',
+    duration: '12s',
+    selectable: false,
+    ready: false,
+    recommend: true,
+  },
+  {
+    id: 'rec-2',
+    name: '数字人-男-站',
+    portraitUrl: CREATIVE_CDN.pipeline.voice,
+    timeLabel: '精选模板',
+    tag: '公共',
+    duration: '8s',
+    selectable: false,
+    ready: false,
+    recommend: true,
+  },
+  {
+    id: 'rec-3',
+    name: '数字人-女-站',
+    portraitUrl: CREATIVE_CDN.pipeline.mic,
+    timeLabel: '精选模板',
+    tag: '影视',
+    duration: '10s',
+    selectable: false,
+    ready: false,
+    recommend: true,
+  },
+  {
+    id: 'rec-4',
+    name: '数字人-男-坐',
+    portraitUrl: CREATIVE_CDN.pipeline.film,
+    timeLabel: '精选模板',
+    tag: '公共',
+    duration: '15s',
+    selectable: false,
+    ready: false,
+    recommend: true,
+  },
+  {
+    id: 'rec-5',
+    name: '数字人-女-半身',
+    portraitUrl: CREATIVE_CDN.pipeline.publish,
+    timeLabel: '精选模板',
+    tag: '商务',
+    duration: '9s',
+    selectable: false,
+    ready: false,
+    recommend: true,
+  },
+]
+
+function formatUploadTime(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `上传于 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function subjectTag(s: ViduSubject) {
+  if (s.state !== 'success') {
+    if (s.state === 'failed') return '失败'
+    return '创建中'
+  }
+  if (s.kind === 'scene') return '场景'
+  if (s.hasVideo) return '视频'
+  return '我的'
+}
+
+function subjectToCard(s: ViduSubject): LibCard {
+  return {
+    id: s.taskId,
+    name: s.name,
+    portraitUrl: s.portraitUrl,
+    timeLabel: formatUploadTime(s.createdAt),
+    tag: subjectTag(s),
+    duration: s.hasVideo ? '≤5s' : undefined,
+    selectable: true,
+    ready: s.state === 'success' && !!s.serverId,
+    serverId: s.serverId || undefined,
+    subject: s,
+  }
+}
+
+/** 数字人库：库式浏览 / 定制 / 批量管理（列表布局） */
 export default function AvatarModule() {
   const navigate = useNavigate()
-  const { brandId } = useBrandContext()
-  const draft = useComposeDraft()
-  const [busy, setBusy] = useState(false)
-  const [subjectServerId, setSubjectServerId] = useState('')
-  const [intent, setIntent] = useState('')
-  const [legacyImageUrl, setLegacyImageUrl] = useState('')
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const text = draft.rewritten || draft.script || ''
-
-  const { isEnabled } = useGenerationTypes()
-  const { ready: subjects } = useSubjectList()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { subjects, tasks, refetch, isLoading } = useSubjectList({ refetchInterval: 8_000 })
+  const [scope, setScope] = useState<Scope>('all')
+  const [q, setQ] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
-    draft.setTrack('video')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (searchParams.get('create') === '1' || searchParams.get('create') === 'subject') {
+      setCreateOpen(true)
+      const next = new URLSearchParams(searchParams)
+      next.delete('create')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
-  const { data: assets = [] } = useMediaAssets()
-  const imageAssets = useMemo(
-    () => assets.filter((a) => (a.mime || '').startsWith('image/')),
-    [assets],
-  )
+  const myVoices = useMemo(() => {
+    const ids = new Set<string>()
+    for (const t of tasks || []) {
+      if (t.sub_type !== 'voice_clone' || t.state !== 'success') continue
+      const vid = parseGenerationTaskParams(t).voice_id
+      if (typeof vid === 'string' && vid) ids.add(vid)
+    }
+    return Array.from(ids)
+  }, [tasks])
 
-  const selectedSubject = useMemo(
-    () => subjects.find((s) => s.serverId === subjectServerId),
-    [subjects, subjectServerId],
-  )
+  const mineCards = useMemo(() => subjects.map(subjectToCard), [subjects])
 
-  const submitSubject = async () => {
-    if (!text.trim()) {
-      message.warning('请先准备口播文案')
-      return
+  const cards = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    let list: LibCard[] = []
+    if (scope === 'recommend') {
+      list = RECOMMEND_SHOWCASE
+    } else if (scope === 'mine') {
+      list = mineCards
+    } else {
+      list = [...mineCards, ...RECOMMEND_SHOWCASE]
     }
-    const bid = brandId || draft.brandId
-    if (!bid) {
-      message.warning('请先选择人设/品牌')
-      return
-    }
-    if (!subjectServerId) {
-      message.warning('请选择数字分身')
-      return
-    }
-    if (!isEnabled('reference2video')) {
-      message.warning('参考生视频未在后台启用')
-      return
-    }
-    setBusy(true)
+    if (!needle) return list
+    return list.filter((c) => c.name.toLowerCase().includes(needle) || c.tag.toLowerCase().includes(needle))
+  }, [scope, mineCards, q])
+
+  const toggleSelect = (id: string, checked: boolean) => {
+    setSelected((prev) => {
+      if (checked) return prev.includes(id) ? prev : [...prev, id]
+      return prev.filter((x) => x !== id)
+    })
+  }
+
+  const batchDelete = async () => {
+    if (selected.length === 0) return
+    setDeleting(true)
     try {
-      let audioMaterialId: string | undefined
-      if (draft.voiceUrl) {
-        audioMaterialId = await ensureMaterialId(draft.voiceUrl)
-      }
-      const scriptText = [intent.trim(), text.trim()].filter(Boolean).join('，')
-      const task = await submitUnified(buildSubjectReferencePayload({
-        brand_id: bid,
-        server_id: subjectServerId,
-        name: selectedSubject?.name,
-        text: scriptText,
-        audioMaterialId,
-      }))
-      draft.patch({ avatarTaskId: task.id, brandId: bid })
-      message.success('主体一致性口播已提交')
-      navigate('/m/compose/tools?tab=media')
-    } catch (e) {
-      catchGenerationError(e)
-    } finally {
-      setBusy(false)
+      await Promise.all(selected.map((id) => businessApi.deleteGenerationTask(id)))
+      message.success(`已删除 ${selected.length} 个数字人`)
+      setSelected([])
+      refetch()
+    } catch { /* 拦截器 */ } finally {
+      setDeleting(false)
     }
   }
 
-  const submitLegacy = async () => {
-    if (!text.trim()) {
-      message.warning('请先准备口播文案')
+  const onCardAction = (card: LibCard) => {
+    if (card.recommend) {
+      setCreateOpen(true)
       return
     }
-    const bid = brandId || draft.brandId
-    if (!bid) {
-      message.warning('请先选择人设/品牌')
+    if (card.ready && card.serverId) {
+      navigate(`/m/compose/lipsync?subject=${encodeURIComponent(card.serverId)}`)
       return
     }
-    const imageRef = legacyImageUrl || imageAssets[0]?.url
-    if (!imageRef) {
-      message.warning('请选择人像参考图')
-      return
-    }
-    if (!draft.voiceUrl) {
-      message.warning('降级路径需要配音——请先在「爆款配音」生成')
-      return
-    }
-    setBusy(true)
-    try {
-      const materials = [await ensureMaterialId(imageRef), await ensureMaterialId(draft.voiceUrl)]
-      const task = await submitUnified({
-        brand_id: bid,
-        materials,
-        text: text.slice(0, 2000),
-        params: deliverableWorkParams(),
-      })
-      draft.patch({ avatarTaskId: task.id, brandId: bid })
-      message.success('口播任务已提交（图+音频，降级路径）')
-      navigate('/m/compose/tools?tab=media')
-    } catch (e) {
-      catchGenerationError(e)
-    } finally {
-      setBusy(false)
-    }
+    message.info(card.subject?.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中')
   }
 
   return (
-    <div className="wr-page-content ip-page">
-      <ComposeModuleHeader
-        title="口播数字人"
-        lead="数字分身 + 文案 → 主体一致性口播成片"
-        badge="发视频"
-      />
-      <Alert
-        style={{ marginBottom: 16 }}
-        type="info"
-        showIcon
-        message="完整五步流程（真人出镜 / 音色 / 分段）请使用「拍口播」向导"
-        action={
-          <Button size="small" type="primary" onClick={() => navigate('/m/compose/lipsync')}>
-            打开拍口播
-          </Button>
-        }
-      />
-      {!draft.voiceUrl && (
-        <Alert
-          style={{ marginBottom: 16 }}
-          type="warning"
-          showIcon
-          message="可选：先在「爆款配音」生成配音，成片将附带音频轨道"
-        />
-      )}
-      <div className="wr-glass-card" style={{ padding: 24 }}>
-        <Text strong>口播文案</Text>
-        <TextArea
-          rows={6}
-          style={{ marginTop: 8, marginBottom: 16 }}
-          value={text}
-          onChange={(e) => draft.patch({ script: e.target.value })}
-        />
-        <Text strong style={{ display: 'block', marginBottom: 8 }}>选择数字分身</Text>
-        <SubjectPicker
-          subjects={subjects}
-          value={subjectServerId}
-          onChange={setSubjectServerId}
-          className="wz-subject-picks--block"
-        />
-        <Input
-          placeholder="场景意图（可选，如：在厨房边做菜边对镜头讲解）"
-          value={intent}
-          onChange={(e) => setIntent(e.target.value)}
-          maxLength={200}
-          style={{ marginTop: 12, marginBottom: 16 }}
-        />
-        <Button
-          type="primary"
-          loading={busy}
-          icon={<RobotOutlined />}
-          disabled={!isEnabled('reference2video') || !subjectServerId}
-          onClick={submitSubject}
-        >
-          提交主体一致性成片
-        </Button>
-        <Collapse
-          ghost
-          style={{ marginTop: 20 }}
-          items={[{
-            key: 'legacy',
-            label: '降级：人像图 + 配音（无分身时）',
-            children: (
-              <>
-                <Text strong>人像参考图（素材库 ID）</Text>
-                <Select
-                  style={{ display: 'block', marginTop: 8, marginBottom: 12, maxWidth: 480 }}
-                  placeholder={imageAssets.length ? '从素材库选择' : '请先在多媒体工作台上传人像'}
-                  value={legacyImageUrl || undefined}
-                  onChange={setLegacyImageUrl}
-                  options={imageAssets.map((a) => ({
-                    value: a.url,
-                    label: `${a.id.slice(0, 8)}… · ${a.mime || 'image'}`,
-                  }))}
-                />
-                <Space wrap>
-                  <Upload
-                    accept="image/*"
-                    showUploadList={false}
-                    beforeUpload={async (file) => {
-                      try {
-                        const asset = await businessApi.uploadAsset(file)
-                        setLegacyImageUrl(asset.url)
-                        message.success('形象已上传')
-                      } catch (e) {
-                        catchGenerationError(e)
-                      }
-                      return false
-                    }}
-                  >
-                    <Button size="small">上传形象</Button>
-                  </Upload>
-                  <Button size="small" onClick={() => setPickerOpen(true)}>素材库</Button>
-                </Space>
-                <Button loading={busy} style={{ marginTop: 12 }} onClick={submitLegacy}>
-                  提交降级口播
+    <div className="dh-lib">
+      <header className="dh-lib-head">
+        <div className="dh-lib-titles">
+          <h1 className="dh-lib-title">数字人库</h1>
+          <p className="dh-lib-lead">独家高逼真数字人，满足多种应用场景</p>
+        </div>
+
+        <div className="dh-lib-toolbar">
+          <div className="dh-lib-tabs" role="tablist">
+            {(
+              [
+                { key: 'all', label: '全部' },
+                { key: 'mine', label: '我的' },
+                { key: 'recommend', label: '推荐' },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={scope === t.key}
+                className={`dh-lib-tab${scope === t.key ? ' is-active' : ''}`}
+                onClick={() => {
+                  setScope(t.key)
+                  setSelected([])
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="dh-lib-actions">
+            <Input
+              allowClear
+              className="dh-lib-search"
+              placeholder="搜索数字人"
+              prefix={<SearchOutlined />}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <Button
+              type="primary"
+              className="dh-lib-btn-primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCreateOpen(true)}
+            >
+              定制数字人
+            </Button>
+            <Popconfirm
+              title={`删除选中的 ${selected.length} 个数字人？`}
+              description="仅移除本地记录，Vidu 侧主体不受影响"
+              okText="删除"
+              okButtonProps={{ danger: true, loading: deleting }}
+              cancelText="取消"
+              disabled={selected.length === 0}
+              onConfirm={batchDelete}
+            >
+              <Button
+                className="dh-lib-btn-ghost"
+                icon={<DeleteOutlined />}
+                disabled={selected.length === 0}
+              >
+                批量删除 ({selected.length})
+              </Button>
+            </Popconfirm>
+          </div>
+        </div>
+      </header>
+
+      {isLoading && mineCards.length === 0 ? (
+        <div className="dh-lib-empty">
+          <Spin size="large" />
+        </div>
+      ) : cards.length === 0 ? (
+        <div className="dh-lib-empty">
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={scope === 'mine' || scope === 'all' ? '还没有数字人，先定制一个吧' : '暂无推荐'}
+          >
+            {(scope === 'mine' || scope === 'all') && (
+              <Button type="primary" className="dh-lib-btn-primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                定制数字人
+              </Button>
+            )}
+          </Empty>
+        </div>
+      ) : (
+        <ul className="dh-lib-list" role="list">
+          {cards.map((card) => {
+            const checked = selected.includes(card.id)
+            const actionLabel = card.recommend ? '去定制同款' : card.ready ? '拍口播' : '查看状态'
+            const publicTag = card.tag === '公共' || card.tag === '影视' || card.tag === '商务'
+            return (
+              <li
+                key={card.id}
+                className={`dh-lib-row${checked ? ' is-selected' : ''}${card.recommend ? ' is-recommend' : ''}`}
+              >
+                {card.selectable ? (
+                  <label className="dh-lib-row-check">
+                    <Checkbox
+                      checked={checked}
+                      onChange={(e) => toggleSelect(card.id, e.target.checked)}
+                    />
+                  </label>
+                ) : (
+                  <span className="dh-lib-row-check is-spacer" aria-hidden />
+                )}
+
+                <button
+                  type="button"
+                  className="dh-lib-row-thumb"
+                  onClick={() => onCardAction(card)}
+                  aria-label={actionLabel}
+                >
+                  {card.portraitUrl ? (
+                    <img src={card.portraitUrl} alt="" loading="lazy" />
+                  ) : (
+                    <span className="dh-lib-row-placeholder">
+                      <UserOutlined />
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="dh-lib-row-main"
+                  onClick={() => onCardAction(card)}
+                >
+                  <strong className="dh-lib-row-name" title={card.name}>{card.name}</strong>
+                  <span className="dh-lib-row-meta">
+                    <span className="dh-lib-row-time">{card.timeLabel}</span>
+                    {card.duration && (
+                      <span className="dh-lib-row-dur">
+                        <PlayCircleOutlined />
+                        {card.duration}
+                      </span>
+                    )}
+                  </span>
+                </button>
+
+                <span className={`dh-lib-row-tag${publicTag ? ' is-public' : ''}`}>
+                  {card.tag}
+                </span>
+
+                <Button
+                  type="link"
+                  className="dh-lib-row-action"
+                  onClick={() => onCardAction(card)}
+                >
+                  {actionLabel}
                 </Button>
-              </>
-            ),
-          }]}
-        />
-      </div>
-      <AssetPicker
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        kind="image"
-        title="选择数字人形象图"
-        onPick={(url) => setLegacyImageUrl(url)}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <CreateSubjectModal
+        open={createOpen}
+        voices={myVoices}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          refetch()
+          setScope('mine')
+        }}
       />
     </div>
   )

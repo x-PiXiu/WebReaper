@@ -1,5 +1,5 @@
 import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input, Badge, Popover, List, Empty } from 'antd'
-import { SearchOutlined, BellOutlined } from '@ant-design/icons'
+import { SearchOutlined, BellOutlined, VideoCameraOutlined, RightOutlined } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { usePublishableWorks } from '../hooks/usePublishableWorks'
@@ -161,7 +161,7 @@ export function AppShell({
       { value: '快捷 · 爆款对标', label: '快捷 · 爆款对标', target: '/m/compose/benchmark' },
       { value: '快捷 · 口播数字人', label: '快捷 · 口播数字人', target: '/m/compose/avatar' },
       { value: '快捷 · 一键发布', label: '快捷 · 一键发布', target: '/m/distribution' },
-      { value: '快捷 · 素材库', label: '快捷 · 素材库', target: '/m/assets' },
+      { value: '快捷 · 分镜素材', label: '快捷 · 分镜素材', target: '/m/assets' },
       { value: '快捷 · 作品数据', label: '快捷 · 作品数据', target: '/m/analytics' },
       { value: '快捷 · 获客管家', label: '快捷 · 获客管家', target: '/m/chat' },
       { value: '快捷 · 账号人设', label: '快捷 · 账号人设', target: '/m/brands' },
@@ -225,7 +225,7 @@ export function AppShell({
           </div>
         </div>
 
-        <div data-tour="merchant-nav">
+        <div data-tour="merchant-nav" className="wr-app-sider-nav">
         <Menu
           theme={themeMode === 'dark' ? 'dark' : 'light'}
           mode="inline"
@@ -235,6 +235,26 @@ export function AppShell({
           items={toMenuItems(menuItems)}
         />
         </div>
+
+        {!inAdmin && (
+          <div className="wr-sider-member">
+            <div className="wr-sider-member-avatar">
+              {(username || '?')[0].toUpperCase()}
+            </div>
+            <div className="wr-sider-member-meta">
+              <div className="wr-sider-member-name">{username || '创作者'}</div>
+              <div className="wr-sider-member-plan">会员权益</div>
+            </div>
+            <Button
+              size="small"
+              type="primary"
+              className="wr-sider-member-btn"
+              onClick={() => navigate('/m/my-plan')}
+            >
+              续费
+            </Button>
+          </div>
+        )}
       </Sider>
 
       <Layout style={{ background: 'var(--wr-bg-base)' }}>
@@ -302,6 +322,18 @@ export function AppShell({
           </div>
 
           <Space size={12} className="wr-header-right">
+            {!inAdmin && (
+              <Button
+                type="primary"
+                size="small"
+                className="wr-header-create-cta"
+                icon={<VideoCameraOutlined />}
+                onClick={() => navigate('/m/compose/lipsync')}
+              >
+                立即创作
+                <RightOutlined style={{ fontSize: 10 }} />
+              </Button>
+            )}
             <NotificationBell />
             <div className="wr-header-theme" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span className="wr-header-theme-label" style={{ fontSize: 14 }}>{themeMode === 'dark' ? '深' : '亮'}</span>

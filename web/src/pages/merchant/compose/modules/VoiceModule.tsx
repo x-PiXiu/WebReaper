@@ -1,99 +1,341 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Input, Select, Space, Typography } from 'antd'
-import { SoundOutlined } from '@ant-design/icons'
-import { ComposeModuleHeader } from '../ComposeModuleHeader'
-import { useComposeDraft } from '../../../../store/composeDraft'
-import { useBrandContext } from '../../../../hooks/useBrands'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Button,
+  Checkbox,
+  Empty,
+  Input,
+  Popconfirm,
+  Spin,
+} from 'antd'
+import {
+  CaretRightOutlined,
+  DeleteOutlined,
+  PauseOutlined,
+  PlusOutlined,
+  SearchOutlined,
+} from '@ant-design/icons'
 import { businessApi } from '../../../../api/business'
+import { GenerateAssetModal } from '../../../../components/assets/GenerateAssetModal'
+import { GENERATION_TASKS_KEY, useGenerationTasks } from '../../../../hooks/useGenerationTasks'
+import type { GenerationVoice } from '../../../../types/api'
 import { message } from '../../../../utils/antdApp'
+import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
 
-const { Text } = Typography
-const { TextArea } = Input
+type Scope = 'all' | 'mine' | 'recommend'
 
-/** 爆款配音：口播文案 → TTS 任务（发视频专属） */
+type VoiceCard = {
+  id: string
+  name: string
+  timeLabel: string
+  tag: string
+  sampleUrl?: string
+  selectable: boolean
+  mine: boolean
+  taskId?: string
+  voiceId: string
+}
+
+/** 全局试听（切换条目自动停上一段） */
+let previewAudio: HTMLAudioElement | null = null
+function stopPreview() {
+  if (previewAudio) {
+    previewAudio.pause()
+    previewAudio = null
+  }
+}
+
+function formatUploadTime(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `上传于 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** 音色库：官方音色 + 我的克隆音色（列表布局） */
 export default function VoiceModule() {
-  const navigate = useNavigate()
-  const { brandId } = useBrandContext()
-  const draft = useComposeDraft()
-  const [busy, setBusy] = useState(false)
-  const [model, setModel] = useState<string>()
-  const text = draft.rewritten || draft.script || ''
+  const queryClient = useQueryClient()
+  const { tasks, refetch, isLoading: tasksLoading } = useGenerationTasks({ refetchInterval: 8_000 })
+  const [scope, setScope] = useState<Scope>('all')
+  const [q, setQ] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [cloneOpen, setCloneOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [playingId, setPlayingId] = useState('')
+  const playingRef = useRef('')
 
-  useEffect(() => {
-    draft.setTrack('video')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const { data: types = [] } = useQuery({
-    queryKey: ['generation-types'],
-    queryFn: () => businessApi.listGenerationTypes().then((r) => r.types),
+  const { data: official = [], isLoading: voicesLoading } = useQuery({
+    queryKey: ['generation-voices'],
+    queryFn: () => businessApi.listGenerationVoices().then((r) => r.voices),
+    staleTime: 24 * 60 * 60 * 1000,
   })
 
-  const ttsModels = useMemo(() => {
-    const t = types.find((x) => x.sub_type === 'tts')
-    return (t?.models || []).map((m) => m.model)
-  }, [types])
+  useEffect(() => () => { stopPreview() }, [])
 
-  const submit = async () => {
-    if (!text.trim()) {
-      message.warning('请先准备口播文案')
-      return
-    }
-    const bid = brandId || draft.brandId
-    if (!bid) {
-      message.warning('请先选择人设/品牌')
-      return
-    }
-    setBusy(true)
-    try {
-      const task = await businessApi.submitGeneration({
-        brand_id: bid,
-        text: text.slice(0, 2000),
-        type: 'audio',
-        params: model ? { model } : undefined, // TTS 模型选择（此前下拉是死控件——所选模型从未提交）
+  const mineCards = useMemo((): VoiceCard[] => {
+    const cards: VoiceCard[] = []
+    for (const t of tasks || []) {
+      if (t.sub_type !== 'voice_clone') continue
+      const p = parseGenerationTaskParams(t)
+      const voiceId = typeof p.voice_id === 'string' && p.voice_id
+        ? p.voice_id
+        : (t.provider_task_id || t.id)
+      const name = (typeof p.name === 'string' && p.name)
+        || (typeof p.voice_name === 'string' && p.voice_name)
+        || `克隆音色 ${voiceId.slice(0, 8)}`
+      const sample = t.creations?.[0]?.url || ''
+      let tag = '我的'
+      if (t.state === 'failed') tag = '失败'
+      else if (t.state !== 'success') tag = '克隆中'
+      cards.push({
+        id: `mine-${t.id}`,
+        name,
+        timeLabel: formatUploadTime(t.created_at),
+        tag,
+        sampleUrl: sample || undefined,
+        selectable: true,
+        mine: true,
+        taskId: t.id,
+        voiceId,
       })
-      draft.patch({ voiceTaskId: task.id, brandId: bid })
-      message.success('配音任务已提交，可在生成任务列表查看产物')
-      navigate('/m/compose/tools?tab=media')
-    } catch {
-      /* 拦截器 */
-    } finally {
-      setBusy(false)
+    }
+    return cards
+  }, [tasks])
+
+  const myVoiceIds = useMemo(
+    () => mineCards.filter((c) => c.tag === '我的').map((c) => c.voiceId),
+    [mineCards],
+  )
+
+  const officialCards = useMemo((): VoiceCard[] => {
+    return (official as GenerationVoice[]).map((v) => ({
+      id: `off-${v.voice_id}`,
+      name: `${v.name}（${v.language}）`,
+      timeLabel: '官方音色',
+      tag: '公共',
+      sampleUrl: v.sample_url || undefined,
+      selectable: false,
+      mine: false,
+      voiceId: v.voice_id,
+    }))
+  }, [official])
+
+  const recommendCards = useMemo(
+    () => officialCards.slice(0, 12).map((c) => ({ ...c, tag: c.tag || '公共', id: `rec-${c.voiceId}` })),
+    [officialCards],
+  )
+
+  const cards = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    let list: VoiceCard[] = []
+    if (scope === 'mine') list = mineCards
+    else if (scope === 'recommend') list = recommendCards.length ? recommendCards : officialCards
+    else list = [...mineCards, ...officialCards]
+    if (!needle) return list
+    return list.filter((c) =>
+      c.name.toLowerCase().includes(needle)
+      || c.voiceId.toLowerCase().includes(needle)
+      || c.tag.toLowerCase().includes(needle),
+    )
+  }, [scope, mineCards, officialCards, recommendCards, q])
+
+  const toggleSelect = (id: string, checked: boolean) => {
+    setSelected((prev) => {
+      if (checked) return prev.includes(id) ? prev : [...prev, id]
+      return prev.filter((x) => x !== id)
+    })
+  }
+
+  const batchDelete = async () => {
+    if (selected.length === 0) return
+    const taskIds = selected
+      .map((id) => mineCards.find((c) => c.id === id)?.taskId)
+      .filter((id): id is string => !!id)
+    if (taskIds.length === 0) return
+    setDeleting(true)
+    try {
+      await Promise.all(taskIds.map((id) => businessApi.deleteGenerationTask(id)))
+      message.success(`已删除 ${taskIds.length} 个音色`)
+      setSelected([])
+      refetch()
+    } catch { /* 拦截器 */ } finally {
+      setDeleting(false)
     }
   }
 
+  const togglePlay = (card: VoiceCard) => {
+    if (!card.sampleUrl) {
+      message.info(card.mine ? '克隆音色暂无试听样例' : '该音色暂无试听')
+      return
+    }
+    if (playingRef.current === card.id && previewAudio) {
+      stopPreview()
+      playingRef.current = ''
+      setPlayingId('')
+      return
+    }
+    stopPreview()
+    previewAudio = new Audio(card.sampleUrl)
+    playingRef.current = card.id
+    setPlayingId(card.id)
+    previewAudio.onended = () => {
+      playingRef.current = ''
+      setPlayingId('')
+      stopPreview()
+    }
+    previewAudio.play().catch(() => {
+      playingRef.current = ''
+      setPlayingId('')
+      message.warning('试听播放失败')
+    })
+  }
+
+  const loading = (voicesLoading || tasksLoading) && cards.length === 0
+
   return (
-    <div className="wr-page-content ip-page">
-      <ComposeModuleHeader title="爆款配音" lead="把口播文案交给 TTS 生成配音（发视频专属）" badge="发视频" />
-      <Alert
-        style={{ marginBottom: 16 }}
-        type="info"
-        showIcon
-        message="依赖生成服务中的 tts 端点；提交后可在多媒体工作台查看任务与音频产物"
-      />
-      <div className="wr-glass-card" style={{ padding: 24 }}>
-        <Text strong>配音文案</Text>
-        <TextArea rows={10} style={{ marginTop: 8 }} value={text} onChange={(e) => draft.patch({ script: e.target.value })} />
-        <div style={{ marginTop: 12 }}>
-          <Text strong>TTS 模型</Text>
-          <Select
-            style={{ display: 'block', marginTop: 8, maxWidth: 360 }}
-            placeholder={ttsModels.length ? '选择模型' : '无可用模型'}
-            value={model || ttsModels[0]}
-            onChange={setModel}
-            options={ttsModels.map((m) => ({ value: m, label: m }))}
-          />
+    <div className="vc-lib">
+      <header className="vc-lib-head">
+        <div className="vc-lib-titles">
+          <h1 className="vc-lib-title">音色库</h1>
+          <p className="vc-lib-lead">AI 情感音色，真人般自然流畅</p>
         </div>
-        <Space style={{ marginTop: 16 }} wrap>
-          <Button type="primary" className="ip-btn-primary" icon={<SoundOutlined />} loading={busy} onClick={submit}>
-            提交配音任务
-          </Button>
-          <Button onClick={() => navigate('/m/compose/avatar')}>去口播数字人</Button>
-          <Button type="link" onClick={() => navigate('/m/compose/tools?tab=media')}>打开多媒体工作台</Button>
-        </Space>
-      </div>
+
+        <div className="vc-lib-toolbar">
+          <div className="vc-lib-tabs" role="tablist">
+            {(
+              [
+                { key: 'all', label: '全部' },
+                { key: 'mine', label: '我的' },
+                { key: 'recommend', label: '推荐' },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={scope === t.key}
+                className={`vc-lib-tab${scope === t.key ? ' is-active' : ''}`}
+                onClick={() => {
+                  setScope(t.key)
+                  setSelected([])
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="vc-lib-actions">
+            <Input
+              allowClear
+              className="vc-lib-search"
+              placeholder="搜索音色"
+              prefix={<SearchOutlined />}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <Button
+              type="primary"
+              className="vc-lib-btn-primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCloneOpen(true)}
+            >
+              定制音色
+            </Button>
+            <Popconfirm
+              title={`删除选中的 ${selected.length} 个音色？`}
+              description="仅移除本地克隆记录"
+              okText="删除"
+              okButtonProps={{ danger: true, loading: deleting }}
+              cancelText="取消"
+              disabled={selected.length === 0}
+              onConfirm={batchDelete}
+            >
+              <Button
+                className="vc-lib-btn-ghost"
+                icon={<DeleteOutlined />}
+                disabled={selected.length === 0}
+              >
+                批量删除 ({selected.length})
+              </Button>
+            </Popconfirm>
+          </div>
+        </div>
+      </header>
+
+      {loading ? (
+        <div className="vc-lib-empty">
+          <Spin size="large" />
+        </div>
+      ) : cards.length === 0 ? (
+        <div className="vc-lib-empty">
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={scope === 'mine' ? '还没有克隆音色，先定制一个吧' : '暂无音色'}
+          >
+            {scope === 'mine' && (
+              <Button type="primary" className="vc-lib-btn-primary" icon={<PlusOutlined />} onClick={() => setCloneOpen(true)}>
+                定制音色
+              </Button>
+            )}
+          </Empty>
+        </div>
+      ) : (
+        <ul className="vc-lib-list" role="list">
+          {cards.map((card) => {
+            const checked = selected.includes(card.id)
+            const playing = playingId === card.id
+            return (
+              <li
+                key={card.id}
+                className={`vc-lib-row${checked ? ' is-selected' : ''}${playing ? ' is-playing' : ''}`}
+              >
+                {card.selectable ? (
+                  <label className="vc-lib-row-check">
+                    <Checkbox
+                      checked={checked}
+                      onChange={(e) => toggleSelect(card.id, e.target.checked)}
+                    />
+                  </label>
+                ) : (
+                  <span className="vc-lib-row-check is-spacer" aria-hidden />
+                )}
+
+                <button
+                  type="button"
+                  className="vc-lib-row-play"
+                  onClick={() => togglePlay(card)}
+                  aria-label={playing ? '暂停试听' : '试听'}
+                >
+                  {playing ? <PauseOutlined /> : <CaretRightOutlined />}
+                </button>
+
+                <div className="vc-lib-row-main">
+                  <strong className="vc-lib-row-name" title={card.name}>{card.name}</strong>
+                  <span className="vc-lib-row-time">{card.timeLabel}</span>
+                </div>
+
+                <span className={`vc-lib-row-tag${card.tag === '公共' ? ' is-public' : ''}`}>
+                  {card.tag}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <GenerateAssetModal
+        open={cloneOpen}
+        type="voice"
+        myVoices={myVoiceIds}
+        onClose={() => setCloneOpen(false)}
+        onGenerated={() => {
+          queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
+          refetch()
+          setScope('mine')
+          setCloneOpen(false)
+        }}
+      />
     </div>
   )
 }

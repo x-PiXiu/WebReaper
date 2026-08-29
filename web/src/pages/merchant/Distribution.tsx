@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, Typography, Button, Row, Col, Tag, Space, Table, Modal, Alert, Popconfirm, Tabs } from 'antd'
-import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, ExportOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, ExportOutlined, RightOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { useBrandContext } from '../../hooks/useBrands'
@@ -228,18 +228,51 @@ export default function Distribution() {
   ]
 
   return (
-    <div className="wr-page-content ip-page" style={{ paddingTop: 4, position: 'relative' }}>
+    <div className="wr-page-content ip-page dist-page ch-creative" style={{ paddingTop: 4, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <div className="ip-page-hero">
-          <div>
-            <p className="ip-kicker">Go Live</p>
-            <h1>一键发布</h1>
-            <p className="ip-lead">五步发完：选平台 → 写内容 → 带素材 → 填平台参数 → 预览确认</p>
+        <section className="ch-hero dist-hero">
+          <div className="ch-hero-copy">
+            <p className="ch-hero-kicker">Go Live · 账号发布</p>
+            <h1 className="ch-hero-title">
+              <span className="ch-hero-ai">一键</span>
+              <span>发到多平台。</span>
+            </h1>
+            <p className="ch-hero-lead">
+              绑定账号 → 五步向导填内容 → 半自动或全自动发布。Cookie 失效可降级为打开平台页手动发。
+            </p>
           </div>
-          <Button onClick={() => navigate('/m/works')}>查看我的作品</Button>
-        </div>
+          <div className="ch-hero-cta">
+            <Button
+              type="primary"
+              size="large"
+              className="ch-hero-btn"
+              icon={<ExportOutlined />}
+              onClick={() => { tabTouched.current = true; setActiveTab('publish') }}
+            >
+              去发布
+              <RightOutlined />
+            </Button>
+            <div className="ch-hero-tags">
+              <button type="button" className="ch-hero-tag" onClick={() => { tabTouched.current = true; setActiveTab('accounts') }}>
+                账号池
+              </button>
+              <button type="button" className="ch-hero-tag" onClick={() => navigate('/m/works')}>
+                我的作品
+              </button>
+              <button type="button" className="ch-hero-tag" onClick={() => navigate('/m/compose')}>
+                回首页
+              </button>
+            </div>
+            <p className="ch-hero-proof">
+              {healthyAccounts.length > 0
+                ? `${healthyAccounts.length} 个健康账号可用`
+                : '尚未绑定账号，先去账号池扫码'}
+            </p>
+          </div>
+        </section>
 
         <Tabs
+          className="dist-tabs"
           activeKey={activeTab}
           onChange={(k) => { tabTouched.current = true; setActiveTab(k) }}
           items={[
@@ -248,24 +281,22 @@ export default function Distribution() {
               label: '账号池',
               children: (
                 <>
-                  <Card className="wr-glass-card" style={{ marginBottom: 16 }}>
-                    <Space align="start" style={{ width: '100%' }}>
-                      <LinkOutlined style={{ color: 'var(--wr-warning)', marginTop: 3 }} />
-                      <div style={{ flex: 1 }}>
-                        <Text strong style={{ fontSize: 14 }}>发布带定位 = 本地曝光更好（半自动指引）</Text>
-                        <Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 8px' }}>
-                          平台「添加定位」自动化暂缓——先用最稳的半自动方式：人设档案维护地址 → 发布附带门店信息 → 平台页手动选定位。
-                        </Paragraph>
-                      </div>
-                    </Space>
-                  </Card>
+                  <div className="dist-hint">
+                    <LinkOutlined className="dist-hint-icon" />
+                    <div>
+                      <Text strong style={{ fontSize: 14 }}>发布带定位 = 本地曝光更好（半自动指引）</Text>
+                      <Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 0' }}>
+                        平台「添加定位」自动化暂缓——先用最稳的半自动方式：人设档案维护地址 → 发布附带门店信息 → 平台页手动选定位。
+                      </Paragraph>
+                    </div>
+                  </div>
 
-                  <Row gutter={[16, 16]} className="wr-stagger" style={{ marginBottom: 16 }}>
+                  <Row gutter={[16, 16]} className="wr-stagger dist-platform-grid" style={{ marginBottom: 16 }}>
                     {PLATFORMS.map((pf) => {
                       const accs = accounts.filter((a) => a.platform === pf.key)
                       return (
                         <Col xs={24} sm={12} key={pf.key}>
-                          <Card className="wr-glass-card" styles={{ body: { padding: 24 } }}>
+                          <div className="dist-platform-card">
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
                               <div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -282,11 +313,7 @@ export default function Distribution() {
                                   const isExpired = a.health === 'expired'
                                   const isOAuth = a.auth_type === 'oauth'
                                   return (
-                                    <div key={a.id} style={{
-                                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                      padding: '8px 12px', background: 'var(--wr-bg-elevated)', borderRadius: 8,
-                                      borderLeft: isExpired ? '3px solid var(--wr-danger)' : '3px solid transparent',
-                                    }}>
+                                    <div key={a.id} className={`dist-account-row${isExpired ? ' is-expired' : ''}`}>
                                       <Space>
                                         <span style={{ color: cfg.color }}>{cfg.icon}</span>
                                         <Text style={{ color: isExpired ? 'var(--wr-text-muted)' : 'inherit' }}>{a.display_name}</Text>
@@ -328,7 +355,7 @@ export default function Distribution() {
                                 点击绑定 {pf.name} 账号
                               </Button>
                             )}
-                          </Card>
+                          </div>
                         </Col>
                       )
                     })}
@@ -398,7 +425,7 @@ export default function Distribution() {
                           ? monitored.reduce((s: number, j: PublishJob) => s + ((j.post_mention_rate || 0) - (j.pre_mention_rate || 0)), 0) / monitored.length
                           : null
                         return (
-                          <div key={pf.key} style={{ padding: '12px 16px', background: 'var(--wr-bg-elevated)', borderRadius: 10 }}>
+                          <div key={pf.key} className="dist-stat-tile">
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                               <span style={{ width: 8, height: 8, borderRadius: '50%', background: pf.color, display: 'inline-block' }} />
                               <Text strong style={{ fontSize: 13 }}>{pf.name}</Text>

@@ -21,7 +21,7 @@ export function SubjectPicker({
   value,
   onChange,
   highlightServerId,
-  createHref = '/m/assets?create=subject',
+  createHref = '/m/compose/avatar?create=1',
   className,
   emptyHint = '还没有可用的数字分身',
 }: Props) {
