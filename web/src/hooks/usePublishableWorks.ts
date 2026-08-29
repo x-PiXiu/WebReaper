@@ -10,7 +10,8 @@ export function usePublishableWorks(options?: { enabled?: boolean; staleTime?: n
 
   const worksQuery = useQuery({
     queryKey: ['merchant-works'],
-    queryFn: () => businessApi.listWorks().catch(() => []),
+    // 错误不吞：失败要冒泡给页面（QueryBoundary 出错重试），吞成 [] 会把"服务挂了"伪装成"没有作品"
+    queryFn: () => businessApi.listWorks(),
     staleTime: options?.staleTime,
     enabled,
   })
@@ -30,6 +31,7 @@ export function usePublishableWorks(options?: { enabled?: boolean; staleTime?: n
   return {
     works,
     isLoading: worksQuery.isLoading,
+    isError: worksQuery.isError,
     isFetching: worksQuery.isFetching || tasksQuery.isFetching,
     refetch: worksQuery.refetch,
   }

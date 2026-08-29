@@ -105,7 +105,7 @@ export default function AdminUsers() {
       <Row gutter={[16, 16]} className="wr-stagger" style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
           <div className="wr-metric-card">
-            <div className="wr-metric-value wr-gradient-text">{users.length}</div>
+            <div className="wr-metric-value">{users.length}</div>
             <div className="wr-metric-label"><TeamOutlined style={{ marginRight: 4 }} />全部用户</div>
           </div>
         </Col>

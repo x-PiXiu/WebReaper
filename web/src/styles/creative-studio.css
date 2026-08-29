@@ -664,3 +664,169 @@
   justify-content: center;
   padding: 10px;
 }
+
+/* teal tone（ComposeHub tone: 'teal'）——补齐掉默认样式的第五色调 */
+.ch-studio .ch-pipe-card--teal .ch-pipe-badge {
+  color: #0d9488;
+  background: rgba(13, 148, 136, 0.14);
+}
+
+/* —— 首页底部：更多创作方式 / 我的创作（常驻分区，替代折叠） —— */
+.ch-studio .ch-more {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.ch-studio .ch-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.ch-studio .ch-section-head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--studio-ink);
+}
+.ch-studio .ch-section-head p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--studio-muted);
+}
+.ch-studio .ch-section-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--studio);
+  white-space: nowrap;
+}
+.ch-studio .ch-section-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+.ch-studio .ch-section-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ch-studio .ch-section-side .ch-panel {
+  flex: 1;
+}
+
+/* 灵感入口：紧凑卡替代大空态 */
+.ch-studio .ch-inspire-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 26px 18px 24px;
+  text-align: center;
+}
+.ch-studio .ch-inspire-entry-icon {
+  font-size: 30px;
+  color: var(--studio);
+  opacity: 0.85;
+}
+.ch-studio .ch-inspire-entry p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--studio-muted);
+  max-width: 240px;
+}
+.ch-studio .ch-inspire-entry-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #fff;
+  background: linear-gradient(135deg, #8b7cf6, #6d55f0);
+  box-shadow: 0 6px 18px rgba(109, 85, 240, 0.28);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.ch-studio .ch-inspire-entry-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(109, 85, 240, 0.38);
+}
+
+/* 失败任务：弱化为中性单行（替代大红块） */
+.ch-studio .ch-panel-failed .ch-panel-head h3 {
+  color: var(--studio-muted);
+  font-size: 14px;
+}
+.ch-studio .ch-fail-mini {
+  list-style: none;
+  margin: 0;
+  padding: 0 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ch-studio .ch-fail-mini li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: var(--studio-muted-soft, rgba(20, 20, 40, 0.04));
+  font-size: 12.5px;
+}
+.ch-studio .ch-fail-mini-icon {
+  color: #d97706;
+  flex-shrink: 0;
+}
+.ch-studio .ch-fail-mini-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--studio-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-studio .ch-fail-mini-link {
+  flex-shrink: 0;
+  font-weight: 650;
+  color: var(--studio);
+}
+.ch-studio .ch-fail-mini-more {
+  color: var(--studio-muted);
+  background: transparent;
+  padding-top: 0;
+}
+.ch-studio .ch-fail-mini-more a {
+  color: var(--studio);
+  font-weight: 600;
+}
+
+/* 作品列表底部"还有 N 个"引导 */
+.ch-studio .ch-panel-foot {
+  padding: 8px 14px 12px;
+  font-size: 12.5px;
+}
+.ch-studio .ch-panel-foot a {
+  color: var(--studio);
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .ch-studio .ch-section-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-studio .ch-inspire-entry-btn,
+  .ch-studio .ch-inspire-entry-btn:hover {
+    transform: none;
+  }
+}

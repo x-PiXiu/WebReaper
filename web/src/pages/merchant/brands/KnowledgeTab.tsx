@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Button, Card, Empty, Input, List, Modal, Popconfirm, Space, Spin, Tag, Typography, Upload } from 'antd'
+import { Button, Card, Input, List, Modal, Popconfirm, Space, Tag, Typography, Upload } from 'antd'
 import { UploadOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
+import QueryBoundary from '../../../components/QueryBoundary'
 import { message } from '../../../utils/antdApp'
 
 const { Text } = Typography
@@ -29,7 +30,7 @@ export default function KnowledgeTab({ brandId }: { brandId: string }) {
   const [content, setContent] = useState('')
   const [fileName, setFileName] = useState('')
 
-  const { data: materials = [], isLoading } = useQuery({
+  const { data: materials = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['brand-knowledge', brandId],
     queryFn: () => businessApi.listBrandKnowledge(brandId).then((r) => r.materials),
     enabled: !!brandId,
@@ -93,11 +94,14 @@ export default function KnowledgeTab({ brandId }: { brandId: string }) {
         AI 会自动学习，写文章和做视频时引用这些内容，确保专业准确。
       </Text>
 
-      {isLoading ? <Spin /> : materials.length === 0 ? (
-        <Empty description="还没有上传资料——AI 还不认识你的品牌细节">
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>上传第一份资料</Button>
-        </Empty>
-      ) : (
+      <QueryBoundary
+        loading={isLoading}
+        error={isError}
+        onRetry={() => refetch()}
+        empty={materials.length === 0}
+        emptyText="还没有上传资料——AI 还不认识你的品牌细节"
+        emptyExtra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>上传第一份资料</Button>}
+      >
         <List
           dataSource={materials}
           renderItem={(m: KnowledgeMaterialView) => (
@@ -126,7 +130,7 @@ export default function KnowledgeTab({ brandId }: { brandId: string }) {
             </List.Item>
           )}
         />
-      )}
+      </QueryBoundary>
 
       <Modal
         title="上传品牌资料"

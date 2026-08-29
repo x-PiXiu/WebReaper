@@ -1,11 +1,11 @@
 import { Typography, Card, Row, Col, Tag, Button, Progress, Space, Table, Modal, Empty, Statistic } from 'antd'
 import { CrownOutlined, CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons'
-import PageLoading from '../../components/PageLoading'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Plan } from '../../types/api'
+import QueryBoundary from '../../components/QueryBoundary'
 import { message } from '../../utils/antdApp'
 
 const { Text, Title } = Typography
@@ -41,8 +41,8 @@ export default function MyPlan() {
   const [searchParams, setSearchParams] = useSearchParams()
   const settlingRef = useRef(false)
 
-  const { data: usage, isLoading: usageLoading } = useQuery({ queryKey: ['my-usage'], queryFn: () => businessApi.getMyUsage() })
-  const { data: plansRes, isLoading: plansLoading } = useQuery({ queryKey: ['active-plans'], queryFn: () => businessApi.listActivePlans() })
+  const { data: usage, isLoading: usageLoading, isError: usageError, refetch: refetchUsage } = useQuery({ queryKey: ['my-usage'], queryFn: () => businessApi.getMyUsage() })
+  const { data: plansRes, isLoading: plansLoading, isError: plansError, refetch: refetchPlans } = useQuery({ queryKey: ['active-plans'], queryFn: () => businessApi.listActivePlans() })
   const { data: ordersRes, refetch: refetchOrders } = useQuery({
     queryKey: ['my-orders'],
     queryFn: () => businessApi.listMyOrders(),
@@ -138,15 +138,12 @@ export default function MyPlan() {
     },
   })
 
-  if (usageLoading || plansLoading) {
-    return (
-      <div className="wr-page-content" style={{ paddingTop: 8 }}>
-        <PageLoading tip="套餐信息加载中..." />
-      </div>
-    )
-  }
-
   return (
+    <QueryBoundary
+      loading={usageLoading || plansLoading}
+      error={usageError || plansError}
+      onRetry={() => { refetchUsage(); refetchPlans() }}
+    >
     <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
@@ -285,5 +282,6 @@ export default function MyPlan() {
         )}
       </Modal>
     </div>
+    </QueryBoundary>
   )
 }

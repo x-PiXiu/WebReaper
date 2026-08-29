@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Button, Empty, Select, Space, Spin, Tag, Typography,
+  Button, Select, Space, Tag, Typography,
 } from 'antd'
 import {
   FireOutlined, LinkOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
+import QueryBoundary from '../../../components/QueryBoundary'
 import { PlatformBadge } from '../../../components/PlatformBadge'
 import { getPlatformLabel } from '../../../data/platforms'
 
@@ -27,7 +28,7 @@ export default function InspirationTab({ brandId }: Props) {
   const navigate = useNavigate()
   const [platform, setPlatform] = useState<string>('all')
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['brand-inspirations', brandId, platform],
     queryFn: () => businessApi.listInspirations({
       brand_id: brandId,
@@ -46,15 +47,15 @@ export default function InspirationTab({ brandId }: Props) {
   const videos = data?.items || []
   const platforms = platformData?.platforms?.filter(Boolean) || []
 
-  if (isLoading) {
-    return (
-      <div style={{ textAlign: 'center', padding: 48 }}>
-        <Spin tip="加载灵感中…" />
-      </div>
-    )
-  }
-
   return (
+    <QueryBoundary
+      loading={isLoading}
+      error={isError}
+      onRetry={() => refetch()}
+      empty={videos.length === 0}
+      emptyText="暂无灵感数据，系统会自动更新"
+      emptyExtra={<Button type="primary" onClick={() => navigate('/m/inspire')}>去灵感广场</Button>}
+    >
     <div className="inspiration-tab">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
@@ -83,17 +84,7 @@ export default function InspirationTab({ brandId }: Props) {
         </Space>
       </div>
 
-      {videos.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="暂无灵感数据，系统会自动更新"
-        >
-          <Button type="primary" onClick={() => navigate('/m/inspire')}>
-            去灵感广场
-          </Button>
-        </Empty>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
           {videos.map((v) => {
             const isGraphic = GRAPHIC_PLATFORMS.has(v.platform)
             return (
@@ -141,8 +132,7 @@ export default function InspirationTab({ brandId }: Props) {
               </div>
             )
           })}
-        </div>
-      )}
+      </div>
 
       {videos.length > 0 && (
         <div style={{ textAlign: 'center', marginTop: 16 }}>
@@ -152,5 +142,6 @@ export default function InspirationTab({ brandId }: Props) {
         </div>
       )}
     </div>
+    </QueryBoundary>
   )
 }

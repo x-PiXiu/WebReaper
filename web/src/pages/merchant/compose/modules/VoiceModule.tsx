@@ -5,6 +5,7 @@ import {
   Checkbox,
   Empty,
   Input,
+  Pagination,
   Popconfirm,
   Spin,
 } from 'antd'
@@ -23,6 +24,9 @@ import { message } from '../../../../utils/antdApp'
 import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
 
 type Scope = 'all' | 'mine' | 'recommend'
+
+/** 每页展示条数（官方+克隆音色可能上百条，分页避免长列表） */
+const PAGE_SIZE = 12
 
 type VoiceCard = {
   id: string
@@ -138,6 +142,25 @@ export default function VoiceModule() {
       || c.tag.toLowerCase().includes(needle),
     )
   }, [scope, mineCards, officialCards, recommendCards, q])
+
+  // 分页：筛选/搜索/切换 Tab 后回到第一页；翻页停掉试听
+  const [page, setPage] = useState(1)
+  const safePage = Math.min(page, Math.max(1, Math.ceil(cards.length / PAGE_SIZE)))
+  useEffect(() => { setPage(1) }, [scope, q])
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safePage])
+  const paged = useMemo(
+    () => cards.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [cards, safePage],
+  )
+  const changePage = (p: number) => {
+    stopPreview()
+    playingRef.current = ''
+    setPlayingId('')
+    setPage(p)
+  }
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected((prev) => {
@@ -281,47 +304,62 @@ export default function VoiceModule() {
           </Empty>
         </div>
       ) : (
-        <ul className="vc-lib-list" role="list">
-          {cards.map((card) => {
-            const checked = selected.includes(card.id)
-            const playing = playingId === card.id
-            return (
-              <li
-                key={card.id}
-                className={`vc-lib-row${checked ? ' is-selected' : ''}${playing ? ' is-playing' : ''}`}
-              >
-                {card.selectable ? (
-                  <label className="vc-lib-row-check">
-                    <Checkbox
-                      checked={checked}
-                      onChange={(e) => toggleSelect(card.id, e.target.checked)}
-                    />
-                  </label>
-                ) : (
-                  <span className="vc-lib-row-check is-spacer" aria-hidden />
-                )}
-
-                <button
-                  type="button"
-                  className="vc-lib-row-play"
-                  onClick={() => togglePlay(card)}
-                  aria-label={playing ? '暂停试听' : '试听'}
+        <>
+          <ul className="vc-lib-list" role="list">
+            {paged.map((card) => {
+              const checked = selected.includes(card.id)
+              const playing = playingId === card.id
+              return (
+                <li
+                  key={card.id}
+                  className={`vc-lib-row${checked ? ' is-selected' : ''}${playing ? ' is-playing' : ''}`}
                 >
-                  {playing ? <PauseOutlined /> : <CaretRightOutlined />}
-                </button>
+                  {card.selectable ? (
+                    <label className="vc-lib-row-check">
+                      <Checkbox
+                        checked={checked}
+                        onChange={(e) => toggleSelect(card.id, e.target.checked)}
+                      />
+                    </label>
+                  ) : (
+                    <span className="vc-lib-row-check is-spacer" aria-hidden />
+                  )}
 
-                <div className="vc-lib-row-main">
-                  <strong className="vc-lib-row-name" title={card.name}>{card.name}</strong>
-                  <span className="vc-lib-row-time">{card.timeLabel}</span>
-                </div>
+                  <button
+                    type="button"
+                    className="vc-lib-row-play"
+                    onClick={() => togglePlay(card)}
+                    aria-label={playing ? '暂停试听' : '试听'}
+                  >
+                    {playing ? <PauseOutlined /> : <CaretRightOutlined />}
+                  </button>
 
-                <span className={`vc-lib-row-tag${card.tag === '公共' ? ' is-public' : ''}`}>
-                  {card.tag}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+                  <div className="vc-lib-row-main">
+                    <strong className="vc-lib-row-name" title={card.name}>{card.name}</strong>
+                    <span className="vc-lib-row-time">{card.timeLabel}</span>
+                  </div>
+
+                  <span className={`vc-lib-row-tag${card.tag === '公共' ? ' is-public' : ''}`}>
+                    {card.tag}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+
+          {cards.length > PAGE_SIZE && (
+            <div className="vc-lib-pagination">
+              <Pagination
+                current={safePage}
+                pageSize={PAGE_SIZE}
+                total={cards.length}
+                onChange={changePage}
+                showSizeChanger={false}
+                showTotal={(total) => `共 ${total} 个音色`}
+              />
+            </div>
+          )}
+        </>
       )}
 
       <GenerateAssetModal

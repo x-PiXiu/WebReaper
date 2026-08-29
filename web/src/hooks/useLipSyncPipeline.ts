@@ -30,6 +30,9 @@ function creationUrl(task: GenerationTask): string {
 
 export type LipSyncPipelineStage = 'tts' | 'ref' | 'lipsync' | ''
 
+/** 音频来源（23 号计划 §4.2）：A 文本+音色→TTS；B 文本直生（Vidu 端内合成）；C 上传已录音频 */
+export type LipSyncAudioSource = 'tts' | 'direct' | 'upload'
+
 export type LipSyncPipelineInput = {
   brandId: string
   script: string
@@ -41,6 +44,10 @@ export type LipSyncPipelineInput = {
   subjectServerId?: string
   subjectName?: string
   intent?: string
+  /** 音频路径（默认 tts=路径 A）；direct 仅数字分身可用（真人无端内合成） */
+  audioSource?: LipSyncAudioSource
+  /** audioSource=upload 时必填：已录音频 URL（先经 uploadAsset 入库） */
+  uploadedAudioUrl?: string
 }
 
 export type LipSyncPipelineResume = {
@@ -61,10 +68,13 @@ export type LipSyncPipelineResult = {
 }
 
 /**
- * 口播成片链路（对齐统一 submit）：
- * - 真人：TTS → video+audio → lip_sync
- * - 分身（有 server_id）：TTS → reference2video(subjects)
- * - 分身（无 server_id）：TTS → 图+音降级（digital_human，厂商端点可能已废弃）
+ * 口播成片链路（对齐统一 submit + 23 号计划音频三路径）：
+ * - 音频路径 A（tts，默认）：TTS 产音频 → 成片
+ * - 音频路径 B（direct）：跳过 TTS，台词文本直传（分身 reference2video 端内合成语音，单段）
+ * - 音频路径 C（upload）：跳过 TTS，已录音频直传 → 成片
+ * 出镜形态：
+ * - 分身（有 server_id）：reference2video(subjects)
+ * - 真人：lip_sync(video + audio)
  */
 export async function runLipSyncPipeline(
   input: LipSyncPipelineInput,
@@ -77,6 +87,14 @@ export async function runLipSyncPipeline(
   const { onStage, resume, retryFrom } = opts
   if (!input.brandId) throw new Error('请先选择人设/品牌')
 
+  const audioSource = input.audioSource || 'tts'
+  if (audioSource === 'direct' && input.presence !== 'avatar') {
+    throw new Error('「文本直生」仅支持数字分身模式——真人出镜请选 TTS 配音或上传已录音频')
+  }
+  if (audioSource === 'upload' && !input.uploadedAudioUrl) {
+    throw new Error('请先上传已录音频')
+  }
+
   let audioUrl = resume?.audioUrl || ''
   let videoUrl = input.presence === 'real'
     ? (input.realVideoUrl || resume?.videoUrl || '')
@@ -85,7 +103,11 @@ export async function runLipSyncPipeline(
   let refTaskId = resume?.refTaskId || ''
   let lipsyncTaskId = resume?.lipsyncTaskId || ''
 
-  const runTts = !retryFrom || retryFrom === 'tts' || !audioUrl
+  // 路径 C：音频来自上传（无需任务）；路径 B：全程无音频任务
+  if (audioSource === 'upload') {
+    audioUrl = input.uploadedAudioUrl || ''
+  }
+  const runTts = audioSource === 'tts' && (!retryFrom || retryFrom === 'tts' || !audioUrl)
   const runAvatar = input.presence === 'avatar' && (!retryFrom || retryFrom === 'ref' || retryFrom === 'tts' || !videoUrl)
   const runLipsync = input.presence === 'real' && (!retryFrom || retryFrom === 'lipsync' || retryFrom === 'ref' || retryFrom === 'tts')
 
@@ -104,7 +126,10 @@ export async function runLipSyncPipeline(
   }
 
   if (input.presence === 'avatar' && runAvatar) {
-    const prompt = (input.intent || '').trim() || input.script.slice(0, 2000)
+    // 路径 B（无音频）：text=台词本身，Vidu 端内合成语音；A/C（有音频）：text 为场景意图
+    const prompt = audioUrl
+      ? (input.intent || '').trim() || input.script.slice(0, 2000)
+      : input.script
     onStage?.('ref')
 
     if (input.subjectServerId) {
@@ -145,6 +170,7 @@ export async function runLipSyncPipeline(
   }
 
   if (runLipsync) {
+    if (!audioUrl) throw new Error('音频缺失——请选择 TTS 配音或上传已录音频')
     onStage?.('lipsync')
     const videoId = await ensureMaterialId(videoUrl)
     const audioId = await ensureMaterialId(audioUrl)

@@ -4,6 +4,7 @@ import { Card, Typography, Input, Switch, Button, Space, Tag, Alert, Description
 import { CloudServerOutlined, SaveOutlined, KeyOutlined, SafetyCertificateOutlined, SearchOutlined, WalletOutlined } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import type { ProviderConfig } from '../../types/api'
+import QueryBoundary from '../../components/QueryBoundary'
 import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
@@ -188,7 +189,7 @@ function ViduCredits({ enabled }: { enabled: boolean }) {
 // Tavily 搜索 API 配置（专为 AI 设计的高质量搜索源；Key 在 .env 配置，改 Key 需重启）。
 function TavilySection() {
   const queryClient = useQueryClient()
-  const { data: status, isLoading } = useQuery({
+  const { data: status, isLoading, isError, refetch } = useQuery({
     queryKey: ['tavily-status'],
     queryFn: () => businessApi.getTavilyStatus(),
   })
@@ -210,7 +211,7 @@ function TavilySection() {
       style={{ marginBottom: 16 }}
       title={<Space><SearchOutlined /><Text strong>Tavily 搜索 API</Text><Tag color={enabled ? 'success' : 'default'} style={{ fontSize: 11 }}>{enabled ? '已启用' : '未启用'}</Tag></Space>}
     >
-      {isLoading ? <Text type="secondary">加载中...</Text> : (
+      <QueryBoundary loading={isLoading} error={isError} onRetry={() => refetch()}>
         <div>
           <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>
             Tavily 是专为 AI 设计的高质量搜索 API。配置后，GEO 监测的 Agent 会使用它搜索全网，
@@ -241,7 +242,7 @@ function TavilySection() {
             )}
           </Space>
         </div>
-      )}
+      </QueryBoundary>
     </Card>
   )
 }

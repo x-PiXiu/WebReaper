@@ -56,6 +56,8 @@ export type ComposeDraft = {
   wizardRefTaskId?: string     // 参考生任务 ID
   wizardLipsyncTaskId?: string // 对口型任务 ID
   wizardResultUrl?: string     // 成片 URL
+  wizardAudioSource?: 'tts' | 'direct' | 'upload' // 音频路径（23 号计划：A 配音/B 文本直生/C 上传录音）
+  wizardUploadedAudioUrl?: string                 // 路径 C：已录音频素材 URL
 }
 
 type ComposeDraftState = ComposeDraft & {

@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Button, Card, Col, Empty, Progress, Row, Select, Space, Spin, Tag, Tooltip, Typography, Collapse } from 'antd'
+import { Button, Card, Col, Empty, Progress, Row, Select, Space, Tag, Tooltip, Typography, Collapse } from 'antd'
 import { EnvironmentOutlined, PlusOutlined, ReloadOutlined, TrophyOutlined, CompassOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { useBrandContext } from '../../hooks/useBrands'
 import { useNavigate } from 'react-router-dom'
 import type { Brand } from '../../types/api'
+import QueryBoundary from '../../components/QueryBoundary'
 import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
@@ -41,7 +42,7 @@ export default function Nearby({ embedded }: { embedded?: boolean }) {
     enabled: !!brandId && brandId !== '' && (selectedBrand?.biz_type !== 'online'),
   })
 
-  const { data: ranking, isLoading: rankingLoading, refetch: refetchRanking } = useQuery({
+  const { data: ranking, isLoading: rankingLoading, isError: rankingError, refetch: refetchRanking } = useQuery({
     queryKey: ['geo-nearby', brandId, types],
     queryFn: () => businessApi.getNearbyCompetitors(brandId!, types || undefined),
     enabled: !!brandId,
@@ -145,9 +146,10 @@ export default function Nearby({ embedded }: { embedded?: boolean }) {
                     ),
                   }]}
                 />
-                {rankingLoading ? <Spin /> : !ranking ? (
-                  <Empty description="暂无附近同行数据——请先创建门店并完成定位（或先发起 AI 体检）" />
-                ) : (
+                <QueryBoundary loading={rankingLoading} error={rankingError} onRetry={() => refetchRanking()}>
+                  {!ranking ? (
+                    <Empty description="暂无附近同行数据——请先创建门店并完成定位（或先发起 AI 体检）" />
+                  ) : (
                   <>
                     {!ranking.map_available && (
                       <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fff7e6', borderRadius: 8, fontSize: 13 }}>
@@ -270,7 +272,8 @@ export default function Nearby({ embedded }: { embedded?: boolean }) {
                       </Col>
                     </Row>
                   </>
-                )}
+                  )}
+                </QueryBoundary>
               </Card>
             </>
           )}

@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Empty, Input, Segmented, Space, Tag, Typography } from 'antd'
-import { PlusOutlined, SendOutlined } from '@ant-design/icons'
+import { Button, Input, Segmented, Space, Tag, Typography } from 'antd'
+import { PlusOutlined, SendOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
 import { GenerationFailedBar } from '../../../components/compose/GenerationFailedBar'
 import { retryFailureMessage } from '../../../components/RetryHint'
 import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
 import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
+import QueryBoundary from '../../../components/QueryBoundary'
+import BrollDrawer, { type BrollSource } from '../../../components/compose/BrollDrawer'
 import { VideoFrameCover } from '../../../components/VideoFrameCover'
 import { ImageCover } from '../../../components/ImageCover'
 import type { GenerationTask, MediaAsset, WorkItem } from '../../../types/api'
@@ -50,8 +52,9 @@ export default function MyWorks() {
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
   const [previewAsset, setPreviewAsset] = useState<MediaAsset | null>(null)
+  const [brollSource, setBrollSource] = useState<BrollSource | null>(null)
 
-  const { works = [], isLoading } = usePublishableWorks()
+  const { works = [], isLoading, isError, refetch } = usePublishableWorks()
   const { data: failedTasks = [] } = useQuery({
     queryKey: ['generation-tasks'],
     queryFn: () => businessApi.listGenerationTasks()
@@ -96,13 +99,14 @@ export default function MyWorks() {
         <Input.Search allowClear placeholder="搜索作品标题" style={{ maxWidth: 240 }} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {isLoading ? (
-        <Empty description="加载中…" style={{ padding: 60 }} />
-      ) : list.length === 0 ? (
-        <Empty style={{ padding: 60 }} description="还没有作品——去内容合成写第一篇文章或做第一个视频">
-          <Button type="primary" onClick={() => navigate('/m/compose')}>去内容合成</Button>
-        </Empty>
-      ) : (
+      <QueryBoundary
+        loading={isLoading}
+        error={isError}
+        onRetry={() => refetch()}
+        empty={list.length === 0}
+        emptyText="还没有作品——去内容合成写第一篇文章或做第一个视频"
+        emptyExtra={<Button type="primary" onClick={() => navigate('/m/compose')}>去内容合成</Button>}
+      >
         <div className="ip-works-grid">
           {list.map((w) => {
             const st = STATUS_CONFIG[w.status] || { label: w.status, color: 'default' }
@@ -150,6 +154,15 @@ export default function MyWorks() {
                         去发布
                       </Button>
                     )}
+                    {w.kind === 'video' && w.id.startsWith('g-') && (
+                      <Button size="small" icon={<VideoCameraAddOutlined />} onClick={() => setBrollSource({
+                        taskId: w.id.slice(2),
+                        title: w.title,
+                        videoUrl: w.media_urls?.[0],
+                      })}>
+                        插入画面
+                      </Button>
+                    )}
                     {(w.kind === 'video' || w.kind === 'image') && w.media_urls?.[0] && (
                       <Button size="small" onClick={() => setPreviewAsset({
                         id: w.id,
@@ -173,13 +186,15 @@ export default function MyWorks() {
             )
           })}
         </div>
-      )}
+      </QueryBoundary>
 
       <MediaPreviewModal
         open={!!previewAsset}
         asset={previewAsset}
         onClose={() => setPreviewAsset(null)}
       />
+
+      <BrollDrawer open={!!brollSource} source={brollSource} onClose={() => setBrollSource(null)} />
 
       {failedTasks.length > 0 && (
         <div style={{ marginTop: 32 }}>

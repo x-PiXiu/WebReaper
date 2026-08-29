@@ -1,4 +1,4 @@
-import { Row, Col, Typography, Spin, Card, Tag, Space, Empty, Progress } from 'antd'
+import { Row, Col, Typography, Card, Tag, Space, Empty, Progress } from 'antd'
 import { DollarOutlined, CrownOutlined, RiseOutlined, AppstoreOutlined, FileTextOutlined, GlobalOutlined, TrophyOutlined, SmileOutlined, LinkOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMemo } from 'react'
@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../store/auth'
 import { businessApi } from '../../api/business'
 import type { IndustryOverviewView } from '../../types/api'
+import QueryBoundary from '../../components/QueryBoundary'
 
 const { Text } = Typography
 
@@ -54,7 +55,7 @@ export default function Dashboard() {
   const username = useAuthStore(s => s.username)
   const navigate = useNavigate()
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats, isLoading: statsLoading, isError: statsError, refetch: refetchStats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => businessApi.getStats(),
   })
@@ -138,7 +139,7 @@ export default function Dashboard() {
         <p>SaaS 运营核心指标 · GEO 内容引擎运行概况</p>
       </div>
 
-      {statsLoading && <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}
+      <QueryBoundary loading={statsLoading} error={statsError} onRetry={() => refetchStats()}>
 
       {/* 核心运营指标（SaaS 三件套：MRR / 活跃订阅 / 当月收入）*/}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
@@ -353,6 +354,7 @@ export default function Dashboard() {
           </Row>
         </>
       )}
+      </QueryBoundary>
     </div>
   )
 }

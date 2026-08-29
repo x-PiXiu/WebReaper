@@ -387,6 +387,20 @@ export interface OptimizedContent {
   created_at: string
 }
 
+// ---- 口播 B-Roll 台词时间轴（22/23 号计划）----
+export interface TimelineLine {
+  index: number
+  text: string
+  start_ms: number
+  end_ms: number
+  estimated?: boolean   // true=句边界为估算（ASR 无标点等场景）
+}
+export interface TaskTimeline {
+  task_id?: string
+  lines: TimelineLine[]
+  script_source?: string   // asr = 台词来自语音识别（可提示用户修正文字）
+}
+
 // ---- 作品库三源聚合（我的作品页：文章 + 可发布成片，不含素材库中间产物）----
 export interface WorkItem {
   id: string

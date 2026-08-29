@@ -232,13 +232,10 @@ export default function Distribution() {
       <div style={{ position: 'relative', zIndex: 1 }}>
         <section className="ch-hero dist-hero">
           <div className="ch-hero-copy">
-            <p className="ch-hero-kicker">Go Live · 账号发布</p>
-            <h1 className="ch-hero-title">
-              <span className="ch-hero-ai">一键</span>
-              <span>发到多平台。</span>
-            </h1>
+            <p className="ch-hero-kicker">账号发布</p>
+            <h1 className="ch-hero-title">把内容发到多平台。</h1>
             <p className="ch-hero-lead">
-              绑定账号 → 五步向导填内容 → 半自动或全自动发布。Cookie 失效可降级为打开平台页手动发。
+              绑定账号后按向导填写内容，支持半自动或全自动发布；Cookie 失效时可降级为手动发布。
             </p>
           </div>
           <div className="ch-hero-cta">
@@ -284,9 +281,9 @@ export default function Distribution() {
                   <div className="dist-hint">
                     <LinkOutlined className="dist-hint-icon" />
                     <div>
-                      <Text strong style={{ fontSize: 14 }}>发布带定位 = 本地曝光更好（半自动指引）</Text>
+                      <Text strong style={{ fontSize: 14 }}>发布时带定位，本地曝光更好</Text>
                       <Paragraph type="secondary" style={{ fontSize: 12, margin: '4px 0 0' }}>
-                        平台「添加定位」自动化暂缓——先用最稳的半自动方式：人设档案维护地址 → 发布附带门店信息 → 平台页手动选定位。
+                        定位的自动化暂未开放，推荐流程：人设档案维护地址 → 发布附带门店信息 → 平台页手动选定位。
                       </Paragraph>
                     </div>
                   </div>

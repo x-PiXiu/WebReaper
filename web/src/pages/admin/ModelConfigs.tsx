@@ -1,8 +1,9 @@
-import { Typography, Card, Space, Tag, Table, Button, Switch, Collapse, Spin } from 'antd'
+import { Typography, Card, Space, Tag, Table, Button, Switch, Collapse } from 'antd'
 import { SettingOutlined, CheckCircleFilled } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationSpec } from '../../types/api'
+import QueryBoundary from '../../components/QueryBoundary'
 import { message } from '../../utils/antdApp'
 
 const { Text } = Typography
@@ -29,7 +30,7 @@ export default function AdminModelConfigs() {
   const queryClient = useQueryClient()
 
   // 查询所有模型配置
-  const { data: specs = [], isLoading } = useQuery({
+  const { data: specs = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-generation-specs'],
     queryFn: () => businessApi.adminListGenerationSpecs(),
   })
@@ -170,9 +171,7 @@ export default function AdminModelConfigs() {
 
   return (
     <div className="wr-page-content">
-      {isLoading ? (
-        <Spin style={{ display: 'block', margin: '60px auto' }} />
-      ) : (
+      <QueryBoundary loading={isLoading} error={isError} onRetry={() => refetch()}>
       <>
       <div className="wr-page-header">
         <h1>模型配置管理</h1>
@@ -200,7 +199,7 @@ export default function AdminModelConfigs() {
         </Collapse>
       </Card>
       </>
-      )}
+      </QueryBoundary>
     </div>
   )
 }

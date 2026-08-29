@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, Typography, Tag, Space, Button, Descriptions, Switch, Input, Select, Alert, Spin, Empty, Tabs, Collapse, Table, Form, InputNumber, Modal, Popconfirm, Tooltip } from 'antd'
+import { Card, Typography, Tag, Space, Button, Descriptions, Switch, Input, Select, Alert, Empty, Tabs, Collapse, Table, Form, InputNumber, Modal, Popconfirm, Tooltip } from 'antd'
 import { message } from '../../utils/antdApp'
+import QueryBoundary from '../../components/QueryBoundary'
 import {
   CloudServerOutlined, RobotOutlined, AudioOutlined, SearchOutlined, WalletOutlined,
   ReloadOutlined, SaveOutlined,
@@ -54,7 +55,7 @@ export default function IntegrationsPage() {
 function IntegrationCenter() {
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null)
 
-  const { data: vendorsData, isLoading: vendorsLoading } = useQuery({
+  const { data: vendorsData, isLoading: vendorsLoading, isError: vendorsError, refetch: refetchVendors } = useQuery({
     queryKey: ['admin-integration-vendors'],
     queryFn: () => businessApi.listIntegrationVendors(),
   })
@@ -96,7 +97,7 @@ function IntegrationCenter() {
         description="商户「拍口播」与「快速生成」需要 Vidu 对口型、语音合成、参考生视频等模式已启用且积分充足。未配置时商户入口会显示能力不可用提示。"
       />
 
-      {vendorsLoading ? <Spin style={{ display: 'block', margin: '60px auto' }} /> : (
+      <QueryBoundary loading={vendorsLoading} error={vendorsError} onRetry={() => refetchVendors()}>
         <>
           {/* 厂商卡片网格 */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14, marginBottom: 24 }}>
@@ -164,7 +165,7 @@ function IntegrationCenter() {
             />
           )}
         </>
-      )}
+      </QueryBoundary>
     </div>
   )
 }
@@ -623,7 +624,7 @@ function IntegrationDetail({ id }: { id: string }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-integration', id],
     queryFn: () => businessApi.getIntegrationDetail(id),
     retry: false,
@@ -635,13 +636,15 @@ function IntegrationDetail({ id }: { id: string }) {
     staleTime: 30_000,
   })
 
-  if (isLoading) return <Spin style={{ display: 'block', margin: '60px auto' }} />
-  if (!data) return <Empty description="集成不存在" />
-
-  const meta = data.meta as any
-  const sections = data.sections as Record<string, any>
+  // data 兜底：内容分支仅在 data 就绪时渲染（QueryBoundary 先挡 loading/error）
+  const meta = data?.meta as any
+  const sections = (data?.sections ?? {}) as Record<string, any>
 
   return (
+    <QueryBoundary loading={isLoading} error={isError} onRetry={() => refetch()}>
+      {!data ? (
+        <Empty description="集成不存在" />
+      ) : (
     <div className="wr-page-content" style={{ paddingTop: 8 }}>
       <Button type="link" onClick={() => navigate('/admin/integrations')} style={{ marginBottom: 8, padding: 0 }}>
         ← 返回集成列表
@@ -670,6 +673,8 @@ function IntegrationDetail({ id }: { id: string }) {
         }))}
       />
     </div>
+      )}
+    </QueryBoundary>
   )
 }
 

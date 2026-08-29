@@ -4,7 +4,7 @@ import { DeleteOutlined, PushpinOutlined, StarOutlined } from '@ant-design/icons
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { InspirationVideo } from '../../types/api'
-import PageLoading from '../../components/PageLoading'
+import QueryBoundary from '../../components/QueryBoundary'
 import { message } from '../../utils/antdApp'
 
 const { Text, Title } = Typography
@@ -25,7 +25,7 @@ export default function AdminInspirations() {
     queryKey: ['inspiration-platforms'],
     queryFn: () => businessApi.listInspirationPlatforms(),
   })
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-inspirations', platform, keyword, page],
     queryFn: () => businessApi.listInspirations({
       platform: platform || undefined,
@@ -61,9 +61,8 @@ export default function AdminInspirations() {
     [platformsRes],
   )
 
-  if (isLoading && !data) return <PageLoading tip="灵感列表加载中…" />
-
   return (
+    <QueryBoundary loading={isLoading} error={isError} onRetry={() => refetch()}>
     <div className="wr-page-content">
       <div style={{ marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>灵感运营</Title>
@@ -197,5 +196,6 @@ export default function AdminInspirations() {
         ]}
       />
     </div>
+    </QueryBoundary>
   )
 }

@@ -344,3 +344,15 @@
 [data-theme='dark'] .vc-lib-empty {
   background: rgba(255, 255, 255, 0.03);
 }
+
+/* 分页器：列表下方居中 */
+.vc-lib-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
+  padding-bottom: 8px;
+}
+
+[data-theme='dark'] .vc-lib-pagination .ant-pagination-item {
+  background: rgba(255, 255, 255, 0.04);
+}

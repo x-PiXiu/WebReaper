@@ -35,7 +35,7 @@ export function GenerationTaskCard({ taskId, subType, initialStatus }: Props) {
           {pending && <LoadingOutlined spin style={{ color: 'var(--wr-accent)' }} />}
           {success && <CheckCircleOutlined style={{ color: 'var(--wr-success)' }} />}
           {failed && <CloseCircleOutlined style={{ color: 'var(--wr-error)' }} />}
-          <Text strong>✨ {label}</Text>
+          <Text strong>{label}</Text>
         </Space>
         <Text type="secondary" style={{ fontSize: 12 }}>
           {pending ? '生成中…' : success ? '已完成' : failed ? '失败' : state}

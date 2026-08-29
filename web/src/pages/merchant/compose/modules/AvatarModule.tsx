@@ -296,7 +296,7 @@ export default function AvatarModule() {
           </Empty>
         </div>
       ) : (
-        <ul className="dh-lib-list" role="list">
+        <ul className="dh-lib-grid" role="list">
           {cards.map((card) => {
             const checked = selected.includes(card.id)
             const actionLabel = card.recommend ? '去定制同款' : card.ready ? '拍口播' : '查看状态'
@@ -304,62 +304,59 @@ export default function AvatarModule() {
             return (
               <li
                 key={card.id}
-                className={`dh-lib-row${checked ? ' is-selected' : ''}${card.recommend ? ' is-recommend' : ''}`}
+                className={`dh-lib-card${checked ? ' is-selected' : ''}${card.recommend ? ' is-recommend' : ''}`}
               >
-                {card.selectable ? (
-                  <label className="dh-lib-row-check">
-                    <Checkbox
-                      checked={checked}
-                      onChange={(e) => toggleSelect(card.id, e.target.checked)}
-                    />
-                  </label>
-                ) : (
-                  <span className="dh-lib-row-check is-spacer" aria-hidden />
+                {card.selectable && (
+                  <span
+                    className="dh-lib-card-check"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSelect(card.id, !checked)
+                    }}
+                  >
+                    <Checkbox checked={checked} />
+                  </span>
                 )}
 
                 <button
                   type="button"
-                  className="dh-lib-row-thumb"
+                  className="dh-lib-card-cover"
                   onClick={() => onCardAction(card)}
                   aria-label={actionLabel}
                 >
                   {card.portraitUrl ? (
                     <img src={card.portraitUrl} alt="" loading="lazy" />
                   ) : (
-                    <span className="dh-lib-row-placeholder">
+                    <span className="dh-lib-card-placeholder">
                       <UserOutlined />
                     </span>
                   )}
+
+                  {card.recommend && <span className="dh-lib-card-badge">推荐</span>}
+
+                  <span className={`dh-lib-card-tag${publicTag ? ' is-public' : ''}`}>
+                    {card.tag}
+                  </span>
+
+                  <span className="dh-lib-card-overlay" aria-hidden>
+                    <Button type="primary" size="small" tabIndex={-1}>
+                      {actionLabel}
+                    </Button>
+                  </span>
                 </button>
 
-                <button
-                  type="button"
-                  className="dh-lib-row-main"
-                  onClick={() => onCardAction(card)}
-                >
-                  <strong className="dh-lib-row-name" title={card.name}>{card.name}</strong>
-                  <span className="dh-lib-row-meta">
-                    <span className="dh-lib-row-time">{card.timeLabel}</span>
+                <div className="dh-lib-card-body">
+                  <strong className="dh-lib-card-name" title={card.name}>{card.name}</strong>
+                  <span className="dh-lib-card-meta">
+                    <span className="dh-lib-card-time">{card.timeLabel}</span>
                     {card.duration && (
-                      <span className="dh-lib-row-dur">
+                      <span className="dh-lib-card-dur">
                         <PlayCircleOutlined />
                         {card.duration}
                       </span>
                     )}
                   </span>
-                </button>
-
-                <span className={`dh-lib-row-tag${publicTag ? ' is-public' : ''}`}>
-                  {card.tag}
-                </span>
-
-                <Button
-                  type="link"
-                  className="dh-lib-row-action"
-                  onClick={() => onCardAction(card)}
-                >
-                  {actionLabel}
-                </Button>
+                </div>
               </li>
             )
           })}
@@ -370,9 +367,13 @@ export default function AvatarModule() {
         open={createOpen}
         voices={myVoices}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => {
+        onCreated={(serverId) => {
           refetch()
           setScope('mine')
+          // 来自向导的深链创建：完成后带 subject 回向导并自动预选新分身
+          if (searchParams.get('from') === 'wizard' && serverId) {
+            navigate(`/m/compose/lipsync?subject=${encodeURIComponent(serverId)}`)
+          }
         }}
       />
     </div>

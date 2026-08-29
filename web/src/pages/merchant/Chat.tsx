@@ -25,16 +25,16 @@ const MASTER_AGENT_PROMPT = `你是「获客智能体」的获客管家，服务
 - 简单事实查询（我有哪些作品/账号绑定没/数据多少）→ 自己调对应查询工具，快`
 
 const TOOL_LABELS: Record<string, string> = {
-  query_brands: '📋 查看人设档案',
-  list_works: '📁 查看作品库',
-  query_analytics: '📊 查询作品数据',
-  trigger_monitor: '🔍 发起 AI 监测',
-  publish_work: '📤 发布操作',
-  query_accounts: '🔗 查看账号绑定',
-  query_knowledge: '📚 查阅品牌知识库',
-  generate_content: '✨ 生成内容',
-  api_crawler: '🌐 抓取网页',
-  growth_advisor: '🧭 增长诊断',
+  query_brands: '查看人设档案',
+  list_works: '查看作品库',
+  query_analytics: '查询作品数据',
+  trigger_monitor: '发起 AI 监测',
+  publish_work: '发布操作',
+  query_accounts: '查看账号绑定',
+  query_knowledge: '查阅品牌知识库',
+  generate_content: '生成内容',
+  api_crawler: '抓取网页',
+  growth_advisor: '增长诊断',
 }
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -214,7 +214,7 @@ function PublishConfirmCard({ planId, raw }: { planId: string; raw: string }) {
       margin: '8px 0', padding: 14, borderRadius: 12,
       background: 'rgba(212,165,116,0.08)', border: '1px solid rgba(212,165,116,0.3)',
     }}>
-      <Text strong style={{ fontSize: 13 }}>📤 发布确认</Text>
+      <Text strong style={{ fontSize: 13 }}>发布确认</Text>
       <div style={{ fontSize: 13, margin: '8px 0', whiteSpace: 'pre-wrap' }}>{summary}</div>
       {state === 'pending' && (
         <Space wrap>

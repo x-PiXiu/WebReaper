@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { submitGenerationTaskCompat, submitUnified } from './generationSubmit'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding, TaskTimeline } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -466,6 +466,17 @@ export const businessApi = {
   // 原文 → 双产出（clean=用原文按钮 / rewrite=默认填入）
   rewriteScript: (data: { raw_text: string; topic?: string }) =>
     apiClient.post<unknown, { clean: string; rewrite: string }>('/api/v1/generation/transcript/rewrite', data),
+
+  // ---- 口播 B-Roll（22/23 号计划：成片后按句插入画面）----
+  // 台词时间轴：首次点「插入画面」时 POST 定位（静音检测，秒级）；支持重跑或仅修正文字（lines_override 不改切换点）
+  locateTaskTimeline: (taskId: string, body?: { force?: boolean; lines_override?: { index: number; text: string }[] }) =>
+    apiClient.post<unknown, TaskTimeline>(`/api/v1/generation/tasks/${taskId}/timeline`, body || {}),
+  // 读取已定位时间轴（未定位时服务端 404）
+  getTaskTimeline: (taskId: string) =>
+    apiClient.get<unknown, TaskTimeline>(`/api/v1/generation/tasks/${taskId}/timeline`),
+  // 提交插入合成（type=compose，统一提交体系；只传句号，时间窗由后端换算，防客户端错位）
+  submitCompose: (data: { source_task_id: string; segments: { sentence_index: number; media_url: string }[] }) =>
+    apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', { type: 'compose', ...data }),
 
   // 素材库（上传/列表/删除——本地托管，P2 换 OSS 前端零改动）
   uploadAsset: (file: File) => {

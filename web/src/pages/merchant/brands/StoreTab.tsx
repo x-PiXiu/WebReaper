@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Row, Col, AutoComplete, Space, Spin, Table, Tag, Typography } from 'antd'
+import { Button, Card, Form, Input, Modal, Popconfirm, Row, Col, AutoComplete, Space, Table, Tag, Typography } from 'antd'
 import { PlusOutlined, ReloadOutlined, DeleteOutlined, EnvironmentOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
 import type { Brand, StoreLocation } from '../../../types/api'
+import QueryBoundary from '../../../components/QueryBoundary'
 import { message } from '../../../utils/antdApp'
 
 const { Text } = Typography
@@ -26,7 +27,7 @@ export default function StoreTab({ brand }: { brand: Brand }) {
   const [suggestOptions, setSuggestOptions] = useState<{ value: string; address?: string }[]>([])
   const [form] = Form.useForm()
 
-  const { data: stores = [], isLoading } = useQuery({
+  const { data: stores = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['geo-stores', brand.id],
     queryFn: () => businessApi.listStoreLocations(brand.id),
   })
@@ -128,11 +129,14 @@ export default function StoreTab({ brand }: { brand: Brand }) {
       <Text type="secondary" style={{ display: 'block', fontSize: 12.5, marginBottom: 12 }}>
         门店建好后，本地发布可带定位；竞品推荐也可按门店周边给出候选。
       </Text>
-      {isLoading ? <Spin /> : stores.length === 0 ? (
-        <Empty description="还没有门店——添加真实地址后，AI 推荐附近商家才会带上你">
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加第一家门店</Button>
-        </Empty>
-      ) : (
+      <QueryBoundary
+        loading={isLoading}
+        error={isError}
+        onRetry={() => refetch()}
+        empty={stores.length === 0}
+        emptyText="还没有门店——添加真实地址后，AI 推荐附近商家才会带上你"
+        emptyExtra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加第一家门店</Button>}
+      >
         <Table
           dataSource={stores}
           rowKey="id"
@@ -158,7 +162,7 @@ export default function StoreTab({ brand }: { brand: Brand }) {
             },
           ]}
         />
-      )}
+      </QueryBoundary>
 
       <Modal
         title={editing ? '编辑门店' : '新建门店'}

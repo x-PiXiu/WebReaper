@@ -153,7 +153,7 @@ export default function AdminContents() {
       <Row gutter={[16, 16]} className="wr-stagger" style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
           <div className="wr-metric-card">
-            <div className="wr-metric-value wr-gradient-text">{filtered.length}</div>
+            <div className="wr-metric-value">{filtered.length}</div>
             <div className="wr-metric-label"><FileTextOutlined style={{ marginRight: 4 }} />内容总数</div>
           </div>
         </Col>

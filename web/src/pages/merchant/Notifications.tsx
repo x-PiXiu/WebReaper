@@ -1,8 +1,8 @@
-import { Button, Empty, List, Space, Tag, Typography } from 'antd'
+import { Button, List, Space, Tag, Typography } from 'antd'
 import { BellOutlined, CheckOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMarkNotificationRead, useNotificationList, useUnreadCount } from '../../hooks/useNotifications'
-import PageLoading from '../../components/PageLoading'
+import QueryBoundary from '../../components/QueryBoundary'
 
 const { Text } = Typography
 
@@ -17,13 +17,18 @@ const TYPE_LABEL: Record<string, string> = {
 /** 通知中心：全量列表 + 全部已读（与顶栏铃铛共享缓存） */
 export default function Notifications() {
   const navigate = useNavigate()
-  const { data: items = [], isLoading } = useNotificationList()
+  const { data: items = [], isLoading, isError, refetch } = useNotificationList()
   const { data: unread } = useUnreadCount()
   const markRead = useMarkNotificationRead()
 
-  if (isLoading) return <PageLoading tip="通知加载中…" />
-
   return (
+    <QueryBoundary
+      loading={isLoading}
+      error={isError}
+      onRetry={() => refetch()}
+      empty={items.length === 0}
+      emptyText="暂无通知"
+    >
     <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
@@ -45,12 +50,9 @@ export default function Notifications() {
       </div>
 
       <div className="ip-panel">
-        {items.length === 0 ? (
-          <Empty description="暂无通知" style={{ padding: '48px 0' }} />
-        ) : (
-          <List
-            itemLayout="vertical"
-            dataSource={items}
+        <List
+          itemLayout="vertical"
+          dataSource={items}
             renderItem={(n) => (
               <List.Item
                 key={n.id}
@@ -91,9 +93,9 @@ export default function Notifications() {
                 />
               </List.Item>
             )}
-          />
-        )}
+        />
       </div>
     </div>
+    </QueryBoundary>
   )
 }

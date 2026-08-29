@@ -1,9 +1,13 @@
-import { Layout, Menu, Button, Space, Avatar, Switch, AutoComplete, Input, Badge, Popover, List, Empty } from 'antd'
-import { SearchOutlined, BellOutlined, VideoCameraOutlined, RightOutlined } from '@ant-design/icons'
+import { Layout, Menu, Button, Space, Avatar, AutoComplete, Input, Badge, Popover, List, Empty, Dropdown, Tooltip } from 'antd'
+import {
+  SearchOutlined, BellOutlined, VideoCameraOutlined, RightOutlined,
+  MoonOutlined, SunOutlined, LogoutOutlined, CrownOutlined, SwapOutlined,
+} from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { usePublishableWorks } from '../hooks/usePublishableWorks'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { InputRef } from 'antd'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { useBrandStore } from '../store/brand'
@@ -67,6 +71,11 @@ function findSelectedKey(items: NavItem[], pathname: string): string | undefined
   return undefined
 }
 
+// ⌘K 还是 Ctrl K（按平台显示）
+const SEARCH_KBD = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform || navigator.userAgent)
+  ? '⌘K'
+  : 'Ctrl K'
+
 // AppShell 是通用应用骨架（侧边栏 + 顶栏 + 内容区）。
 // 商户端和管理后台共用此骨架，各自传入不同的菜单项和品牌名。
 //
@@ -78,7 +87,7 @@ export function AppShell({
   brandName = PRODUCT.name,
   brandTagline,
   brandIcon = 'G',
-  siderWidth = 300,
+  siderWidth = 248,
   noPaddingKeys = [],
   banner,
 }: {
@@ -123,8 +132,29 @@ export function AppShell({
     document.title = `${pageTitle} · ${PRODUCT.name}`
   }, [pageTitle])
 
-  // 全局搜索：人设 + 作品库 + 发布任务 + 快捷入口
+  // 顶栏滚动感知：内容滚过 8px 后加阴影/分割线（玻璃条浮起）
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // 全局搜索：人设 + 作品库 + 发布任务 + 快捷入口（⌘K / Ctrl+K 唤起）
+  const searchInputRef = useRef<InputRef>(null)
   const [searchReady, setSearchReady] = useState(false)
+  useEffect(() => {
+    const onKeydown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeydown)
+    return () => window.removeEventListener('keydown', onKeydown)
+  }, [])
+
   const { works = [] } = usePublishableWorks({ enabled: !inAdmin, staleTime: 60_000 })
   const { data: brands = [] } = useQuery({
     queryKey: ['geo-brands'],
@@ -173,6 +203,32 @@ export function AppShell({
     if (hit) navigate(hit.target)
   }
 
+  // 用户下拉菜单（头像收纳：身份 + 套餐 + 角色切换 + 退出）
+  const userMenuItems = [
+    {
+      key: 'plan',
+      icon: <CrownOutlined />,
+      label: '套餐额度',
+      onClick: () => navigate('/m/my-plan'),
+      hidden: inAdmin,
+    },
+    {
+      key: 'role',
+      icon: <SwapOutlined />,
+      label: inAdmin ? '返回用户界面' : '管理后台',
+      onClick: () => navigate(roleSwitchTarget),
+      hidden: !showRoleSwitch,
+    },
+    { type: 'divider' as const },
+    {
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: '退出登录',
+      danger: true,
+      onClick: handleLogout,
+    },
+  ].filter((i) => !('hidden' in i && i.hidden))
+
   return (
     <Layout className="wr-app-layout" style={{ minHeight: '100vh', background: 'var(--wr-bg-base)' }}>
       {/* 侧边栏 */}
@@ -192,23 +248,23 @@ export function AppShell({
       >
         {/* Logo 区 */}
         <div className="wr-app-brand" style={{
-          minHeight: brandTagline ? 72 : 64,
+          minHeight: 64,
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          padding: '12px 20px',
+          padding: '12px 16px',
           borderBottom: '1px solid var(--wr-border)',
         }}>
           <div className="wr-app-brand-mark" style={{
             width: 38, height: 38, borderRadius: 12,
-            background: 'linear-gradient(135deg, var(--wr-primary), var(--wr-accent))',
+            background: 'var(--wr-gradient)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 17, fontWeight: 800, color: '#fff', flexShrink: 0,
-            boxShadow: 'var(--wr-shadow-glow)',
+            boxShadow: '0 4px 14px var(--wr-primary-bg)',
           }}>{brandIcon}</div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{
-              fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em',
+              fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em',
               color: 'var(--wr-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
               {brandName}
@@ -225,15 +281,15 @@ export function AppShell({
           </div>
         </div>
 
-        <div data-tour="merchant-nav" className="wr-app-sider-nav">
-        <Menu
-          theme={themeMode === 'dark' ? 'dark' : 'light'}
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          onClick={({ key }) => navigate(key)}
-          style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 14, padding: '0 12px' }}
-          items={toMenuItems(menuItems)}
-        />
+        <div data-tour="merchant-nav" className="wr-app-sider-nav" style={{ flex: 1, overflow: 'auto', paddingBottom: 8 }}>
+          <Menu
+            theme={themeMode === 'dark' ? 'dark' : 'light'}
+            mode="inline"
+            selectedKeys={[selectedKey]}
+            onClick={({ key }) => navigate(key)}
+            style={{ background: 'transparent', borderInlineEnd: 'none', marginTop: 10, padding: '0 12px' }}
+            items={toMenuItems(menuItems)}
+          />
         </div>
 
         {!inAdmin && (
@@ -258,75 +314,57 @@ export function AppShell({
       </Sider>
 
       <Layout style={{ background: 'var(--wr-bg-base)' }}>
-        {/* 顶栏：玻璃质感 */}
-        <Header className="wr-app-header" style={{
-          background: 'var(--wr-bg-surface)',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          borderBottom: '1px solid var(--wr-border)',
-          padding: '0 24px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-          height: 60,
-        }}>
-          <div className="wr-header-left" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <span className="wr-header-brand" style={{ color: 'var(--wr-text-muted)', fontSize: 14 }}>{brandName}</span>
-            <span className="wr-header-sep" style={{ color: 'var(--wr-border-hover)' }}>/</span>
-            <span style={{ color: 'var(--wr-text-primary)', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-              {pageTitle}
-            </span>
+        {/* 顶栏：玻璃质感 + 滚动浮起 */}
+        <Header className={`wr-app-header${scrolled ? ' is-scrolled' : ''}`}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+            <nav className="wr-crumb" aria-label="页面位置">
+              <span className="wr-crumb-root">{brandName}</span>
+              <span className="wr-crumb-sep">/</span>
+              <span className="wr-crumb-current">{pageTitle}</span>
+            </nav>
             {showRoleSwitch && (
               <Button
                 className="wr-header-role-switch"
                 size="small"
                 onClick={() => navigate(roleSwitchTarget)}
                 style={{
-                  marginLeft: 12,
-                  background: inAdmin ? 'var(--wr-bg-base)' : 'var(--wr-gradient)',
-                  color: inAdmin ? 'var(--wr-text-primary)' : '#fff',
-                  border: inAdmin ? '1px solid var(--wr-border-hover)' : 'none',
-                  fontWeight: 600,
-                  borderRadius: 8,
-                  padding: '0 14px',
-                  height: 32,
-                  boxShadow: inAdmin ? 'none' : 'var(--wr-shadow-glow)',
+                  marginLeft: 4,
+                  background: 'var(--wr-bg-elevated)',
+                  color: 'var(--wr-text-secondary)',
+                  border: '1px solid var(--wr-border)',
                 }}
               >
                 {inAdmin ? '← 返回用户界面' : '管理后台 →'}
               </Button>
             )}
             {!inAdmin && (
-              <div data-tour="merchant-search">
-              <AutoComplete
-                className="wr-header-search"
-                options={searchOptions}
-                onSelect={handleSearchSelect}
-                style={{ width: 240, marginLeft: 16 }}
-                popupMatchSelectWidth={280}
-                onFocus={() => setSearchReady(true)}
-              >
-                <Input
-                  size="small"
-                  prefix={<SearchOutlined style={{ color: 'var(--wr-text-muted)', fontSize: 13 }} />}
-                  placeholder="搜索人设 / 作品 / 模块"
-                  variant="borderless"
-                  style={{ background: 'var(--wr-input-bg)', borderRadius: 8 }}
-                />
-              </AutoComplete>
+              <div data-tour="merchant-search" style={{ marginLeft: 'auto' }}>
+                <AutoComplete
+                  className="wr-header-search"
+                  options={searchOptions}
+                  onSelect={handleSearchSelect}
+                  popupMatchSelectWidth={300}
+                  onFocus={() => setSearchReady(true)}
+                >
+                  <Input
+                    ref={searchInputRef}
+                    prefix={<SearchOutlined style={{ color: 'var(--wr-text-muted)', fontSize: 13 }} />}
+                    suffix={<span className="wr-kbd">{SEARCH_KBD}</span>}
+                    placeholder="搜索人设 / 作品 / 模块"
+                    variant="borderless"
+                    style={{ background: 'var(--wr-input-bg)' }}
+                  />
+                </AutoComplete>
               </div>
             )}
           </div>
 
-          <Space size={12} className="wr-header-right">
+          <Space size={6} className="wr-header-right" style={{ marginLeft: 16, flexShrink: 0 }}>
             {!inAdmin && (
               <Button
                 type="primary"
-                size="small"
-                className="wr-header-create-cta"
+                size="middle"
+                className="wr-cta-btn"
                 icon={<VideoCameraOutlined />}
                 onClick={() => navigate('/m/compose/lipsync')}
               >
@@ -335,38 +373,39 @@ export function AppShell({
               </Button>
             )}
             <NotificationBell />
-            <div className="wr-header-theme" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span className="wr-header-theme-label" style={{ fontSize: 14 }}>{themeMode === 'dark' ? '深' : '亮'}</span>
-              <Switch
-                size="small"
-                checked={themeMode === 'light'}
-                onChange={() => toggleTheme()}
+            <Tooltip title={themeMode === 'dark' ? '切换到亮色模式' : '切换到暗色模式'} mouseEnterDelay={0.4}>
+              <Button
+                className="wr-icon-btn"
+                type="text"
                 aria-label="切换主题"
+                icon={themeMode === 'dark' ? <SunOutlined style={{ fontSize: 16 }} /> : <MoonOutlined style={{ fontSize: 16 }} />}
+                onClick={() => toggleTheme()}
               />
-            </div>
-            <Avatar size={28} style={{
-              background: 'linear-gradient(135deg, var(--wr-primary), var(--wr-accent))',
-              fontSize: 13, fontWeight: 600, flexShrink: 0,
-            }}>
-              {(username || '?')[0].toUpperCase()}
-            </Avatar>
-            <span className="wr-header-username" style={{ color: 'var(--wr-text-secondary)', fontSize: 14 }}>{username}</span>
-            <Button
-              size="small"
-              type="text"
-              style={{ color: 'var(--wr-text-muted)' }}
-              onClick={handleLogout}
+            </Tooltip>
+            <Dropdown
+              menu={{ items: userMenuItems }}
+              trigger={['click']}
+              placement="bottomRight"
+              arrow={false}
             >
-              退出
-            </Button>
+              <button type="button" className="wr-avatar-btn" aria-label="账号菜单">
+                <Avatar size={30} style={{
+                  background: 'var(--wr-gradient)',
+                  fontSize: 13, fontWeight: 600, flexShrink: 0,
+                }}>
+                  {(username || '?')[0].toUpperCase()}
+                </Avatar>
+                <span className="wr-avatar-name">{username}</span>
+              </button>
+            </Dropdown>
           </Space>
         </Header>
 
         {/* 内容区（外层极光背景）*/}
         <Content className="wr-app-main" style={{
           margin: 0,
-          padding: noPadding ? 0 : '16px 20px 24px',
-          minHeight: 'calc(100vh - 60px)',
+          padding: noPadding ? 0 : '20px 24px 28px',
+          minHeight: 'calc(100vh - 64px)',
           overflow: noPadding ? 'hidden' : 'visible',
         }}>
           <div className="wr-aurora-bg" style={{ minHeight: '100%', borderRadius: 0 }}>
@@ -460,9 +499,8 @@ function NotificationBell() {
       <Badge count={unread?.unread || 0} size="small" offset={[-2, 2]}>
         <Button
           type="text"
-          size="small"
+          className="wr-icon-btn"
           icon={<BellOutlined style={{ fontSize: 16 }} />}
-          style={{ color: 'var(--wr-text-muted)' }}
         />
       </Badge>
     </Popover>

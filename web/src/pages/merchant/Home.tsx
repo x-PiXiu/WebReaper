@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Col, Row, Segmented, Space, Tag, Typography } from 'antd'
+import { Button, Col, Row, Segmented, Space, Spin, Tag, Typography } from 'antd'
 import {
   ArrowRightOutlined, FireOutlined, LinkOutlined, RobotOutlined, SendOutlined,
   VideoCameraOutlined, ThunderboltOutlined,
@@ -11,8 +11,7 @@ import { usePublishableWorks } from '../../hooks/usePublishableWorks'
 import { businessApi } from '../../api/business'
 import { useComposeDraft } from '../../store/composeDraft'
 import { composeProgressLabel, hasComposeDraft, composeResumePath } from '../../utils/composeProgress'
-import PageLoading from '../../components/PageLoading'
-import ChinaHotMap from '../../components/ChinaHotMap'
+import QueryBoundary from '../../components/QueryBoundary'
 import { GrowthStagesNav } from '../../components/GrowthStagesNav'
 import { useGenerationTasks } from '../../hooks/useGenerationTasks'
 import { inferGrowthStage } from '../../utils/growthStage'
@@ -21,6 +20,9 @@ import {
   CITY_HOTSPOTS, PROVINCE_HEAT, provinceByName, type CityHotspot,
 } from '../../data/hotspots'
 
+// 地图组件懒加载：echarts 体积大（约 1MB），不阻塞首页首屏
+const ChinaHotMap = lazy(() => import('../../components/ChinaHotMap'))
+
 const { Text, Title } = Typography
 
 type MetricKey = 'heat' | 'leads' | 'posts'
@@ -28,7 +30,7 @@ type MetricKey = 'heat' | 'leads' | 'posts'
 /** 工作台：中国地图获客热力 + 城市热点参数（热力数据空则隐藏演示指标，作品走真实 API） */
 export default function MerchantHome() {
   const navigate = useNavigate()
-  const { data: brands = [], isLoading } = useBrands()
+  const { data: brands = [], isLoading, isError, refetch: refetchBrands } = useBrands()
   const { works = [] } = usePublishableWorks({ staleTime: 60_000 })
   const { data: summary } = useQuery({
     queryKey: ['analytics-summary'],
@@ -76,10 +78,9 @@ export default function MerchantHome() {
 
   const province = provinceName ? provinceByName(provinceName) : null
 
-  if (isLoading) return <PageLoading />
-
   return (
-    <div className="wr-page-content ip-page">
+    <QueryBoundary loading={isLoading} error={isError} onRetry={() => refetchBrands()}>
+      <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
           <p className="ip-kicker">{PRODUCT.nameEn}</p>
@@ -192,19 +193,27 @@ export default function MerchantHome() {
                   ]}
                 />
               </div>
-              <ChinaHotMap
-                height={520}
-                selectedId={hotspot?.id}
-                onSelectHotspot={(h) => {
-                  setHotspot(h)
-                  if (h) setProvinceName(h.province)
-                }}
-                onSelectProvince={(name) => {
-                  setProvinceName(name)
-                  const city = CITY_HOTSPOTS.find((c) => c.province === name || name.startsWith(c.province))
-                  if (city) setHotspot(city)
-                }}
-              />
+              <Suspense
+                fallback={
+                  <div style={{ height: 520, display: 'grid', placeItems: 'center' }}>
+                    <Spin tip="地图加载中…" />
+                  </div>
+                }
+              >
+                <ChinaHotMap
+                  height={520}
+                  selectedId={hotspot?.id}
+                  onSelectHotspot={(h) => {
+                    setHotspot(h)
+                    if (h) setProvinceName(h.province)
+                  }}
+                  onSelectProvince={(name) => {
+                    setProvinceName(name)
+                    const city = CITY_HOTSPOTS.find((c) => c.province === name || name.startsWith(c.province))
+                    if (city) setHotspot(city)
+                  }}
+                />
+              </Suspense>
             </div>
           ) : (
             <div className="ip-panel ip-rise" style={{ padding: 24 }}>
@@ -340,6 +349,7 @@ export default function MerchantHome() {
           )}
         </Col>
       </Row>
-    </div>
+      </div>
+    </QueryBoundary>
   )
 }

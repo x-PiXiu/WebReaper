@@ -22,9 +22,9 @@ const fontFamily = "'DM Sans', 'Noto Sans SC', -apple-system, 'Segoe UI', 'PingF
 const darkThemeConfig = {
   algorithm: antdTheme.darkAlgorithm,
   token: {
-    // 主色与 index.css 的 --wr-primary 统一（此前 #6366f1 与 #7c6cff 两套紫并存）
-    colorPrimary: '#7c6cff',
-    colorInfo: '#7c6cff',
+    // 主色与 index.css 的 --wr-primary 统一（暗色亮紫 / 亮色深紫，同一色系）
+    colorPrimary: '#8b7cf6',
+    colorInfo: '#8b7cf6',
     // 语义色对齐 CSS 变量（--wr-success/warning/danger）
     colorSuccess: '#4ade80',
     colorWarning: '#fbbf24',
@@ -43,16 +43,16 @@ const darkThemeConfig = {
     colorBorderSecondary: 'rgba(255,255,255,0.04)',
   },
   components: {
-    Layout: { siderBg: '#0d0d14', headerBg: 'rgba(18,18,24,0.8)', headerHeight: 60, bodyBg: '#0a0a0f' },
+    Layout: { siderBg: '#0c0c11', headerBg: 'transparent', headerHeight: 64, bodyBg: '#07070a' },
     Menu: {
       darkItemBg: 'transparent', darkSubMenuItemBg: 'transparent',
-      darkItemSelectedBg: 'rgba(124,108,255,0.16)', darkItemHoverBg: 'rgba(255,255,255,0.04)',
-      darkItemColor: '#71717a', darkItemSelectedColor: '#a89bff',
-      itemBorderRadius: 8, itemMarginInline: 8,
+      darkItemSelectedBg: 'rgba(139,124,246,0.13)', darkItemHoverBg: 'rgba(255,255,255,0.04)',
+      darkItemColor: '#73737e', darkItemSelectedColor: '#a89bff',
+      itemBorderRadius: 10, itemMarginInline: 8,
     },
     Card: { colorBgContainer: '#121218', headerBg: 'transparent' },
-    Table: { headerBg: '#1a1a24', headerColor: '#a1a1aa', rowHoverBg: '#1a1a24', borderColor: 'rgba(255,255,255,0.06)' },
-    Button: { primaryShadow: '0 0 16px rgba(124,108,255,0.3)', fontWeight: 500 },
+    Table: { headerBg: '#1a1a24', headerColor: '#a8a8b3', rowHoverBg: '#1a1a24', borderColor: 'rgba(255,255,255,0.06)' },
+    Button: { primaryShadow: '0 4px 14px rgba(139,124,246,0.25)', fontWeight: 500 },
     Modal: { contentBg: '#121218' },
   },
 }
@@ -61,8 +61,8 @@ const lightThemeConfig = {
   algorithm: antdTheme.defaultAlgorithm,
   token: {
     // 主色与 index.css 亮色 --wr-primary 统一；语义色对齐 CSS 变量
-    colorPrimary: '#7c5cfc',
-    colorInfo: '#7c5cfc',
+    colorPrimary: '#6d55f0',
+    colorInfo: '#6d55f0',
     colorSuccess: '#16a34a',
     colorWarning: '#d97706',
     colorError: '#dc2626',
@@ -80,16 +80,16 @@ const lightThemeConfig = {
     colorBorderSecondary: 'rgba(20,20,40,0.04)',
   },
   components: {
-    Layout: { siderBg: '#ffffff', headerBg: '#ffffff', headerHeight: 60, bodyBg: '#f5f6fa' },
+    Layout: { siderBg: '#ffffff', headerBg: 'transparent', headerHeight: 64, bodyBg: '#f5f6fa' },
     Menu: {
       itemBg: 'transparent', subMenuItemBg: 'transparent',
-      itemSelectedBg: 'rgba(124,92,252,0.12)', itemHoverBg: 'rgba(20,20,40,0.03)',
-      itemColor: '#6b6b76', itemSelectedColor: '#7c5cfc',
-      itemBorderRadius: 12, itemMarginInline: 8,
+      itemSelectedBg: 'rgba(109,85,240,0.09)', itemHoverBg: 'rgba(20,20,40,0.03)',
+      itemColor: '#555563', itemSelectedColor: '#6d55f0',
+      itemBorderRadius: 10, itemMarginInline: 8,
     },
     Card: { colorBgContainer: '#ffffff', headerBg: 'transparent' },
     Table: { headerBg: '#f5f6fa', headerColor: '#555563', rowHoverBg: '#f1f2f7', borderColor: 'rgba(20,20,40,0.06)' },
-    Button: { fontWeight: 600 },
+    Button: { fontWeight: 600, primaryShadow: '0 4px 14px rgba(109,85,240,0.22)' },
     Modal: { contentBg: '#ffffff' },
   },
 }

@@ -83,7 +83,7 @@ export default function AdminBrands() {
       <Row gutter={[16, 16]} className="wr-stagger" style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}>
           <div className="wr-metric-card">
-            <div className="wr-metric-value wr-gradient-text">{brands.length}</div>
+            <div className="wr-metric-value">{brands.length}</div>
             <div className="wr-metric-label"><AppstoreOutlined style={{ marginRight: 4 }} />品牌总数</div>
           </div>
         </Col>

@@ -5,6 +5,7 @@ import { Alert, Button, Col, Empty, Modal, Row, Select, Space, Table, Tabs, Tag,
 import { ArrowDownOutlined, ArrowUpOutlined, ExperimentOutlined, FundOutlined, SearchOutlined } from '@ant-design/icons'
 import { LazyColumn, LazyLine } from '../../../components/charts/LazyCharts'
 import WorkDetailDrawer, { type WorkDetailData } from '../../../components/WorkDetailDrawer'
+import QueryBoundary from '../../../components/QueryBoundary'
 import { businessApi } from '../../../api/business'
 import { useBrandContext } from '../../../hooks/useBrands'
 import { MODAL_W, modalBodyScroll } from '../../../ui/modalFit'
@@ -97,7 +98,7 @@ export default function WorksAnalytics() {
   }
 
   // 平台数据（真实发布记录聚合）
-  const { data: summary, isLoading: summaryLoading } = useQuery({
+  const { data: summary, isLoading: summaryLoading, isError: summaryError, refetch: refetchSummary } = useQuery({
     queryKey: ['analytics-summary'],
     queryFn: () => businessApi.getAnalyticsSummary(),
   })
@@ -129,7 +130,6 @@ export default function WorksAnalytics() {
     <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
-          <p className="ip-kicker">Growth</p>
           <h1>作品数据</h1>
           <p className="ip-lead">平台数据与 AI 提及一屏看完——发布效果与获客影响同步追踪</p>
         </div>
@@ -145,6 +145,7 @@ export default function WorksAnalytics() {
         </Space>
       </div>
 
+      <QueryBoundary loading={summaryLoading} error={summaryError} onRetry={() => refetchSummary()}>
       <Row gutter={[16, 16]} className="ip-metric-row ip-stagger">
         {[
           { label: '已发布作品', value: (totals?.published ?? 0).toLocaleString(), delta: '' },
@@ -173,14 +174,14 @@ export default function WorksAnalytics() {
             {summaryLoading ? null : trend.every((p) => p.发布数 === 0) ? (
               <Empty description="还没有发布记录——去发布中心发出第一条作品" style={{ padding: '40px 0' }} />
             ) : (
-              <LazyLine data={trend} xField="day" yField="发布数" smooth height={260} color={['#5eead4']} />
+              <LazyLine data={trend} xField="day" yField="发布数" smooth height={260} color={['#8b7cf6']} />
             )}
           </div>
         </Col>
         <Col xs={24} lg={10}>
           <div className="ip-panel">
             <Title level={5}>每日发布（条）</Title>
-            <LazyColumn data={trend} xField="day" yField="发布数" height={260} style={{ fill: 'l(270) 0:#5eead488 1:#5eead4', radiusTopLeft: 6, radiusTopRight: 6 }} />
+            <LazyColumn data={trend} xField="day" yField="发布数" height={260} style={{ fill: 'l(270) 0:#8b7cf688 1:#8b7cf6', radiusTopLeft: 6, radiusTopRight: 6 }} />
           </div>
         </Col>
       </Row>
@@ -273,17 +274,26 @@ export default function WorksAnalytics() {
             },
             {
               title: '',
-              key: 'detail',
-              width: 80,
+              key: 'actions',
+              width: 150,
               render: (_, r) => (
-                <Button size="small" onClick={() => setDetail({ jobId: r.job_id, title: r.title, platform: r.platform, content_type: r.content_type, external_url: r.external_url, published_at: r.published_at, status: r.status, views: r.views, likes: r.likes, comments: r.comments, shares: r.shares })}>
-                  详情
-                </Button>
+                <Space size={0}>
+                  <Button size="small" onClick={() => setDetail({ jobId: r.job_id, title: r.title, platform: r.platform, content_type: r.content_type, external_url: r.external_url, published_at: r.published_at, status: r.status, views: r.views, likes: r.likes, comments: r.comments, shares: r.shares })}>
+                    详情
+                  </Button>
+                  {/* 闭环入口：看过数据直接回去再创作（选题预填原标题） */}
+                  {r.content_type === 'video' && (
+                    <Button size="small" type="link" onClick={() => navigate('/m/compose/lipsync', { state: { title: r.title } })}>
+                      再拍同款
+                    </Button>
+                  )}
+                </Space>
               ),
             },
           ]}
         />
       </div>
+      </QueryBoundary>
 
       {/* AI 效果完整报告（居中弹窗；checkup 报告/记录/测一测，深链 ?tab=ask|report|records） */}
       <Modal

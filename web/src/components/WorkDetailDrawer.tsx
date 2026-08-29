@@ -137,7 +137,7 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
           {trend.length >= 2 && (
             <div style={{ marginTop: 14 }}>
               <Text type="secondary" style={{ fontSize: 12 }}>互动趋势（回读快照）</Text>
-              <LazyLine data={trend} xField="day" yField="播放" height={120} smooth color={['#5eead4']} />
+              <LazyLine data={trend} xField="day" yField="播放" height={120} smooth color={['#8b7cf6']} />
             </div>
           )}
         </div>

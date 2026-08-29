@@ -4,6 +4,7 @@ import { Button, Input, Modal, Segmented, Space, Typography, Upload } from 'antd
 import { PlusOutlined, UserOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import { buildSubjectRegisterPayload } from '../../api/generationSubmit'
+import { subjectServerId } from '../../utils/subjectTask'
 import { useBrandContext } from '../../hooks/useBrands'
 import { GENERATION_TASKS_KEY } from '../../hooks/useGenerationTasks'
 import { MODAL_W } from '../../ui/modalFit'
@@ -36,7 +37,8 @@ type Props = {
   open: boolean
   voices: string[]
   onClose: () => void
-  onCreated: () => void
+  /** 创建成功回调；带新分身 server_id（可能为空——注册响应缺失时由列表刷新兜底） */
+  onCreated: (serverId?: string) => void
   title?: string
 }
 
@@ -91,7 +93,7 @@ export function CreateSubjectModal({
       message.success(`数字分身「${name.trim()}」已创建（任务 ${task.id}）——生成视频时可直接复用该形象`)
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
       resetForm()
-      onCreated()
+      onCreated(subjectServerId(task) || undefined)
       onClose()
     } catch { /* 拦截器已提示 */ } finally {
       setCreating(false)

@@ -1,5 +1,6 @@
 import { Alert, Button, Card, Progress, Space, Typography } from 'antd'
-import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
+import { CheckCircleFilled, CloseCircleFilled, FundOutlined, LoadingOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { PlatformBadge } from '../../../components/PlatformBadge'
 
 const { Text, Title } = Typography
@@ -20,6 +21,7 @@ type Props = {
 
 /** 发布结果面板：展示多平台并行发布的实时进度与最终结果 */
 export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
+  const navigate = useNavigate()
   if (jobs.length === 0) return null
 
   const total = jobs.length
@@ -50,6 +52,12 @@ export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
       }
       extra={
         <Space>
+          {/* 闭环入口：发布完成 → 引导去看数据表现 */}
+          {allDone && success.length > 0 && (
+            <Button size="small" type="primary" ghost icon={<FundOutlined />} onClick={() => navigate('/m/analytics')}>
+              查看数据
+            </Button>
+          )}
           {allDone && failed.length > 0 && onRetry && (
             <Button size="small" icon={<ReloadOutlined />} onClick={onRetry}>
               重试失败项

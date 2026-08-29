@@ -403,7 +403,7 @@ export default function AssetLibrary() {
           </Empty>
         </div>
       ) : (
-        <ul className="sb-lib-list" role="list">
+        <div className="sb-lib-grid">
           {filtered.map((a) => {
             const kind = inferMediaKind(a.mime, a.url, a.type)
             const isSystem = a.id.startsWith('sys-') || a.owner_type === 'system'
@@ -418,58 +418,61 @@ export default function AssetLibrary() {
               setPreviewAsset(a)
             }
             return (
-              <li
+              <div
                 key={a.id}
-                className={`sb-lib-row${checked ? ' is-selected' : ''}${isSystem ? ' is-system' : ''}`}
+                className={`sb-lib-card${checked ? ' is-selected' : ''}${isSystem ? ' is-system' : ''}`}
               >
-                {selectable ? (
-                  <label className="sb-lib-row-check">
-                    <Checkbox
-                      checked={checked}
-                      onChange={(e) => toggleSelect(a.id, e.target.checked)}
-                    />
-                  </label>
-                ) : (
-                  <span className="sb-lib-row-check is-spacer" aria-hidden />
+                {selectable && (
+                  <span
+                    className="sb-lib-card-check"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleSelect(a.id, !checked)
+                    }}
+                  >
+                    <Checkbox checked={checked} />
+                  </span>
                 )}
 
                 <button
                   type="button"
-                  className="sb-lib-row-thumb"
+                  className="sb-lib-card-cover"
                   onClick={openPreview}
                   aria-label={`预览 ${displayName}`}
                 >
                   {kind === 'image' && <ImageCover url={a.url} />}
                   {kind === 'video' && <VideoFrameCover url={a.url} poster={a.cover_url} />}
                   {kind === 'audio' && (
-                    <span className="sb-lib-row-placeholder">
+                    <span className="sb-lib-card-placeholder">
                       <SoundOutlined />
                     </span>
                   )}
-                </button>
 
-                <button type="button" className="sb-lib-row-main" onClick={openPreview}>
-                  <strong className="sb-lib-row-name" title={displayName}>{displayName}</strong>
-                  <span className="sb-lib-row-meta">
-                    {formatSize(a.size_bytes) && <span>{formatSize(a.size_bytes)}</span>}
-                    {!isSystem && <span>{timeAgo(a.created_at)}</span>}
-                    {isSystem && <span>系统</span>}
-                    {a.owner_type === 'creation' && <span>AI 产物</span>}
+                  <span className={`sb-lib-card-kind sb-lib-card-kind--${kind}`}>
+                    {kind === 'video' ? <VideoCameraOutlined /> : kind === 'audio' ? <SoundOutlined /> : <PictureOutlined />}
+                    {kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '图片'}
+                  </span>
+
+                  <span className="sb-lib-card-overlay" aria-hidden>
+                    <Button type="primary" size="small" tabIndex={-1}>
+                      {isSystem ? '仅供参考' : '预览'}
+                    </Button>
                   </span>
                 </button>
 
-                <span className={`sb-lib-row-kind sb-lib-row-kind--${kind}`}>
-                  {kind === 'video' ? <VideoCameraOutlined /> : kind === 'audio' ? <SoundOutlined /> : <PictureOutlined />}
-                  {kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '图片'}
-                </span>
-
-                <Button type="link" className="sb-lib-row-action" onClick={openPreview}>
-                  {isSystem ? '仅供参考' : '预览'}
-                </Button>
-              </li>
+                <div className="sb-lib-card-body">
+                  <strong className="sb-lib-card-name" title={displayName}>{displayName}</strong>
+                  <span className="sb-lib-card-meta">
+                    {formatSize(a.size_bytes) && <span>{formatSize(a.size_bytes)}</span>}
+                    {!isSystem && <span>{timeAgo(a.created_at)}</span>}
+                    {isSystem && <span>系统素材</span>}
+                    {a.owner_type === 'creation' && <span className="sb-lib-card-ai">AI 产物</span>}
+                  </span>
+                </div>
+              </div>
             )
           })}
-        </ul>
+        </div>
       )}
 
       <MediaPreviewModal

@@ -1,3 +1,4 @@
+import { ThunderboltOutlined } from '@ant-design/icons'
 import type { GenerationTemplate } from '../../types/api'
 
 type Props = {
@@ -22,7 +23,7 @@ export function TemplatePickGrid({ templates, selectedId, onSelect, loading }: P
         className={`wz-template-card${selectedId === '' ? ' is-active' : ''}`}
         onClick={() => onSelect('')}
       >
-        <span className="wz-template-icon">✨</span>
+        <span className="wz-template-icon"><ThunderboltOutlined /></span>
         <strong>自由生成</strong>
         <span>不传模板，系统根据素材自动判断</span>
       </button>
