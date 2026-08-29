@@ -64,6 +64,7 @@ import (
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/generation"
+	"webreaper/internal/usecase/videocompose"
 	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/geo"
 	"webreaper/internal/usecase/works"
@@ -1051,6 +1052,18 @@ func main() {
 		templateUC := generation.NewTemplateUseCase(templateRepo)
 		router.SetTemplate(templateUC)
 		router.SetGeneration(genUC, viduProvider, genRegistry, genSpecRepo)
+		// B-Roll 画面插入合成（22 号计划：本地 ffmpeg 编排——timeline 定位 + compose 任务）
+		// 装配点在 mediaStore 就绪后（产物上传依赖存储）。
+		{
+			genTaskRepo := repository.NewGormGenerationTaskRepository(geoRepos.db)
+			composerUC := videocompose.NewUseCase(genTaskRepo, avTool, asrClient)
+			if mediaStore != nil {
+				composerUC.SetStore(composeStoreAdapter{mediaStore})
+			}
+			genUC.SetComposer(composerUC)
+			router.SetComposer(composerUC)
+			log.Info("B-Roll 画面插入已启用（timeline 定位 + compose 合成）")
+		}
 		router.SetIntegrationRepo(integrationRepo) // 能力路由新表（集成中心 vendor/capability 管理）
 
 		// ---- 灵感广场（热门视频采集+展示）----

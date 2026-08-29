@@ -205,6 +205,12 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	api.POST("/generation/tasks/:id/cancel", gh.HandleCancel)
 	api.DELETE("/generation/tasks/:id", gh.HandleDelete)
 	api.GET("/generation/voices", gh.HandleVoices)
+	// B-Roll 台词时间轴（22 计划 §5.4①②——composer 未注入不注册）
+	if r.composerUC != nil {
+		th := NewTimelineHandler(r.composerUC)
+		api.POST("/generation/tasks/:id/timeline", th.HandleLocate)
+		api.GET("/generation/tasks/:id/timeline", th.HandleGet)
+	}
 	// 视频文案提取（08 计划 D4——向导第①步：链接/上传 → 说话内容 → 双产出台词）
 	if r.transcriptUC != nil {
 		th := NewTranscriptHandler(r.transcriptUC, r.mediaStore)

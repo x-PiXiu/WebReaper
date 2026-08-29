@@ -74,6 +74,8 @@ type GenerationUseCase struct {
 	callbackURL string
 	// endpointSelector 端点选择器（可选；nil=不支持统一提交）
 	endpointSelector port.EndpointSelector
+	// composer B-Roll 合成编排（可选；nil=compose 类型不可用——main 装配注入 videocompose.UseCase）
+	composer port.Composer
 	// defaultProvider 默认厂商（当 resolver 未配置或查询失败时使用）
 	defaultProvider string
 	// urlResolver 素材 URL 可达性解析（可选；nil=不转换——SRP：URL 判断+格式转换移至 Adapter 层）
@@ -189,6 +191,9 @@ func (uc *GenerationUseCase) SetTaskNotifier(n port.TaskNotifier) {
 func (uc *GenerationUseCase) SetCallbackURL(u string) {
 	uc.callbackURL = strings.TrimRight(u, "/")
 }
+
+// SetComposer 注入 B-Roll 合成编排（可选；未注入则 compose 类型报不可用）。
+func (uc *GenerationUseCase) SetComposer(c port.Composer) { uc.composer = c }
 
 // SetEndpointSelector 注入端点选择器（可选；未注入则不支持统一提交）。
 func (uc *GenerationUseCase) SetEndpointSelector(s port.EndpointSelector) {
@@ -1300,6 +1305,11 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 	// 显式端点：主体注册（数字分身一键创建——server_id 落任务 creations[0].id）
 	if in.SubType == "subject" {
 		return uc.submitSubject(ctx, in)
+	}
+
+	// 显式端点：B-Roll 画面插入合成（本地 ffmpeg——22 号计划；不走端点选择器）
+	if in.SubType == "compose" {
+		return uc.submitCompose(ctx, in)
 	}
 
 	// 模板默认参数填充（管理后台模板的 default_params——未显式指定才采用）

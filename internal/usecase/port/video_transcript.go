@@ -39,6 +39,15 @@ type MediaAVTool interface {
 	// SegmentAudio 把音频按 segSeconds 切段（16kHz 单声道 mp3），返回段文件路径列表。
 	// 长音频分段转写用（半小时+ 音视频超出 ASR 上限的解决方案）。
 	SegmentAudio(ctx context.Context, audioPath string, segSeconds int) ([]string, error)
+	// ComposeInsertSegments 视频画面插入合成（22 号计划 B-Roll）：overlay 时间窗替换画面、
+	// 音频直拷（-c:a copy）、片段音轨不映射即剥离。ffmpeg 细节全关在 adapter。
+	ComposeInsertSegments(ctx context.Context, mainVideoPath string, segs []InsertSegmentSpec, outPath string) error
+	// DetectSpeechSegments 静音/音量低点检测（22 号计划三级阈值）：volumedetect 预分析
+	// → silencedetect 自适应阈值 → 解析语音段序列。媒体须含音频轨。
+	DetectSpeechSegments(ctx context.Context, mediaPath string) ([]SpeechSegment, error)
+	// ProbeHasVideoStream ffprobe 探测是否含视频流（图片的 mjpeg 单帧也返回 true——
+	// compose 片段形态校验用：纯音频文件返回 false 被拒）。
+	ProbeHasVideoStream(ctx context.Context, mediaPath string) (bool, error)
 }
 
 // SpeechTranscriber 语音识别（音频 → 文本）。

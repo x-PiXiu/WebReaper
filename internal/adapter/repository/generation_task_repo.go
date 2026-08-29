@@ -24,6 +24,7 @@ type GenerationTaskPO struct {
 	ErrMsg           string    `gorm:"size:512"`
 	ParamsJSON       string    `gorm:"type:json"`
 	Payload          string    `gorm:"size:512"`
+	TimelineJSON     string     // B-Roll 台词时间轴（空=未定位）
 	CreationsJSON    string    `gorm:"type:json"`
 	Credits          int
 	OffPeak          bool
@@ -53,6 +54,7 @@ func generationTaskToPO(t entity.GenerationTask) GenerationTaskPO {
 		ID: t.ID, TenantID: t.TenantID, BrandID: t.BrandID, Type: t.Type, SubType: t.SubType,
 		Model: t.Model, Provider: t.Provider, ProviderTaskID: t.ProviderTaskID, State: t.State,
 		ErrCode: t.ErrCode, ErrMsg: t.ErrMsg, ParamsJSON: t.ParamsJSON, Payload: t.Payload,
+		TimelineJSON: t.TimelineJSON,
 		CreationsJSON: t.CreationsJSON, Credits: t.Credits, OffPeak: t.OffPeak,
 		Watermark: t.Watermark, CallbackReceived: t.CallbackReceived, CallbackAt: t.CallbackAt,
 		RetryCount: t.RetryCount, ParamsHash: t.ParamsHash,
@@ -65,6 +67,7 @@ func generationTaskFromPO(p GenerationTaskPO) entity.GenerationTask {
 		ID: p.ID, TenantID: p.TenantID, BrandID: p.BrandID, Type: p.Type, SubType: p.SubType,
 		Model: p.Model, Provider: p.Provider, ProviderTaskID: p.ProviderTaskID, State: p.State,
 		ErrCode: p.ErrCode, ErrMsg: p.ErrMsg, ParamsJSON: p.ParamsJSON, Payload: p.Payload,
+		TimelineJSON: p.TimelineJSON,
 		CreationsJSON: p.CreationsJSON, Credits: p.Credits, OffPeak: p.OffPeak,
 		Watermark: p.Watermark, CallbackReceived: p.CallbackReceived, CallbackAt: p.CallbackAt,
 		RetryCount: p.RetryCount, ParamsHash: p.ParamsHash,

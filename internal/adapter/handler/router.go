@@ -96,6 +96,7 @@ type Router struct {
 	providerConfigUC   *providerconfig.UseCase // 厂商配置（管理后台）
 	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
 	transcriptUC       *videotranscript.UseCase // 视频文案提取（可选；08 计划 D4）
+	composerUC         port.Composer // B-Roll 合成编排（可选；22 计划——未注入则端点不注册）
 	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
 	apiPrefix          string                  // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
 	rootGroup          *gin.RouterGroup        // Engine() 装配时记录——延迟注册的公开路由用（OAuth 回调等）
@@ -276,6 +277,11 @@ func (r *Router) SetTemplate(uc *generation.TemplateUseCase) {
 // SetGenerationVoices 注入官方音色库（可选——未注入则 /generation/voices 不返回数据）。
 func (r *Router) SetGenerationVoices(v port.VoiceLibrary) {
 	r.generationVoices = v
+}
+
+// SetComposer 注入 B-Roll 合成编排（可选——未注入则 timeline/compose 端点不注册）。
+func (r *Router) SetComposer(c port.Composer) {
+	r.composerUC = c
 }
 
 // SetTranscript 注入视频文案提取用例（可选——未注入则提取端点不注册）。

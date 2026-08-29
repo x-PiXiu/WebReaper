@@ -52,6 +52,7 @@ type GenerationTask struct {
 	OffPeak        bool   // 错峰模式（积分更低，48h 内完成）
 	Watermark      bool   // 是否加水印
 	CallbackReceived bool // 回调是否已到达（轮询可提前停）
+	TimelineJSON     string // B-Roll 台词时间轴（静音检测定位产物 JSON；空=未定位——22 计划）
 	CallbackAt     *time.Time
 	RetryCount     int    // 自动重试次数（失败分类后）
 	ParamsHash     string // 提交参数哈希（防重复提交）
