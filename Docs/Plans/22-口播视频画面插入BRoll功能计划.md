@@ -251,9 +251,27 @@ ffmpeg 需要 `between(t, START, END)` 的秒数，产品语义是"第 N 句台�
    - `M == N`（最常见）：顺序一一配对
    - `M > N`（句中停顿被切开）：按台词句字符数比例为界合并相邻段
    - `M < N`（相邻句连读）：按字符数比例拆分段
+   - **窗口边界落点语义（切换在静音中，不在语音起止瞬间）**：
+     窗口起点 = 上一静音段的中点（无上一静音则取 `start_ms - 150ms` 且 clamp ≥0）；
+     窗口终点 = 本句语音结束（不含尾静音）。观感：上句话音刚落画面即切入片段，
+     本句说完即回口播画面
 3. **解析实现**：解析 silencedetect 的 stderr（`silence_start/end` 成对），首段前
    如有语音从 0 起、尾静音截断；产出 `TimelineLine[]` 随任务缓存，`force:true` 重跑
 4. **无音频轨成片**：明确报错"该视频无音频，无法定位台词"
+5. **台词行来源的自动分支**（三条音频路径统一覆盖，2026-08-29 补）：
+   - **a. 任务 `params.script` 非空**（A 文本+音色 / B 文本直生路径）→ 上述配对规则
+   - **b. `params.script` 为空**（C 上传音频路径）→ **ASR 自动分行**：
+     全文 ASR 一次（现有 SenseVoice 栈纯文本能力即可）→ 按语音段时长比例把全文
+     切成行 → 行与段天然一一对应（无需配对）。设计要点：
+     * 全文一次调用而非逐段 ASR（省 N 次调用；短段识别率低的问题也规避）
+     * 行边界（静音处）是精确锚点，段内文字错位 ±2 字不影响插入——
+       **切换点由静音决定，不由文字决定**
+     * 产出标记 `script_source: "asr"`（a 路径为 `"params"`）——前端展示
+       "台词来自语音识别"提示
+     * 用户可修正文字：timeline POST 支持 `lines_override`（只改各行 text、
+       不改时间窗——错字修正不影响画面切换点）
+   - **数据流规范**（客户端对接约定）：lipsync 提交时 A/B 路径在 `params.script`
+     携带台词原文（一行一句）；C 路径不传 `script`（留空即触发定位时 ASR 分行）
 
 ## 5. 架构设计（整洁架构分层）
 
@@ -306,16 +324,25 @@ type TimelineLine struct {
 1. `sentence_index` 在时间轴范围内；窗口 `[start_ms, end_ms)` 非空
 2. 各片段窗口**互不重叠**（重叠拒绝，提示具体冲突句）
 3. `MediaURL` 可达（HEAD 预检，复用素材库校验）
-4. 片段含视频轨校验（ffprobe 预检——纯音频文件拒绝；图片走 loop 输入形态）
+4. **片段形态校验（ffprobe 预检）**：有视频流（含 mjpeg 单帧——即图片）→ 通过；
+   图片形态（无音频流 + 单帧视频流 / MIME image/*）→ 自动走 `-loop 1` 输入形态；
+   纯音频文件（无视频流）→ 拒绝
 5. 源视频存在且已有时间轴（无时间轴 → 报错引导先调 POST timeline 定位）
+6. `segments` 数量 ≤ 20（防滥用；窗口过多应考虑内容拆分）
+7. 产物命名：源作品标题 + `·含插入` 后缀（多版本可区分）
 
 ### 5.4 API 设计（挂现有统一生成体系，2026-08-29 完善为五端点）
 
 ```
 ① POST /api/v1/generation/tasks/:id/timeline     台词时间轴定位（按需触发）
      请求: {"force": false}                      （true=重跑静音检测，忽略缓存）
+           或 {"lines_override": [{"index":0,"text":"修正后的文字"}, ...]}
+                                                （只改各行 text 不改时间窗——ASR 分行
+                                                 的错字修正，画面切换点不受影响）
      响应: {"lines": [{"index":0,"text":"...","start_ms":0,"end_ms":3120}, ...],
-            "source": "silence-detect", "located_at": "..."}
+            "script_source": "params" | "asr",   （台词来源：任务参数 | 语音识别自动分行）
+            "align_mode": "direct" | "estimated", （配对方式：段句直配 | 比例合并/拆分）
+            "located_at": "..."}
      错误: 成片无音频轨 / 段句数差异超限（源音频不适合自动定位）→ 可读错误
 
 ② GET  /api/v1/generation/tasks/:id/timeline     读取已定位时间轴
@@ -333,7 +360,19 @@ type TimelineLine struct {
 
 ⑤ GET  /api/v1/generation/tasks/:id/preview?sentence_index=2
      （增强项，阶段四）窗口首帧截图——配置时所见即所得，前端缩略展示
+
+⑥ POST /api/v1/generation/tasks/:id/cancel       （现有取消端点，compose 适配）
+     compose 取消语义：排队中 → 信号量让位即取消（状态 cancelled）；
+     编码中 → kill ffmpeg 进程（exec.Command 的 Process.Kill），任务标
+     failed"已取消"（半截产物清理）。客户端对接：复用现有取消调用，无需新端点
 ```
+
+**客户端对接小结**（前端不用改页面结构，只看端点约定）：
+- lipsync 提交时带 `params.script`（A/B 路径一行一句文本；C 路径不传）
+- timeline POST 首次定位 → 读响应渲染台词列表（`script_source=asr` 时显示
+  "台词来自语音识别"提示；文字有错可带 `lines_override` 修正，时间窗不受影响）
+- compose 提交只传 `{source_task_id, segments[{sentence_index, media_url}]}`
+- 等待/取消复用现有任务端点
 
 ### 5.5 前端交互（LipSyncWizard / 作品详情）
 
@@ -356,9 +395,11 @@ type TimelineLine struct {
 
 - silencedetect 解析器：抽音轨（复用 ExtractAudio）→ volumedetect 预分析 →
   三级阈值检测 → 静音边界解析 → 语音段序列；配对规则（M==N 直配 / M>N 字符比例合并 / M<N 比例拆分）
-- timeline 定位/读取端点（POST/GET）+ 结果随任务缓存
+- 台词行来源分支（§4-5）：params.script 配对 + C 路径 ASR 全文转写按时长比例自动分行
+- timeline 定位/读取端点（POST/GET，含 lines_override 修正）+ 结果随任务缓存
 - **验证**：真实 TTS 成片 + 带噪音频（模拟用户上传）各定位一例，播放器逐句跳转核对（±200ms）；
-  两种生成入口（文本直生 / TTS+lipsync）各验一例；无音频成片与段句数差异过大两条报错路径
+  三条音频路径各验一例（A script 配对 / B text 直生 / C 上传音频 ASR 分行）；
+  无音频成片与段句数差异过大两条报错路径
 
 ### 阶段三：compose 用例 + API（任务体系接入）
 
