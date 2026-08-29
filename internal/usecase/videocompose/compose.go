@@ -278,6 +278,10 @@ func safeDownloadMedia(ctx context.Context, rawURL string) (path string, cleanup
 		cleanup()
 		return "", nil, fmt.Errorf("内容为空")
 	}
+	if n < 1024 {
+		cleanup()
+		return "", nil, fmt.Errorf("文件过小（%d 字节）——可能是错误页/重定向页而非实际媒体", n)
+	}
 	f.Close()
 	return f.Name(), cleanup, nil
 }
