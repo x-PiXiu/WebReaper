@@ -830,3 +830,29 @@
     transform: none;
   }
 }
+
+/* 草稿条右上角"清空"小按钮 */
+.ch-studio .ch-draft-bar {
+  position: relative;
+}
+.ch-studio .ch-draft-bar-clear {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--studio-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 160ms ease, color 160ms ease;
+}
+.ch-studio .ch-draft-bar:hover .ch-draft-bar-clear {
+  opacity: 1;
+}
+.ch-studio .ch-draft-bar-clear:hover {
+  color: var(--wr-danger, #dc2626);
+  background: rgba(220, 38, 38, 0.06);
+}
