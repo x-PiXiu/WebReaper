@@ -87,7 +87,7 @@ export function AppShell({
   brandName = PRODUCT.name,
   brandTagline,
   brandIcon = 'G',
-  siderWidth = 248,
+  siderWidth = 284,
   noPaddingKeys = [],
   banner,
 }: {

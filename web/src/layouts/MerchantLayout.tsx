@@ -56,7 +56,7 @@ export default function MerchantLayout() {
       brandName={PRODUCT.name}
       brandTagline={PRODUCT.tagline}
       brandIcon="获"
-      siderWidth={260}
+      siderWidth={284}
       noPaddingKeys={['/m/chat', '/m/compose/video', '/m/compose/graphic', '/m/compose/lipsync', '/m/compose/quick', '/m/compose/avatar', '/m/assets', '/m/compose/voice', '/m/compose/copy']}
     />
   )

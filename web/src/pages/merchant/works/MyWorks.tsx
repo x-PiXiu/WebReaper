@@ -1,22 +1,22 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { Button, Input, Segmented, Space, Tag, Typography } from 'antd'
-import { PlusOutlined, SendOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
-import { businessApi } from '../../../api/business'
-import { GenerationFailedBar } from '../../../components/compose/GenerationFailedBar'
-import { retryFailureMessage } from '../../../components/RetryHint'
+import { Button, Input, Segmented, Space } from 'antd'
+import { LikeOutlined, PlayCircleOutlined, PlusOutlined, SendOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
 import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
 import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
 import QueryBoundary from '../../../components/QueryBoundary'
+import { cleanWorkTitle } from '../../../utils/workTitle'
 import BrollDrawer, { type BrollSource } from '../../../components/compose/BrollDrawer'
 import { VideoFrameCover } from '../../../components/VideoFrameCover'
 import { ImageCover } from '../../../components/ImageCover'
-import type { GenerationTask, MediaAsset, WorkItem } from '../../../types/api'
+import type { MediaAsset, WorkItem } from '../../../types/api'
 
-const { Text } = Typography
 
 type Filter = 'all' | 'draft' | 'ready' | 'published'
+
+const PLATFORM_LABEL: Record<string, string> = {
+  douyin: '抖音', kuaishou: '快手', zhihu: '知乎', xiaohongshu: '小红书', bilibili: 'B站', wechat: '微信',
+}
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   draft: { label: '草稿', color: 'default' },
@@ -55,13 +55,6 @@ export default function MyWorks() {
   const [brollSource, setBrollSource] = useState<BrollSource | null>(null)
 
   const { works = [], isLoading, isError, refetch } = usePublishableWorks()
-  const { data: failedTasks = [] } = useQuery({
-    queryKey: ['generation-tasks'],
-    queryFn: () => businessApi.listGenerationTasks()
-      .then((r) => r.tasks.filter((t) => t.state === 'failed').slice(0, 8))
-      .catch(() => []),
-    staleTime: 30_000,
-  })
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -76,7 +69,6 @@ export default function MyWorks() {
     <div className="wr-page-content ip-page">
       <div className="ip-page-hero">
         <div>
-          <p className="ip-kicker">Library</p>
           <h1>我的作品</h1>
           <p className="ip-lead">内容合成产出的可发布成片与文章——待发布可直达发布中心</p>
         </div>
@@ -107,80 +99,98 @@ export default function MyWorks() {
         emptyText="还没有作品——去内容合成写第一篇文章或做第一个视频"
         emptyExtra={<Button type="primary" onClick={() => navigate('/m/compose')}>去内容合成</Button>}
       >
-        <div className="ip-works-grid">
+        <div className="mw-grid">
           {list.map((w) => {
             const st = STATUS_CONFIG[w.status] || { label: w.status, color: 'default' }
-            const kd = KIND_CONFIG[w.kind] || { label: w.kind, emoji: '📦' }
+            const kd = KIND_CONFIG[w.kind] || { label: w.kind, emoji: '' }
+            const title = cleanWorkTitle(w.title)
+            const previewUrl = w.kind === 'video' || w.kind === 'image' ? w.media_urls?.[0] : undefined
+            const canBroll = w.kind === 'video' && w.id.startsWith('g-')
+            const coverStyle = w.cover_url
+              ? { background: `linear-gradient(180deg, rgba(8,8,14,0.2), rgba(8,8,14,0.72)), url(${w.cover_url}) center/cover` }
+              : undefined
+            const previewBtn = previewUrl ? (
+              <Button size="small" onClick={() => setPreviewAsset({
+                    id: w.id,
+                    tenant_id: '',
+                    brand_id: w.brand_id || '',
+                    owner_type: 'creation',
+                    type: w.kind,
+                    name: w.title,
+                    url: previewUrl,
+                    mime: w.kind === 'image' ? 'image/jpeg' : 'video/mp4',
+                    size_bytes: 0,
+                    width: 0,
+                    height: 0,
+                    duration: 0,
+                    created_at: w.created_at,
+                })}>
+                  预览
+                </Button>
+            ) : null
+            const publishBtn = w.status !== 'published' ? (
+              <Button type="primary" size="small" icon={<SendOutlined />} onClick={() => navigate(distributionPath(w))}>
+                去发布
+              </Button>
+            ) : null
+            const brollBtn = canBroll ? (
+              <Button size="small" icon={<VideoCameraAddOutlined />} onClick={() => setBrollSource({
+                taskId: w.id.slice(2),
+                title: w.title,
+                videoUrl: w.media_urls?.[0],
+              })}>
+                插入画面
+              </Button>
+            ) : null
+            const actions = (
+              <>
+                {publishBtn}
+                {brollBtn}
+                {previewBtn}
+              </>
+            )
             return (
-              <div key={w.id} className="ip-work-card">
-                <div
-                  className="ip-work-cover"
-                  style={{
-                    position: 'relative',
-                    overflow: 'hidden',
-                    background: w.kind === 'video' || w.kind === 'image'
-                      ? undefined
-                      : w.cover_url
-                        ? `linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0.55)), url(${w.cover_url}) center/cover`
-                        : 'linear-gradient(145deg, #12121a, #1f2937)',
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    padding: 12,
-                  }}
-                >
+              <div key={w.id} className={`mw-card mw-card--${w.status}`}>
+                <div className="mw-cover" style={w.cover_url || previewUrl ? undefined : coverStyle}>
                   {w.kind === 'video' && w.media_urls?.[0] && (
                     <VideoFrameCover url={w.media_urls[0]} poster={w.cover_url} />
                   )}
                   {w.kind === 'image' && (w.cover_url || w.media_urls?.[0]) && (
                     <ImageCover url={w.cover_url || w.media_urls![0]} />
                   )}
-                  <Tag color={st.color} style={{ margin: 0, position: 'relative', zIndex: 1 }}>{st.label}</Tag>
-                  {w.status === 'published' && w.platforms?.length ? (
-                    <span className="ip-ratio" style={{ marginLeft: 8, position: 'relative', zIndex: 1 }}>{w.platforms.join(' · ')}</span>
-                  ) : null}
-                </div>
-                <div className="ip-work-body">
-                  <Text strong style={{ fontSize: 14, display: 'block' }} ellipsis={{ tooltip: w.title }}>
-                    {kd.emoji} {w.title}
-                  </Text>
-                  <div className="ip-work-metrics">
-                    <span>{kd.label}</span>
-                    {w.views > 0 && <span>播放 {w.views.toLocaleString()}</span>}
-                    {w.likes > 0 && <span>赞 {w.likes.toLocaleString()}</span>}
+                  {!previewUrl && (
+                    <span className="mw-cover-title">{title}</span>
+                  )}
+
+                  <span className={`mw-status mw-status--${w.status}`}>{st.label}</span>
+                  <span className="mw-kind">{kd.label}</span>
+
+                  <div className="mw-hover" aria-hidden>
+                    <Space size={6} wrap style={{ justifyContent: 'center' }}>{actions}</Space>
                   </div>
-                  <Space style={{ marginTop: 12 }}>
-                    {w.status !== 'published' && (
-                      <Button size="small" type="primary" ghost icon={<SendOutlined />} onClick={() => navigate(distributionPath(w))}>
-                        去发布
-                      </Button>
+                </div>
+
+                <div className="mw-body">
+                  <strong className="mw-title" title={w.title}>{title}</strong>
+                  <div className="mw-meta">
+                    {w.status === 'published' && w.platforms?.length ? (
+                      <span className="mw-platforms">
+                        {w.platforms.map((pf) => (
+                          <i key={pf}>{PLATFORM_LABEL[pf] || pf}</i>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="mw-time">{new Date(w.created_at).toLocaleDateString('zh-CN')}</span>
                     )}
-                    {w.kind === 'video' && w.id.startsWith('g-') && (
-                      <Button size="small" icon={<VideoCameraAddOutlined />} onClick={() => setBrollSource({
-                        taskId: w.id.slice(2),
-                        title: w.title,
-                        videoUrl: w.media_urls?.[0],
-                      })}>
-                        插入画面
-                      </Button>
-                    )}
-                    {(w.kind === 'video' || w.kind === 'image') && w.media_urls?.[0] && (
-                      <Button size="small" onClick={() => setPreviewAsset({
-                        id: w.id,
-                        tenant_id: '',
-                        brand_id: w.brand_id || '',
-                        owner_type: 'creation',
-                        type: w.kind,
-                        name: w.title,
-                        url: w.media_urls![0],
-                        mime: w.kind === 'image' ? 'image/jpeg' : 'video/mp4',
-                        size_bytes: 0,
-                        width: 0,
-                        height: 0,
-                        duration: 0,
-                        created_at: w.created_at,
-                      })}>预览</Button>
-                    )}
-                  </Space>
+                    {w.views > 0 && <span className="mw-stat"><PlayCircleOutlined /> {w.views.toLocaleString()}</span>}
+                    {w.likes > 0 && <span className="mw-stat"><LikeOutlined /> {w.likes.toLocaleString()}</span>}
+                  </div>
+                </div>
+
+                {/* 静态主操作：无 hover 设备/快速直达 */}
+                <div className="mw-actions-static">
+                  {publishBtn}
+                  {w.status === 'published' && previewBtn}
                 </div>
               </div>
             )
@@ -196,25 +206,6 @@ export default function MyWorks() {
 
       <BrollDrawer open={!!brollSource} source={brollSource} onClose={() => setBrollSource(null)} />
 
-      {failedTasks.length > 0 && (
-        <div style={{ marginTop: 32 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text strong>生成失败任务</Text>
-            <Button type="link" size="small" onClick={() => navigate('/m/compose/tools?tab=media')}>打开任务中心</Button>
-          </div>
-          <div className="mw-failed-list" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {failedTasks.map((t: GenerationTask) => (
-              <GenerationFailedBar
-                key={t.id}
-                compact
-                message={`${t.sub_type} · ${t.model}：${retryFailureMessage(t, '生成失败')}`}
-                onRetry={() => navigate('/m/compose/tools?tab=media')}
-                retryLabel="去任务中心"
-              />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

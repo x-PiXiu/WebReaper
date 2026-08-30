@@ -29,6 +29,13 @@ const { Text } = Typography
 
 type GenType = 'image' | 'video' | 'audio' | 'voice'
 
+const MOVEMENT_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'small', label: '小幅度' },
+  { value: 'medium', label: '中幅度' },
+  { value: 'large', label: '大幅度' },
+]
+
 const META: Record<GenType, { title: string; lead: string; icon: ReactNode; tone: string }> = {
   image: {
     title: '生成图片',
@@ -77,6 +84,7 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
   const [duration, setDuration] = useState<number>()
   const [resolution, setResolution] = useState('')
   const [aspectRatio, setAspectRatio] = useState('')
+  const [movement, setMovement] = useState('auto')
   const [refImages, setRefImages] = useState<{ id: string; url: string }[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [voiceId, setVoiceId] = useState('')
@@ -124,7 +132,10 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
     if (!open || models.length === 0) return
     const preferred = type === 'image'
       ? (models.find((m) => m.model === 'viduq2') || models[0])
-      : models[0]
+      : (models.find((m) => {
+          const [dMin, dMax] = m.capability?.durations || [0, 0]
+          return dMax > dMin
+        }) || models[0])
     setModel(preferred.model)
     const c = preferred.capability
     const [dMin, dMax] = c.durations || [0, 0]
@@ -226,7 +237,10 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
           duration: duration || undefined,
           quality: resolution || undefined,
           aspect_ratio: aspectRatio || undefined,
-          params: mergeSubmitParams(effectiveModel ? { model: effectiveModel } : undefined),
+          params: mergeSubmitParams(
+            effectiveModel ? { model: effectiveModel } : undefined,
+            movement && movement !== 'auto' ? { movement_amplitude: movement } : undefined,
+          ),
         })
       } else if (type === 'audio') {
         result = await submitUnified({
@@ -441,7 +455,12 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
                     const [dMin, dMax] = cap.durations || [0, 0]
                     if (dMax <= 0) return null
                     if (dMin === dMax) {
-                      return <Text type="secondary" style={{ fontSize: 12 }}>时长 {dMin} 秒</Text>
+                      return (
+                        <div className="gam-param">
+                          <Text type="secondary" className="gam-param-label">时长</Text>
+                          <Text type="secondary" style={{ fontSize: 12, lineHeight: '32px' }}>固定 {dMin} 秒（该模型不可调）</Text>
+                        </div>
+                      )
                     }
                     return (
                       <div className="gam-param">
@@ -458,6 +477,25 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
                       </div>
                     )
                   })()}
+                  {cap.supports_movement && (
+                    <div className="gam-param">
+                      <Text type="secondary" className="gam-param-label">运镜</Text>
+                      <Segmented
+                        block
+                        value={movement}
+                        onChange={(v) => setMovement(String(v))}
+                        options={MOVEMENT_OPTIONS}
+                        disabled={busy}
+                      />
+                    </div>
+                  )}
+                  {cap.audio_default && (
+                    <div className="gam-param gam-param--wide">
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        该模型将自动生成同步音效（环境声/动作声）
+                      </Text>
+                    </div>
+                  )}
                   {(cap.resolutions?.length || 0) > 0 && (
                     <div className="gam-param gam-param--wide">
                       <Text type="secondary" className="gam-param-label">清晰度</Text>
