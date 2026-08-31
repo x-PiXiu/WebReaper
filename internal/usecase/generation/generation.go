@@ -88,8 +88,87 @@ type GenerationUseCase struct {
 	subjectAssetRepo port.SubjectAssetRepository
 }
 
+// GenerationOption 函数式选项（27 号优化——替代 14 个 Setter，构造时一次性注入）。
+type GenerationOption func(*GenerationUseCase)
+
+// WithCapabilityResolver 注入能力路由解析器。
+func WithCapabilityResolver(r port.CapabilityResolver) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.resolver = r }
+}
+
+// WithNonceStore 注入回调 nonce 防重放存储。
+func WithNonceStore(s port.CallbackNonceStore) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.nonceStore = s }
+}
+
+// WithTaskNotifier 注入终态通知器。
+func WithTaskNotifier(n port.TaskNotifier) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.notifier = n }
+}
+
+// WithCallbackURL 注入公网回调地址。
+func WithCallbackURL(u string) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.callbackURL = u }
+}
+
+// WithComposer 注入 B-Roll 合成编排。
+func WithComposer(c port.Composer) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.composer = c }
+}
+
+// WithEndpointSelector 注入端点选择器。
+func WithEndpointSelector(s port.EndpointSelector) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.endpointSelector = s }
+}
+
+// WithAssetStore 注入媒体资产存储。
+func WithAssetStore(s port.MediaAssetStore) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.asset = s }
+}
+
+// WithSubjectAssetRepo 注入主体资产仓储（26 号计划）。
+func WithSubjectAssetRepo(r port.SubjectAssetRepository) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.subjectAssetRepo = r }
+}
+
+// WithQuotaGate 注入配额门禁。
+func WithQuotaGate(g port.QuotaStore) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.quotaGate = g }
+}
+
+// WithUsageRecorder 注入用量记录器。
+func WithUsageRecorder(r port.UsageRecorder) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.usageRec = r }
+}
+
+// WithConcurrency 设置并发节流上限。
+func WithConcurrency(n int) GenerationOption {
+	return func(uc *GenerationUseCase) {
+		if n > 0 {
+			uc.submitSem = make(chan struct{}, n)
+		}
+	}
+}
+
+// WithSettingRepo 注入系统设置仓储。
+func WithSettingRepo(sr port.SystemSettingRepository) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.settingRepo = sr }
+}
+
+// WithTemplateRepo 注入生成模板仓储。
+func WithTemplateRepo(tr port.TemplateRepository) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.templateRepo = tr }
+}
+
+// WithURLResolver 注入素材 URL 解析器。
+func WithURLResolver(r port.MaterialURLResolver) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.urlResolver = r }
+}
+
 // NewGenerationUseCase 创建统一生成用例（支持多厂商）。
-func NewGenerationUseCase(providers map[string]port.GenerationProvider, registry port.EndpointRegistry, repo port.GenerationTaskRepository) *GenerationUseCase {
+//
+// 可选依赖通过 Option 注入（推荐）或 SetXxx 方法注入（向后兼容）。
+func NewGenerationUseCase(providers map[string]port.GenerationProvider, registry port.EndpointRegistry, repo port.GenerationTaskRepository, opts ...GenerationOption) *GenerationUseCase {
 	// 确定默认厂商（第一个非nil的provider）
 	defaultProvider := ""
 	for name, p := range providers {
@@ -99,13 +178,18 @@ func NewGenerationUseCase(providers map[string]port.GenerationProvider, registry
 		}
 	}
 
-	return &GenerationUseCase{
+	uc := &GenerationUseCase{
 		providers:       providers,
 		registry:        registry,
 		repo:            repo,
 		nonceStore:      newMemoryNonceStore(),
 		defaultProvider: defaultProvider,
 	}
+	// 应用选项
+	for _, opt := range opts {
+		opt(uc)
+	}
+	return uc
 }
 
 // SetCapabilityResolver 注入能力路由解析器（可选；nil=使用默认provider）。

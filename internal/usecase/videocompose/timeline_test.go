@@ -37,7 +37,7 @@ func TestAlignSegmentsDirect(t *testing.T) {
 func TestAlignSegmentsMerge(t *testing.T) {
 	// M>N：5 段 vs 3 行——按字符比例合并
 	segs := []port.SpeechSegment{
-		{0, 1000}, {1000, 2000}, {2000, 3000}, {3000, 4000}, {4000, 5000},
+		{StartMs: 0, EndMs: 1000}, {StartMs: 1000, EndMs: 2000}, {StartMs: 2000, EndMs: 3000}, {StartMs: 3000, EndMs: 4000}, {StartMs: 4000, EndMs: 5000},
 	}
 	lines := []string{"第一句比较短", "第二句稍微长一些", "第三句"}
 	meta := alignSegments(segs, lines)
@@ -58,7 +58,7 @@ func TestAlignSegmentsMerge(t *testing.T) {
 func TestSplitBySegmentsASR(t *testing.T) {
 	// C 路径 ASR 分行：全文按段时长比例切
 	segs := []port.SpeechSegment{
-		{0, 3000}, {3500, 8000}, {8500, 10000},
+		{StartMs: 0, EndMs: 3000}, {StartMs: 3500, EndMs: 8000}, {StartMs: 8500, EndMs: 10000},
 	}
 	meta := splitBySegments(segs, "第一段文字内容 第二段文字更长的内容 第三段")
 	if meta.ScriptSource != port.TimelineScriptSourceASR {
