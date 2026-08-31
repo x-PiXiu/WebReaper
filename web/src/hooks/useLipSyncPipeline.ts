@@ -157,16 +157,19 @@ export async function runLipSyncPipeline(
     }
     const env = audioSource === 'upload' ? input.envSubject : undefined
     const sceneIntent = input.intent?.trim() || input.script.slice(0, 2000)
-    const ref = await submitUnified(buildSubjectReferencePayload({
-      brand_id: input.brandId,
-      server_id: input.subjectServerId,
-      name: input.subjectName,
-      // 文本驱动：text=台词（音色可选，分身绑定优先）；上传音频：text=场景意图
-      text: audioSource === 'upload' ? (env ? `${sceneIntent}（在「${env.name || '环境'}」中）` : sceneIntent) : input.script,
-      audioMaterialId: audioSource === 'upload' ? await ensureMaterialId(input.uploadedAudioUrl!) : undefined,
-      envSubject: env ? { serverId: env.serverId, name: env.name } : undefined,
-      voiceId: audioSource === 'text' ? input.voiceId : undefined,
-    }))
+    const ref = await submitUnified({
+      ...buildSubjectReferencePayload({
+        brand_id: input.brandId,
+        server_id: input.subjectServerId,
+        name: input.subjectName,
+        // 文本驱动：text=台词（音色可选，分身绑定优先）；上传音频：text=场景意图
+        text: audioSource === 'upload' ? (env ? `${sceneIntent}（在「${env.name || '环境'}」中）` : sceneIntent) : input.script,
+        audioMaterialId: audioSource === 'upload' ? await ensureMaterialId(input.uploadedAudioUrl!) : undefined,
+        envSubject: env ? { serverId: env.serverId, name: env.name } : undefined,
+        voiceId: audioSource === 'text' ? input.voiceId : undefined,
+      }),
+      broll_segments: input.brollSegments,
+    })
     onTaskSubmit?.('video', ref.id)
     videoTask = await waitGenerationTask(ref.id)
   }
