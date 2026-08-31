@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -26,6 +27,72 @@ const (
 // IsTerminal 终态判断（终态后回调/轮询重复到达直接忽略——双通道幂等）。
 func IsTerminal(state string) bool {
 	return state == TaskStateSuccess || state == TaskStateFailed || state == TaskStateCancelled
+}
+
+// validTransitions 合法状态转换表（27 号：实体层贫血治理——状态规则下沉到 entity）。
+// key=当前状态，value=可转换到的目标状态集合。
+var validTransitions = map[string]map[string]bool{
+	TaskStateCreated:    {TaskStateQueueing: true},
+	TaskStateQueueing:   {TaskStateProcessing: true, TaskStateSuccess: true, TaskStateFailed: true, TaskStateCancelled: true},
+	TaskStateProcessing: {TaskStateSuccess: true, TaskStateFailed: true, TaskStateCancelled: true},
+	// 终态不可转换
+	TaskStateSuccess:   {},
+	TaskStateFailed:    {},
+	TaskStateCancelled: {},
+}
+
+// IsTerminalM 方法版终态判断。
+func (t GenerationTask) IsTerminalM() bool { return IsTerminal(t.State) }
+
+// CanTransitionTo 检查是否可转换到目标状态。
+func (t GenerationTask) CanTransitionTo(target string) bool {
+	targets, ok := validTransitions[t.State]
+	if !ok {
+		return false
+	}
+	return targets[target]
+}
+
+// TransitionTo 执行状态转换（27 号：状态规则下沉——usecase 不再直接赋值 State）。
+//
+// 合法转换：created→queueing, queueing→processing/success/failed/cancelled,
+// processing→success/failed/cancelled。终态不可转换。
+// 成功/失败/取消自动设置 FinishedAt。
+// 返回 error 而非 panic——调用方可选择忽略（向后兼容）或处理。
+func (t *GenerationTask) TransitionTo(target string, errMsg string) error {
+	if !t.CanTransitionTo(target) {
+		return fmt.Errorf("非法状态转换: %s → %s", t.State, target)
+	}
+	t.State = target
+	t.UpdatedAt = time.Now()
+	if IsTerminal(target) {
+		now := time.Now()
+		t.FinishedAt = &now
+	}
+	if target == TaskStateFailed && errMsg != "" {
+		t.ErrMsg = errMsg
+	}
+	return nil
+}
+
+// MarkSuccess 标记成功（含产物 JSON 和积分）。
+func (t *GenerationTask) MarkSuccess(creationsJSON string, credits int) error {
+	if err := t.TransitionTo(TaskStateSuccess, ""); err != nil {
+		return err
+	}
+	t.CreationsJSON = creationsJSON
+	t.Credits = credits
+	return nil
+}
+
+// MarkFailed 标记失败。
+func (t *GenerationTask) MarkFailed(errMsg string) error {
+	return t.TransitionTo(TaskStateFailed, errMsg)
+}
+
+// MarkCancelled 标记取消。
+func (t *GenerationTask) MarkCancelled() error {
+	return t.TransitionTo(TaskStateCancelled, "")
 }
 
 // GenerationTask 统一生成任务（Vidu 全量接入的核心资产）。
