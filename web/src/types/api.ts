@@ -622,6 +622,28 @@ export interface GenerationVoice {
   name: string
   sample_url: string
   recommend?: boolean // 精选推荐（服务端标记——077 迁移）
+  scope?: string // vidu(官方seed) / platform(官方复刻) / clone(用户克隆)
+  tenant_id?: string // clone行归属
+  status?: string // active / disabled
+}
+
+// 主体资产（26号计划——从generation_tasks物化到独立资产表）
+export interface SubjectAsset {
+  id: string
+  tenant_id: string
+  scope: string // personal / official
+  kind: string // person / scene
+  name: string
+  server_id: string // Vidu主体ID（reference2video的subjects[].server_id引用值）
+  portrait_url: string
+  avatar_video_url: string // 链式形象视频产物URL
+  voice_id: string
+  tags: string
+  sort_order: number
+  status: string // active / disabled
+  source_task_id: string
+  created_at: string
+  updated_at: string
 }
 
 // 第三方集成中心（08 计划 D7——能力路由模型）

@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { submitGenerationTaskCompat, submitUnified } from './generationSubmit'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding, TaskTimeline } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, SubjectAsset, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding, TaskTimeline } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -439,6 +439,14 @@ export const businessApi = {
   // 官方音色库
   listGenerationVoices: (params?: { language?: string; q?: string }) =>
     apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/generation/voices', { params }),
+
+  // 个人主体资产列表（26号计划——从subject_assets表读取，失败任务天然不出现）
+  listSubjectAssets: (params?: { kind?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, { assets: SubjectAsset[]; total: number }>('/api/v1/subjects/mine', { params }),
+
+  // 官方主体列表（从subject_assets表读取scope=official）
+  listOfficialSubjects: (params?: { kind?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, { subjects: SubjectAsset[]; total: number }>('/api/v1/subjects', { params: { ownership: 'official', ...params } }),
 
   // ---- 模板管理 ----
 

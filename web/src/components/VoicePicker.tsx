@@ -35,14 +35,33 @@ export default function VoicePicker({
     staleTime: 24 * 60 * 60 * 1000, // 静态参考数据——当天内不重拉
   })
 
-  // 分组：我的音色（克隆产物，若有）→ 各语言官方音色
+  // 分组：平台精选音色 → 各语言官方音色 → 我的音色
   const groups = useMemo(() => {
+    const platform: GenerationVoice[] = []
     const byLang = new Map<string, GenerationVoice[]>()
     for (const v of voices) {
-      if (!byLang.has(v.language)) byLang.set(v.language, [])
-      byLang.get(v.language)!.push(v)
+      // platform scope = 管理后台创建的官方复刻音色（置顶显示）
+      if (v.scope === 'platform') {
+        platform.push(v)
+        continue
+      }
+      // recommend = 精选推荐（口播常用音色）
+      const lang = v.recommend ? '★ 精选推荐' : (v.language || '其他')
+      if (!byLang.has(lang)) byLang.set(lang, [])
+      byLang.get(lang)!.push(v)
     }
-    return byLang
+    // 平台精选音色置顶
+    if (platform.length > 0) {
+      byLang.set('🎤 平台精选', platform)
+    }
+    // 精选推荐组排在最前
+    const sorted = new Map<string, GenerationVoice[]>()
+    const recommendKey = '★ 精选推荐'
+    if (byLang.has(recommendKey)) sorted.set(recommendKey, byLang.get(recommendKey)!)
+    for (const [k, v] of byLang) {
+      if (k !== recommendKey) sorted.set(k, v)
+    }
+    return sorted
   }, [voices])
 
   const togglePreview = (e: React.MouseEvent, v: GenerationVoice) => {
@@ -101,6 +120,7 @@ export default function VoicePicker({
               </span>
             )}
             {!v && <Tag style={{ margin: 0 }} title="克隆音色：7 天内在语音合成中调用一次即永久保留">克隆</Tag>}
+            {v?.scope === 'platform' && <Tag color="orange" style={{ margin: 0 }} title="管理后台创建的平台精选音色">平台</Tag>}
           </span>
         )
       }}
