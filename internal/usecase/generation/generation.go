@@ -86,6 +86,8 @@ type GenerationUseCase struct {
 	urlResolver port.MaterialURLResolver
 	// subjectAssetRepo 主体资产仓储（可选；26 号计划——终态物化钩子写入）。
 	subjectAssetRepo port.SubjectAssetRepository
+	// voiceRepo 音色仓储（可选；26 号计划——voice_clone 终态物化写入）。
+	voiceRepo port.VoiceLibrary
 }
 
 // GenerationOption 函数式选项（27 号优化——替代 14 个 Setter，构造时一次性注入）。
@@ -129,6 +131,11 @@ func WithAssetStore(s port.MediaAssetStore) GenerationOption {
 // WithSubjectAssetRepo 注入主体资产仓储（26 号计划）。
 func WithSubjectAssetRepo(r port.SubjectAssetRepository) GenerationOption {
 	return func(uc *GenerationUseCase) { uc.subjectAssetRepo = r }
+}
+
+// WithVoiceRepo 注入音色仓储（26 号计划——voice_clone 物化）。
+func WithVoiceRepo(r port.VoiceLibrary) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.voiceRepo = r }
 }
 
 // WithQuotaGate 注入配额门禁。
@@ -411,22 +418,28 @@ func (uc *GenerationUseCase) notifyTerminal(ctx context.Context, task entity.Gen
 //   - sub_type=subject && state=success → upsert subject_assets（server_id 唯一键幂等）
 //   - sub_type=reference2video && params.avatar_video=true && state=success → 回填
 //     对应 subject_assets.avatar_video_url（按 subjects[0].server_id 定位）
+//   - sub_type=voice_clone && state=success → upsert generation_voices(scope=clone)
 //
 // 失败/取消不物化——留在任务中心可重试，资产列表天然干净。
 // fire-and-forget：物化失败仅日志，不影响状态机。
 func (uc *GenerationUseCase) maybeMaterializeAsset(ctx context.Context, task entity.GenerationTask) {
-	if uc.subjectAssetRepo == nil {
-		return
-	}
 	if task.State != entity.TaskStateSuccess {
 		return
 	}
 
 	switch task.SubType {
 	case "subject":
-		uc.materializeSubject(ctx, task)
+		if uc.subjectAssetRepo != nil {
+			uc.materializeSubject(ctx, task)
+		}
 	case "reference2video":
-		uc.maybeBackfillAvatarVideo(ctx, task)
+		if uc.subjectAssetRepo != nil {
+			uc.maybeBackfillAvatarVideo(ctx, task)
+		}
+	case "voice_clone":
+		if uc.voiceRepo != nil {
+			uc.materializeVoiceClone(ctx, task)
+		}
 	}
 }
 
@@ -531,6 +544,49 @@ func (uc *GenerationUseCase) maybeBackfillAvatarVideo(ctx context.Context, task 
 	}
 }
 
+// materializeVoiceClone 将成功的声音克隆任务物化到 generation_voices 表（scope=clone）。
+//
+// voice_id 来源：params.voice_id（提交时生成的唯一 ID）。
+// sample_url 来源：creations[0].url（克隆产物的试听 URL）。
+func (uc *GenerationUseCase) materializeVoiceClone(ctx context.Context, task entity.GenerationTask) {
+	var p map[string]any
+	if err := json.Unmarshal([]byte(task.ParamsJSON), &p); err != nil {
+		return
+	}
+	voiceID, _ := p["voice_id"].(string)
+	if voiceID == "" {
+		return
+	}
+
+	// 取试听 URL
+	sampleURL := ""
+	var creations []map[string]any
+	if json.Unmarshal([]byte(task.CreationsJSON), &creations) == nil && len(creations) > 0 {
+		sampleURL, _ = creations[0]["stored_url"].(string)
+		if sampleURL == "" {
+			sampleURL, _ = creations[0]["url"].(string)
+		}
+		if sampleURL == "" {
+			sampleURL, _ = creations[0]["demo_audio"].(string)
+		}
+	}
+
+	voice := entity.GenerationVoice{
+		VoiceID:      voiceID,
+		Language:     "克隆音色",
+		Name:         fmt.Sprintf("克隆-%s", voiceID[:min(8, len(voiceID))]),
+		SampleURL:    sampleURL,
+		Scope:        "clone",
+		TenantID:     task.TenantID,
+		SourceTaskID: task.ID,
+		Status:       "active",
+	}
+
+	if err := uc.voiceRepo.Upsert(ctx, voice); err != nil {
+		log.Printf("[materialize] 音色 %s 物化失败（不影响任务状态）: %v", voiceID, err)
+	}
+}
+
 // SetAssetStore 注入媒体资产存储（可选；nil=产物不转存）。
 func (uc *GenerationUseCase) SetAssetStore(s port.MediaAssetStore) {
 	if s != nil {
@@ -541,6 +597,11 @@ func (uc *GenerationUseCase) SetAssetStore(s port.MediaAssetStore) {
 // SetSubjectAssetRepo 注入主体资产仓储（可选；26 号计划——终态物化钩子）。
 func (uc *GenerationUseCase) SetSubjectAssetRepo(r port.SubjectAssetRepository) {
 	uc.subjectAssetRepo = r
+}
+
+// SetVoiceRepo 注入音色仓储（可选；26 号计划——voice_clone 终态物化）。
+func (uc *GenerationUseCase) SetVoiceRepo(r port.VoiceLibrary) {
+	uc.voiceRepo = r
 }
 
 // SetQuotaGate 注入配额门（可选；generation 场景按次限额）。

@@ -10,11 +10,15 @@ import (
 
 // GenerationVoicePO 官方音色表映射（seed 自 Vidu 音色表——静态参考数据）。
 type GenerationVoicePO struct {
-	VoiceID   string `gorm:"primaryKey;size:128"`
-	Language  string `gorm:"size:64;index"`
-	Name      string `gorm:"size:128"`
-	SampleURL string `gorm:"size:512"`
-	Recommend bool   `gorm:"not null;default:0"`
+	VoiceID      string `gorm:"primaryKey;size:128"`
+	Language     string `gorm:"size:64;index"`
+	Name         string `gorm:"size:128"`
+	SampleURL    string `gorm:"size:512"`
+	Recommend    bool   `gorm:"not null;default:0"`
+	Scope        string `gorm:"size:16;not null;default:vidu"`   // vidu(官方seed) / platform(官方复刻) / clone(用户克隆)
+	TenantID     string `gorm:"size:64;not null;default:''"`     // clone行归属；官方行空
+	SourceTaskID string `gorm:"size:64;not null;default:''"`     // 溯源任务ID
+	Status       string `gorm:"size:16;not null;default:active"` // active / disabled
 }
 
 func (GenerationVoicePO) TableName() string { return "generation_voices" }
@@ -46,10 +50,22 @@ func (r *GormVoiceRepository) List(ctx context.Context, language, keyword string
 	for _, p := range pos {
 		out = append(out, entity.GenerationVoice{
 			VoiceID: p.VoiceID, Language: p.Language, Name: p.Name, SampleURL: p.SampleURL,
-			Recommend: p.Recommend,
+			Recommend: p.Recommend, Scope: p.Scope, TenantID: p.TenantID,
+			SourceTaskID: p.SourceTaskID, Status: p.Status,
 		})
 	}
 	return out, nil
+}
+
+// Upsert 按 voice_id 主键幂等写入（26号计划——voice_clone 物化钩子调用）。
+func (r *GormVoiceRepository) Upsert(ctx context.Context, voice entity.GenerationVoice) error {
+	po := GenerationVoicePO{
+		VoiceID: voice.VoiceID, Language: voice.Language, Name: voice.Name,
+		SampleURL: voice.SampleURL, Recommend: voice.Recommend,
+		Scope: voice.Scope, TenantID: voice.TenantID,
+		SourceTaskID: voice.SourceTaskID, Status: voice.Status,
+	}
+	return r.db.WithContext(ctx).Save(&po).Error
 }
 
 // SeedIfEmpty 表空时批量写入（voice_id 主键幂等——Save 覆盖同键行）。

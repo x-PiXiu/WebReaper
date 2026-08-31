@@ -264,11 +264,15 @@ func InferTypeFromMime(mime string) string {
 // 启动 seed 进 generation_voices 表，客户端查询/筛选（TTS 的
 // voice_setting_voice_id、主体的 voice_id、数字人 voice_id 均可引用）。
 type GenerationVoice struct {
-	VoiceID   string `json:"voice_id"`   // 音色 ID（提交参数的取值）
-	Language  string `json:"language"`   // 语言（中文 (普通话)/英文/日文…分组用）
-	Name      string `json:"name"`       // 音色名称（展示用）
-	SampleURL string `json:"sample_url"` // 试听示例音频 URL
-	Recommend bool   `json:"recommend"`  // 精选推荐（口播常用音色——服务端标记，替代前端截断）
+	VoiceID      string `json:"voice_id"`                  // 音色 ID（提交参数的取值）
+	Language     string `json:"language"`                  // 语言（中文 (普通话)/英文/日文…分组用）
+	Name         string `json:"name"`                      // 音色名称（展示用）
+	SampleURL    string `json:"sample_url"`                // 试听示例音频 URL
+	Recommend    bool   `json:"recommend"`                 // 精选推荐（口播常用音色——服务端标记，替代前端截断）
+	Scope        string `json:"scope,omitempty"`           // vidu(官方seed) / platform(官方复刻) / clone(用户克隆)
+	TenantID     string `json:"tenant_id,omitempty"`       // clone行归属；官方行空
+	SourceTaskID string `json:"source_task_id,omitempty"`  // 溯源任务ID
+	Status       string `json:"status,omitempty"`          // active / disabled
 }
 
 // PromptRef 提示词 @引用（客户端从素材库选择，提交给服务端统一翻译）。

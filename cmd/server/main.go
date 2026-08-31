@@ -1058,6 +1058,9 @@ func main() {
 		genUC.SetSubjectAssetRepo(subjectAssetRepo)
 		router.SetSubjectAssetRepo(subjectAssetRepo)
 		log.Info("主体资产物化已启用（subject_assets 表，终态自动快照）")
+		// 26 号计划：音色资产物化——voice_clone 终态 success 时写入 generation_voices(scope=clone)
+		genUC.SetVoiceRepo(voiceRepo)
+		log.Info("音色资产物化已启用（generation_voices scope=clone，终态自动快照）")
 		// B-Roll 画面插入合成（22 号计划：本地 ffmpeg 编排——timeline 定位 + compose 任务）
 		// 装配点在 mediaStore 就绪后（产物上传依赖存储）。
 		{

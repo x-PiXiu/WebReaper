@@ -192,6 +192,8 @@ type VoiceLibrary interface {
 	List(ctx context.Context, language, keyword string) ([]entity.GenerationVoice, error)
 	// SeedIfEmpty 表空时写入种子数据（返回写入条数；已非空返回 0）。
 	SeedIfEmpty(ctx context.Context, voices []entity.GenerationVoice) (int, error)
+	// Upsert 按 voice_id 主键幂等写入（26号计划——voice_clone 物化钩子调用）。
+	Upsert(ctx context.Context, voice entity.GenerationVoice) error
 }
 
 // TaskNotifier 生成任务终态通知（可选注入——站内信主动唤醒）。
