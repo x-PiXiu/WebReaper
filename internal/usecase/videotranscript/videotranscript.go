@@ -655,6 +655,10 @@ func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic, requiremen
 	if res.Rewrite == "" {
 		res.Rewrite = res.Clean
 	}
+	// 23 号 §3.1：润色结果同样逐句显示（保持一行一句形态）。实测 LLM 会把多行
+	// 输入压成单段（clean/rewrite 换行数=0）——对双产物重跑读句切分，形态由本层保证。
+	res.Clean = strings.Join(splitSentences(res.Clean), "\n")
+	res.Rewrite = strings.Join(splitSentences(res.Rewrite), "\n")
 	return res, nil
 }
 
