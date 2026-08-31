@@ -88,6 +88,8 @@ type GenerationUseCase struct {
 	subjectAssetRepo port.SubjectAssetRepository
 	// voiceRepo 音色仓储（可选；26 号计划——voice_clone 终态物化写入）。
 	voiceRepo port.VoiceLibrary
+	// placeholderTranslator 占位符翻译器（28号计划——统一处理 @素材/@主体 引用）。
+	placeholderTranslator *PlaceholderTranslator
 }
 
 // GenerationOption 函数式选项（27 号优化——替代 14 个 Setter，构造时一次性注入）。
@@ -170,6 +172,11 @@ func WithTemplateRepo(tr port.TemplateRepository) GenerationOption {
 // WithURLResolver 注入素材 URL 解析器。
 func WithURLResolver(r port.MaterialURLResolver) GenerationOption {
 	return func(uc *GenerationUseCase) { uc.urlResolver = r }
+}
+
+// WithPlaceholderTranslator 注入占位符翻译器（28号计划）。
+func WithPlaceholderTranslator(t *PlaceholderTranslator) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.placeholderTranslator = t }
 }
 
 // NewGenerationUseCase 创建统一生成用例（支持多厂商）。
@@ -693,10 +700,21 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if err != nil {
 		return entity.GenerationTask{}, err
 	}
-	// 提示词翻译层：@引用（图片/音频/视频）→ 该端点需要的参数格式
-	params, err := translateRefs(in.SubType, cap, in.Params, in.Refs)
-	if err != nil {
-		return entity.GenerationTask{}, err
+	// 提示词翻译层：@引用（图片/音频/视频/主体）→ 该端点需要的参数格式
+	// 28号计划：使用 PlaceholderTranslator 统一处理素材引用和主体引用
+	params := in.Params
+	if uc.placeholderTranslator != nil {
+		provider, _ := uc.getProvider(ctx, in.SubType)
+		params, err = uc.placeholderTranslator.Translate(ctx, provider.Name(), in.SubType, in.Params, in.Refs, in.TenantID)
+		if err != nil {
+			return entity.GenerationTask{}, err
+		}
+	} else {
+		// 降级：使用原有 translateRefs（仅处理素材引用）
+		params, err = translateRefs(in.SubType, cap, in.Params, in.Refs)
+		if err != nil {
+			return entity.GenerationTask{}, err
+		}
 	}
 	if err := adapter.Validate(ctx, cap, params); err != nil {
 		return entity.GenerationTask{}, err
@@ -1623,6 +1641,18 @@ func (uc *GenerationUseCase) generationBoolDefault(ctx context.Context, key stri
 		return fallback
 	}
 	return st.Value == "1" || st.Value == "true"
+}
+
+// settingString 从 system_settings 读取字符串值（未配置回落 fallback）。
+func (uc *GenerationUseCase) settingString(ctx context.Context, key, fallback string) string {
+	if uc.settingRepo == nil {
+		return fallback
+	}
+	st, err := uc.settingRepo.Get(ctx, key)
+	if err != nil || st.Value == "" {
+		return fallback
+	}
+	return st.Value
 }
 
 // UnifiedSubmit 统一提交（傻瓜式：客户端不需要选择端点/模型）。

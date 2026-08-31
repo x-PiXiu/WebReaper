@@ -7,6 +7,7 @@
 //   - 场景描述融入 prompt，无则默认形象展示模板
 //   - 链式任务带 params.avatar_video=true（作品库过滤用——中间产物不进「我的作品」）
 //   - 任务 ID 写回主体任务 params.avatar_task_id（前端 join 任务列表渲染三态/预览）
+//   - 28号改进：prompt 支持用户自定义 + settings 默认值 + @name 引用
 //
 // 决策点（25 号 §2.3.1）：D2 配置 gen_chain_avatar_video 默认开；D3 计入 generation
 // 配额（走 Submit 既有闸门）；D4 链式失败不影响主体可用性，可幂等重试；环境主体不链。
@@ -23,6 +24,7 @@ import (
 	"webreaper/internal/domain/entity"
 )
 
+// defaultAvatarVideoPrompt 兜底默认值（settings 未配置时使用）。
 const defaultAvatarVideoPrompt = "形象展示：正面特写，微笑看向镜头，姿态自然大方，缓慢自然的肢体动作"
 
 // maybeChainAvatarVideo 创建主体成功后的链式钩子：配置关闭或环境主体时跳过；
@@ -63,10 +65,15 @@ func (uc *GenerationUseCase) chainAvatarVideo(ctx context.Context, subject entit
 	sceneDesc, _ := p["scene_description"].(string)
 	sceneImg, _ := p["scene_image"].(string)
 
+	// 28号改进：prompt 支持用户自定义 + settings 默认值
 	prompt := strings.TrimSpace(sceneDesc)
 	if prompt == "" {
-		prompt = defaultAvatarVideoPrompt
+		// 从 system_settings 读取默认 prompt（运营可调）
+		prompt = uc.settingString(ctx, entity.SettingKeyGenDefaultAvatarPrompt, defaultAvatarVideoPrompt)
 	}
+
+	// 28号改进：添加 @name 引用（Vidu 参考生视频需要在 prompt 中引用主体）
+	prompt = fmt.Sprintf("@%s %s", name, prompt)
 
 	subjects := []any{map[string]any{"name": name, "server_id": serverID}}
 	if sceneImg != "" {

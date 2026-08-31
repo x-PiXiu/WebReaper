@@ -26,4 +26,5 @@ const (
 	SettingKeyGenDefaultResolution  = "gen_default_resolution"    // 默认分辨率（如 "1080p"）
 	SettingKeyGenDefaultAspectRatio = "gen_default_aspect_ratio"  // 默认画面比例（如 "16:9"）
 	SettingKeyGenDefaultDuration    = "gen_default_duration"      // 默认时长（秒，如 5）
+	SettingKeyGenDefaultAvatarPrompt = "gen_default_avatar_prompt" // 默认形象视频 prompt（28号计划）
 )
