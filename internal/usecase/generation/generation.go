@@ -1082,6 +1082,17 @@ func (uc *GenerationUseCase) List(ctx context.Context, tenantID string, limit in
 	return uc.repo.List(ctx, tenantID, limit)
 }
 
+// ListActiveAll 列出全部租户的未终态任务（管理后台健康总览/Admin Tools 用——
+// 跨租户监控排队积压与处理中任务数）。
+func (uc *GenerationUseCase) ListActiveAll(ctx context.Context, limit int) ([]entity.GenerationTask, error) {
+	return uc.repo.ListActive(ctx, limit)
+}
+
+// ListRecentFailed 列出全部租户最近的失败任务（管理后台诊断用）。
+func (uc *GenerationUseCase) ListRecentFailed(ctx context.Context, limit int) ([]entity.GenerationTask, error) {
+	return uc.repo.ListFailed(ctx, limit)
+}
+
 // Types 可用端点类型（前端表单驱动）。
 func (uc *GenerationUseCase) Types() []string { return uc.registry.Types() }
 

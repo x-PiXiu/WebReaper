@@ -507,6 +507,27 @@ export const businessApi = {
   // 设为平台默认音色（scope=platform 内仅一条 is_default）
   adminSetDefaultVoice: (voiceId: string) =>
     apiClient.put<unknown, unknown>(`/api/v1/admin/voices/${encodeURIComponent(voiceId)}/default`),
+  // ---- 管理后台·系统健康总览 + 生成任务监控 ----
+  adminSystemHealth: () =>
+    apiClient.get<unknown, {
+      timestamp: string
+      tasks?: { active: number; queueing: number; failed: number }
+      vidu?: { credits: number; status: string }
+      voices?: { platform: number; vidu_refs: number }
+      subjects?: { official: number }
+      settings?: Record<string, string>
+    }>('/api/v1/admin/system/health'),
+  adminListAllTasks: (params?: { state?: string; limit?: number }) =>
+    apiClient.get<unknown, { tasks: Array<{
+      id: string; tenant_id: string; sub_type: string; state: string
+      model: string; err_msg?: string; created_at: string
+    }>; total: number }>('/api/v1/admin/tasks', { params }),
+  adminCancelTask: (taskId: string) =>
+    apiClient.post<unknown, { cancelled: string }>(`/api/v1/admin/tasks/${encodeURIComponent(taskId)}/cancel`),
+  adminGetGenSettings: () =>
+    apiClient.get<unknown, Record<string, string>>('/api/v1/admin/settings/gen'),
+  adminSetGenSetting: (key: string, value: string) =>
+    apiClient.put<unknown, unknown>(`/api/v1/admin/settings/gen/${encodeURIComponent(key)}`, { value }),
   adminCreateVoice: (form: FormData) =>
     apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices', form, {
       headers: { 'Content-Type': 'multipart/form-data' },

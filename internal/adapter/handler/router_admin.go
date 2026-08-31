@@ -76,6 +76,18 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			}
 			// R3 运营指标（LLM 成功率/缓存命中率/配额拒绝/锁竞争——admin 专用）
 			adminGroup.GET("/debug/metrics", r.HandleDebugMetrics)
+			// 系统健康总览 + 生成任务监控（Admin Tools 配套）
+			if r.generationUC != nil {
+				ahh := NewAdminHealthHandler(r.generationUC, r.generationVoices, r.subjectAssetRepo, r.settingRepo, r.generationProvider)
+				adminGroup.GET("/system/health", ahh.HandleSystemHealth)
+				adminGroup.GET("/tasks", ahh.HandleListAllTasks)
+				adminGroup.POST("/tasks/:id/cancel", ahh.HandleAdminCancelTask)
+				// 生成域业务配置（gen_* 键值对——UI 化散落的环境变量）
+				if r.settingRepo != nil {
+					adminGroup.GET("/settings/gen", ahh.HandleGetGenSettings)
+					adminGroup.PUT("/settings/gen/:key", ahh.HandleSetGenSetting)
+				}
+			}
 			// 发布通道管理（三轴重构：双链路共存的手动切换入口）
 			if r.transportRegistry != nil {
 				ta := NewTransportAdminHandler(r.transportRegistry, r.settingRepo)
