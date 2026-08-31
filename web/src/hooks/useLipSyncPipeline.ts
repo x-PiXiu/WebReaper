@@ -48,6 +48,9 @@ export type LipSyncPipelineInput = {
   audioSource?: LipSyncAudioSource
   /** audioSource=upload 时必填：已录音频 URL（先经 uploadAsset 入库） */
   uploadedAudioUrl?: string
+  /** 组合出镜（25 号 §6.5）：环境主体作为第二参考主体——分身在环境里口播；
+   *  仅音频路径 A/C（text 为场景意图）注入，B 路径台词直生不注入（text 即台词） */
+  envSubject?: { serverId: string; name?: string }
 }
 
 export type LipSyncPipelineResume = {
@@ -137,12 +140,14 @@ export async function runLipSyncPipeline(
 
     if (input.subjectServerId) {
       const audioId = audioUrl ? await ensureMaterialId(audioUrl) : undefined
+      const env = audioUrl ? input.envSubject : undefined // B 路径（无音频）不注入环境
       const ref = await submitUnified(buildSubjectReferencePayload({
         brand_id: input.brandId,
         server_id: input.subjectServerId,
         name: input.subjectName,
-        text: prompt,
+        text: env ? `${prompt}（在「${env.name || '环境'}」中）` : prompt,
         audioMaterialId: audioId,
+        envSubject: env,
       }))
       refTaskId = ref.id
       lipsyncTaskId = ref.id

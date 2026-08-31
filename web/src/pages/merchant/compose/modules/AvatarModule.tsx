@@ -5,24 +5,29 @@ import {
   Checkbox,
   Empty,
   Input,
+  Modal,
   Popconfirm,
   Spin,
   Tag,
 } from 'antd'
 import {
   DeleteOutlined,
+  EnvironmentOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   SearchOutlined,
   UserOutlined,
+  VideoCameraOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../../api/business'
 import { CreateSubjectModal } from '../../../../components/compose/CreateSubjectModal'
 import { useSubjectList } from '../../../../hooks/useSubjectList'
-import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
+import { parseGenerationTaskParams, listSceneSubjects } from '../../../../utils/subjectTask'
 import type { ViduSubject } from '../../../../utils/subjectTask'
 import { message } from '../../../../utils/antdApp'
 import { CREATIVE_CDN } from '../../../../config/creativeCdn'
+import type { GenerationTask } from '../../../../types/api'
+
 
 type LibCard = {
   id: string
@@ -38,87 +43,42 @@ type LibCard = {
 }
 
 /**
- * 官方主体展示区（23 号计划 §2.3）。
- * ⚠️ 临时静态样例：服务端缓存代理端点 GET /subjects?ownership=system 尚未提供
- * （见 Docs/问题反馈.md #1），端点就绪后替换为 API 数据——结构已按"即选即用"预留。
+ * 官方主体展示区（23 号 §2.3；25 号 §6 定案：官方主体=平台后台自建）。
+ * ⚠️ 平台资产页（25 号阶段二′b）上线前以静态样例占位。
  */
 const OFFICIAL_SHOWCASE: LibCard[] = [
-  {
-    id: 'official-1',
-    name: '数字人-女-坐',
-    portraitUrl: CREATIVE_CDN.pipeline.copy,
-    timeLabel: '官方主体',
-    tag: '公共',
-    duration: '12s',
-    selectable: false,
-    ready: false,
-  },
-  {
-    id: 'official-2',
-    name: '数字人-男-站',
-    portraitUrl: CREATIVE_CDN.pipeline.voice,
-    timeLabel: '官方主体',
-    tag: '公共',
-    duration: '8s',
-    selectable: false,
-    ready: false,
-  },
-  {
-    id: 'official-3',
-    name: '数字人-女-站',
-    portraitUrl: CREATIVE_CDN.pipeline.mic,
-    timeLabel: '官方主体',
-    tag: '影视',
-    duration: '10s',
-    selectable: false,
-    ready: false,
-  },
-  {
-    id: 'official-4',
-    name: '数字人-男-坐',
-    portraitUrl: CREATIVE_CDN.pipeline.film,
-    timeLabel: '官方主体',
-    tag: '公共',
-    duration: '15s',
-    selectable: false,
-    ready: false,
-  },
-  {
-    id: 'official-5',
-    name: '数字人-女-半身',
-    portraitUrl: CREATIVE_CDN.pipeline.publish,
-    timeLabel: '官方主体',
-    tag: '商务',
-    duration: '9s',
-    selectable: false,
-    ready: false,
-  },
+  { id: 'official-1', name: '官方数字人·陆续上线', portraitUrl: CREATIVE_CDN.pipeline.copy, timeLabel: '平台定制', tag: '人物', selectable: false, ready: false },
+  { id: 'official-2', name: '官方音色·陆续上线', portraitUrl: CREATIVE_CDN.pipeline.voice, timeLabel: '平台定制', tag: '音色', selectable: false, ready: false },
+  { id: 'official-3', name: '官方环境·陆续上线', portraitUrl: CREATIVE_CDN.pipeline.mic, timeLabel: '平台定制', tag: '环境', selectable: false, ready: false },
 ]
 
 function formatUploadTime(iso: string) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `上传于 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `上传于 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/** 分身状态徽标（23 号计划 §2.3：创建中 / 失败 / 可用；链式形象视频上线后补"形象视频生成中"态） */
-function subjectTag(s: ViduSubject) {
+/** 分身三态徽标（25 号阶段二：创建中 → 形象视频生成中 → 可用；D4 失败可重试） */
+function subjectTag(s: ViduSubject, avatarTask?: GenerationTask) {
   if (s.state !== 'success') {
-    if (s.state === 'failed') return '失败'
-    return '创建中'
+    return { label: s.state === 'failed' ? '失败' : '创建中', tone: s.state === 'failed' ? 'danger' : 'processing' }
   }
-  if (s.hasVideo) return '可用 · 视频'
-  return '可用'
+  if (s.avatarTaskId && avatarTask) {
+    if (avatarTask.state === 'success') return { label: '可用', tone: 'success' }
+    if (avatarTask.state === 'failed' || avatarTask.state === 'cancelled') return { label: '形象视频失败', tone: 'warning' }
+    return { label: '形象视频生成中', tone: 'processing' }
+  }
+  return { label: '可用 · 无形象视频', tone: 'success' }
 }
 
-function subjectToCard(s: ViduSubject): LibCard {
+function subjectToCard(s: ViduSubject, avatarTask?: GenerationTask): LibCard {
   return {
     id: s.taskId,
     name: s.name,
     portraitUrl: s.portraitUrl,
     timeLabel: formatUploadTime(s.createdAt),
-    tag: subjectTag(s),
+    tag: subjectTag(s, avatarTask).label,
     duration: s.hasVideo ? '≤5s' : undefined,
     selectable: true,
     ready: s.state === 'success' && !!s.serverId,
@@ -127,7 +87,23 @@ function subjectToCard(s: ViduSubject): LibCard {
   }
 }
 
-/** 分身管理页（23 号计划 §2.3）：上「官方主体」网格 + 下「我的分身」列表 */
+function sceneToCard(s: ViduSubject): LibCard {
+  return {
+    id: s.taskId,
+    name: s.name,
+    portraitUrl: s.portraitUrl,
+    timeLabel: formatUploadTime(s.createdAt),
+    tag: '环境',
+    selectable: true,
+    ready: s.state === 'success' && !!s.serverId,
+    serverId: s.serverId || undefined,
+    subject: s,
+  }
+}
+
+type PreviewState = { subject: ViduSubject; url?: string } | null
+
+/** 数字资产管理页（23 号 §2.3 + 25 号 §6.5）：官方区 / 我的环境 / 我的分身 */
 export default function AvatarModule() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -135,7 +111,10 @@ export default function AvatarModule() {
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
+  const [createKind, setCreateKind] = useState<'person' | 'scene'>('person')
   const [deleting, setDeleting] = useState(false)
+  const [preview, setPreview] = useState<PreviewState>(null)
+  const [retrying, setRetrying] = useState('')
 
   useEffect(() => {
     if (searchParams.get('create') === '1' || searchParams.get('create') === 'subject') {
@@ -156,12 +135,37 @@ export default function AvatarModule() {
     return Array.from(ids)
   }, [tasks])
 
-  const mineCards = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    const all = subjects.map(subjectToCard)
-    if (!needle) return all
-    return all.filter((c) => c.name.toLowerCase().includes(needle) || c.tag.toLowerCase().includes(needle))
-  }, [subjects, q])
+  // 链式形象视频任务 join（params.avatar_video=true 的 reference2video 任务）
+  const avatarTaskById = useMemo(() => {
+    const m = new Map<string, GenerationTask>()
+    for (const t of tasks || []) {
+      if (t.sub_type !== 'reference2video') continue
+      if (parseGenerationTaskParams(t).avatar_video !== true) continue
+      m.set(t.id, t)
+    }
+    return m
+  }, [tasks])
+
+  const sceneSubjects = useMemo(() => listSceneSubjects(subjects), [subjects])
+  const personSubjects = useMemo(
+    () => subjects.filter((s) => s.kind === 'person'),
+    [subjects],
+  )
+
+  const needle = q.trim().toLowerCase()
+  const personCards = useMemo(
+    () => personSubjects
+      .map((s) => subjectToCard(s, avatarTaskById.get(s.avatarTaskId)))
+      .filter((c) => !needle || c.name.toLowerCase().includes(needle)),
+    [personSubjects, avatarTaskById, needle],
+  )
+  const sceneCards = useMemo(
+    () => sceneSubjects.map(sceneToCard).filter((c) => !needle || c.name.toLowerCase().includes(needle)),
+    [sceneSubjects, needle],
+  )
+
+  const avatarVideoUrl = (t?: GenerationTask) =>
+    t?.state === 'success' ? (t.creations?.[0]?.stored_url || t.creations?.[0]?.url || '') : ''
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected((prev) => {
@@ -175,7 +179,7 @@ export default function AvatarModule() {
     setDeleting(true)
     try {
       await Promise.all(selected.map((id) => businessApi.deleteGenerationTask(id)))
-      message.success(`已删除 ${selected.length} 个数字人`)
+      message.success(`已删除 ${selected.length} 项`)
       setSelected([])
       refetch()
     } catch { /* 拦截器 */ } finally {
@@ -183,18 +187,41 @@ export default function AvatarModule() {
     }
   }
 
-  const onCardAction = (card: LibCard) => {
-    if (card.ready && card.serverId) {
-      navigate(`/m/compose/lipsync?subject=${encodeURIComponent(card.serverId)}`)
-      return
+  /** 重试/补建形象视频（D4：幂等，未终态任务服务端直接返回） */
+  const retryAvatarVideo = async (s: ViduSubject) => {
+    setRetrying(s.taskId)
+    try {
+      await businessApi.retryAvatarVideo(s.taskId)
+      message.success('形象视频任务已提交——生成中')
+      refetch()
+    } catch { /* 拦截器已提示 */ } finally {
+      setRetrying('')
     }
-    message.info(card.subject?.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中')
   }
 
-  const renderCard = (card: LibCard, opts: { official?: boolean }) => {
+  const onPersonCardAction = (card: LibCard) => {
+    const s = card.subject!
+    if (!card.ready) {
+      message.info(s.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中')
+      return
+    }
+    const avatarTask = avatarTaskById.get(s.avatarTaskId)
+    const url = avatarVideoUrl(avatarTask)
+    if (url) {
+      setPreview({ subject: s, url })
+      return
+    }
+    navigate(`/m/compose/lipsync?subject=${encodeURIComponent(card.serverId!)}`)
+  }
+
+  const renderCard = (card: LibCard, opts: { official?: boolean; scene?: boolean }) => {
     const checked = selected.includes(card.id)
-    const actionLabel = opts.official ? '即将接入' : card.ready ? '拍口播' : '查看状态'
-    const publicTag = card.tag === '公共' || card.tag === '影视' || card.tag === '商务'
+    const actionLabel = opts.official ? '敬请期待'
+      : opts.scene ? (card.ready ? '向导中选择' : '查看状态')
+        : card.ready ? (avatarVideoUrl(avatarTaskById.get(card.subject!.avatarTaskId)) ? '预览形象' : '拍口播') : '查看状态'
+    const tagTone = opts.scene || opts.official ? undefined
+      : subjectTag(card.subject!, avatarTaskById.get(card.subject!.avatarTaskId)).tone
+    const publicTag = opts.official
     return (
       <li key={card.id} className="dh-lib-card">
         {card.selectable && (
@@ -213,12 +240,12 @@ export default function AvatarModule() {
           type="button"
           className="dh-lib-card-cover"
           onClick={() => {
-            if (opts.official) {
-              // 官方主体端点未接入前：样例卡引导定制同款
-              setCreateOpen(true)
+            if (opts.official) return
+            if (opts.scene) {
+              message.info('在口播向导第②步「出镜环境」中选择使用——与数字分身组合出镜')
               return
             }
-            onCardAction(card)
+            onPersonCardAction(card)
           }}
           aria-label={actionLabel}
         >
@@ -226,19 +253,19 @@ export default function AvatarModule() {
             <img src={card.portraitUrl} alt="" loading="lazy" />
           ) : (
             <span className="dh-lib-card-placeholder">
-              <UserOutlined />
+              {opts.scene ? <EnvironmentOutlined /> : <UserOutlined />}
             </span>
           )}
 
           {opts.official && <span className="dh-lib-card-badge">官方</span>}
 
-          <span className={`dh-lib-card-tag${publicTag ? ' is-public' : ''}`}>
+          <span className={`dh-lib-card-tag${publicTag ? ' is-public' : ''}`} data-tone={tagTone}>
             {card.tag}
           </span>
 
           <span className="dh-lib-card-overlay" aria-hidden>
             <Button type="primary" size="small" tabIndex={-1}>
-              {opts.official ? '去定制同款' : actionLabel}
+              {actionLabel}
             </Button>
           </span>
         </button>
@@ -254,6 +281,22 @@ export default function AvatarModule() {
               </span>
             )}
           </span>
+          {!opts.official && !opts.scene && card.ready && (() => {
+            const s = card.subject!
+            const avatarTask = avatarTaskById.get(s.avatarTaskId)
+            const hasVideo = !!avatarVideoUrl(avatarTask)
+            const failed = !!s.avatarTaskId && (avatarTask?.state === 'failed' || avatarTask?.state === 'cancelled')
+            if (hasVideo) return null
+            return (
+              <a
+                role="button"
+                style={{ fontSize: 12, display: 'inline-block', marginTop: 4 }}
+                onClick={(e) => { e.stopPropagation(); retryAvatarVideo(s) }}
+              >
+                {retrying === s.taskId ? '提交中…' : failed ? '重试形象视频' : '生成形象视频'}
+              </a>
+            )
+          })()}
         </div>
       </li>
     )
@@ -263,49 +306,45 @@ export default function AvatarModule() {
     <div className="dh-lib">
       <header className="dh-lib-head">
         <div className="dh-lib-titles">
-          <h1 className="dh-lib-title">分身管理</h1>
-          <p className="dh-lib-lead">官方主体即选即用；定制个人分身，跨视频人物形象一致</p>
+          <h1 className="dh-lib-title">数字资产管理</h1>
+          <p className="dh-lib-lead">数字分身即选即用；注册自己的店内环境，组合出镜——分身在你的店里口播</p>
         </div>
 
         <div className="dh-lib-actions">
           <Input
             allowClear
             className="dh-lib-search"
-            placeholder="搜索我的分身"
+            placeholder="搜索分身 / 环境"
             prefix={<SearchOutlined />}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
           <Button
+            icon={<EnvironmentOutlined />}
+            className="dh-lib-btn-ghost"
+            onClick={() => { setCreateKind('scene'); setCreateOpen(true) }}
+          >
+            添加环境
+          </Button>
+          <Button
             type="primary"
             className="dh-lib-btn-primary"
             icon={<PlusOutlined />}
-            onClick={() => setCreateOpen(true)}
+            onClick={() => { setCreateKind('person'); setCreateOpen(true) }}
           >
             定制数字人
           </Button>
         </div>
       </header>
 
-      {/* 官方主体区（§2.3 上区）：服务端缓存代理端点就绪后改为即选即用 */}
+      {/* 官方主体区（平台自建资产——25 号阶段二′b 管理后台上线前占位） */}
       <section className="dh-lib-section">
         <div className="dh-lib-section-head">
-          <h2 className="dh-lib-section-title">官方主体</h2>
-          <Tag color="orange">接入中</Tag>
-          <span className="dh-lib-section-note">官方主体库即将开放（等服务端端点），当前展示样例</span>
-        </div>
-        <ul className="dh-lib-grid" role="list">
-          {OFFICIAL_SHOWCASE.map((card) => renderCard(card, { official: true }))}
-        </ul>
-      </section>
-
-      {/* 我的分身区（§2.3 下区） */}
-      <section className="dh-lib-section">
-        <div className="dh-lib-section-head">
-          <h2 className="dh-lib-section-title">我的分身</h2>
-          <span className="dh-lib-section-note">{mineCards.length} 个 · 上传形象照即可创建</span>
+          <h2 className="dh-lib-section-title">官方资产</h2>
+          <Tag color="orange">筹备中</Tag>
+          <span className="dh-lib-section-note">平台定制的人物形象 / 环境模板 / 音色——陆续上线</span>
           <Popconfirm
-            title={`删除选中的 ${selected.length} 个数字人？`}
+            title={`删除选中的 ${selected.length} 项？`}
             description="仅移除本地记录，Vidu 侧主体不受影响"
             okText="删除"
             okButtonProps={{ danger: true, loading: deleting }}
@@ -322,38 +361,101 @@ export default function AvatarModule() {
             </Button>
           </Popconfirm>
         </div>
+        <ul className="dh-lib-grid" role="list">
+          {OFFICIAL_SHOWCASE.map((card) => renderCard(card, { official: true }))}
+        </ul>
+      </section>
 
-        {isLoading && mineCards.length === 0 ? (
+      {/* 我的环境（25 号 §6.5：组合出镜资产——分身 × 环境） */}
+      <section className="dh-lib-section">
+        <div className="dh-lib-section-head">
+          <h2 className="dh-lib-section-title">我的环境</h2>
+          <span className="dh-lib-section-note">{sceneCards.length} 个 · 拍 2-3 张店内照片注册，口播时与分身组合出镜</span>
+        </div>
+        {sceneCards.length === 0 ? (
+          <div className="dh-lib-empty">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有环境——拍两张店内/产品照片，让分身在你的店里口播">
+              <Button icon={<EnvironmentOutlined />} onClick={() => { setCreateKind('scene'); setCreateOpen(true) }}>
+                添加出镜环境
+              </Button>
+            </Empty>
+          </div>
+        ) : (
+          <ul className="dh-lib-grid" role="list">
+            {sceneCards.map((card) => renderCard(card, { scene: true }))}
+          </ul>
+        )}
+      </section>
+
+      {/* 我的分身（§2.3 下区；三态：创建中/形象视频生成中/可用） */}
+      <section className="dh-lib-section">
+        <div className="dh-lib-section-head">
+          <h2 className="dh-lib-section-title">我的分身</h2>
+          <span className="dh-lib-section-note">{personCards.length} 个 · 上传形象照即可创建，形象视频自动生成供预览</span>
+        </div>
+        {isLoading && personCards.length === 0 ? (
           <div className="dh-lib-empty">
             <Spin size="large" />
           </div>
-        ) : mineCards.length === 0 ? (
+        ) : personCards.length === 0 ? (
           <div className="dh-lib-empty">
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有数字分身，先定制一个吧">
-              <Button type="primary" className="dh-lib-btn-primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              <Button type="primary" className="dh-lib-btn-primary" icon={<PlusOutlined />} onClick={() => { setCreateKind('person'); setCreateOpen(true) }}>
                 定制数字人
               </Button>
             </Empty>
           </div>
         ) : (
           <ul className="dh-lib-grid" role="list">
-            {mineCards.map((card) => renderCard(card, {}))}
+            {personCards.map((card) => renderCard(card, {}))}
           </ul>
         )}
       </section>
 
       <CreateSubjectModal
         open={createOpen}
+        kind={createKind}
         voices={myVoices}
         onClose={() => setCreateOpen(false)}
         onCreated={(serverId) => {
           refetch()
-          // 来自向导的深链创建：完成后带 subject 回向导并自动预选新分身
-          if (searchParams.get('from') === 'wizard' && serverId) {
+          if (searchParams.get('from') === 'wizard' && serverId && createKind === 'person') {
             navigate(`/m/compose/lipsync?subject=${encodeURIComponent(serverId)}`)
           }
         }}
       />
+
+      {/* 分身预览弹窗（§2.3：形象视频 10s 循环 + 用此分身去创作） */}
+      <Modal
+        open={!!preview}
+        onCancel={() => setPreview(null)}
+        footer={null}
+        width={480}
+        title={<span><VideoCameraOutlined /> 分身预览 · {preview?.subject.name}</span>}
+      >
+        {preview?.url ? (
+          <video
+            src={preview.url}
+            controls
+            autoPlay
+            loop
+            muted
+            style={{ width: '100%', maxHeight: 520, borderRadius: 12, background: '#000' }}
+          />
+        ) : null}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+          <Button onClick={() => setPreview(null)}>关闭</Button>
+          <Button
+            type="primary"
+            onClick={() => {
+              navigate(`/m/compose/lipsync?subject=${encodeURIComponent(preview!.subject.serverId)}`)
+              setPreview(null)
+            }}
+          >
+            用此分身去创作
+          </Button>
+        </div>
+      </Modal>
     </div>
   )
 }

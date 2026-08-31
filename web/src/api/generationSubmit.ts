@@ -27,7 +27,7 @@ export type UnifiedSubmitPayload = {
 }
 
 /** 主体引用（reference2video 一致性——BE-SUBJ-01） */
-export type SubjectRef = { name: string; server_id: string }
+export type SubjectRef = { name: string; server_id?: string; images?: string[] }
 
 /** 合并统一提交高级参数（model / seed / voice_setting_* 等——服务端 params 白名单合并） */
 export function mergeSubmitParams(
@@ -253,6 +253,8 @@ export function buildSubjectRegisterPayload(input: {
   sceneImageUrl?: string
   /** 23 号计划 §2.1③：可选场景描述（一句话：主角在哪个场景做什么） */
   sceneDescription?: string
+  /** 25 号 §6.5：资产分类——person=人物分身（默认）/ scene=环境主体 */
+  kind?: 'person' | 'scene'
 }): UnifiedSubmitPayload {
   const name = (input.name || '').trim()
   if (!name) throw new Error('请输入主体名称')
@@ -269,6 +271,7 @@ export function buildSubjectRegisterPayload(input: {
   const sceneDesc = (input.sceneDescription || '').trim()
   if (input.sceneImageUrl) params.scene_image = input.sceneImageUrl
   if (sceneDesc) params.scene_description = sceneDesc
+  if (input.kind) params.kind = input.kind
   const materials = [...ids]
   if (!materials.length && urls.length) materials.push(...urls)
   if (!materials.length && video) materials.push(video)
@@ -291,16 +294,21 @@ export function buildSubjectReferencePayload(input: {
   name?: string
   text: string
   audioMaterialId?: string
+  /** 组合出镜（25 号 §6.5）：环境主体作为第二参考主体——分身在环境里口播 */
+  envSubject?: { serverId: string; name?: string }
 }): UnifiedSubmitPayload {
-  const subject: SubjectRef = {
+  const subjects: SubjectRef[] = [{
     name: (input.name || '主体').trim() || '主体',
     server_id: input.server_id.trim(),
+  }]
+  if (input.envSubject?.serverId) {
+    subjects.push({ name: (input.envSubject.name || '环境').trim(), server_id: input.envSubject.serverId })
   }
   return {
     brand_id: input.brand_id,
     text: input.text.trim(),
     materials: input.audioMaterialId ? [input.audioMaterialId] : undefined,
-    params: deliverableWorkParams({ subjects: [subject] }),
+    params: deliverableWorkParams({ subjects }),
   }
 }
 

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Popconfirm, Popover, Segmented, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Input, Popconfirm, Popover, Segmented, Select, Space, Tag, Typography } from 'antd'
 import { message } from '../../../utils/antdApp'
 import {
   LinkOutlined, EditOutlined, UploadOutlined, VideoCameraOutlined, UserOutlined,
   RocketOutlined, CheckCircleOutlined, SoundOutlined, ExportOutlined, ClockCircleOutlined,
-  RightOutlined, VideoCameraAddOutlined, StopOutlined,
+  RightOutlined, VideoCameraAddOutlined, StopOutlined, EnvironmentOutlined,
 } from '@ant-design/icons'
 import { transcriptLines } from '../../../utils/transcript'
 import { checkMaterialFileSize, friendlyGenerationError } from '../../../utils/generationErrors'
@@ -18,7 +18,7 @@ import { useBrandContext } from '../../../hooks/useBrands'
 import { runLipSyncPipeline, type LipSyncAudioSource, type LipSyncPipelineStage } from '../../../hooks/useLipSyncPipeline'
 import { useGenerationTasks, GENERATION_TASKS_KEY } from '../../../hooks/useGenerationTasks'
 import { useSubjectList } from '../../../hooks/useSubjectList'
-import { parseGenerationTaskParams } from '../../../utils/subjectTask'
+import { parseGenerationTaskParams, listSceneSubjects } from '../../../utils/subjectTask'
 import { ScriptLinesEditor } from '../../../components/compose/ScriptLinesEditor'
 import { SubjectPicker } from '../../../components/compose/SubjectPicker'
 import BrollDrawer from '../../../components/compose/BrollDrawer'
@@ -110,6 +110,8 @@ export default function LipSyncWizard() {
   const [realVideoName, setRealVideoName] = useState('')
   const [realVideoSec, setRealVideoSec] = useState(0)
   const [intent, setIntent] = useState(draft.wizardIntent || '')
+  // 出镜环境（25 号 §6.5 组合出镜）：环境主体 server_id；空=默认棚拍
+  const [envSubjectId, setEnvSubjectId] = useState(draft.wizardEnvSubjectId || '')
   // ④ 音色
   const [voiceId, setVoiceId] = useState(draft.wizardVoiceId || '')
   // ④ 音频来源（23 号计划三选一）：A 文本+音色（默认）/ B 文本直生 / C 上传已录音频
@@ -160,9 +162,10 @@ export default function LipSyncWizard() {
       wizardResultUrl: resultUrl,
       wizardAudioSource: audioSource,
       wizardUploadedAudioUrl: uploadedAudioUrl,
+      wizardEnvSubjectId: envSubjectId,
       wizardSchema: 4,
     })
-  }, [step, presence, topic, script, cleanText, voiceId, realVideoUrl, subjectServerId, intent, ttsTaskId, refTaskId, lipsyncTaskId, resultUrl, audioSource, uploadedAudioUrl])
+  }, [step, presence, topic, script, cleanText, voiceId, realVideoUrl, subjectServerId, intent, ttsTaskId, refTaskId, lipsyncTaskId, resultUrl, audioSource, uploadedAudioUrl, envSubjectId])
 
   // 预填原文（灵感广场等入口带入）原样进编辑器——不自动润色（23 号计划 §3.1：显式可选）
   useEffect(() => {
@@ -183,7 +186,13 @@ export default function LipSyncWizard() {
   }, [])
 
   const { tasks } = useGenerationTasks({ refetchInterval: false })
-  const { ready: subjects } = useSubjectList({ refetchInterval: false })
+  const { subjects: allSubjects, ready: subjects } = useSubjectList({ refetchInterval: false })
+  // 组合出镜（25 号 §6.5）：已注册环境主体（我的店面/后厨/产品展台）
+  const sceneSubjects = useMemo(() => listSceneSubjects(allSubjects), [allSubjects])
+  const selectedEnv = useMemo(
+    () => sceneSubjects.find((e) => e.serverId === envSubjectId && e.state === 'success'),
+    [sceneSubjects, envSubjectId],
+  )
   const myVoices = useMemo(() => {
     const ids = new Set<string>()
     for (const t of tasks) {
@@ -329,6 +338,7 @@ export default function LipSyncWizard() {
         intent,
         audioSource,
         uploadedAudioUrl: uploadedAudioUrl || undefined,
+        envSubject: selectedEnv ? { serverId: selectedEnv.serverId, name: selectedEnv.name } : undefined,
       }, {
         onStage: setPipelineStage,
         onTaskSubmit: (_stage, taskId) => setActiveTaskId(taskId),
@@ -819,6 +829,31 @@ export default function LipSyncWizard() {
                   onChange={e => setIntent(e.target.value)}
                   maxLength={200}
                 />
+                <div>
+                  <label style={{ display: 'block', marginBottom: 4 }}>
+                    <EnvironmentOutlined /> 出镜环境（可选——分身在你的店里口播）
+                  </label>
+                  <Select
+                    allowClear
+                    placeholder="默认纯色棚拍；选择已注册的环境（店内大堂/后厨/门头…）"
+                    value={envSubjectId || undefined}
+                    onChange={(v) => setEnvSubjectId(v || '')}
+                    style={{ width: '100%', maxWidth: 480 }}
+                    notFoundContent={
+                      <span style={{ fontSize: 12 }}>
+                        还没有环境——去<a href="/m/compose/avatar" target="_blank" rel="noreferrer">数字资产页</a>拍 2-3 张店内照片注册
+                      </span>
+                    }
+                    options={sceneSubjects
+                      .filter((e) => e.state === 'success' && e.serverId)
+                      .map((e) => ({ value: e.serverId, label: e.name }))}
+                  />
+                  {envSubjectId && audioSource === 'direct' && (
+                    <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+                      「文本直生」路径台词即提示词，环境暂不注入画面——建议改用「文本 + 音色配音」获得组合出镜效果
+                    </Text>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -931,6 +966,9 @@ export default function LipSyncWizard() {
               {audioSource === 'direct' ? '文本直生（分身端内合成语音）'
                 : audioSource === 'upload' ? '已录音频' : (voiceId ? '音色已选' : '默认音色')}
             </Tag>
+            {selectedEnv && (
+              <Tag color="cyan" icon={<EnvironmentOutlined />}>出镜环境：{selectedEnv.name}</Tag>
+            )}
             <Tag color="blue">
               {audioSource === 'direct'
                 ? '链路：台词直生成片（单步）'

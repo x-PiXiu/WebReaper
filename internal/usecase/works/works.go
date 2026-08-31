@@ -241,6 +241,12 @@ var deliverableSubTypes = map[string]bool{
 func isDeliverableTask(t entity.GenerationTask) bool {
 	var params map[string]any
 	_ = json.Unmarshal([]byte(t.ParamsJSON), &params)
+	// 链式形象视频（25 号阶段二）：分身预览中间产物，不进「我的作品」
+	if v, ok := params["avatar_video"]; ok {
+		if b, ok := v.(bool); ok && b {
+			return false
+		}
+	}
 	if v, ok := params["deliverable"]; ok {
 		if b, ok := v.(bool); ok && b {
 			return true

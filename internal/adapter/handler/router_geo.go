@@ -203,6 +203,8 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	api.GET("/generation/tasks", gh.HandleList)
 	api.GET("/generation/types", gh.HandleTypes)
 	api.POST("/generation/tasks/:id/cancel", gh.HandleCancel)
+	// 分身形象视频重试/补建（25 号阶段二——链式创建失败或配置关闭后补建）
+	api.POST("/generation/tasks/:id/avatar-video", gh.HandleRetryAvatarVideo)
 	api.DELETE("/generation/tasks/:id", gh.HandleDelete)
 	api.GET("/generation/voices", gh.HandleVoices)
 	// 官方主体缓存代理（25 号阶段一——前端读本地端点，不直连 Vidu）

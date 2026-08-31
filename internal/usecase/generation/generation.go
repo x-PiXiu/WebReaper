@@ -1000,11 +1000,12 @@ func (uc *GenerationUseCase) submitSubject(ctx context.Context, in UnifiedSubmit
 	}
 	params := entity.GenerationParams{"name": in.Text}
 
-	// ① 优先从 Params 直传（前端 buildSubjectRegisterPayload 已写 images/videos URL）
-	if imgs, ok := in.Params["images"].([]string); ok && len(imgs) > 0 {
+	// ① 优先从 Params 直传（前端 buildSubjectRegisterPayload 已写 images/videos URL）。
+	// HTTP JSON 反序列化后数组是 []any（直连 API 调用方），前端 TS 是 []string——两种形态都接
+	if imgs := stringSliceOf(in.Params["images"]); len(imgs) > 0 {
 		params["images"] = imgs
 	}
-	if vids, ok := in.Params["videos"].([]string); ok && len(vids) > 0 {
+	if vids := stringSliceOf(in.Params["videos"]); len(vids) > 0 {
 		params["videos"] = vids
 	}
 
@@ -1057,11 +1058,44 @@ func (uc *GenerationUseCase) submitSubject(ctx context.Context, in UnifiedSubmit
 		params["voice_id"] = v
 	}
 
-	return uc.Submit(ctx, SubmitInput{
+	// ④ 资产分类与场景参数（25 号 §6.5/§2.1③）：kind=person|scene（环境主体）；
+	// scene_image/scene_description 供链式形象视频 D1 注入
+	for _, k := range []string{"kind", "scene_image", "scene_description"} {
+		if v, ok := in.Params[k].(string); ok && v != "" {
+			params[k] = v
+		}
+	}
+
+	task, err := uc.Submit(ctx, SubmitInput{
 		TenantID: in.TenantID, BrandID: in.BrandID,
 		SubType: "subject", Model: "", Params: params,
 		Watermark: in.Watermark, OffPeak: in.OffPeak,
 	})
+	if err != nil {
+		return task, err
+	}
+	// 注册成功 → 链式 10s 形象视频（25 号阶段二；失败不影响主体，D4）
+	if task.State == entity.TaskStateSuccess {
+		uc.maybeChainAvatarVideo(ctx, task)
+	}
+	return task, nil
+}
+
+// stringSliceOf 兼容 []string 与 []any（JSON 反序列化形态）的字符串数组提取。
+func stringSliceOf(v any) []string {
+	switch arr := v.(type) {
+	case []string:
+		return arr
+	case []any:
+		out := make([]string, 0, len(arr))
+		for _, it := range arr {
+			if s, ok := it.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // containsStrAny 列表包含（URL 直传素材匹配用）。

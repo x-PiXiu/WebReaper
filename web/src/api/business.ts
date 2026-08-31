@@ -429,6 +429,9 @@ export const businessApi = {
 
   cancelGenerationTask: (id: string) =>
     apiClient.post<unknown, { cancelled: string }>(`/api/v1/generation/tasks/${id}/cancel`),
+  // 分身形象视频重试/补建（25 号阶段二 D4——幂等，未终态链式任务直接返回）
+  retryAvatarVideo: (taskId: string) =>
+    apiClient.post<unknown, GenerationTask>(`/api/v1/generation/tasks/${taskId}/avatar-video`),
 
   deleteGenerationTask: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/generation/tasks/${id}`),

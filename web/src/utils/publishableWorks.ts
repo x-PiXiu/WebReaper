@@ -29,6 +29,7 @@ function taskFlag(task: GenerationTask, key: string): boolean {
 
 /** 生成任务是否为可发布成片（非素材库中间产物） */
 export function isDeliverableGenerationTask(task: GenerationTask): boolean {
+  if (taskFlag(task, 'avatar_video')) return false // 链式形象视频（25 号阶段二）——分身预览中间产物
   if (taskFlag(task, 'deliverable') || taskFlag(task, 'work_product')) return true
   const sub = (task.sub_type || '').toLowerCase()
   if (DELIVERABLE_SUB_TYPES.has(sub)) return true

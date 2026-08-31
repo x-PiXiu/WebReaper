@@ -326,6 +326,21 @@ func validateRefsOwnership(tenantID string, refs []entity.PromptRef) error {
 	return nil
 }
 
+// HandleRetryAvatarVideo POST /api/v1/generation/tasks/:id/avatar-video
+// 重试/补建分身形象视频（25 号阶段二 D4——幂等：未终态链式任务直接返回）。
+func (h *GenerationHandler) HandleRetryAvatarVideo(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	task, err := h.uc.RetryAvatarVideo(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, generationTaskToView(task))
+}
+
 // HandleListOfficialSubjects GET /api/v1/subjects?ownership=system&page_token=&count=
 // 官方主体缓存代理（25 号阶段一——23 号 §2.2：前端读本地端点，不直连 Vidu）。
 // 仅支持 ownership=system（个人主体走本地 subject 任务聚合，不查服务商）。

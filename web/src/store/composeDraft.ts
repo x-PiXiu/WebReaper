@@ -59,6 +59,7 @@ export type ComposeDraft = {
   wizardAudioSource?: 'tts' | 'direct' | 'upload' // 音频路径（23 号计划：A 配音/B 文本直生/C 上传录音）
   wizardSchema?: number      // 向导步骤 schema 版本（4=四步式；缺省视为旧 5 步，读取时迁移一次）
   wizardUploadedAudioUrl?: string                 // 路径 C：已录音频素材 URL
+  wizardEnvSubjectId?: string                     // 25 号 §6.5：出镜环境主体 server_id（空=棚拍）
 }
 
 type ComposeDraftState = ComposeDraft & {
