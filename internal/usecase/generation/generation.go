@@ -34,7 +34,7 @@ var subTypeToCapID = map[string]string{
 	"start_end2video": "video",
 	"reference2video": "video",
 	"multiframe":      "video",
-	"digital_human":   "digital-human",
+	"digital_human":   "digital-human", // 已废弃（2026-08-31），保留映射兼容旧任务查询
 	"lip_sync":        "video",
 	"subject":         "video",
 	"text2image":      "image",

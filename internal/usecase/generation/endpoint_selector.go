@@ -27,7 +27,7 @@ import (
 //   - 1张图片 → img2video
 //   - 2张图片 → start_end2video
 //   - 3-7张图片 → reference2video
-//   - 1张图片+音频 → digital_human
+//   - 1张图片+音频 → lip_sync（digital_human 已废弃）
 //   - 1张图片+文本 → img2video
 //   - 1个视频+音频 → lip_sync
 //   - 1个视频+文本 → lip_sync
@@ -229,11 +229,12 @@ func (s *EndpointSelectorImpl) selectEndpoint(req entity.UnifiedGenerationReques
 		return "lip_sync", params, nil
 	}
 
-	// 情况3: 单张图片+音频 → 数字人口播
+	// 情况3: 单张图片+音频 → 对口型（图片+音频，复用lip_sync端点）
+	// digital_human 已废弃（2026-08-31确认），统一走 lip_sync
 	if stats.ImageCount == 1 && stats.AudioCount > 0 {
-		params := s.buildDigitalHumanParams(req, stats)
-		params["__sub_type"] = "digital_human"
-		return "digital_human", params, nil
+		params := s.buildLipSyncParams(req, stats)
+		params["__sub_type"] = "lip_sync"
+		return "lip_sync", params, nil
 	}
 
 	// 情况4: 单张图片+文本 → 图生视频

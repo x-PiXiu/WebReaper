@@ -22,6 +22,7 @@ import {
 import { businessApi } from '../../../../api/business'
 import { CreateSubjectModal } from '../../../../components/compose/CreateSubjectModal'
 import { useSubjectList } from '../../../../hooks/useSubjectList'
+import { useOfficialSubjects } from '../../../../hooks/useSubjectAssets'
 import { parseGenerationTaskParams, listSceneSubjects } from '../../../../utils/subjectTask'
 import type { ViduSubject } from '../../../../utils/subjectTask'
 import { message } from '../../../../utils/antdApp'
@@ -42,15 +43,7 @@ type LibCard = {
   subject?: ViduSubject
 }
 
-/**
- * 官方主体展示区（23 号 §2.3；25 号 §6 定案：官方主体=平台后台自建）。
- * ⚠️ 平台资产页（25 号阶段二′b）上线前以静态样例占位。
- */
-const OFFICIAL_SHOWCASE: LibCard[] = [
-  { id: 'official-1', name: '官方数字人·陆续上线', portraitUrl: CREATIVE_CDN.pipeline.copy, timeLabel: '平台定制', tag: '人物', selectable: false, ready: false },
-  { id: 'official-2', name: '官方音色·陆续上线', portraitUrl: CREATIVE_CDN.pipeline.voice, timeLabel: '平台定制', tag: '音色', selectable: false, ready: false },
-  { id: 'official-3', name: '官方环境·陆续上线', portraitUrl: CREATIVE_CDN.pipeline.mic, timeLabel: '平台定制', tag: '环境', selectable: false, ready: false },
-]
+/** 官方主体展示区已改用真实API（27号优化）：useOfficialSubjects hook 从 subject_assets(scope=official) 读取 */
 
 function formatUploadTime(iso: string) {
   const d = new Date(iso)
@@ -108,6 +101,7 @@ export default function AvatarModule() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { subjects, tasks, refetch, isLoading } = useSubjectList({ refetchInterval: 8_000 })
+  const { subjects: officialSubjects, isLoading: officialLoading } = useOfficialSubjects({ limit: 50 })
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
@@ -361,9 +355,29 @@ export default function AvatarModule() {
             </Button>
           </Popconfirm>
         </div>
-        <ul className="dh-lib-grid" role="list">
-          {OFFICIAL_SHOWCASE.map((card) => renderCard(card, { official: true }))}
-        </ul>
+        {officialLoading ? (
+          <div className="dh-lib-empty"><Spin /></div>
+        ) : officialSubjects.length === 0 ? (
+          <div className="dh-lib-empty">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="官方主体暂未上线，敬请期待" />
+          </div>
+        ) : (
+          <ul className="dh-lib-grid" role="list">
+            {officialSubjects.map((asset) => {
+              const card: LibCard = {
+                id: asset.id,
+                name: asset.name,
+                portraitUrl: asset.portrait_url || CREATIVE_CDN.pipeline.copy,
+                timeLabel: '官方主体',
+                tag: asset.kind === 'scene' ? '环境' : '人物',
+                selectable: true,
+                ready: true,
+                serverId: asset.server_id,
+              }
+              return renderCard(card, { official: true })
+            })}
+          </ul>
+        )}
       </section>
 
       {/* 我的环境（25 号 §6.5：组合出镜资产——分身 × 环境） */}
