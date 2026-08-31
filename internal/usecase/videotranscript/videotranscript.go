@@ -574,7 +574,7 @@ type ScriptResult struct {
 
 // RewriteScript 原文 → 双产出（一次 LLM 调用）。topic 为用户的一句话意图
 //（品牌/产品上下文由调用方拼入——向导持品牌知识库）；rawText 为 ASR/字幕原文。
-func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic string) (*ScriptResult, error) {
+func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic, requirement string) (*ScriptResult, error) {
 	if uc.ai == nil {
 		return nil, fmt.Errorf("AI 服务未配置")
 	}
@@ -590,6 +590,9 @@ func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic string) (*S
 		"rewrite：改写版——借鉴原文的结构（开头钩子→内容→行动号召），内容围绕给定主题重写，口语化适合口播，长度与原文相当（±20%）。\n" +
 		"严格输出 JSON：{\"clean\":\"...\",\"rewrite\":\"...\"}"
 	user := fmt.Sprintf("主题：%s\n\n参考视频转录原文：\n%s", topic, rawText)
+	if req := strings.TrimSpace(requirement); req != "" {
+		user += fmt.Sprintf("\n\n润色要求：%s（只作用于 rewrite 版；clean 版仍为最小干预清洗）", req)
+	}
 	out, err := uc.ai.ChatStream(ctx, "", "default", []port.ChatMessage{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},

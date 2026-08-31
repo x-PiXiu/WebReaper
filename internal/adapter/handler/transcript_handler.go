@@ -141,21 +141,22 @@ func (h *TranscriptHandler) respond(c *gin.Context, res *videotranscript.Extract
 }
 
 // HandleRewrite POST /api/v1/generation/transcript/rewrite —— 原文 → 双产出。
-// 请求体：{raw_text, topic}；topic 为用户一句话意图（向导侧拼品牌上下文）。
+// 请求体：{raw_text, topic, requirement}；topic 为用户一句话意图（向导侧拼品牌上下文）。
 func (h *TranscriptHandler) HandleRewrite(c *gin.Context) {
 	if h.uc == nil {
 		fail(c, fmt.Errorf("提取服务未配置"))
 		return
 	}
 	var req struct {
-		RawText string `json:"raw_text" binding:"required"`
-		Topic   string `json:"topic"`
+		RawText     string `json:"raw_text" binding:"required"`
+		Topic       string `json:"topic"`
+		Requirement string `json:"requirement"` // 可选润色需求（23 号 §3.1：如"更口语化"——只影响 rewrite 版方向）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
 		return
 	}
-	res, err := h.uc.RewriteScript(c.Request.Context(), req.RawText, req.Topic)
+	res, err := h.uc.RewriteScript(c.Request.Context(), req.RawText, req.Topic, req.Requirement)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 40000, "msg": err.Error()})
 		return

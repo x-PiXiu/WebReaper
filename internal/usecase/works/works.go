@@ -35,6 +35,7 @@ type WorkItem struct {
 	Comments    int64     `json:"comments"`
 	CreatedAt   time.Time `json:"created_at"`
 	PublishedAt *time.Time `json:"published_at,omitempty"`
+	ParentTaskID string    `json:"parent_task_id,omitempty"` // B-Roll 血缘：compose 产物的源片任务 ID
 }
 
 // WorksUseCase 作品库聚合。
@@ -167,6 +168,15 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 				CoverURL:  cover,
 				CreatedAt: t.CreatedAt,
 			}
+			// B-Roll 血缘：compose 产物携带源片任务 ID（前端"已插画面/B-Roll"标记与链式入口用）
+			if strings.EqualFold(strings.TrimSpace(t.SubType), "compose") {
+				var pp struct {
+					SourceTaskID string `json:"source_task_id"`
+				}
+				if json.Unmarshal([]byte(t.ParamsJSON), &pp) == nil && pp.SourceTaskID != "" {
+					it.ParentTaskID = pp.SourceTaskID
+				}
+			}
 			// 发布关联：任一产物 URL 出现在已发布 job 的 media_urls 里
 			var matched *entity.PublishJob
 			for _, u := range urls {
@@ -224,6 +234,7 @@ var materialSubTypes = map[string]bool{
 var deliverableSubTypes = map[string]bool{
 	"lip_sync": true, "reference2video": true, "digital_human": true,
 	"text2video": true, "img2video": true, "start_end2video": true,
+	"compose": true, // B-Roll 合成成片（22/23 号计划：源片保留，合成片进作品库）
 }
 
 // isDeliverableTask 判断 success 生成任务是否属于可发布成片（非素材库中间产物）。

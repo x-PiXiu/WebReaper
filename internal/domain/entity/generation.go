@@ -199,6 +199,7 @@ type GenerationVoice struct {
 	Language  string `json:"language"`   // 语言（中文 (普通话)/英文/日文…分组用）
 	Name      string `json:"name"`       // 音色名称（展示用）
 	SampleURL string `json:"sample_url"` // 试听示例音频 URL
+	Recommend bool   `json:"recommend"`  // 精选推荐（口播常用音色——服务端标记，替代前端截断）
 }
 
 // PromptRef 提示词 @引用（客户端从素材库选择，提交给服务端统一翻译）。

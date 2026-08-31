@@ -40,7 +40,7 @@ func TestParseScriptJSON(t *testing.T) {
 
 func TestRewriteScriptDualOutput(t *testing.T) {
 	uc := NewUseCase(nil, nil, fakeASR{}, &fakeAI{out: `{"clean":"干净原文","rewrite":"品牌改写"}`})
-	res, err := uc.RewriteScript(context.Background(), "嗯大家好这个鱼是现杀的", "酸菜鱼餐馆")
+	res, err := uc.RewriteScript(context.Background(), "嗯大家好这个鱼是现杀的", "酸菜鱼餐馆", "")
 	if err != nil {
 		t.Fatalf("改写失败: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestRewriteScriptDualOutput(t *testing.T) {
 func TestRewriteScriptFallback(t *testing.T) {
 	// LLM 未按 JSON 输出 → 整段当清洗版，不失败
 	uc := NewUseCase(nil, nil, fakeASR{}, &fakeAI{out: "这不是JSON"})
-	res, err := uc.RewriteScript(context.Background(), "原文", "主题")
+	res, err := uc.RewriteScript(context.Background(), "原文", "主题", "")
 	if err != nil {
 		t.Fatalf("降级失败: %v", err)
 	}

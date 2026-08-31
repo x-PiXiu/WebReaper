@@ -14,6 +14,7 @@ type GenerationVoicePO struct {
 	Language  string `gorm:"size:64;index"`
 	Name      string `gorm:"size:128"`
 	SampleURL string `gorm:"size:512"`
+	Recommend bool   `gorm:"not null;default:0"`
 }
 
 func (GenerationVoicePO) TableName() string { return "generation_voices" }
@@ -45,6 +46,7 @@ func (r *GormVoiceRepository) List(ctx context.Context, language, keyword string
 	for _, p := range pos {
 		out = append(out, entity.GenerationVoice{
 			VoiceID: p.VoiceID, Language: p.Language, Name: p.Name, SampleURL: p.SampleURL,
+			Recommend: p.Recommend,
 		})
 	}
 	return out, nil
@@ -61,7 +63,7 @@ func (r *GormVoiceRepository) SeedIfEmpty(ctx context.Context, voices []entity.G
 	}
 	pos := make([]GenerationVoicePO, 0, len(voices))
 	for _, v := range voices {
-		pos = append(pos, GenerationVoicePO{VoiceID: v.VoiceID, Language: v.Language, Name: v.Name, SampleURL: v.SampleURL})
+		pos = append(pos, GenerationVoicePO{VoiceID: v.VoiceID, Language: v.Language, Name: v.Name, SampleURL: v.SampleURL, Recommend: v.Recommend})
 	}
 	// 分批插入（单条 SQL 上千占位符在部分 MySQL 配置下超限）
 	const batchSize = 100
