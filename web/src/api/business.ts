@@ -435,6 +435,9 @@ export const businessApi = {
 
   deleteGenerationTask: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/generation/tasks/${id}`),
+  // 用户改名（作品/素材自定义标题——写 params.custom_title，读路径优先展示）
+  renameGenerationTask: (id: string, title: string) =>
+    apiClient.patch<unknown, { renamed: string; title: string }>(`/api/v1/generation/tasks/${id}/title`, { title }),
 
   // 官方音色库
   listGenerationVoices: (params?: { language?: string; q?: string }) =>

@@ -156,6 +156,27 @@ func (h *GenerationHandler) HandleList(c *gin.Context) {
 	success(c, gin.H{"tasks": out})
 }
 
+// HandleRenameTask PATCH /api/v1/generation/tasks/:id/title
+// 用户修改作品/素材的自定义标题（写 params.custom_title，读路径优先展示）。
+func (h *GenerationHandler) HandleRenameTask(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	var req struct {
+		Title string `json:"title" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, fmt.Errorf("标题不能为空"))
+		return
+	}
+	if err := h.uc.RenameTask(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), req.Title); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"renamed": c.Param("id"), "title": req.Title})
+}
+
 // HandleTypes GET /api/v1/generation/types —— 端点类型 + 模型能力向量（前端表单驱动）。
 func (h *GenerationHandler) HandleTypes(c *gin.Context) {
 	if h.uc == nil {

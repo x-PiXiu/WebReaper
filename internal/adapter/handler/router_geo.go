@@ -206,6 +206,8 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	api.GET("/generation/tasks", gh.HandleList)
 	api.GET("/generation/types", gh.HandleTypes)
 	api.POST("/generation/tasks/:id/cancel", gh.HandleCancel)
+	// 用户改名（作品/素材自定义标题——写 params.custom_title）
+	api.PATCH("/generation/tasks/:id/title", gh.HandleRenameTask)
 	// 分身形象视频重试/补建（25 号阶段二——链式创建失败或配置关闭后补建）
 	api.POST("/generation/tasks/:id/avatar-video", gh.HandleRetryAvatarVideo)
 	api.DELETE("/generation/tasks/:id", gh.HandleDelete)

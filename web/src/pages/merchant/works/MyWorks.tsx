@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Input, Segmented, Space } from 'antd'
-import { LikeOutlined, PlayCircleOutlined, PlusOutlined, SendOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
+import { useQueryClient } from '@tanstack/react-query'
+import { Button, Input, Modal, Segmented, Space } from 'antd'
+import { EditOutlined, LikeOutlined, PlayCircleOutlined, PlusOutlined, SendOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
 import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
+import { businessApi } from '../../../api/business'
 import { brollLineage } from '../../../utils/publishableWorks'
 import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
 import QueryBoundary from '../../../components/QueryBoundary'
 import { cleanWorkTitle } from '../../../utils/workTitle'
+import { message } from '../../../utils/antdApp'
 import OralJourneyNav from '../../../components/compose/OralJourneyNav'
 import { VideoFrameCover } from '../../../components/VideoFrameCover'
 import { ImageCover } from '../../../components/ImageCover'
@@ -50,9 +53,28 @@ function distributionPath(w: WorkItem) {
  */
 export default function MyWorks() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
   const [previewAsset, setPreviewAsset] = useState<MediaAsset | null>(null)
+  // 用户改名（作品/素材自定义标题）
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [renaming, setRenaming] = useState(false)
+
+  const doRename = async () => {
+    if (!renameTarget || !renameValue.trim()) return
+    setRenaming(true)
+    try {
+      await businessApi.renameGenerationTask(renameTarget.id.slice(2), renameValue.trim())
+      message.success('已重命名')
+      setRenameTarget(null)
+      queryClient.invalidateQueries({ queryKey: ['merchant-works'] })
+      queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
+    } catch { /* 拦截器已提示 */ } finally {
+      setRenaming(false)
+    }
+  }
 
   const { works = [], tasks, isLoading, isError, refetch } = usePublishableWorks()
 
@@ -158,11 +180,19 @@ export default function MyWorks() {
                 详情
               </Button>
             )
+            const renameBtn = w.id.startsWith('g-') ? (
+              <Button size="small" icon={<EditOutlined />} title="重命名" onClick={(e) => {
+                e.stopPropagation()
+                setRenameTarget({ id: w.id, title: w.title })
+                setRenameValue(cleanWorkTitle(w.title))
+              }} />
+            ) : null
             const actions = (
               <>
                 {publishBtn}
                 {brollBtn}
                 {detailBtn}
+                {renameBtn}
                 {previewBtn}
               </>
             )
@@ -235,6 +265,25 @@ export default function MyWorks() {
         asset={previewAsset}
         onClose={() => setPreviewAsset(null)}
       />
+
+      {/* 用户改名弹窗（作品/素材自定义标题） */}
+      <Modal
+        open={!!renameTarget}
+        title="重命名"
+        okText="保存" cancelText="取消"
+        confirmLoading={renaming}
+        onOk={doRename}
+        onCancel={() => setRenameTarget(null)}
+      >
+        <Input
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          maxLength={64}
+          showCount
+          placeholder="输入新名称"
+          onPressEnter={doRename}
+        />
+      </Modal>
     </div>
   )
 }

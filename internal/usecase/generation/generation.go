@@ -1101,6 +1101,31 @@ func (uc *GenerationUseCase) Models(ctx context.Context, subType string) ([]stri
 	return uc.registry.Models(ctx, subType)
 }
 
+// RenameTask 用户修改生成任务的自定义标题（作品/素材重命名——用户自命名需求）。
+// 写入 params.custom_title，读路径（works/素材库）优先展示此值。
+func (uc *GenerationUseCase) RenameTask(ctx context.Context, tenantID, taskID, title string) error {
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("标题不能为空")
+	}
+	if len([]rune(title)) > 64 {
+		return fmt.Errorf("标题不能超过 64 字")
+	}
+	task, err := uc.repo.FindByID(ctx, tenantID, taskID)
+	if err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+	var params map[string]any
+	_ = json.Unmarshal([]byte(task.ParamsJSON), &params)
+	if params == nil {
+		params = map[string]any{}
+	}
+	params["custom_title"] = strings.TrimSpace(title)
+	pj, _ := json.Marshal(params)
+	task.ParamsJSON = string(pj)
+	task.UpdatedAt = time.Now()
+	return uc.repo.Save(ctx, task)
+}
+
 // Capabilities 某端点全部模型的能力向量（前端表单渲染：时长/分辨率/图片槽位/主体…）。
 func (uc *GenerationUseCase) Capabilities(ctx context.Context, subType string) ([]entity.ModelCapability, error) {
 	models, err := uc.registry.Models(ctx, subType)

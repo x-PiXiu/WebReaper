@@ -279,20 +279,49 @@ func titleFromTask(t entity.GenerationTask, kind string) string {
 		Text   string `json:"text"`
 	}
 	_ = json.Unmarshal([]byte(t.ParamsJSON), &params)
-	title := params.Prompt
+
+	// 优先级：用户自定义标题（custom_title——用户改名需求） > 台词首句 > prompt > 按类型兜底
+	// 自动标题加时间后缀（MM-DD HH:mm）区分同一天生成的多个作品
+	title := ""
+
+	// ① 用户自定义标题（RenameTask 写入）
+	var customTitle string
+	_ = json.Unmarshal([]byte(t.ParamsJSON), &struct {
+		CustomTitle *string `json:"custom_title"`
+	}{CustomTitle: &customTitle})
+	if customTitle != "" {
+		return customTitle
+	}
+
+	// ② 自动提取：script/text 首句
+	if s := strings.TrimSpace(params.Text); s != "" {
+		if idx := strings.IndexAny(s, "。！？\n"); idx > 0 {
+			title = s[:idx]
+		} else {
+			title = s
+		}
+	}
 	if title == "" {
-		title = params.Text
+		title = strings.TrimSpace(params.Prompt)
 	}
+	// 去掉 @引用标记和停顿标记（形象展示 prompt 的前缀噪音）
+	title = strings.TrimSpace(strings.Split(title, " ")[0])
+	if idx := strings.Index(title, "<#"); idx > 0 {
+		title = title[:idx]
+	}
+
 	runes := []rune(strings.TrimSpace(title))
-	if len(runes) > 30 {
-		return string(runes[:30]) + "…"
-	}
+	timeSuffix := t.CreatedAt.Format("01-02 15:04")
+
 	if len(runes) == 0 {
 		fallback := map[string]string{"video": "视频作品", "image": "图片作品", "audio": "音频作品"}
 		if name, ok := fallback[kind]; ok {
-			return name
+			return name + " " + timeSuffix
 		}
-		return "多媒体作品"
+		return "多媒体作品 " + timeSuffix
 	}
-	return string(runes)
+	if len(runes) > 15 {
+		return string(runes[:15]) + "… " + timeSuffix
+	}
+	return string(runes) + " " + timeSuffix
 }
