@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Segmented, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Input, Popconfirm, Popover, Segmented, Space, Tag, Typography } from 'antd'
 import { message } from '../../../utils/antdApp'
 import {
   LinkOutlined, EditOutlined, UploadOutlined, VideoCameraOutlined, UserOutlined,
   RocketOutlined, CheckCircleOutlined, SoundOutlined, ExportOutlined, ClockCircleOutlined,
-  RightOutlined, VideoCameraAddOutlined,
+  RightOutlined, VideoCameraAddOutlined, StopOutlined,
 } from '@ant-design/icons'
 import { transcriptLines } from '../../../utils/transcript'
 import { checkMaterialFileSize, friendlyGenerationError } from '../../../utils/generationErrors'
@@ -19,7 +19,7 @@ import { runLipSyncPipeline, type LipSyncAudioSource, type LipSyncPipelineStage 
 import { useGenerationTasks, GENERATION_TASKS_KEY } from '../../../hooks/useGenerationTasks'
 import { useSubjectList } from '../../../hooks/useSubjectList'
 import { parseGenerationTaskParams } from '../../../utils/subjectTask'
-import { PauseScriptEditor } from '../../../components/compose/PauseScriptEditor'
+import { ScriptLinesEditor } from '../../../components/compose/ScriptLinesEditor'
 import { SubjectPicker } from '../../../components/compose/SubjectPicker'
 import BrollDrawer from '../../../components/compose/BrollDrawer'
 import {
@@ -62,8 +62,9 @@ type SourceMode = 'link' | 'upload' | 'manual' | null
 type ScriptVersion = 'rewrite' | 'clean'
 
 /**
- * 拍同款口播视频向导（08 计划 D2 五步）：
- * ① 文案来源 → ② 文案确认 → ③ 出镜方式 → ④ 音色 → ⑤ 成片
+ * 拍口播视频向导（23 号计划四步式）：
+ * ① 确定文案（三来源提取，逐句编辑，润色显式可选）→ ② 出镜与配音（形态二选一 + 音频三选一）
+ * → ③ 生成成片（阶段进度 + 断点重试 + 可取消）→ ④ 发布
  */
 export default function LipSyncWizard() {
   const navigate = useNavigate()
@@ -92,14 +93,15 @@ export default function LipSyncWizard() {
   const [extractLineCount, setExtractLineCount] = useState(0)
   const [extracting, setExtracting] = useState(false)
   const [extractStage, setExtractStage] = useState('')
-  // ② 文案
-  const [, setRawText] = useState(presetState?.rawText || draft.wizardCleanText || '')
+  // ② 文案（逐句形态：一行一句；润色显式可选——提取结果原样进编辑器，不自动润色）
   const [cleanText, setCleanText] = useState(draft.wizardCleanText || '')
   const [rewriteText, setRewriteText] = useState('')
-  const [scriptVersion, setScriptVersion] = useState<ScriptVersion>('rewrite')
+  const [scriptVersion, setScriptVersion] = useState<ScriptVersion>('clean')
   const [script, setScript] = useState(presetState?.rawText || draft.wizardScript || '')
   const [topic, setTopic] = useState(draft.wizardTopic || presetState?.title || '')
   const [rewriting, setRewriting] = useState(false)
+  const [rewritePopOpen, setRewritePopOpen] = useState(false)
+  const [rewriteReq, setRewriteReq] = useState('')
   // ③ 出镜
   const [presence, setPresence] = useState<'real' | 'avatar'>(
     presetSubjectId ? 'avatar' : (draft.wizardPresence || 'real')
@@ -125,6 +127,10 @@ export default function LipSyncWizard() {
   const [refTaskId, setRefTaskId] = useState(draft.wizardRefTaskId || '')
   const [lipsyncTaskId, setLipsyncTaskId] = useState(draft.wizardLipsyncTaskId || '')
   const [subjectServerId, setSubjectServerId] = useState(presetSubjectId || draft.wizardSubjectId || '')
+  // 生成中可取消（23 号计划 §4.1）：跟踪活动任务，取消调服务端真实取消端点
+  const [activeTaskId, setActiveTaskId] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const cancelRequested = useRef(false)
 
   const goStep = (next: number) => {
     setStep(next)
@@ -158,20 +164,21 @@ export default function LipSyncWizard() {
     })
   }, [step, presence, topic, script, cleanText, voiceId, realVideoUrl, subjectServerId, intent, ttsTaskId, refTaskId, lipsyncTaskId, resultUrl, audioSource, uploadedAudioUrl])
 
-  const [initRewriting, setInitRewriting] = useState(false)
+  // 预填原文（灵感广场等入口带入）原样进编辑器——不自动润色（23 号计划 §3.1：显式可选）
   useEffect(() => {
-    if (presetState?.rawText && !initRewriting && cleanText === '') {
-      const prefilled = presetState.rawText
-      setInitRewriting(true)
-      businessApi.rewriteScript({ raw_text: prefilled, topic: topic || '' })
-        .then(rw => {
-          setCleanText(rw.clean)
-          setRewriteText(rw.rewrite || rw.clean)
-          setScript(rw.rewrite || rw.clean)
-          setScriptVersion('rewrite')
-        })
-        .catch(() => { setCleanText(prefilled); setScript(prefilled) })
-        .finally(() => setInitRewriting(false))
+    if (presetState?.rawText) {
+      setCleanText(presetState.rawText)
+      setScript(presetState.rawText)
+      setScriptVersion('clean')
+    }
+  }, [])
+
+  // 恢复草稿时若上次停留在改写版，回填改写文案（草稿只存最终 script 与 cleanText）
+  useEffect(() => {
+    if (!presetState?.rawText && draft.wizardCleanText && draft.wizardScript
+      && draft.wizardScript !== draft.wizardCleanText) {
+      setRewriteText(draft.wizardScript)
+      setScriptVersion('rewrite')
     }
   }, [])
 
@@ -233,13 +240,12 @@ export default function LipSyncWizard() {
         : await extractWithPolling(payload.share_url ? { share_url: payload.share_url } : {})
       const lines = transcriptLines(r.raw_text, r.raw_text_lines)
       setExtractLineCount(lines.length)
-      setRawText(r.raw_text)
-      const rw = await businessApi.rewriteScript({ raw_text: r.raw_text, topic: topic || '口播获客' })
-      setCleanText(rw.clean)
-      setRewriteText(rw.rewrite || rw.clean)
-      setScript(rw.rewrite || rw.clean)
-      setScriptVersion('rewrite')
-      message.success(`提取完成，共 ${lines.length} 句——请在下方确认文案`)
+      // 原样逐句进编辑器（不自动润色——润色是显式可选项，23 号计划 §3.1）
+      setCleanText(r.raw_text)
+      setRewriteText('')
+      setScript(r.raw_text)
+      setScriptVersion('clean')
+      message.success(`提取完成，共 ${lines.length} 句——请在下方逐句确认文案`)
     } catch (e: any) {
       const raw = e?.response?.data?.msg || e?.message || '提取失败'
       setError(friendlyGenerationError(raw))
@@ -250,18 +256,27 @@ export default function LipSyncWizard() {
     } finally { setExtracting(false) }
   }
 
-  const doRewrite = async () => {
+  /** 显式 AI 润色（23 号计划 §3.1②：点按钮 → 输入一句话需求 → 双版本二选一） */
+  const doRewrite = async (req: string) => {
     if (!script.trim()) { message.warning('请先输入文案'); return }
     setRewriting(true)
+    setRewritePopOpen(false)
     try {
-      const rw = await businessApi.rewriteScript({ raw_text: script, topic: topic || '口播获客' })
-      setRawText(script)
+      // 服务端 rewrite 的 topic 是自由文本进 LLM 提示——需求拼入（待服务端加独立字段）
+      const topicFull = [
+        topic.trim() || '口播获客',
+        req.trim() ? `润色要求：${req.trim()}` : '',
+      ].filter(Boolean).join('；')
+      const rw = await businessApi.rewriteScript({ raw_text: script, topic: topicFull })
       setCleanText(rw.clean)
       setRewriteText(rw.rewrite || rw.clean)
       setScript(rw.rewrite || rw.clean)
       setScriptVersion('rewrite')
-      message.success('已润色')
-    } catch { /* 拦截器已提示 */ } finally { setRewriting(false) }
+      message.success('已润色——可在「原文 / AI 改写版」间切换应用')
+    } catch { /* 拦截器已提示 */ } finally {
+      setRewriting(false)
+      setRewriteReq('')
+    }
   }
 
   const switchScriptVersion = (v: ScriptVersion) => {
@@ -299,6 +314,7 @@ export default function LipSyncWizard() {
       return
     }
     setProducing(true); setError(''); setFailedStage('')
+    cancelRequested.current = false
     if (!retryFrom) setResultUrl('')
     queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     try {
@@ -316,6 +332,7 @@ export default function LipSyncWizard() {
         uploadedAudioUrl: uploadedAudioUrl || undefined,
       }, {
         onStage: setPipelineStage,
+        onTaskSubmit: (_stage, taskId) => setActiveTaskId(taskId),
         retryFrom,
         resume: retryFrom ? {
           ttsTaskId,
@@ -334,16 +351,38 @@ export default function LipSyncWizard() {
       message.success('成片完成')
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     } catch (e: any) {
-      setError(friendlyGenerationError(e?.response?.data?.msg || e?.message || '成片失败'))
-      setFailedStage(pipelineStage)
+      if (cancelRequested.current) {
+        // 用户主动取消：不算失败——已完成阶段的产物保留，可断点重试
+        message.info('已取消生成——已完成阶段的产物已保留，可重新生成或从断点重试')
+      } else {
+        setError(friendlyGenerationError(e?.response?.data?.msg || e?.message || '成片失败'))
+        setFailedStage(pipelineStage)
+      }
     } finally {
       setProducing(false)
       setPipelineStage('')
+      setCancelling(false)
+      setActiveTaskId('')
     }
+  }
+
+  /** 取消当前生成（服务端真实取消：上游尽力取消 + 本地置 cancelled；23 号计划 §4.1"可取消"） */
+  const cancelProduce = async () => {
+    if (!activeTaskId) return
+    cancelRequested.current = true
+    setCancelling(true)
+    try {
+      await businessApi.cancelGenerationTask(activeTaskId)
+    } catch { /* 轮询到 cancelled 终态后管线自行退出 */ }
   }
 
   const scriptSec = estSeconds(script)
   const scriptMin = scriptSec / 60
+  // 逐句统计（非空行；口播"句"= 一行）
+  const scriptLineCount = useMemo(
+    () => script.split('\n').filter((l) => l.trim()).length,
+    [script],
+  )
   // 成片预计耗时（按音频路径与出镜形态；路径 B 单步最快）
   const produceEta = audioSource === 'direct'
     ? '预计 1-2 分钟（单步直出）'
@@ -507,7 +546,7 @@ export default function LipSyncWizard() {
       onNext={handleNext}
       nextDisabled={((step === 0 || step === 1) && !canNext()) || ((step === 2 || step === 3) && producing)}
       nextHint={nextHint()}
-      nextLoading={extracting || rewriting || producing || initRewriting}
+      nextLoading={extracting || rewriting || producing}
       nextLabel={footerNextLabel}
       backLabel={step === 0 ? '返回工作台' : undefined}
       alerts={alerts}
@@ -606,7 +645,7 @@ export default function LipSyncWizard() {
           )}
 
           <div className="ip-form-stack ip-stagger" style={{ marginTop: 18 }}>
-          <label>口播文案（可手写、AI 润色，或从上方提取）</label>
+          <label>品牌/主题（润色与改写围绕它展开）</label>
           <Input
             placeholder="如：酸菜鱼餐馆新菜品推广"
             value={topic}
@@ -618,31 +657,60 @@ export default function LipSyncWizard() {
               value={scriptVersion}
               onChange={v => switchScriptVersion(v as ScriptVersion)}
               options={[
-                { label: '改写版（推荐）', value: 'rewrite', disabled: !rewriteText && !cleanText },
-                { label: '清洗版原文', value: 'clean', disabled: !cleanText },
+                { label: '原文', value: 'clean', disabled: !cleanText },
+                { label: 'AI 改写版', value: 'rewrite', disabled: !rewriteText },
               ]}
             />
           )}
-          <PauseScriptEditor
-            rows={9}
-            showCount
+          <label>口播文案 · 一行一句（后续插入画面按句对齐，逐句编辑效果最佳）</label>
+          <ScriptLinesEditor
             value={script}
             onChange={setScript}
-            placeholder="输入或提取口播文案…"
+            placeholder="输入或提取口播文案，一行一句…"
           />
           <div className="wz-script-toolbar">
             <span className="wz-duration-ring">
               预计口播约 <strong>{scriptMin >= 1 ? `${scriptMin.toFixed(1)} 分钟` : `${scriptSec} 秒`}</strong>
-              {extractLineCount > 0 && (
-                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>提取 {extractLineCount} 句</Text>
+              <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                共 {scriptLineCount} 句 · {script.length} 字
+              </Text>
+              {extractLineCount > 0 && scriptLineCount !== extractLineCount && (
+                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>（提取 {extractLineCount} 句）</Text>
               )}
               {scriptMin > 10 && (
                 <Text type="danger" style={{ marginLeft: 8, fontSize: 12 }}>文案过长，建议精简</Text>
               )}
             </span>
-            <Button loading={rewriting} onClick={doRewrite} disabled={!script.trim()}>
-              AI 润色/改写
-            </Button>
+            <Popover
+              open={rewritePopOpen}
+              onOpenChange={(v) => { setRewritePopOpen(v); if (v) setRewriteReq('') }}
+              trigger="click"
+              placement="topRight"
+              content={
+                <Space direction="vertical" size={8} style={{ width: 280 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    输入一句话润色需求（留空则按主题常规改写）
+                  </Text>
+                  <Input
+                    placeholder="如：更口语化 / 突出限时优惠"
+                    value={rewriteReq}
+                    onChange={(e) => setRewriteReq(e.target.value)}
+                    maxLength={60}
+                    onPressEnter={() => doRewrite(rewriteReq)}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <Button size="small" onClick={() => setRewritePopOpen(false)}>取消</Button>
+                    <Button size="small" type="primary" loading={rewriting} onClick={() => doRewrite(rewriteReq)}>
+                      开始润色
+                    </Button>
+                  </div>
+                </Space>
+              }
+            >
+              <Button loading={rewriting} disabled={!script.trim()}>
+                AI 润色/改写
+              </Button>
+            </Popover>
           </div>
           </div>
         </div>
@@ -891,7 +959,25 @@ export default function LipSyncWizard() {
           )}
 
           {producing && (
-            <Alert type="info" showIcon style={{ marginTop: 14 }} message={`生成中（${produceEta}），请勿关闭页面…`} />
+            <Alert
+              type="info" showIcon style={{ marginTop: 14 }}
+              message={`生成中（${produceEta}），请勿关闭页面…`}
+              action={
+                <Popconfirm
+                  title="取消当前生成？"
+                  description="已完成阶段的产物会保留，之后可从断点重试"
+                  okText="取消生成"
+                  cancelText="继续生成"
+                  okButtonProps={{ danger: true, loading: cancelling }}
+                  onConfirm={cancelProduce}
+                  disabled={!activeTaskId}
+                >
+                  <Button size="small" danger icon={<StopOutlined />} disabled={!activeTaskId}>
+                    取消生成
+                  </Button>
+                </Popconfirm>
+              }
+            />
           )}
 
           {resultUrl && (

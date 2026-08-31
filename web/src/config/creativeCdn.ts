@@ -13,9 +13,4 @@ export const CREATIVE_CDN = {
     film: pic(1015, 640, 960),
     publish: pic(201, 640, 960),
   },
-  avatars: [
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Ada',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Ben',
-    'https://api.dicebear.com/7.x/avataaars/svg?seed=Cora',
-  ],
 } as const

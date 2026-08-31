@@ -50,6 +50,9 @@ export default function BrollDrawer({ open, onClose, source }: {
   const [editingText, setEditingText] = useState('')
   const [composeTaskId, setComposeTaskId] = useState('')
   const [composing, setComposing] = useState(false)
+  // 链式再调整（23 号计划 §5.1：以新成片为源继续插入，时间轴服务端自动继承）
+  const [chainSource, setChainSource] = useState<BrollSource | null>(null)
+  const activeSource = chainSource || source
 
   const { tasks: genTasks = [] } = useGenerationTasks({ enabled: open })
   const composeTask = useMemo(
@@ -60,32 +63,33 @@ export default function BrollDrawer({ open, onClose, source }: {
   const composeUrl = composeTask?.creations?.[0]?.stored_url || composeTask?.creations?.[0]?.url || ''
 
   useEffect(() => {
-    if (!open || !source?.taskId) return
+    if (!open || !activeSource?.taskId) return
     setTimeline(null)
     setLocateError('')
     setSegments({})
     setComposeTaskId('')
     setLocating(true)
     // 先读缓存时间轴；未定位（404）则自动触发首次定位
-    businessApi.getTaskTimeline(source.taskId)
+    // 链式场景（compose 产物）服务端已继承源片时间轴——这里直接命中缓存
+    businessApi.getTaskTimeline(activeSource.taskId)
       .then(setTimeline)
       .catch(async () => {
         try {
-          setTimeline(await businessApi.locateTaskTimeline(source.taskId))
+          setTimeline(await businessApi.locateTaskTimeline(activeSource.taskId))
         } catch (e: any) {
           setLocateError(e?.response?.data?.msg || e?.message || '台词定位失败，请重试')
         }
       })
       .finally(() => setLocating(false))
-  }, [open, source?.taskId])
+  }, [open, activeSource?.taskId])
 
   const segmentCount = Object.keys(segments).length
 
   const saveLineText = async (index: number, text: string) => {
-    if (!source) return
+    if (!activeSource) return
     setEditingIndex(null)
     try {
-      const next = await businessApi.locateTaskTimeline(source.taskId, {
+      const next = await businessApi.locateTaskTimeline(activeSource.taskId, {
         lines_override: [{ index, text }],
       })
       setTimeline(next)
@@ -96,11 +100,11 @@ export default function BrollDrawer({ open, onClose, source }: {
   }
 
   const doCompose = async () => {
-    if (!source || segmentCount === 0) return
+    if (!activeSource || segmentCount === 0) return
     setComposing(true)
     try {
       const t = await businessApi.submitCompose({
-        source_task_id: source.taskId,
+        source_task_id: activeSource.taskId,
         segments: Object.entries(segments).map(([idx, media_url]) => ({
           sentence_index: Number(idx),
           media_url,
@@ -120,22 +124,39 @@ export default function BrollDrawer({ open, onClose, source }: {
     }
   }
 
+  /** 以合成产物为源继续调整（时间轴自动继承，无需重新定位） */
+  const chainToComposed = () => {
+    if (!composeTaskId || !composeUrl) return
+    setChainSource({
+      taskId: composeTaskId,
+      title: `${activeSource?.title || '口播成片'} · 新成片`,
+      videoUrl: composeUrl,
+    })
+    // effect 依赖 activeSource.taskId 变化——自动重载（时间轴命中继承缓存）
+  }
+
   if (!source) return null
+
+  // 关闭时回到源片视角（下次打开重新从源片开始）
+  const handleWrapperClose = () => {
+    setChainSource(null)
+    onClose()
+  }
 
   return (
     <Modal
       open={open}
-      onCancel={onClose}
+      onCancel={handleWrapperClose}
       width={MODAL_W.lg}
-      title={<Space><VideoCameraAddOutlined /> 插入画面 · {source.title || '口播成片'}</Space>}
+      title={<Space><VideoCameraAddOutlined /> 插入画面 · {activeSource?.title || '口播成片'}</Space>}
       footer={null}
       destroyOnHidden
       styles={{ body: { ...modalBodyScroll.body, background: 'var(--wr-bg)' } }}
     >
       <Space direction="vertical" size={14} style={{ width: '100%' }}>
-        {source.videoUrl && (
+        {activeSource?.videoUrl && (
           <video
-            src={source.videoUrl}
+            src={activeSource.videoUrl}
             controls
             style={{ width: '100%', maxHeight: 320, borderRadius: 12, background: '#000' }}
           />
@@ -148,8 +169,8 @@ export default function BrollDrawer({ open, onClose, source }: {
           message="插入点按台词句对齐——一行一句效果最佳"
           description={
             timeline?.script_source === 'asr'
-              ? '台词来自语音识别，文字如有出入可直接点击修改（只改文字，不影响画面切换点）'
-              : '给指定句挂上素材片段，合成时该句画面切换为素材，口播声音全程不变'
+              ? '台词来自语音识别，文字如有出入可直接点击修改（只改文字，不影响画面切换点）；片段支持视频与图片（图片按该句时长自动转视频）'
+              : '给指定句挂上素材片段（视频或图片），合成时该句画面切换为素材，口播声音全程不变'
           }
         />
 
@@ -166,10 +187,10 @@ export default function BrollDrawer({ open, onClose, source }: {
               <Button
                 icon={<ReloadOutlined />}
                 onClick={async () => {
-                  if (!source) return
+                  if (!activeSource) return
                   setLocateError(''); setLocating(true)
                   try {
-                    setTimeline(await businessApi.locateTaskTimeline(source.taskId, { force: true }))
+                    setTimeline(await businessApi.locateTaskTimeline(activeSource.taskId, { force: true }))
                   } catch (e: any) {
                     setLocateError(e?.response?.data?.msg || e?.message || '定位失败')
                   } finally {
@@ -281,7 +302,12 @@ export default function BrollDrawer({ open, onClose, source }: {
                       播放新成片
                     </Button>
                   )}
-                  <Text type="secondary" style={{ fontSize: 12 }}>已入作品库，源片保留；不满意可对新成片继续插入画面</Text>
+                  {composeUrl && (
+                    <Button size="small" icon={<VideoCameraAddOutlined />} onClick={chainToComposed}>
+                      对新成片继续插入
+                    </Button>
+                  )}
+                  <Text type="secondary" style={{ fontSize: 12 }}>已入作品库，源片保留；时间轴自动继承，可继续调整</Text>
                 </Space>
               ) : (
                 <Space>
@@ -294,7 +320,12 @@ export default function BrollDrawer({ open, onClose, source }: {
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={onClose}>关闭</Button>
+          {chainSource && (
+            <Button style={{ marginRight: 'auto' }} onClick={() => setChainSource(null)}>
+              回到源片
+            </Button>
+          )}
+          <Button onClick={handleWrapperClose}>关闭</Button>
           <Button
             type="primary"
             disabled={segmentCount === 0 || !!composeDone}
@@ -309,7 +340,7 @@ export default function BrollDrawer({ open, onClose, source }: {
       <AssetPicker
         open={pickerIndex !== null}
         mode="single"
-        accept="video"
+        accept="visual"
         title={`选择插入片段（第 ${(pickerIndex ?? 0) + 1} 句）`}
         onClose={() => setPickerIndex(null)}
         onSelect={(assets) => {

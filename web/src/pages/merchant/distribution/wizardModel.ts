@@ -35,46 +35,11 @@ export const WIZARD_STEPS: { key: WizardStep; title: string; short: string }[] =
   { key: 5, title: '预览确认', short: '确认发' },
 ]
 
+// B站分区：服务端渠道约束暂无分区枚举下发（见 Docs/Plans/24 硬编码清单），前端维护；
+// 服务端配置化后替换。
 export const BILIBILI_CATEGORIES = [
   '生活', '知识', '科技', '美食', '游戏', '娱乐', '动画', '音乐', '舞蹈', '运动', '汽车', '时尚',
 ]
-
-/**
- * Plan-14 诚实矩阵兜底（与 Docs/Plans/14 第三章同源）。
- * 服务端 ChannelConstraints 目前只有 title/min_images/min_videos；
- * require_tags / require_category / max_tags / 全自动形态尚未下发时，用本表补齐——「不撒谎」。
- */
-type MatrixCell = Partial<PublishChannelConstraints> & { auto?: boolean }
-
-export const CAPABILITY_FALLBACK: Record<string, Partial<Record<PublishForm, MatrixCell>>> = {
-  douyin: {
-    video: { title_max_runes: 55, min_videos: 1, max_tags: 3 },
-    image: { title_max_runes: 55, min_images: 1 },
-  },
-  kuaishou: {
-    video: { title_max_runes: 80, min_videos: 1, max_tags: 2 },
-  },
-  xiaohongshu: {
-    image: { title_max_runes: 20, min_images: 1, auto: true },
-    video: { title_max_runes: 20, min_videos: 1 },
-    article: { title_max_runes: 20 },
-  },
-  weixin: {
-    video: { title_max_runes: 40, min_videos: 1 },
-  },
-  bilibili: {
-    video: {
-      title_max_runes: 80,
-      min_videos: 1,
-      require_tags: true,
-      require_category: true,
-      max_tags: 10,
-    },
-  },
-  zhihu: {
-    article: { title_max_runes: 100, auto: true },
-  },
-}
 
 const DRAFT_KEY = 'wr_publish_wizard_v1'
 
@@ -129,23 +94,23 @@ export function runeLen(s: string) {
 }
 
 /**
- * 合并服务端 Constraints + Plan-14 矩阵。
- * 服务端有值优先；缺字段用矩阵补齐（能力声明驱动，矩阵仅作诚实兜底）。
+ * 发布约束：服务端 ChannelConstraints 已全量下发
+ * （title_max_runes/min_images/min_videos/require_tags/require_category/max_tags）。
+ * 此前的 Plan-14 前端兜底矩阵已删除——能力声明以服务端为唯一事实源，
+ * 未下发的平台按"无约束"处理（0/false，不虚构限制）。
  */
 export function effectiveConstraints(
   platform: string,
   contentType: PublishForm,
   channels: PublishChannelView[],
 ): PublishChannelConstraints {
-  const server = channels.find((c) => c.platform === platform)?.constraints?.[contentType] || {}
-  const fb = CAPABILITY_FALLBACK[platform]?.[contentType] || {}
-  return {
-    title_max_runes: server.title_max_runes || fb.title_max_runes || 0,
-    min_images: server.min_images || fb.min_images || 0,
-    min_videos: server.min_videos || fb.min_videos || 0,
-    require_tags: server.require_tags ?? fb.require_tags ?? false,
-    require_category: server.require_category ?? fb.require_category ?? false,
-    max_tags: server.max_tags || fb.max_tags || 0,
+  return channels.find((c) => c.platform === platform)?.constraints?.[contentType] || {
+    title_max_runes: 0,
+    min_images: 0,
+    min_videos: 0,
+    require_tags: false,
+    require_category: false,
+    max_tags: 0,
   }
 }
 
@@ -177,18 +142,16 @@ export function channelShowsTags(platform: string, contentType: PublishForm, cha
 }
 
 /**
- * 全自动是否可用（Plan-14「不撒谎」）。
- * 优先消费服务端 auto_content_types；未下发时仅信任矩阵中 auto=true 的格子。
+ * 全自动是否可用（Plan-14「不撒谎」）：唯一事实源是服务端 auto + auto_content_types。
+ * 未下发即视为不支持（不前端虚构）。
  */
 export function supportsAutoForm(
   platform: string,
   contentType: PublishForm,
   ch: PublishChannelView | undefined,
 ): boolean {
-  if (ch?.auto_content_types?.length) {
-    return !!ch.auto && ch.auto_content_types.includes(contentType)
-  }
-  return !!CAPABILITY_FALLBACK[platform]?.[contentType]?.auto
+  void platform
+  return !!ch?.auto && !!ch.auto_content_types?.includes(contentType)
 }
 
 export function adaptPreviewTitle(title: string, max: number) {

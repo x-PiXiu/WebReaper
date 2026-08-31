@@ -4710,6 +4710,50 @@ html.light .cf-phone {
 }
 .wz-duration-ring strong { font-size: 14px; font-weight: 700; }
 
+/* 逐句文案编辑器（23 号计划 §3.1：一行一句，句=插入点心智铺垫） */
+.wz-lines-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--wr-border);
+  border-radius: 12px;
+  background: var(--wr-bg-elevated, rgba(0, 0, 0, 0.02));
+}
+.wz-lines-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.wz-lines-idx {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--wr-primary-bg);
+  border: 1px solid var(--wr-primary-border);
+  color: var(--wr-primary);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.wz-lines-row .wz-lines-input.ant-input {
+  border-radius: 8px;
+}
+.wz-lines-del {
+  flex: none;
+  margin-top: 2px;
+  color: var(--wr-text-secondary, #999);
+}
+.wz-lines-add {
+  align-self: flex-start;
+  margin-left: 30px;
+}
+
 .wz-dropzone.ant-upload-wrapper .ant-upload-drag {
   border-radius: 14px !important;
   border: 1px dashed var(--wr-border) !important;
@@ -5563,6 +5607,17 @@ html.light .pub-wizard-step-num { background: rgba(0, 0, 0, 0.06); }
   color: #fff;
   background: rgba(16, 16, 30, 0.5);
   backdrop-filter: blur(6px);
+}
+
+/* B-Roll 徽标：错开类型徽标，紫色系标识插入画面血缘 */
+.mw-kind--broll {
+  right: auto;
+  left: 10px;
+  background: rgba(124, 92, 252, 0.78);
+}
+.mw-kind--broll-source {
+  top: 36px;
+  background: rgba(124, 92, 252, 0.42);
 }
 
 /* hover 操作浮层 */

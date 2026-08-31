@@ -6,7 +6,6 @@ export type ViduSubject = {
   name: string
   serverId: string
   voiceId: string
-  kind: 'person' | 'scene'
   hasVideo: boolean
   imageCount: number
   portraitUrl: string
@@ -39,7 +38,6 @@ export function parseSubjectFromTask(t: GenerationTask): ViduSubject | null {
     name: (typeof p.name === 'string' && p.name) || t.id.slice(0, 12),
     serverId: subjectServerId(t),
     voiceId: typeof p.voice_id === 'string' ? p.voice_id : '',
-    kind: p.kind === 'scene' ? 'scene' : 'person',
     hasVideo: Array.isArray(p.videos) && p.videos.length > 0,
     imageCount: images.length,
     portraitUrl: images[0] || t.creations?.[0]?.url || '',

@@ -27,8 +27,8 @@ describe('parseGenerationTaskParams', () => {
   })
 
   it('parses JSON string params', () => {
-    const t = subjectTask({ params: '{"name":"店小二","kind":"scene"}' as unknown as GenerationTask['params'] })
-    expect(parseGenerationTaskParams(t).kind).toBe('scene')
+    const t = subjectTask({ params: '{"name":"店小二","voice_id":"v-1"}' as unknown as GenerationTask['params'] })
+    expect(parseGenerationTaskParams(t).voice_id).toBe('v-1')
   })
 
   it('returns empty object on invalid JSON', () => {
@@ -58,7 +58,6 @@ describe('parseSubjectFromTask', () => {
     expect(s.portraitUrl).toBe('https://cdn/p.jpg')
     expect(s.hasVideo).toBe(true)
     expect(s.voiceId).toBe('voice-1')
-    expect(s.kind).toBe('person')
   })
 
   it('falls back to creation id for serverId', () => {

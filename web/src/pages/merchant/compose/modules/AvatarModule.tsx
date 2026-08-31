@@ -7,6 +7,7 @@ import {
   Input,
   Popconfirm,
   Spin,
+  Tag,
 } from 'antd'
 import {
   DeleteOutlined,
@@ -23,8 +24,6 @@ import type { ViduSubject } from '../../../../utils/subjectTask'
 import { message } from '../../../../utils/antdApp'
 import { CREATIVE_CDN } from '../../../../config/creativeCdn'
 
-type Scope = 'all' | 'mine' | 'recommend'
-
 type LibCard = {
   id: string
   name: string
@@ -36,64 +35,63 @@ type LibCard = {
   ready: boolean
   serverId?: string
   subject?: ViduSubject
-  recommend?: boolean
 }
 
-const RECOMMEND_SHOWCASE: LibCard[] = [
+/**
+ * 官方主体展示区（23 号计划 §2.3）。
+ * ⚠️ 临时静态样例：服务端缓存代理端点 GET /subjects?ownership=system 尚未提供
+ * （见 Docs/问题反馈.md #1），端点就绪后替换为 API 数据——结构已按"即选即用"预留。
+ */
+const OFFICIAL_SHOWCASE: LibCard[] = [
   {
-    id: 'rec-1',
+    id: 'official-1',
     name: '数字人-女-坐',
     portraitUrl: CREATIVE_CDN.pipeline.copy,
-    timeLabel: '精选模板',
+    timeLabel: '官方主体',
     tag: '公共',
     duration: '12s',
     selectable: false,
     ready: false,
-    recommend: true,
   },
   {
-    id: 'rec-2',
+    id: 'official-2',
     name: '数字人-男-站',
     portraitUrl: CREATIVE_CDN.pipeline.voice,
-    timeLabel: '精选模板',
+    timeLabel: '官方主体',
     tag: '公共',
     duration: '8s',
     selectable: false,
     ready: false,
-    recommend: true,
   },
   {
-    id: 'rec-3',
+    id: 'official-3',
     name: '数字人-女-站',
     portraitUrl: CREATIVE_CDN.pipeline.mic,
-    timeLabel: '精选模板',
+    timeLabel: '官方主体',
     tag: '影视',
     duration: '10s',
     selectable: false,
     ready: false,
-    recommend: true,
   },
   {
-    id: 'rec-4',
+    id: 'official-4',
     name: '数字人-男-坐',
     portraitUrl: CREATIVE_CDN.pipeline.film,
-    timeLabel: '精选模板',
+    timeLabel: '官方主体',
     tag: '公共',
     duration: '15s',
     selectable: false,
     ready: false,
-    recommend: true,
   },
   {
-    id: 'rec-5',
+    id: 'official-5',
     name: '数字人-女-半身',
     portraitUrl: CREATIVE_CDN.pipeline.publish,
-    timeLabel: '精选模板',
+    timeLabel: '官方主体',
     tag: '商务',
     duration: '9s',
     selectable: false,
     ready: false,
-    recommend: true,
   },
 ]
 
@@ -104,14 +102,14 @@ function formatUploadTime(iso: string) {
   return `上传于 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/** 分身状态徽标（23 号计划 §2.3：创建中 / 失败 / 可用；链式形象视频上线后补"形象视频生成中"态） */
 function subjectTag(s: ViduSubject) {
   if (s.state !== 'success') {
     if (s.state === 'failed') return '失败'
     return '创建中'
   }
-  if (s.kind === 'scene') return '场景'
-  if (s.hasVideo) return '视频'
-  return '我的'
+  if (s.hasVideo) return '可用 · 视频'
+  return '可用'
 }
 
 function subjectToCard(s: ViduSubject): LibCard {
@@ -129,12 +127,11 @@ function subjectToCard(s: ViduSubject): LibCard {
   }
 }
 
-/** 数字人库：库式浏览 / 定制 / 批量管理（列表布局） */
+/** 分身管理页（23 号计划 §2.3）：上「官方主体」网格 + 下「我的分身」列表 */
 export default function AvatarModule() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { subjects, tasks, refetch, isLoading } = useSubjectList({ refetchInterval: 8_000 })
-  const [scope, setScope] = useState<Scope>('all')
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
@@ -159,21 +156,12 @@ export default function AvatarModule() {
     return Array.from(ids)
   }, [tasks])
 
-  const mineCards = useMemo(() => subjects.map(subjectToCard), [subjects])
-
-  const cards = useMemo(() => {
+  const mineCards = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    let list: LibCard[] = []
-    if (scope === 'recommend') {
-      list = RECOMMEND_SHOWCASE
-    } else if (scope === 'mine') {
-      list = mineCards
-    } else {
-      list = [...mineCards, ...RECOMMEND_SHOWCASE]
-    }
-    if (!needle) return list
-    return list.filter((c) => c.name.toLowerCase().includes(needle) || c.tag.toLowerCase().includes(needle))
-  }, [scope, mineCards, q])
+    const all = subjects.map(subjectToCard)
+    if (!needle) return all
+    return all.filter((c) => c.name.toLowerCase().includes(needle) || c.tag.toLowerCase().includes(needle))
+  }, [subjects, q])
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected((prev) => {
@@ -196,10 +184,6 @@ export default function AvatarModule() {
   }
 
   const onCardAction = (card: LibCard) => {
-    if (card.recommend) {
-      setCreateOpen(true)
-      return
-    }
     if (card.ready && card.serverId) {
       navigate(`/m/compose/lipsync?subject=${encodeURIComponent(card.serverId)}`)
       return
@@ -207,161 +191,156 @@ export default function AvatarModule() {
     message.info(card.subject?.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中')
   }
 
+  const renderCard = (card: LibCard, opts: { official?: boolean }) => {
+    const checked = selected.includes(card.id)
+    const actionLabel = opts.official ? '即将接入' : card.ready ? '拍口播' : '查看状态'
+    const publicTag = card.tag === '公共' || card.tag === '影视' || card.tag === '商务'
+    return (
+      <li key={card.id} className="dh-lib-card">
+        {card.selectable && (
+          <span
+            className="dh-lib-card-check"
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleSelect(card.id, !checked)
+            }}
+          >
+            <Checkbox checked={checked} />
+          </span>
+        )}
+
+        <button
+          type="button"
+          className="dh-lib-card-cover"
+          onClick={() => {
+            if (opts.official) {
+              // 官方主体端点未接入前：样例卡引导定制同款
+              setCreateOpen(true)
+              return
+            }
+            onCardAction(card)
+          }}
+          aria-label={actionLabel}
+        >
+          {card.portraitUrl ? (
+            <img src={card.portraitUrl} alt="" loading="lazy" />
+          ) : (
+            <span className="dh-lib-card-placeholder">
+              <UserOutlined />
+            </span>
+          )}
+
+          {opts.official && <span className="dh-lib-card-badge">官方</span>}
+
+          <span className={`dh-lib-card-tag${publicTag ? ' is-public' : ''}`}>
+            {card.tag}
+          </span>
+
+          <span className="dh-lib-card-overlay" aria-hidden>
+            <Button type="primary" size="small" tabIndex={-1}>
+              {opts.official ? '去定制同款' : actionLabel}
+            </Button>
+          </span>
+        </button>
+
+        <div className="dh-lib-card-body">
+          <strong className="dh-lib-card-name" title={card.name}>{card.name}</strong>
+          <span className="dh-lib-card-meta">
+            <span className="dh-lib-card-time">{card.timeLabel}</span>
+            {card.duration && (
+              <span className="dh-lib-card-dur">
+                <PlayCircleOutlined />
+                {card.duration}
+              </span>
+            )}
+          </span>
+        </div>
+      </li>
+    )
+  }
+
   return (
     <div className="dh-lib">
       <header className="dh-lib-head">
         <div className="dh-lib-titles">
-          <h1 className="dh-lib-title">数字人库</h1>
-          <p className="dh-lib-lead">独家高逼真数字人，满足多种应用场景</p>
+          <h1 className="dh-lib-title">分身管理</h1>
+          <p className="dh-lib-lead">官方主体即选即用；定制个人分身，跨视频人物形象一致</p>
         </div>
 
-        <div className="dh-lib-toolbar">
-          <div className="dh-lib-tabs" role="tablist">
-            {(
-              [
-                { key: 'all', label: '全部' },
-                { key: 'mine', label: '我的' },
-                { key: 'recommend', label: '推荐' },
-              ] as const
-            ).map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                role="tab"
-                aria-selected={scope === t.key}
-                className={`dh-lib-tab${scope === t.key ? ' is-active' : ''}`}
-                onClick={() => {
-                  setScope(t.key)
-                  setSelected([])
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="dh-lib-actions">
-            <Input
-              allowClear
-              className="dh-lib-search"
-              placeholder="搜索数字人"
-              prefix={<SearchOutlined />}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <Button
-              type="primary"
-              className="dh-lib-btn-primary"
-              icon={<PlusOutlined />}
-              onClick={() => setCreateOpen(true)}
-            >
-              定制数字人
-            </Button>
-            <Popconfirm
-              title={`删除选中的 ${selected.length} 个数字人？`}
-              description="仅移除本地记录，Vidu 侧主体不受影响"
-              okText="删除"
-              okButtonProps={{ danger: true, loading: deleting }}
-              cancelText="取消"
-              disabled={selected.length === 0}
-              onConfirm={batchDelete}
-            >
-              <Button
-                className="dh-lib-btn-ghost"
-                icon={<DeleteOutlined />}
-                disabled={selected.length === 0}
-              >
-                批量删除 ({selected.length})
-              </Button>
-            </Popconfirm>
-          </div>
+        <div className="dh-lib-actions">
+          <Input
+            allowClear
+            className="dh-lib-search"
+            placeholder="搜索我的分身"
+            prefix={<SearchOutlined />}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <Button
+            type="primary"
+            className="dh-lib-btn-primary"
+            icon={<PlusOutlined />}
+            onClick={() => setCreateOpen(true)}
+          >
+            定制数字人
+          </Button>
         </div>
       </header>
 
-      {isLoading && mineCards.length === 0 ? (
-        <div className="dh-lib-empty">
-          <Spin size="large" />
+      {/* 官方主体区（§2.3 上区）：服务端缓存代理端点就绪后改为即选即用 */}
+      <section className="dh-lib-section">
+        <div className="dh-lib-section-head">
+          <h2 className="dh-lib-section-title">官方主体</h2>
+          <Tag color="orange">接入中</Tag>
+          <span className="dh-lib-section-note">官方主体库即将开放（等服务端端点），当前展示样例</span>
         </div>
-      ) : cards.length === 0 ? (
-        <div className="dh-lib-empty">
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={scope === 'mine' || scope === 'all' ? '还没有数字人，先定制一个吧' : '暂无推荐'}
+        <ul className="dh-lib-grid" role="list">
+          {OFFICIAL_SHOWCASE.map((card) => renderCard(card, { official: true }))}
+        </ul>
+      </section>
+
+      {/* 我的分身区（§2.3 下区） */}
+      <section className="dh-lib-section">
+        <div className="dh-lib-section-head">
+          <h2 className="dh-lib-section-title">我的分身</h2>
+          <span className="dh-lib-section-note">{mineCards.length} 个 · 上传形象照即可创建</span>
+          <Popconfirm
+            title={`删除选中的 ${selected.length} 个数字人？`}
+            description="仅移除本地记录，Vidu 侧主体不受影响"
+            okText="删除"
+            okButtonProps={{ danger: true, loading: deleting }}
+            cancelText="取消"
+            disabled={selected.length === 0}
+            onConfirm={batchDelete}
           >
-            {(scope === 'mine' || scope === 'all') && (
+            <Button
+              className="dh-lib-btn-ghost"
+              icon={<DeleteOutlined />}
+              disabled={selected.length === 0}
+            >
+              批量删除 ({selected.length})
+            </Button>
+          </Popconfirm>
+        </div>
+
+        {isLoading && mineCards.length === 0 ? (
+          <div className="dh-lib-empty">
+            <Spin size="large" />
+          </div>
+        ) : mineCards.length === 0 ? (
+          <div className="dh-lib-empty">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有数字分身，先定制一个吧">
               <Button type="primary" className="dh-lib-btn-primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
                 定制数字人
               </Button>
-            )}
-          </Empty>
-        </div>
-      ) : (
-        <ul className="dh-lib-grid" role="list">
-          {cards.map((card) => {
-            const checked = selected.includes(card.id)
-            const actionLabel = card.recommend ? '去定制同款' : card.ready ? '拍口播' : '查看状态'
-            const publicTag = card.tag === '公共' || card.tag === '影视' || card.tag === '商务'
-            return (
-              <li
-                key={card.id}
-                className={`dh-lib-card${checked ? ' is-selected' : ''}${card.recommend ? ' is-recommend' : ''}`}
-              >
-                {card.selectable && (
-                  <span
-                    className="dh-lib-card-check"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      toggleSelect(card.id, !checked)
-                    }}
-                  >
-                    <Checkbox checked={checked} />
-                  </span>
-                )}
-
-                <button
-                  type="button"
-                  className="dh-lib-card-cover"
-                  onClick={() => onCardAction(card)}
-                  aria-label={actionLabel}
-                >
-                  {card.portraitUrl ? (
-                    <img src={card.portraitUrl} alt="" loading="lazy" />
-                  ) : (
-                    <span className="dh-lib-card-placeholder">
-                      <UserOutlined />
-                    </span>
-                  )}
-
-                  {card.recommend && <span className="dh-lib-card-badge">推荐</span>}
-
-                  <span className={`dh-lib-card-tag${publicTag ? ' is-public' : ''}`}>
-                    {card.tag}
-                  </span>
-
-                  <span className="dh-lib-card-overlay" aria-hidden>
-                    <Button type="primary" size="small" tabIndex={-1}>
-                      {actionLabel}
-                    </Button>
-                  </span>
-                </button>
-
-                <div className="dh-lib-card-body">
-                  <strong className="dh-lib-card-name" title={card.name}>{card.name}</strong>
-                  <span className="dh-lib-card-meta">
-                    <span className="dh-lib-card-time">{card.timeLabel}</span>
-                    {card.duration && (
-                      <span className="dh-lib-card-dur">
-                        <PlayCircleOutlined />
-                        {card.duration}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+            </Empty>
+          </div>
+        ) : (
+          <ul className="dh-lib-grid" role="list">
+            {mineCards.map((card) => renderCard(card, {}))}
+          </ul>
+        )}
+      </section>
 
       <CreateSubjectModal
         open={createOpen}
@@ -369,7 +348,6 @@ export default function AvatarModule() {
         onClose={() => setCreateOpen(false)}
         onCreated={(serverId) => {
           refetch()
-          setScope('mine')
           // 来自向导的深链创建：完成后带 subject 回向导并自动预选新分身
           if (searchParams.get('from') === 'wizard' && serverId) {
             navigate(`/m/compose/lipsync?subject=${encodeURIComponent(serverId)}`)

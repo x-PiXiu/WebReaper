@@ -72,12 +72,10 @@ export function SubjectGridCard({ subject, timeLabel, footer }: GridProps) {
           {subject.state === 'success' && subject.serverId && (
             <Tag color="success">已注册 ✓</Tag>
           )}
-          <Tag color={subject.kind === 'scene' ? 'cyan' : undefined}>
-            {subject.kind === 'scene'
-              ? '场景'
-              : subject.hasVideo
-                ? `视频主体${subject.imageCount > 0 ? '（仅视频生效）' : ''}`
-                : `${subject.imageCount} 张图`}
+          <Tag>
+            {subject.hasVideo
+              ? `视频主体${subject.imageCount > 0 ? '（仅视频生效）' : ''}`
+              : `${subject.imageCount} 张图`}
           </Tag>
           {subject.voiceId && <Tag color="purple">音色 {subject.voiceId}</Tag>}
           {timeLabel && <span className="wr-subject-grid-time">{timeLabel}</span>}

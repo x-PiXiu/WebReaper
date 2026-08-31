@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button, Input, Segmented, Space } from 'antd'
 import { LikeOutlined, PlayCircleOutlined, PlusOutlined, SendOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
 import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
+import { brollLineage } from '../../../utils/publishableWorks'
 import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
 import QueryBoundary from '../../../components/QueryBoundary'
 import { cleanWorkTitle } from '../../../utils/workTitle'
@@ -54,7 +55,10 @@ export default function MyWorks() {
   const [previewAsset, setPreviewAsset] = useState<MediaAsset | null>(null)
   const [brollSource, setBrollSource] = useState<BrollSource | null>(null)
 
-  const { works = [], isLoading, isError, refetch } = usePublishableWorks()
+  const { works = [], tasks, isLoading, isError, refetch } = usePublishableWorks()
+
+  // B-Roll 血缘标记（§6.2）：compose 产物标"B-Roll"，被插过画面的源片标"已插画面"
+  const { composeWorkIds, brollSourceWorkIds } = useMemo(() => brollLineage(tasks), [tasks])
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -164,6 +168,12 @@ export default function MyWorks() {
 
                   <span className={`mw-status mw-status--${w.status}`}>{st.label}</span>
                   <span className="mw-kind">{kd.label}</span>
+                  {composeWorkIds.has(w.id) && (
+                    <span className="mw-kind mw-kind--broll" title="由 B-Roll 插入画面合成的成片">B-Roll</span>
+                  )}
+                  {brollSourceWorkIds.has(w.id) && (
+                    <span className="mw-kind mw-kind--broll-source" title="该成片已插入过画面（有 B-Roll 衍生版本）">已插画面</span>
+                  )}
 
                   <div className="mw-hover" aria-hidden>
                     <Space size={6} wrap style={{ justifyContent: 'center' }}>{actions}</Space>

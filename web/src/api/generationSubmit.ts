@@ -249,6 +249,10 @@ export function buildSubjectRegisterPayload(input: {
   imageUrls?: string[]
   videoUrl?: string
   voice_id?: string
+  /** 23 号计划 §2.1③：可选场景图（形象视频生成的环境参考；服务端接入前忽略） */
+  sceneImageUrl?: string
+  /** 23 号计划 §2.1③：可选场景描述（一句话：主角在哪个场景做什么） */
+  sceneDescription?: string
 }): UnifiedSubmitPayload {
   const name = (input.name || '').trim()
   if (!name) throw new Error('请输入主体名称')
@@ -262,6 +266,9 @@ export function buildSubjectRegisterPayload(input: {
   if (input.voice_id) params.voice_id = input.voice_id
   if (urls.length) params.images = urls
   if (video) params.videos = [video]
+  const sceneDesc = (input.sceneDescription || '').trim()
+  if (input.sceneImageUrl) params.scene_image = input.sceneImageUrl
+  if (sceneDesc) params.scene_description = sceneDesc
   const materials = [...ids]
   if (!materials.length && urls.length) materials.push(...urls)
   if (!materials.length && video) materials.push(video)

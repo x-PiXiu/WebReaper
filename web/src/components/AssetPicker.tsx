@@ -28,10 +28,14 @@ const ASSET_ACCEPT: Record<string, string> = {
   image: 'image/png,image/jpeg,image/webp',
   video: 'video/mp4,video/webm,video/quicktime',
   audio: 'audio/mpeg,audio/mp4,audio/wav',
+  // 图片+视频（B-Roll 插入片段：图片按句子时长自动转视频）
+  visual: 'image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime',
   any: 'image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/mp4,audio/wav',
 }
 
-function filterDiskAssets(list: MediaAsset[], accept: 'image' | 'video' | 'audio' | 'any'): MediaAsset[] {
+export type AssetAccept = 'image' | 'video' | 'audio' | 'visual' | 'any'
+
+function filterDiskAssets(list: MediaAsset[], accept: AssetAccept): MediaAsset[] {
   const normalized = normalizeMediaAssets(list)
   if (accept === 'any') return normalized
   if (accept === 'image') {
@@ -40,13 +44,16 @@ function filterDiskAssets(list: MediaAsset[], accept: 'image' | 'video' | 'audio
   if (accept === 'audio') {
     return normalized.filter(a => isAudioMedia(a.mime, a.url, a.type))
   }
+  if (accept === 'visual') {
+    return normalized.filter(a => isImageMedia(a.mime, a.url, a.type) || isVideoMedia(a.mime, a.url, a.type))
+  }
   return normalized.filter(a => isVideoMedia(a.mime, a.url, a.type))
 }
 
 export default function AssetPicker(props: {
   open: boolean
   mode: 'single' | 'multi'
-  accept: 'image' | 'video' | 'audio' | 'any'
+  accept: AssetAccept
   title: string
   max?: number
   onClose: () => void
@@ -62,12 +69,12 @@ export default function AssetPicker(props: {
 
   const filtered = useMemo(() => {
     const fromDisk = filterDiskAssets(assets, accept)
-    const taskKind = accept === 'image' ? 'image' as const
-      : accept === 'video' ? 'video' as const
-      : accept === 'audio' ? 'audio' as const
-      : null
-    if (!taskKind) return fromDisk
-    const fromTasks = mediaAssetsFromGenerationTasks(genTasks, taskKind)
+    // visual（B-Roll 片段）合并图片+视频的生成产物；any 不并入任务产物（维持原行为）
+    const taskKinds: Array<'image' | 'video' | 'audio'> = accept === 'visual'
+      ? ['image', 'video']
+      : accept === 'any' ? [] : [accept]
+    if (taskKinds.length === 0) return fromDisk
+    const fromTasks = taskKinds.flatMap((k) => mediaAssetsFromGenerationTasks(genTasks, k))
     return mergeMediaByUrl(fromDisk, fromTasks)
   }, [assets, accept, genTasks])
 

@@ -80,11 +80,13 @@ export async function runLipSyncPipeline(
   input: LipSyncPipelineInput,
   opts: {
     onStage?: (stage: LipSyncPipelineStage) => void
+    /** 每提交一个任务即回调（供调用方跟踪活动任务、实现"生成中可取消"） */
+    onTaskSubmit?: (stage: LipSyncPipelineStage, taskId: string) => void
     resume?: LipSyncPipelineResume
     retryFrom?: 'tts' | 'ref' | 'lipsync'
   } = {},
 ): Promise<LipSyncPipelineResult> {
-  const { onStage, resume, retryFrom } = opts
+  const { onStage, onTaskSubmit, resume, retryFrom } = opts
   if (!input.brandId) throw new Error('请先选择人设/品牌')
 
   const audioSource = input.audioSource || 'tts'
@@ -120,6 +122,7 @@ export async function runLipSyncPipeline(
       params: input.voiceId ? { voice_setting_voice_id: input.voiceId } : undefined,
     })
     ttsTaskId = tts.id
+    onTaskSubmit?.('tts', tts.id)
     const ttsDone = await waitGenerationTask(tts.id)
     audioUrl = creationUrl(ttsDone)
     if (!audioUrl) throw new Error('语音产物缺失（可重试）')
@@ -143,6 +146,7 @@ export async function runLipSyncPipeline(
       }))
       refTaskId = ref.id
       lipsyncTaskId = ref.id
+      onTaskSubmit?.('ref', ref.id)
       const done = await waitGenerationTask(ref.id)
       const resultUrl = creationUrl(done)
       if (!resultUrl) throw new Error('主体口播视频产物缺失（可重试）')
@@ -180,6 +184,7 @@ export async function runLipSyncPipeline(
       params: deliverableWorkParams(),
     })
     lipsyncTaskId = lipsync.id
+    onTaskSubmit?.('lipsync', lipsync.id)
     const done = await waitGenerationTask(lipsync.id)
     const resultUrl = creationUrl(done)
     if (!resultUrl) throw new Error('对口型产物缺失（可重试）')
