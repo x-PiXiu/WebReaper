@@ -1,53 +1,37 @@
-import { useRef, useState } from 'react'
-import { Form, Input, Button } from 'antd'
+import { useEffect, useState } from 'react'
+import { Checkbox, Form, Input, Button } from 'antd'
+import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/auth'
 import { message } from '../utils/antdApp'
+import logoUrl from '../assets/logo-zhichen.jpg'
 
 type Mode = 'login' | 'register'
+
+const REMEMBER_KEY = 'wr-login-username'
 
 export default function Login() {
   const [loading, setLoading] = useState(false)
   const [mode, setMode] = useState<Mode>('login')
-  const [torchOn, setTorchOn] = useState(false)
-  const brandRef = useRef<HTMLElement>(null)
-  const rafRef = useRef(0)
+  const [remember, setRemember] = useState(() => !!localStorage.getItem(REMEMBER_KEY))
+  const [form] = Form.useForm()
   const navigate = useNavigate()
   const location = useLocation()
   const setAuth = useAuthStore((s) => s.setAuth)
 
-  const moveTorch = (clientX: number, clientY: number) => {
-    const el = brandRef.current
-    if (!el) return
-    cancelAnimationFrame(rafRef.current)
-    rafRef.current = requestAnimationFrame(() => {
-      const rect = el.getBoundingClientRect()
-      const x = ((clientX - rect.left) / rect.width) * 100
-      const y = ((clientY - rect.top) / rect.height) * 100
-      el.style.setProperty('--torch-x', `${x}%`)
-      el.style.setProperty('--torch-y', `${y}%`)
-    })
-  }
-
-  const handleTorchEnter = (e: React.MouseEvent<HTMLElement>) => {
-    setTorchOn(true)
-    moveTorch(e.clientX, e.clientY)
-  }
-
-  const handleTorchMove = (e: React.MouseEvent<HTMLElement>) => {
-    moveTorch(e.clientX, e.clientY)
-  }
-
-  const handleTorchLeave = () => {
-    setTorchOn(false)
-    cancelAnimationFrame(rafRef.current)
-  }
+  // 「记住用户名」：回填上次登录的账号
+  useEffect(() => {
+    const saved = localStorage.getItem(REMEMBER_KEY)
+    if (saved) form.setFieldsValue({ username: saved })
+  }, [form])
 
   const handleLogin = async (values: { username: string; password: string }) => {
     setLoading(true)
     try {
       const res = await authApi.login(values)
+      if (remember) localStorage.setItem(REMEMBER_KEY, values.username)
+      else localStorage.removeItem(REMEMBER_KEY)
       setAuth(res.token, res.username || values.username, res.role, res.tenant_id, !!res.must_change_password)
       message.success('登录成功')
       // 回跳来源页（路由守卫记录的 from）——OAuth 回调等深链场景：登录后回到原页面而非首页。
@@ -75,85 +59,67 @@ export default function Login() {
 
   return (
     <div className="wr-login">
-      <aside
-        ref={brandRef}
-        className={`wr-login-brand${torchOn ? ' is-torch-on' : ''}`}
-        aria-label="产品介绍"
-        onMouseEnter={handleTorchEnter}
-        onMouseMove={handleTorchMove}
-        onMouseLeave={handleTorchLeave}
-      >
-        <div className="wr-login-texture" aria-hidden />
-        <div className="wr-login-wash" aria-hidden />
-        <div className="wr-login-beam" aria-hidden />
-        <div className="wr-login-torch-lit" aria-hidden />
-        <div className="wr-login-torch-glow" aria-hidden />
-        <div className="wr-login-torch-core" aria-hidden />
+      <div className="wr-login-bg" aria-hidden>
+        <svg className="wr-login-waves" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+          <path d="M-80 640 C 280 520, 560 760, 900 640 S 1420 480, 1560 560" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="1.5" />
+          <path d="M-80 700 C 300 580, 620 820, 960 700 S 1440 560, 1560 620" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="1.2" />
+          <path d="M-80 760 C 320 660, 640 880, 1000 760 S 1440 660, 1560 700" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1" />
+          <path d="M-80 180 C 240 260, 520 80, 860 160 S 1360 260, 1560 140" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1.2" />
+        </svg>
+        <i className="wr-login-grid" aria-hidden />
+      </div>
 
-        <header className="wr-login-brand-top wr-login-rise">
-          <p className="wr-login-kicker">IP Growth Agent</p>
-          <h1 className="wr-login-brand-title">获客智能体</h1>
-          <span className="wr-login-title-line" aria-hidden />
-        </header>
-
-        <div className="wr-login-brand-body wr-login-rise wr-login-rise--delay">
-          <h2 className="wr-login-headline">
-            垂直 IP 营销，
-            <br />
-            帮老板持续拓客。
-          </h2>
+      <aside className="wr-login-brand" aria-label="产品介绍">
+        <div className="wr-login-brand-main wr-login-rise">
+          <div className="wr-login-logo">
+            <img src={logoUrl} alt="智宸AI logo" />
+          </div>
+          <p className="wr-login-kicker">ZHICHEN AI · IP GROWTH AGENT</p>
+          <h1 className="wr-login-title">智宸AI获客智能体</h1>
           <p className="wr-login-lead">
             对标爆款、口播成片、一键分发、看清线索——
             为人设获客而生，而不是堆一堆通用 AI 工具。
           </p>
+
+          <ul className="wr-login-stats">
+            <li>
+              <strong>对标爆款</strong>
+              <span>灵感库驱动选题</span>
+            </li>
+            <li>
+              <strong>口播成片</strong>
+              <span>AI 一键生成</span>
+            </li>
+            <li>
+              <strong>一键分发</strong>
+              <span>多平台同步触达</span>
+            </li>
+          </ul>
         </div>
 
-        <footer className="wr-login-brand-foot wr-login-rise wr-login-rise--delay2">
+        <footer className="wr-login-flow wr-login-rise wr-login-rise--delay">
           <span>建人设</span>
-          <span className="wr-login-dot" aria-hidden />
+          <i aria-hidden />
           <span>出内容</span>
-          <span className="wr-login-dot" aria-hidden />
+          <i aria-hidden />
           <span>发出去</span>
-          <span className="wr-login-dot" aria-hidden />
+          <i aria-hidden />
           <span>看线索</span>
         </footer>
       </aside>
 
       <main className="wr-login-panel">
-        <div className="wr-login-panel-glow" aria-hidden />
-        <div className="wr-login-panel-inner wr-login-rise wr-login-rise--delay">
+        <div className="wr-login-card wr-login-rise wr-login-rise--delay">
           <div className="wr-login-form-head">
-            <h2>{mode === 'login' ? '登录' : '注册'}</h2>
+            <h2>{mode === 'login' ? '欢迎回来' : '创建账号'}</h2>
             <p>
-              {mode === 'login'
-                ? '进入获客智能体工作空间'
-                : '创建账号后即可开始打造账号 IP'}
+              {mode === 'login' ? '请输入您的账号信息' : '注册后即可开始打造账号 IP'}
             </p>
-          </div>
-
-          <div className="wr-login-mode" role="tablist" aria-label="登录或注册">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'login'}
-              className={mode === 'login' ? 'is-active' : undefined}
-              onClick={() => setMode('login')}
-            >
-              登录
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'register'}
-              className={mode === 'register' ? 'is-active' : undefined}
-              onClick={() => setMode('register')}
-            >
-              注册
-            </button>
           </div>
 
           <Form
             key={mode}
+            form={form}
             layout="vertical"
             onFinish={mode === 'login' ? handleLogin : handleRegister}
             autoComplete="off"
@@ -165,18 +131,27 @@ export default function Login() {
               name="username"
               rules={[{ required: true, min: 3, message: '至少 3 个字符' }]}
             >
-              <Input placeholder="请输入用户名" size="large" autoFocus />
+              <Input placeholder="请输入用户名" size="large" prefix={<UserOutlined />} autoFocus />
             </Form.Item>
             <Form.Item
               label="密码"
               name="password"
               rules={[{ required: true, min: 6, message: '至少 6 个字符' }]}
             >
-              <Input.Password placeholder="请输入密码" size="large" />
+              <Input.Password placeholder="请输入密码" size="large" prefix={<LockOutlined />} />
             </Form.Item>
+
+            {mode === 'login' && (
+              <div className="wr-login-remember">
+                <Checkbox checked={remember} onChange={(e) => setRemember(e.target.checked)}>
+                  记住用户名
+                </Checkbox>
+              </div>
+            )}
+
             <Form.Item className="wr-login-submit">
               <Button type="primary" htmlType="submit" loading={loading} block size="large">
-                {mode === 'login' ? '登录' : '注册'}
+                {mode === 'login' ? '立即登录' : '立即注册'}
               </Button>
             </Form.Item>
           </Form>
@@ -184,11 +159,15 @@ export default function Login() {
           <p className="wr-login-footnote">
             {mode === 'login' ? '还没有账号？' : '已有账号？'}
             <button type="button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-              {mode === 'login' ? '注册' : '登录'}
+              {mode === 'login' ? '立即注册' : '直接登录'}
             </button>
           </p>
         </div>
       </main>
+
+      <footer className="wr-login-footer">
+        © {new Date().getFullYear()} 智宸AI · 获客智能体
+      </footer>
     </div>
   )
 }

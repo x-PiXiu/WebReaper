@@ -663,356 +663,217 @@ pre code.hljs {
 }
 .wr-logo-glow:hover { box-shadow: 0 0 36px rgba(34, 211, 238, 0.4); }
 
-/* ===== 登录页：墨砚 + 克制渐变与动效 ===== */
+/* ===== 登录页：智宸AI · 浅色渐变 + 品牌青 ===== */
 .wr-login {
-  --login-ink: #161513;
-  --login-ink-soft: #2a2825;
-  --login-paper: #f2f1ee;
-  --login-paper-deep: #e8e6e1;
-  --login-line: rgba(22, 21, 19, 0.12);
-  --login-muted: #6f6b64;
-  --login-accent: #44337f;
-  --login-mist: #4a3f7a;
-  --login-warm: #8a7a62;
+  --login-ink: #0c2733;
+  --login-ink-soft: #35505c;
+  --login-muted: #64828d;
+  --login-line: #d9eaee;
+  --login-cyan: #1fe3cb;
+  --login-cyan-deep: #0aa4bd;
+  position: relative;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(380px, 0.85fr);
-  background: var(--login-ink);
-  color: #f2f1ee;
+  grid-template-columns: minmax(0, 1.1fr) minmax(420px, 0.9fr);
+  align-items: center;
+  padding: 0 clamp(24px, 6vw, 96px);
+  background: linear-gradient(158deg, #f2fcff 0%, #e3f7fd 34%, #c9eff8 66%, #abe5f1 100%);
+  color: var(--login-ink);
   font-family: 'DM Sans', 'Noto Sans SC', 'PingFang SC', sans-serif;
   overflow: hidden;
 }
 
-.wr-login-brand {
+/* 背景装饰：光晕 + 流动曲线 + 角部网格 */
+.wr-login-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 46% 38% at 14% 12%, rgba(255, 255, 255, 0.9) 0%, transparent 62%),
+    radial-gradient(ellipse 52% 44% at 88% 82%, rgba(31, 227, 203, 0.16) 0%, transparent 66%);
+}
+.wr-login-waves {
+  position: absolute;
+  inset: -4% -6%;
+  width: 112%;
+  height: 108%;
+  animation: wr-login-waves 26s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.wr-login-grid {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 42%;
+  height: 46%;
+  opacity: 0.5;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.55) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.55) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 80% at 100% 0%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(ellipse 80% 80% at 100% 0%, #000 0%, transparent 72%);
+}
+
+.wr-login-brand,
+.wr-login-panel {
   position: relative;
+  z-index: 1;
+}
+
+/* —— 左侧品牌区 —— */
+.wr-login-brand {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  padding: clamp(40px, 7vw, 80px);
-  min-height: 100vh;
-  isolation: isolate;
+  justify-content: center;
+  gap: clamp(32px, 4.5vw, 56px);
+  padding: clamp(32px, 4vw, 56px) 0;
 }
 
-.wr-login-texture {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(155deg, #1a1916 0%, #141311 42%, #101816 100%);
-}
-.wr-login-texture::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  opacity: 0.4;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E");
-  mix-blend-mode: overlay;
+.wr-login-brand-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
-/* 克制色晕：墨绿 → 暖灰，缓慢漂移 */
-.wr-login-wash {
-  position: absolute;
-  inset: -20%;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 55% 45% at 18% 22%, rgba(68, 51, 143, 0.28) 0%, transparent 62%),
-    radial-gradient(ellipse 50% 40% at 78% 78%, rgba(138, 122, 98, 0.16) 0%, transparent 65%),
-    radial-gradient(ellipse 40% 35% at 60% 30%, rgba(74, 63, 122, 0.12) 0%, transparent 70%);
-  animation: wr-login-wash 18s ease-in-out infinite alternate;
-  will-change: transform, opacity;
+.wr-login-logo {
+  width: clamp(76px, 7vw, 96px);
+  height: clamp(76px, 7vw, 96px);
+  margin-bottom: 26px;
+  border-radius: 24%;
+  overflow: hidden;
+  background: #060606;
+  box-shadow:
+    0 18px 40px rgba(7, 40, 52, 0.22),
+    0 0 0 1px rgba(255, 255, 255, 0.6),
+    0 0 32px rgba(31, 227, 203, 0.28);
+  animation: wr-login-float 7s ease-in-out infinite;
 }
-
-/* 斜向细光带 */
-.wr-login-beam {
-  position: absolute;
-  top: -30%;
-  left: -10%;
-  width: 42%;
-  height: 160%;
-  z-index: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    105deg,
-    transparent 0%,
-    rgba(242, 241, 238, 0.015) 42%,
-    rgba(242, 241, 238, 0.055) 50%,
-    rgba(242, 241, 238, 0.015) 58%,
-    transparent 100%
-  );
-  transform: rotate(12deg);
-  animation: wr-login-beam 12s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-/* —— 火炬聚光：跟随鼠标照亮局部 —— */
-.wr-login-brand {
-  --torch-x: 42%;
-  --torch-y: 38%;
-  --torch-size: 280px;
-  cursor: crosshair;
-}
-
-.wr-login-torch-lit,
-.wr-login-torch-glow,
-.wr-login-torch-core {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 420ms ease;
-}
-
-/* 被照亮的「亮面」：暖色纹理透过径向遮罩显出 */
-.wr-login-torch-lit {
-  background:
-    radial-gradient(circle at 30% 20%, rgba(255, 214, 160, 0.14), transparent 45%),
-    linear-gradient(145deg, rgba(62, 48, 32, 0.55) 0%, rgba(28, 42, 36, 0.35) 50%, rgba(40, 32, 24, 0.45) 100%);
-  -webkit-mask-image: radial-gradient(
-    circle var(--torch-size) at var(--torch-x) var(--torch-y),
-    #000 0%,
-    #000 28%,
-    rgba(0, 0, 0, 0.45) 52%,
-    transparent 72%
-  );
-  mask-image: radial-gradient(
-    circle var(--torch-size) at var(--torch-x) var(--torch-y),
-    #000 0%,
-    #000 28%,
-    rgba(0, 0, 0, 0.45) 52%,
-    transparent 72%
-  );
-}
-
-/* 火炬暖光晕（screen 叠暖橙） */
-.wr-login-torch-glow {
-  z-index: 2;
-  background: radial-gradient(
-    circle 320px at var(--torch-x) var(--torch-y),
-    rgba(255, 196, 110, 0.42) 0%,
-    rgba(255, 140, 64, 0.22) 22%,
-    rgba(180, 90, 30, 0.1) 42%,
-    rgba(68, 51, 143, 0.04) 58%,
-    transparent 72%
-  );
-  mix-blend-mode: screen;
-}
-
-/* 焰芯：更亮的中心点，微颤动 */
-.wr-login-torch-core {
-  z-index: 2;
-  background: radial-gradient(
-    circle 56px at var(--torch-x) var(--torch-y),
-    rgba(255, 244, 210, 0.75) 0%,
-    rgba(255, 180, 80, 0.35) 35%,
-    transparent 70%
-  );
-  mix-blend-mode: soft-light;
-}
-
-.wr-login-brand.is-torch-on .wr-login-torch-lit {
-  opacity: 1;
-}
-.wr-login-brand.is-torch-on .wr-login-torch-glow {
-  opacity: 1;
-  animation: wr-login-torch-flicker 2.4s ease-in-out infinite;
-}
-.wr-login-brand.is-torch-on .wr-login-torch-core {
-  opacity: 1;
-  animation: wr-login-torch-core 1.8s ease-in-out infinite;
-}
-
-/* 文字在光照下略提亮 */
-.wr-login-brand.is-torch-on .wr-login-brand-top,
-.wr-login-brand.is-torch-on .wr-login-brand-body,
-.wr-login-brand.is-torch-on .wr-login-brand-foot {
-  filter: drop-shadow(0 0 24px rgba(255, 180, 90, 0.08));
-  transition: filter 420ms ease;
-}
-
-.wr-login-brand-top,
-.wr-login-brand-body,
-.wr-login-brand-foot {
-  position: relative;
-  z-index: 3;
+.wr-login-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .wr-login-kicker {
-  margin: 0 0 18px;
-  font-family: 'Newsreader', 'Noto Serif SC', serif;
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(242, 241, 238, 0.45);
-  background: linear-gradient(90deg, rgba(242, 241, 238, 0.55), rgba(68, 51, 143, 0.75), rgba(242, 241, 238, 0.35));
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: wr-login-kicker 10s ease-in-out infinite;
-}
-
-.wr-login-brand-title {
-  margin: 0;
-  font-family: 'Noto Serif SC', 'Songti SC', serif;
-  font-size: clamp(48px, 6.5vw, 72px);
-  font-weight: 700;
-  line-height: 1.05;
-  letter-spacing: 0.04em;
-  background: linear-gradient(125deg, #f7f5f1 0%, #e8ece8 38%, #c5d4ce 72%, #f2efe8 100%);
-  background-size: 180% 180%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: wr-login-title-shift 14s ease-in-out infinite;
-}
-
-.wr-login-title-line {
-  display: block;
-  width: 64px;
-  height: 2px;
-  margin-top: 22px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #44337f, rgba(138, 122, 98, 0.55), transparent);
-  transform-origin: left center;
-  animation: wr-login-line-draw 900ms cubic-bezier(0.22, 1, 0.36, 1) 280ms both;
-}
-
-.wr-login-brand-body {
-  margin-top: -220px;
-}
-
-.wr-login-headline {
-  margin: 0 0 20px;
-  max-width: 14em;
-  font-family: 'Noto Serif SC', 'Songti SC', serif;
-  font-size: clamp(26px, 3.2vw, 36px);
+  margin: 0 0 14px;
+  font-size: 12.5px;
   font-weight: 600;
-  line-height: 1.35;
+  letter-spacing: 0.18em;
+  color: var(--login-cyan-deep);
+}
+
+.wr-login-title {
+  margin: 0 0 18px;
+  font-size: clamp(36px, 4.4vw, 54px);
+  font-weight: 700;
+  line-height: 1.16;
   letter-spacing: 0.02em;
-  color: rgba(247, 245, 241, 0.92);
+  color: var(--login-ink);
 }
 
 .wr-login-lead {
   margin: 0;
-  max-width: 28em;
+  max-width: 30em;
   font-size: 15px;
   line-height: 1.85;
-  color: rgba(242, 241, 238, 0.55);
-  font-weight: 400;
+  color: var(--login-muted);
 }
 
-.wr-login-brand-foot {
+/* 数据点：白色毛玻璃小卡 */
+.wr-login-stats {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 14px;
-  padding-top: 28px;
-  border-top: 1px solid transparent;
-  border-image: linear-gradient(90deg, rgba(242, 241, 238, 0.18), rgba(68, 51, 143, 0.25), rgba(242, 241, 238, 0.05)) 1;
-  font-size: 12.5px;
-  letter-spacing: 0.06em;
-  color: rgba(242, 241, 238, 0.42);
+  gap: 14px;
+  margin: 34px 0 0;
+  padding: 0;
+  list-style: none;
 }
-.wr-login-dot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #44337f, #8a7a62);
-  animation: wr-login-dot-pulse 3.2s ease-in-out infinite;
+.wr-login-stats li {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 128px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 26px rgba(23, 100, 120, 0.08);
+  backdrop-filter: blur(8px);
+  transition: transform 220ms ease, box-shadow 220ms ease;
 }
-.wr-login-brand-foot .wr-login-dot:nth-child(2) { animation-delay: 0.4s; }
-.wr-login-brand-foot .wr-login-dot:nth-child(4) { animation-delay: 0.8s; }
+.wr-login-stats li:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 32px rgba(23, 100, 120, 0.13);
+}
+.wr-login-stats strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--login-ink);
+}
+.wr-login-stats span {
+  font-size: 12px;
+  color: var(--login-muted);
+}
 
-.wr-login-panel {
-  position: relative;
+/* 底部流程：建人设 · 出内容 · 发出去 · 看线索 */
+.wr-login-flow {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: clamp(32px, 5vw, 64px);
-  background:
-    linear-gradient(165deg, #f5f4f1 0%, #f2f1ee 48%, #ebe9e3 100%);
-  color: var(--login-ink);
-  border-left: 1px solid rgba(22, 21, 19, 0.06);
-  overflow: hidden;
+  gap: 14px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--login-ink-soft);
 }
-
-.wr-login-panel-glow {
-  position: absolute;
-  width: 420px;
-  height: 420px;
-  right: -12%;
-  top: 12%;
+.wr-login-flow i {
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(68, 51, 143, 0.08) 0%, transparent 68%);
-  animation: wr-login-panel-glow 10s ease-in-out infinite alternate;
+  background: var(--login-cyan);
+  box-shadow: 0 0 8px rgba(31, 227, 203, 0.8);
+  animation: wr-login-dot 3.2s ease-in-out infinite;
+}
+.wr-login-flow i:nth-of-type(2) { animation-delay: 0.4s; }
+.wr-login-flow i:nth-of-type(3) { animation-delay: 0.8s; }
+
+/* —— 右侧登录卡片 —— */
+.wr-login-panel {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.wr-login-panel-inner {
-  position: relative;
-  z-index: 1;
-  width: min(380px, 100%);
+.wr-login-card {
+  width: min(400px, 100%);
+  padding: clamp(30px, 3.2vw, 42px) clamp(26px, 2.8vw, 38px);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 24px 64px rgba(15, 88, 110, 0.16),
+    0 2px 8px rgba(15, 88, 110, 0.05);
+  backdrop-filter: blur(14px);
 }
 
 .wr-login-form-head {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
+  text-align: center;
 }
 .wr-login-form-head h2 {
   margin: 0;
-  font-family: 'Noto Serif SC', 'Songti SC', serif;
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
   color: var(--login-ink);
 }
 .wr-login-form-head p {
-  margin: 10px 0 0;
-  font-size: 14px;
-  line-height: 1.6;
+  margin: 9px 0 0;
+  font-size: 13px;
   color: var(--login-muted);
 }
 
-.wr-login-mode {
-  display: flex;
-  gap: 28px;
-  margin-bottom: 28px;
-  border-bottom: 1px solid var(--login-line);
-}
-.wr-login-mode button {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  padding: 0 0 12px;
-  margin: 0;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--login-muted);
-  cursor: pointer;
-  position: relative;
-  transition: color 200ms ease;
-}
-.wr-login-mode button.is-active {
-  color: var(--login-ink);
-  font-weight: 600;
-}
-.wr-login-mode button.is-active::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #44337f, #8a7a62);
-  animation: wr-login-tab-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.wr-login-form .ant-form-item { margin-bottom: 18px; }
+.wr-login-form .ant-form-item { margin-bottom: 16px; }
 .wr-login-form .ant-form-item-label > label {
   color: var(--login-ink-soft) !important;
   font-size: 13px !important;
@@ -1021,57 +882,78 @@ pre code.hljs {
 .wr-login-form .ant-input-affix-wrapper,
 .wr-login-form .ant-input,
 .wr-login-form .ant-input-password {
-  background: rgba(255, 255, 255, 0.88) !important;
+  background: #fbfeff !important;
   border-color: var(--login-line) !important;
   color: var(--login-ink) !important;
-  border-radius: 6px !important;
-  min-height: 46px;
+  border-radius: 8px !important;
+  min-height: 44px;
   box-shadow: none !important;
   transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease !important;
 }
 .wr-login-form .ant-input-affix-wrapper .ant-input {
   background: transparent !important;
 }
+.wr-login-form .ant-input-prefix {
+  color: #93aeb8;
+  margin-inline-end: 8px;
+}
 .wr-login-form .ant-input-affix-wrapper:hover,
 .wr-login-form .ant-input:hover {
-  border-color: rgba(68, 51, 143, 0.35) !important;
+  border-color: rgba(10, 164, 189, 0.45) !important;
 }
 .wr-login-form .ant-input-affix-wrapper-focused,
 .wr-login-form .ant-input-affix-wrapper:focus,
 .wr-login-form .ant-input:focus {
-  border-color: #44337f !important;
-  box-shadow: 0 0 0 3px rgba(68, 51, 143, 0.12) !important;
+  border-color: var(--login-cyan-deep) !important;
+  box-shadow: 0 0 0 3px rgba(31, 227, 203, 0.16) !important;
   background: #fff !important;
 }
 
-.wr-login-submit { margin-bottom: 4px !important; margin-top: 12px; }
+.wr-login-remember {
+  display: flex;
+  justify-content: flex-start;
+  margin: -4px 0 14px;
+  font-size: 13px;
+}
+.wr-login-remember .ant-checkbox-checked .ant-checkbox-inner {
+  background-color: var(--login-cyan-deep);
+  border-color: var(--login-cyan-deep);
+}
+.wr-login-remember .ant-checkbox-inner:hover {
+  border-color: var(--login-cyan-deep);
+}
+.wr-login-remember .ant-checkbox-wrapper:hover .ant-checkbox-inner {
+  border-color: var(--login-cyan-deep);
+}
+
+.wr-login-submit { margin-bottom: 2px !important; margin-top: 6px; }
 .wr-login-submit .ant-btn {
   position: relative;
   overflow: hidden;
   height: 48px !important;
-  border-radius: 6px !important;
+  border-radius: 8px !important;
   font-size: 15px !important;
   font-weight: 600 !important;
   letter-spacing: 0.08em;
-  background: linear-gradient(135deg, #1d1a2e 0%, #44337f 52%, #372e66 100%) !important;
+  background: linear-gradient(135deg, #1fe3cb 0%, #0cb8d2 55%, #0a93c4 100%) !important;
   background-size: 160% 160% !important;
   border: none !important;
-  box-shadow: 0 8px 22px rgba(68, 51, 143, 0.22) !important;
-  color: #f2f1ee !important;
+  box-shadow: 0 10px 24px rgba(10, 164, 189, 0.32) !important;
+  color: #fff !important;
   transition: transform 200ms ease, box-shadow 200ms ease, background-position 400ms ease !important;
 }
 .wr-login-submit .ant-btn::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.14) 48%, transparent 62%);
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.22) 48%, transparent 62%);
   transform: translateX(-120%);
   transition: transform 650ms ease;
 }
 .wr-login-submit .ant-btn:hover {
   background-position: 100% 50% !important;
   transform: translateY(-1px);
-  box-shadow: 0 12px 28px rgba(68, 51, 143, 0.28) !important;
+  box-shadow: 0 14px 30px rgba(10, 164, 189, 0.4) !important;
   filter: none;
 }
 .wr-login-submit .ant-btn:hover::after {
@@ -1079,7 +961,8 @@ pre code.hljs {
 }
 
 .wr-login-footnote {
-  margin: 24px 0 0;
+  margin: 20px 0 0;
+  text-align: center;
   font-size: 13px;
   color: var(--login-muted);
 }
@@ -1089,110 +972,85 @@ pre code.hljs {
   background: none;
   padding: 0;
   margin-left: 6px;
-  color: var(--login-accent);
+  color: var(--login-cyan-deep);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
 }
 .wr-login-footnote button:hover { text-decoration: underline; }
 
+/* 页脚 */
+.wr-login-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  color: rgba(12, 39, 51, 0.45);
+}
+
+/* —— 动效 —— */
 .wr-login-rise {
   animation: wr-login-rise 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-.wr-login-rise--delay { animation-delay: 100ms; }
-.wr-login-rise--delay2 { animation-delay: 200ms; }
+.wr-login-rise--delay { animation-delay: 120ms; }
 
 @keyframes wr-login-rise {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: translateY(0); }
 }
-@keyframes wr-login-wash {
-  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.85; }
-  100% { transform: translate3d(3%, -2%, 0) scale(1.06); opacity: 1; }
+@keyframes wr-login-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
 }
-@keyframes wr-login-beam {
-  0%, 100% { opacity: 0.35; transform: translateX(-6%) rotate(12deg); }
-  50% { opacity: 0.7; transform: translateX(8%) rotate(12deg); }
+@keyframes wr-login-waves {
+  from { transform: translateX(-1.4%); }
+  to { transform: translateX(1.4%); }
 }
-@keyframes wr-login-kicker {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-@keyframes wr-login-title-shift {
-  0%, 100% { background-position: 0% 40%; }
-  50% { background-position: 100% 60%; }
-}
-@keyframes wr-login-line-draw {
-  from { transform: scaleX(0); opacity: 0; }
-  to { transform: scaleX(1); opacity: 1; }
-}
-@keyframes wr-login-dot-pulse {
-  0%, 100% { opacity: 0.45; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.35); }
-}
-@keyframes wr-login-panel-glow {
-  from { transform: translate3d(0, 0, 0); opacity: 0.7; }
-  to { transform: translate3d(-24px, 18px, 0); opacity: 1; }
-}
-@keyframes wr-login-tab-in {
-  from { transform: scaleX(0.4); opacity: 0; }
-  to { transform: scaleX(1); opacity: 1; }
-}
-@keyframes wr-login-torch-flicker {
-  0%, 100% { opacity: 0.88; filter: brightness(1); }
-  35% { opacity: 1; filter: brightness(1.08); }
-  55% { opacity: 0.82; filter: brightness(0.96); }
-  75% { opacity: 0.95; filter: brightness(1.04); }
-}
-@keyframes wr-login-torch-core {
-  0%, 100% { opacity: 0.82; }
-  40% { opacity: 1; }
-  70% { opacity: 0.75; }
+@keyframes wr-login-dot {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.4); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wr-login-wash,
-  .wr-login-beam,
-  .wr-login-kicker,
-  .wr-login-brand-title,
-  .wr-login-dot,
-  .wr-login-panel-glow,
+  .wr-login-waves,
   .wr-login-rise,
-  .wr-login-title-line,
-  .wr-login-mode button.is-active::after,
-  .wr-login-brand.is-torch-on .wr-login-torch-glow,
-  .wr-login-brand.is-torch-on .wr-login-torch-core {
+  .wr-login-logo,
+  .wr-login-flow i,
+  .wr-login-stats li {
     animation: none !important;
+    transition: none !important;
   }
-  .wr-login-brand-title,
-  .wr-login-kicker {
-    -webkit-text-fill-color: unset;
-    color: #f7f5f1;
-    background: none;
-  }
-  .wr-login-brand { cursor: default; }
 }
 
 @media (max-width: 960px) {
   .wr-login {
     grid-template-columns: 1fr;
+    align-items: stretch;
+    padding: 0 20px;
   }
   .wr-login-brand {
-    min-height: auto;
-    padding: 36px 28px 32px;
-    gap: 36px;
+    justify-content: flex-start;
+    padding: 44px 8px 8px;
+    gap: 30px;
   }
-  .wr-login-brand-title { font-size: 40px; }
-  .wr-login-headline { font-size: 24px; max-width: none; }
-  .wr-login-beam { opacity: 0.4; }
+  .wr-login-brand-main { align-items: center; text-align: center; }
+  .wr-login-title { font-size: 30px; }
+  .wr-login-stats { justify-content: center; }
   .wr-login-panel {
-    padding: 36px 24px 48px;
-    align-items: flex-start;
-    border-left: 0;
-    border-top: 1px solid rgba(22, 21, 19, 0.06);
+    justify-content: center;
+    padding: 26px 0 30px;
   }
-  .wr-login-panel-inner { width: 100%; }
+  .wr-login-footer {
+    position: static;
+    grid-column: 1;
+  }
 }
+
 
 /* 空状态插画区 */
 .wr-empty-hero {
