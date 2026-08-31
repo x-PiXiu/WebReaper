@@ -24,6 +24,8 @@ export type UnifiedSubmitPayload = {
   sub_type?: string
   watermark?: boolean
   off_peak?: boolean
+  /** B-Roll 配置（29号计划——单阶段优化，视频生成后自动插入） */
+  broll_segments?: Array<{ sentence_index: number; media_url: string }>
 }
 
 /** 主体引用（reference2video 一致性——BE-SUBJ-01） */
@@ -331,6 +333,7 @@ export async function submitUnified(payload: UnifiedSubmitPayload): Promise<Gene
     sub_type: payload.sub_type,
     watermark: payload.watermark,
     off_peak: payload.off_peak,
+    broll_segments: payload.broll_segments, // 29号计划：B-Roll配置
   })
 }
 
