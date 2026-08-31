@@ -1073,6 +1073,8 @@ func main() {
 			composerUC := videocompose.NewUseCase(genTaskRepo, avTool, asrClient)
 			if mediaStore != nil {
 				composerUC.SetStore(composeStoreAdapter{mediaStore})
+				// 本站素材直读（stored_url/上传片段是 localhost 地址——SSRF 防护拒绝环回，必须本地读）
+				composerUC.SetAssetStore(mediaStore)
 			}
 			genUC.SetComposer(composerUC)
 			router.SetComposer(composerUC)

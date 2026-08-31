@@ -145,7 +145,7 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 	setState(entity.TaskStateProcessing, "")
 
 	// ② 安全下载全部媒体（SSRF 校验 + 500MB 上限——§10.1①）
-	mainPath, cleanupMain, err := safeDownloadMedia(ctx, mainURL)
+	mainPath, cleanupMain, err := uc.ucSafeDownload(ctx, mainURL)
 	if err != nil {
 		setState(entity.TaskStateFailed, fmt.Sprintf("源成片下载失败: %v", err))
 		return
@@ -154,7 +154,7 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 
 	segPaths := make([]string, len(segs))
 	for i, s := range segs {
-		p, cleanup, dErr := safeDownloadMedia(ctx, s.url)
+		p, cleanup, dErr := uc.ucSafeDownload(ctx, s.url)
 		if dErr != nil {
 			setState(entity.TaskStateFailed, fmt.Sprintf("片段下载失败（第 %d 句）: %v", s.idx, dErr))
 			return
@@ -225,6 +225,26 @@ type CreationUploader interface {
 	Upload(ctx context.Context, tenantID, localPath, kind string) (url string, err error)
 }
 
+// ucSafeDownload 本站优先下载：本站托管 URL（stored_url/上传素材，localhost:8082/media/...）
+// 走 assets.ReadLocal 直读本地文件（SSRF 防护拒绝环回地址，自下载必被拒）；
+// 非本站或直读失败回落 safeDownloadMedia（SSRF 校验 + HTTP）。
+func (uc *UseCase) ucSafeDownload(ctx context.Context, rawURL string) (path string, cleanup func(), err error) {
+	if uc.assets != nil {
+		if data, _, ok := uc.assets.ReadLocal(ctx, rawURL); ok && len(data) > 0 {
+			ext := pathExtDefault(rawURL, ".mp4")
+			f, ferr := os.CreateTemp("", "broll-local-*"+ext)
+			if ferr == nil {
+				if _, werr := f.Write(data); werr == nil {
+					f.Close()
+					return f.Name(), func() { os.Remove(f.Name()) }, nil
+				}
+				f.Close()
+			}
+		}
+	}
+	return safeDownloadMedia(ctx, rawURL)
+}
+
 // safeDownloadMedia SSRF 防护下载（§10.1①——与 videotranscript.safeDownload 同级校验）。
 func safeDownloadMedia(ctx context.Context, rawURL string) (path string, cleanup func(), err error) {
 	u, perr := url.Parse(rawURL)
@@ -283,20 +303,24 @@ func safeDownloadMedia(ctx context.Context, rawURL string) (path string, cleanup
 	return f.Name(), cleanup, nil
 }
 
-// safeDownloadTaskMedia 成片获取（timeline 定位用——复用 SSRF 下载）。
+// safeDownloadTaskMedia 成片获取（timeline 定位用——本站 stored_url 优先直读，回落 SSRF 下载）。
 func (uc *UseCase) safeDownloadTaskMedia(ctx context.Context, task entity.GenerationTask) (string, func(), error) {
 	u := taskCreationURL(task)
 	if u == "" {
 		return "", func() {}, fmt.Errorf("任务无成片产物")
 	}
-	return safeDownloadMedia(ctx, u)
+	return uc.ucSafeDownload(ctx, u)
 }
 
-// taskCreationURL 任务产物 URL（CreationsJSON 首个 url）。
+// taskCreationURL 任务产物 URL：优先 stored_url（本地转存产物——绕开 Vidu S3 签名
+// 直链的网络抖动，实测定位时下载 S3 偶发 EOF 导致链式合成失败），回落 url（24h 临时）。
 func taskCreationURL(t entity.GenerationTask) string {
 	var cs []map[string]any
 	if err := json.Unmarshal([]byte(t.CreationsJSON), &cs); err != nil || len(cs) == 0 {
 		return ""
+	}
+	if u, ok := cs[0]["stored_url"].(string); ok && u != "" {
+		return u
 	}
 	if u, ok := cs[0]["url"].(string); ok {
 		return u
