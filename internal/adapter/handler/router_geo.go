@@ -207,8 +207,8 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	api.POST("/generation/tasks/:id/avatar-video", gh.HandleRetryAvatarVideo)
 	api.DELETE("/generation/tasks/:id", gh.HandleDelete)
 	api.GET("/generation/voices", gh.HandleVoices)
-	// 官方主体缓存代理（25 号阶段一——前端读本地端点，不直连 Vidu）
-	api.GET("/subjects", gh.HandleListOfficialSubjects)
+	// 主体库代理（25 号阶段一 + 27 号优化：官方主体 + 个人分身）
+	api.GET("/subjects", gh.HandleListSubjects)
 	// B-Roll 台词时间轴（22 计划 §5.4①②——composer 未注入不注册）
 	if r.composerUC != nil {
 		th := NewTimelineHandler(r.composerUC)

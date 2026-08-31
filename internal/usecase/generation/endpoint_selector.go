@@ -35,6 +35,7 @@ import (
 type EndpointSelectorImpl struct {
 	mediaStore   port.MediaAssetStore
 	templateRepo port.TemplateRepository
+	settingRepo  port.SystemSettingRepository // 可选；nil 时使用硬编码默认值
 }
 
 var _ port.EndpointSelector = (*EndpointSelectorImpl)(nil)
@@ -44,6 +45,11 @@ func NewEndpointSelector(mediaStore port.MediaAssetStore, templateRepo port.Temp
 		mediaStore:   mediaStore,
 		templateRepo: templateRepo,
 	}
+}
+
+// SetSettingRepo 注入系统设置仓储（可选——默认值从 DB 读取，未注入时回落硬编码）。
+func (s *EndpointSelectorImpl) SetSettingRepo(repo port.SystemSettingRepository) {
+	s.settingRepo = repo
 }
 
 // MaterialStats 素材统计。
@@ -408,12 +414,9 @@ func (s *EndpointSelectorImpl) buildLipSyncTextParams(req entity.UnifiedGenerati
 		"text":      convertPauseMarkers(req.Text), // 傻瓜式停顿：标点 → Vidu <#x#> 标记
 	}
 	// 用户显式指定 voice_id 时优先使用（高级参数白名单已包含 voice_id）；
-	// 否则使用 Vidu 默认中文女声（lip-sync 文本模式要求有效音色 ID，
-	// "default" 不在注册音色中会 400）。
+	// 默认音色由 applyDefaults() 统一从 system_settings 读取（27 号硬编码治理）。
 	if vid, ok := req.Params["voice_id"].(string); ok && vid != "" {
 		params["voice_id"] = vid
-	} else {
-		params["voice_id"] = "female-shaonv" // Vidu 首个中文女声
 	}
 	return params
 }
@@ -506,12 +509,9 @@ func (s *EndpointSelectorImpl) buildTTSParams(req entity.UnifiedGenerationReques
 		"text": req.Text,
 	}
 	// 用户显式指定音色时优先使用（高级参数白名单已包含 voice_setting_* 前缀族）；
-	// 否则使用 Vidu 默认中文女声（TTS 路由到 Vidu /ent/v2/audio-tts 时需要有效音色 ID，
-	// "default" 不在注册音色中会 400；路由到 MiMo 时由 MiMo provider 转为 mimo_default）。
+	// 默认音色由 applyDefaults() 统一从 system_settings 读取（27 号硬编码治理）。
 	if vid, ok := req.Params["voice_setting_voice_id"].(string); ok && vid != "" {
 		params["voice_setting_voice_id"] = vid
-	} else {
-		params["voice_setting_voice_id"] = "female-shaonv"
 	}
 	return params
 }
@@ -547,11 +547,13 @@ func mergeAdvancedParams(params entity.GenerationParams, user map[string]any) {
 	}
 }
 
-// applyDefaults 应用默认值。
+// applyDefaults 应用默认值（27 号优化：默认值优先从 system_settings 读取，未配置回落硬编码）。
 func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.GenerationParams, req entity.UnifiedGenerationRequest) entity.GenerationParams {
 	// 如果用户指定了时长，使用用户指定的
 	if req.Duration > 0 {
 		params["duration"] = req.Duration
+	} else if d := s.settingInt(ctx, entity.SettingKeyGenDefaultDuration, 0); d > 0 {
+		params["duration"] = d
 	}
 
 	// 根据端点类型决定是否添加分辨率和比例
@@ -562,22 +564,70 @@ func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.
 		if req.Quality != "" {
 			params["resolution"] = req.Quality
 		} else {
-			params["resolution"] = "1080p" // 默认1080p（所有Vidu模型均支持）
+			params["resolution"] = s.settingString(ctx, entity.SettingKeyGenDefaultResolution, "1080p")
 		}
 
 		// 如果用户指定了比例，使用用户指定的
 		if req.AspectRatio != "" {
 			params["aspect_ratio"] = req.AspectRatio
 		} else {
-			params["aspect_ratio"] = "16:9" // 默认16:9
+			params["aspect_ratio"] = s.settingString(ctx, entity.SettingKeyGenDefaultAspectRatio, "16:9")
 		}
 	}
+
+	// 默认音色（TTS/lip-sync 端点——27 号硬编码治理）
+	s.applyDefaultVoice(ctx, params, subType)
 
 	// 高级参数合并（最后执行——用户显式值覆盖以上默认）
 	mergeAdvancedParams(params, req.Params)
 
 	log.Printf("[EndpointSelector][DEBUG] 端点=%s 参数keys=%v 用户高级参数=%d个", subType, paramKeysSorted(params), len(req.Params))
 	return params
+}
+
+// applyDefaultVoice 为需要音色的端点应用默认音色（27 号硬编码治理）。
+// TTS 用 voice_setting_voice_id；lip-sync 用 voice_id。
+// 用户显式指定时不覆盖（builder 已设置）。
+func (s *EndpointSelectorImpl) applyDefaultVoice(ctx context.Context, params entity.GenerationParams, subType string) {
+	defaultVoice := s.settingString(ctx, entity.SettingKeyGenDefaultVoiceID, "female-shaonv")
+	switch subType {
+	case "tts":
+		if _, ok := params["voice_setting_voice_id"]; !ok {
+			params["voice_setting_voice_id"] = defaultVoice
+		}
+	case "lip_sync":
+		if _, ok := params["voice_id"]; !ok {
+			params["voice_id"] = defaultVoice
+		}
+	}
+}
+
+// settingString 从 system_settings 读取字符串值（未配置/读取失败回落 fallback）。
+func (s *EndpointSelectorImpl) settingString(ctx context.Context, key, fallback string) string {
+	if s.settingRepo == nil {
+		return fallback
+	}
+	setting, err := s.settingRepo.Get(ctx, key)
+	if err != nil || setting.Value == "" {
+		return fallback
+	}
+	return setting.Value
+}
+
+// settingInt 从 system_settings 读取整数值（未配置/读取失败/解析失败回落 fallback）。
+func (s *EndpointSelectorImpl) settingInt(ctx context.Context, key string, fallback int) int {
+	if s.settingRepo == nil {
+		return fallback
+	}
+	setting, err := s.settingRepo.Get(ctx, key)
+	if err != nil || setting.Value == "" {
+		return fallback
+	}
+	var v int
+	if _, err := fmt.Sscanf(setting.Value, "%d", &v); err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }
 
 // paramKeysSorted 日志用：参数 key 排序列表（值不打——脱敏）。

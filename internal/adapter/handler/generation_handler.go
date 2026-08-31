@@ -341,29 +341,41 @@ func (h *GenerationHandler) HandleRetryAvatarVideo(c *gin.Context) {
 	success(c, generationTaskToView(task))
 }
 
-// HandleListOfficialSubjects GET /api/v1/subjects?ownership=system&page_token=&count=
-// 官方主体缓存代理（25 号阶段一——23 号 §2.2：前端读本地端点，不直连 Vidu）。
-// 仅支持 ownership=system（个人主体走本地 subject 任务聚合，不查服务商）。
-func (h *GenerationHandler) HandleListOfficialSubjects(c *gin.Context) {
+// HandleListSubjects GET /api/v1/subjects?ownership=system|private&page_token=&count=
+// 主体库代理（25 号阶段一 + 27 号优化）：
+//   - ownership=system：官方主体缓存代理（前端读本地端点，不直连 Vidu）
+//   - ownership=private：个人分身列表（本地 generation_tasks 聚合已注册成功的主体）
+//   - ownership 空/不传：默认 system（向后兼容）
+func (h *GenerationHandler) HandleListSubjects(c *gin.Context) {
 	if h.uc == nil {
 		fail(c, fmt.Errorf("生成服务未配置"))
 		return
 	}
-	if own := c.Query("ownership"); own != "" && own != "system" {
-		fail(c, fmt.Errorf("仅支持官方主体（ownership=system）；个人分身请走生成任务列表"))
-		return
-	}
+	ownership := c.DefaultQuery("ownership", "system")
 	count := 20
 	if v, err := strconv.Atoi(c.Query("count")); err == nil && v > 0 {
 		count = v
 	}
 	if count > 100 {
-		count = 100 // Vidu 契约上限
+		count = 100
 	}
-	res, err := h.uc.ListOfficialSubjects(c.Request.Context(), c.Query("page_token"), count)
-	if err != nil {
-		fail(c, err)
-		return
+
+	switch ownership {
+	case "system":
+		res, err := h.uc.ListOfficialSubjects(c.Request.Context(), c.Query("page_token"), count)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		success(c, res)
+	case "private":
+		res, err := h.uc.ListPersonalSubjects(c.Request.Context(), middleware.CurrentTenantID(c), count)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		success(c, res)
+	default:
+		fail(c, fmt.Errorf("不支持的 ownership 值: %s（可选 system / private）", ownership))
 	}
-	success(c, res)
 }

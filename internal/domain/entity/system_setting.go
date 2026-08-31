@@ -19,4 +19,11 @@ type SystemSetting struct {
 const (
 	SettingKeyCrawlPolicy    = "crawl_policy"        // 爬虫限流策略（JSON 序列化的 CrawlPolicy）
 	SettingKeyKnowledgeCrawl = "kb_crawl_industries" // 行业采集配置（JSON：[]IndustryCrawlConfig）
+
+	// ---- 生成域默认值（27 号硬编码治理——管理后台可调，免重启）----
+
+	SettingKeyGenDefaultVoiceID     = "gen_default_voice_id"      // 默认音色 ID（如 "female-shaonv"）
+	SettingKeyGenDefaultResolution  = "gen_default_resolution"    // 默认分辨率（如 "1080p"）
+	SettingKeyGenDefaultAspectRatio = "gen_default_aspect_ratio"  // 默认画面比例（如 "16:9"）
+	SettingKeyGenDefaultDuration    = "gen_default_duration"      // 默认时长（秒，如 5）
 )

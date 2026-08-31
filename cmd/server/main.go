@@ -1046,6 +1046,7 @@ func main() {
 		}
 		// 注入端点选择器（统一提交API需要）
 		endpointSelector := generation.NewEndpointSelector(mediaStore, nil)
+		endpointSelector.SetSettingRepo(settingRepo) // 27 号：默认音色/分辨率/比例从 DB 读取
 		genUC.SetEndpointSelector(endpointSelector)
 		// 模板管理用例（管理后台可动态配置生成模板）
 		templateRepo := repository.NewGormTemplateRepository(geoRepos.db)
@@ -1063,6 +1064,11 @@ func main() {
 			genUC.SetComposer(composerUC)
 			router.SetComposer(composerUC)
 			log.Info("B-Roll 画面插入已启用（timeline 定位 + compose 合成）")
+			// Agent 工具：生成任务管理 + B-Roll 操作（27 号优化——补全智能体能力）
+			toolRegistry.Register(agent.NewListGenerationTasksTool(genUC))
+			toolRegistry.Register(agent.NewCancelGenerationTaskTool(genUC))
+			toolRegistry.Register(agent.NewLocateTimelineTool(composerUC))
+			toolRegistry.Register(agent.NewInsertBRollTool(composerUC))
 		}
 		router.SetIntegrationRepo(integrationRepo) // 能力路由新表（集成中心 vendor/capability 管理）
 

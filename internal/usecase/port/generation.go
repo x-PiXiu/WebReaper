@@ -141,6 +141,9 @@ type GenerationTaskRepository interface {
 	// Delete 删除单条任务（本地产记录删除——资产库"删除数字人"等场景；
 	// 上游取消/删除由用例层决定，仓储只做数据访问）。
 	Delete(ctx context.Context, tenantID, taskID string) error
+	// ListBySubType 按端点类型过滤查询（个人分身列表等资产聚合场景）。
+	// state 非空时额外过滤状态；limit<=0 用默认值。
+	ListBySubType(ctx context.Context, tenantID, subType, state string, limit int) ([]entity.GenerationTask, error)
 }
 
 // GenerationSpecRepository 端点/模型规格仓储（DB 为唯一事实源——全局掌控）。

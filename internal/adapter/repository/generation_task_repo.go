@@ -184,3 +184,23 @@ func (r *GormGenerationTaskRepository) Delete(ctx context.Context, tenantID, tas
 	}
 	return q.Delete(&GenerationTaskPO{}).Error
 }
+
+// ListBySubType 按端点类型过滤查询（个人分身列表等资产聚合场景）。
+func (r *GormGenerationTaskRepository) ListBySubType(ctx context.Context, tenantID, subType, state string, limit int) ([]entity.GenerationTask, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	q := r.db.WithContext(ctx).Where("tenant_id = ? AND sub_type = ?", tenantID, subType)
+	if state != "" {
+		q = q.Where("state = ?", state)
+	}
+	var pos []GenerationTaskPO
+	if err := q.Order("created_at DESC").Limit(limit).Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.GenerationTask, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, generationTaskFromPO(p))
+	}
+	return out, nil
+}
