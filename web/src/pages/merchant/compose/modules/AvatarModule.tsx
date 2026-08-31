@@ -109,6 +109,7 @@ export default function AvatarModule() {
   const [deleting, setDeleting] = useState(false)
   const [preview, setPreview] = useState<PreviewState>(null)
   const [retrying, setRetrying] = useState('')
+  const [activeTab, setActiveTab] = useState<'official' | 'scenes' | 'persons'>('persons')
 
   useEffect(() => {
     if (searchParams.get('create') === '1' || searchParams.get('create') === 'subject') {
@@ -304,30 +305,73 @@ export default function AvatarModule() {
           <p className="dh-lib-lead">数字分身即选即用；注册自己的店内环境，组合出镜——分身在你的店里口播</p>
         </div>
 
-        <div className="dh-lib-actions">
-          <Input
-            allowClear
-            className="dh-lib-search"
-            placeholder="搜索分身 / 环境"
-            prefix={<SearchOutlined />}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <Button
-            icon={<EnvironmentOutlined />}
-            className="dh-lib-btn-ghost"
-            onClick={() => { setCreateKind('scene'); setCreateOpen(true) }}
-          >
-            添加环境
-          </Button>
-          <Button
-            type="primary"
-            className="dh-lib-btn-primary"
-            icon={<PlusOutlined />}
-            onClick={() => { setCreateKind('person'); setCreateOpen(true) }}
-          >
-            定制数字人
-          </Button>
+        <div className="dh-lib-toolbar">
+          <div className="dh-lib-tabs" role="tablist">
+            {(
+              [
+                { key: 'official', label: '官方资产' },
+                { key: 'scenes', label: `我的环境${sceneCards.length ? ` ${sceneCards.length}` : ''}` },
+                { key: 'persons', label: `我的分身${personCards.length ? ` ${personCards.length}` : ''}` },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === t.key}
+                className={`dh-lib-tab${activeTab === t.key ? ' is-active' : ''}`}
+                onClick={() => {
+                  setActiveTab(t.key)
+                  setSelected([])
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="dh-lib-actions">
+            <Input
+              allowClear
+              className="dh-lib-search"
+              placeholder="搜索分身 / 环境"
+              prefix={<SearchOutlined />}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <Button
+              icon={<EnvironmentOutlined />}
+              className="dh-lib-btn-ghost"
+              onClick={() => { setCreateKind('scene'); setCreateOpen(true) }}
+            >
+              添加环境
+            </Button>
+            <Button
+              type="primary"
+              className="dh-lib-btn-primary"
+              icon={<PlusOutlined />}
+              onClick={() => { setCreateKind('person'); setCreateOpen(true) }}
+            >
+              定制数字人
+            </Button>
+            <Popconfirm
+              title={`删除选中的 ${selected.length} 项？`}
+              description="仅移除本地记录，Vidu 侧主体不受影响"
+              okText="删除"
+              okButtonProps={{ danger: true, loading: deleting }}
+              cancelText="取消"
+              disabled={selected.length === 0}
+              onConfirm={batchDelete}
+            >
+              <Button
+                className="dh-lib-btn-ghost"
+                icon={<DeleteOutlined />}
+                disabled={selected.length === 0}
+              >
+                批量删除 ({selected.length})
+              </Button>
+            </Popconfirm>
+          </div>
         </div>
       </header>
 
