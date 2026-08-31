@@ -129,6 +129,14 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
 			adminGroup.PUT("/generation/specs/:subType/:model/default", gh.HandleSetDefault) // 设置默认模型
 		}
+		// 官方主体管理（27 号优化——运营可管理官方主体/形象视频）
+		if r.subjectAssetRepo != nil && r.generationUC != nil {
+			ash := NewAdminSubjectHandler(r.generationUC, r.subjectAssetRepo, r.mediaStore)
+			adminGroup.POST("/subjects", ash.HandleCreateOfficialSubject)
+			adminGroup.GET("/subjects", ash.HandleListOfficialSubjects)
+			adminGroup.PUT("/subjects/:id", ash.HandleUpdateOfficialSubject)
+			adminGroup.DELETE("/subjects/:id", ash.HandleDeleteOfficialSubject)
+		}
 		// 第三方集成中心（08 计划 D7——能力路由模型：统一视图/双分组/厂商详情/健康检查）
 		if r.providerConfigUC != nil {
 			ih := NewIntegrationHandler(r.providerConfigUC, r.generationSpecRepo, r.llmCfgUC, r.generationRegistry, r.generationProvider, r.integrationRepo)
