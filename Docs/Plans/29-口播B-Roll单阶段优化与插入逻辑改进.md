@@ -501,8 +501,18 @@ B-Roll 页面保留，用于：
 
 | 文件 | 改动 |
 |------|------|
-| `generation.go` | UnifiedSubmitInput 新增 BrollSegments + chainBrollAfterGeneration |
-| `mediaav/compose.go` | 移除 tpad + shortest，改为纯 overlay |
-| `compose.go` | 移除重叠检测，保留重复检测 |
-| `LipSyncWizard.tsx` | 新增 B-Roll 配置步骤 |
-| `generationSubmit.ts` | 提交时携带 broll_segments |
+| `generation.go` | UnifiedSubmitInput 新增 BrollSegments + chainBrollAfterGeneration ✅ |
+| `mediaav/compose.go` | 移除 tpad + shortest，改为纯 overlay ✅ **+ eof_action=pass + 长片段窗口扩展**（见下） |
+| `compose.go` | 移除重叠检测，保留重复检测 ✅ |
+| `LipSyncWizard.tsx` | 新增 B-Roll 配置步骤（第③步，五步式）✅ + compose 子任务跟踪（一次等待拿最终片） |
+| `generationSubmit.ts` | 提交时携带 broll_segments ✅ |
+
+## 八、实施记录（2026-08-31 全量落地，实测验证）
+
+- **修正 §3.2.1 的内部矛盾**：`enable='between(t,S,E)'`（E=句末）实现不了 §2.2.1
+  "长片段播完整个"——已改为窗口扩展 **E = max(句末, S+片段时长)**（ffprobe 探测片段时长，
+  探测失败回落句末）。实测：窗口 2-6s 放 8s 蓝片，7s 处仍为蓝（旧实现此处已切回原片）。
+- **补 `eof_action=pass`**：overlay 默认 `eof_action=repeat` 会把片段末帧冻结到句末
+  （与旧 tpad 等效）。实测：窗口 2-6s 放 2s 红片，4.5s 处旧实现仍纯红、修复后显示原片。
+- 前端：向导五步（第③步 B-Roll 生成前逐句配置，行号按非空句序与时间轴 splitLines 对齐）；
+  音频两模式（文本驱动默认/上传音频，移除独立 TTS——01 号一致化）；草稿 schema v5。

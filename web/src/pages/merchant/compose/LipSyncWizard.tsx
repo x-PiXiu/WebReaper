@@ -7,6 +7,7 @@ import {
   LinkOutlined, EditOutlined, UploadOutlined, VideoCameraOutlined, UserOutlined,
   RocketOutlined, CheckCircleOutlined, SoundOutlined, ExportOutlined, ClockCircleOutlined,
   RightOutlined, VideoCameraAddOutlined, StopOutlined, EnvironmentOutlined,
+  PlusOutlined,
 } from '@ant-design/icons'
 import { transcriptLines } from '../../../utils/transcript'
 import { checkMaterialFileSize, friendlyGenerationError } from '../../../utils/generationErrors'
@@ -22,6 +23,7 @@ import { parseGenerationTaskParams, listSceneSubjects } from '../../../utils/sub
 import { ScriptLinesEditor } from '../../../components/compose/ScriptLinesEditor'
 import { SubjectPicker } from '../../../components/compose/SubjectPicker'
 import BrollDrawer from '../../../components/compose/BrollDrawer'
+import AssetPicker from '../../../components/AssetPicker'
 import {
   WizardShell, PhonePreview, PipelineProgress, MaterialDropzone, CapabilityBanner,
   type WizardStepDef, type PipelineStage,
@@ -31,9 +33,10 @@ const { Text } = Typography
 
 const WIZARD_STEPS: WizardStepDef[] = [
   { key: 'script', label: '确定文案', title: '第一步：确定文案', tip: '粘贴链接提取、上传音视频提取，或直接手写口播稿', nextLabel: '下一步：出镜与配音' },
-  { key: 'config', label: '出镜与配音', title: '第二步：出镜与配音', tip: '选谁出镜、声音从哪来（配音/文本直生/上传录音三选一）', nextLabel: '下一步：生成成片' },
-  { key: 'produce', label: '生成成片', title: '第三步：生成成片', tip: '按所选路径自动完成配音与对口型各阶段', nextLabel: '下一步：发布' },
-  { key: 'publish', label: '发布', title: '第四步：发布', tip: '成片完成，可直接发布，或先插入画面再发布', nextLabel: '去发布' },
+  { key: 'config', label: '出镜与配音', title: '第二步：出镜与配音', tip: '选谁出镜、声音从哪来（文本配音 / 上传录音）', nextLabel: '下一步：B-Roll 画面' },
+  { key: 'broll', label: 'B-Roll 画面', title: '第三步：B-Roll 画面（可选）', tip: '生成前给指定句配置插入画面——生成后自动合成，一次等待拿到最终视频', nextLabel: '下一步：生成成片' },
+  { key: 'produce', label: '生成成片', title: '第四步：生成成片', tip: '单步生成口播成片；配置了 B-Roll 时自动合成插入画面', nextLabel: '下一步：发布' },
+  { key: 'publish', label: '发布', title: '第五步：发布', tip: '最终成片完成，可直接发布或再调整画面', nextLabel: '去发布' },
 ]
 
 /** 正常语速 ≈180 字/分钟 ≈3 字/秒（口播时长估算） */
@@ -62,9 +65,10 @@ type SourceMode = 'link' | 'upload' | 'manual' | null
 type ScriptVersion = 'rewrite' | 'clean'
 
 /**
- * 拍口播视频向导（23 号计划四步式）：
- * ① 确定文案（三来源提取，逐句编辑，润色显式可选）→ ② 出镜与配音（形态二选一 + 音频三选一）
- * → ③ 生成成片（阶段进度 + 断点重试 + 可取消）→ ④ 发布
+ * 拍口播视频向导（01 号业务线 + 29 号单阶段，五步式）：
+ * ① 确定文案（逐句编辑，润色显式可选）→ ② 出镜与配音（形态二选一 + 音频两模式：
+ * 文本驱动默认/上传音频——无独立 TTS 步骤）→ ③ B-Roll 画面（可选，生成前配置）
+ * → ④ 生成成片（单步 + 自动 B-Roll 合成 + 可取消）→ ⑤ 发布
  */
 export default function LipSyncWizard() {
   const navigate = useNavigate()
@@ -77,13 +81,16 @@ export default function LipSyncWizard() {
   const presetState = location.state as { rawText?: string; title?: string; method?: string } | null
 
   const hasDraft = (draft.wizardStep ?? 0) > 0
-  // 旧版 5 步草稿（0来源 1文案 2出镜 3音频 4成片）迁移到新版 4 步（0文案 1配置 2成片 3发布）
-  // wizardSchema >= 4 的新草稿不做迁移（否则新值 2/3 会被二次映射弹回旧步）
-  const isLegacySchema = (draft.wizardSchema ?? 0) < 4
+  // 草稿 schema 迁移：v5=五步式（01/29 号）；v4=四步式（成片/发布步后移一位）；
+  // 更早=旧 5 步（0来源 1文案 2出镜 3音频 4成片 → 0文案 1配置）。读取时统一迁移一次。
+  const schemaVer = draft.wizardSchema ?? 0
   const legacyStep = draft.wizardStep
-  const migratedStep = legacyStep == null || !isLegacySchema
-    ? (legacyStep ?? 0)
-    : legacyStep >= 4 ? 2 : legacyStep >= 2 ? 1 : legacyStep
+  let migratedStep = legacyStep ?? 0
+  if (schemaVer < 4) {
+    migratedStep = legacyStep == null ? 0 : legacyStep >= 4 ? 2 : legacyStep >= 2 ? 1 : legacyStep
+  } else if (schemaVer === 4) {
+    migratedStep = legacyStep != null && legacyStep >= 2 ? legacyStep + 1 : (legacyStep ?? 0)
+  }
   const [step, setStep] = useState(presetState?.rawText ? 0 : migratedStep)
   const [maxReachableStep, setMaxReachableStep] = useState(Math.max(step, migratedStep))
 
@@ -114,8 +121,10 @@ export default function LipSyncWizard() {
   const [envSubjectId, setEnvSubjectId] = useState(draft.wizardEnvSubjectId || '')
   // ④ 音色
   const [voiceId, setVoiceId] = useState(draft.wizardVoiceId || '')
-  // ④ 音频来源（23 号计划三选一）：A 文本+音色（默认）/ B 文本直生 / C 上传已录音频
-  const [audioSource, setAudioSource] = useState<LipSyncAudioSource>(draft.wizardAudioSource || 'tts')
+  // ④ 音频模式（01 号业务线两模式）：text=文本驱动（默认，无独立 TTS）/ upload=上传已录音频
+  const [audioSource, setAudioSource] = useState<LipSyncAudioSource>(
+    draft.wizardAudioSource === 'upload' ? 'upload' : 'text',
+  )
   const [uploadedAudioUrl, setUploadedAudioUrl] = useState(draft.wizardUploadedAudioUrl || '')
   const [uploadingAudio, setUploadingAudio] = useState(false)
   const [brollOpen, setBrollOpen] = useState(false)
@@ -125,9 +134,12 @@ export default function LipSyncWizard() {
   const [failedStage, setFailedStage] = useState<LipSyncPipelineStage>('')
   const [resultUrl, setResultUrl] = useState(draft.wizardResultUrl || '')
   const [error, setError] = useState('')
-  const [ttsTaskId, setTtsTaskId] = useState(draft.wizardTtsTaskId || '')
-  const [refTaskId, setRefTaskId] = useState(draft.wizardRefTaskId || '')
-  const [lipsyncTaskId, setLipsyncTaskId] = useState(draft.wizardLipsyncTaskId || '')
+  const [videoTaskId, setVideoTaskId] = useState(draft.wizardVideoTaskId || '')
+  // 29 号单阶段：生成前 B-Roll 配置（句号 → 片段 URL；行号按非空句序）
+  const [brollMap, setBrollMap] = useState<Record<number, string>>(
+    () => Object.fromEntries((draft.wizardBrollSegments || []).map((b) => [b.sentence_index, b.media_url])),
+  )
+  const [brollPickerIndex, setBrollPickerIndex] = useState<number | null>(null)
   const [subjectServerId, setSubjectServerId] = useState(presetSubjectId || draft.wizardSubjectId || '')
   // 生成中可取消（23 号计划 §4.1）：跟踪活动任务，取消调服务端真实取消端点
   const [activeTaskId, setActiveTaskId] = useState('')
@@ -156,16 +168,17 @@ export default function LipSyncWizard() {
       wizardRealVideoUrl: realVideoUrl,
       wizardSubjectId: subjectServerId,
       wizardIntent: intent,
-      wizardTtsTaskId: ttsTaskId,
-      wizardRefTaskId: refTaskId,
-      wizardLipsyncTaskId: lipsyncTaskId,
+      wizardVideoTaskId: videoTaskId,
       wizardResultUrl: resultUrl,
       wizardAudioSource: audioSource,
       wizardUploadedAudioUrl: uploadedAudioUrl,
       wizardEnvSubjectId: envSubjectId,
-      wizardSchema: 4,
+      wizardBrollSegments: Object.entries(brollMap).map(([i, media_url]) => ({
+        sentence_index: Number(i), media_url,
+      })),
+      wizardSchema: 5,
     })
-  }, [step, presence, topic, script, cleanText, voiceId, realVideoUrl, subjectServerId, intent, ttsTaskId, refTaskId, lipsyncTaskId, resultUrl, audioSource, uploadedAudioUrl, envSubjectId])
+  }, [step, presence, topic, script, cleanText, voiceId, realVideoUrl, subjectServerId, intent, videoTaskId, resultUrl, audioSource, uploadedAudioUrl, envSubjectId, brollMap])
 
   // 预填原文（灵感广场等入口带入）原样进编辑器——不自动润色（23 号计划 §3.1：显式可选）
   useEffect(() => {
@@ -298,14 +311,19 @@ export default function LipSyncWizard() {
     setScriptVersion(v)
   }
 
-  const resolveTaskUrl = (id: string) => {
-    if (!id) return ''
-    const t = tasks.find(x => x.id === id)
-    if (!t || t.state !== 'success') return ''
-    return t.creations?.[0]?.stored_url || t.creations?.[0]?.url || ''
-  }
+  // 非空句序列（B-Roll 句号 = 非空句序，与时间轴 splitLines 对齐）
+  const scriptLinesIdx = useMemo(
+    () => script.split('\n').map((t, i) => ({ t, i })).filter((x) => x.t.trim()),
+    [script],
+  )
+  const brollSegmentList = useMemo(
+    () => Object.entries(brollMap).map(([i, media_url]) => ({ sentence_index: Number(i), media_url })),
+    [brollMap],
+  )
+  const brollCount = brollSegmentList.length
 
-  const produce = async (retryFrom?: 'tts' | 'ref' | 'lipsync') => {
+  /** 一键成片（01 号单步 + 29 号单阶段）：视频生成 →（配置了 B-Roll 时）自动合成插入画面 */
+  const produce = async () => {
     if (!script.trim()) { message.warning('文案为空'); return }
     const bid = brandId || draft.brandId
     if (!bid) { message.warning('请先选择人设/品牌'); return }
@@ -318,12 +336,12 @@ export default function LipSyncWizard() {
       return
     }
     if (audioSource === 'upload' && !uploadedAudioUrl) {
-      message.warning('请先上传已录音频，或改选 TTS 配音')
+      message.warning('请先上传已录音频，或改用文本配音')
       return
     }
     setProducing(true); setError(''); setFailedStage('')
     cancelRequested.current = false
-    if (!retryFrom) setResultUrl('')
+    setResultUrl('')
     queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     try {
       const result = await runLipSyncPipeline({
@@ -332,37 +350,25 @@ export default function LipSyncWizard() {
         voiceId: voiceId || undefined,
         presence,
         realVideoUrl,
-        portraitMaterial: selectedSubject?.portraitUrl || undefined,
         subjectServerId: subjectServerId || undefined,
         subjectName: selectedSubject?.name,
         intent,
         audioSource,
         uploadedAudioUrl: uploadedAudioUrl || undefined,
         envSubject: selectedEnv ? { serverId: selectedEnv.serverId, name: selectedEnv.name } : undefined,
+        brollSegments: brollCount > 0 ? brollSegmentList : undefined,
       }, {
         onStage: setPipelineStage,
         onTaskSubmit: (_stage, taskId) => setActiveTaskId(taskId),
-        retryFrom,
-        resume: retryFrom ? {
-          ttsTaskId,
-          refTaskId,
-          lipsyncTaskId,
-          audioUrl: audioSource === 'upload'
-            ? uploadedAudioUrl
-            : audioSource === 'direct' ? '' : resolveTaskUrl(ttsTaskId),
-          videoUrl: presence === 'avatar' ? resolveTaskUrl(refTaskId) : realVideoUrl,
-        } : undefined,
       })
-      setTtsTaskId(result.ttsTaskId)
-      setRefTaskId(result.refTaskId || '')
-      setLipsyncTaskId(result.lipsyncTaskId)
+      setVideoTaskId(result.videoTaskId)
       setResultUrl(result.resultUrl)
-      message.success('成片完成')
+      message.success(brollCount > 0 ? '合成完成——含插入画面的最终成片已就绪' : '成片完成')
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     } catch (e: any) {
       if (cancelRequested.current) {
-        // 用户主动取消：不算失败——已完成阶段的产物保留，可断点重试
-        message.info('已取消生成——已完成阶段的产物已保留，可重新生成或从断点重试')
+        // 用户主动取消：不算失败——已生成任务保留，可重新生成
+        message.info('已取消生成——已完成的产物已保留，可重新生成')
       } else {
         setError(friendlyGenerationError(e?.response?.data?.msg || e?.message || '成片失败'))
         setFailedStage(pipelineStage)
@@ -392,12 +398,11 @@ export default function LipSyncWizard() {
     () => script.split('\n').filter((l) => l.trim()).length,
     [script],
   )
-  // 成片预计耗时（按音频路径与出镜形态；路径 B 单步最快）
-  const produceEta = audioSource === 'direct'
-    ? '预计 1-2 分钟（单步直出）'
-    : audioSource === 'upload'
-      ? (presence === 'avatar' ? '预计 2-4 分钟' : '预计 1-3 分钟')
-      : (presence === 'avatar' ? '预计 3-5 分钟' : '预计 2-4 分钟')
+  // 成片预计耗时（01 号单步链路；配置 B-Roll 时加合成时间）
+  const produceEta = (audioSource === 'upload'
+    ? (presence === 'avatar' ? '预计 2-4 分钟' : '预计 1-3 分钟')
+    : (presence === 'avatar' ? '预计 2-4 分钟' : '预计 1-3 分钟'))
+    + (brollCount > 0 ? ' + 画面合成约 1 分钟' : '')
   const durationMismatch = presence === 'real' && realVideoSec > 0 && scriptSec > 0
     && (Math.max(realVideoSec, scriptSec) / Math.min(realVideoSec, scriptSec) > 2)
   const longAvatarScript = presence === 'avatar' && script.length > 60
@@ -405,21 +410,14 @@ export default function LipSyncWizard() {
   const stepKey = WIZARD_STEPS[step]?.key || 'source'
 
   const pipelineStages = useMemo((): PipelineStage[] => {
-    const stages: PipelineStage[] = []
-    // 音频路径 A 才有语音合成阶段；B/C 单段直达（23 号计划 §4.2）
-    if (audioSource === 'tts') {
-      stages.push({ key: 'tts', label: '语音合成', status: 'pending' })
-    }
-    if (presence === 'avatar') {
-      stages.push({
-        key: 'ref',
-        label: subjectServerId
-          ? (audioSource === 'direct' ? '台词直生成片' : '主体一致性视频')
-          : '口播画面生成',
-        status: 'pending',
-      })
-    } else {
-      stages.push({ key: 'lipsync', label: '对口型成片', status: 'pending' })
+    // 01 号单步链路：视频一步生成；29 号：配置了 B-Roll 时追加自动合成阶段
+    const stages: PipelineStage[] = [
+      presence === 'avatar'
+        ? { key: 'video', label: subjectServerId ? '分身口播生成' : '口播画面生成', status: 'pending' as const }
+        : { key: 'video', label: '对口型成片', status: 'pending' as const },
+    ]
+    if (brollCount > 0) {
+      stages.push({ key: 'broll', label: 'B-Roll 画面合成', status: 'pending' as const })
     }
 
     const order = stages.map(s => s.key)
@@ -440,15 +438,16 @@ export default function LipSyncWizard() {
       ...s,
       status: i < activeIdx ? 'done' : i === activeIdx ? 'active' : 'pending',
     }))
-  }, [presence, producing, pipelineStage, resultUrl, error, subjectServerId, audioSource])
+  }, [presence, producing, pipelineStage, resultUrl, error, subjectServerId, brollCount])
 
   const canNext = (): boolean => {
     if (step === 0) return !!script.trim()
     if (step === 1) {
       const presenceOk = presence === 'real' ? !!realVideoUrl : !!subjectServerId || !!selectedSubject?.portraitUrl
-      const audioOk = audioSource !== 'upload' || !!uploadedAudioUrl // 路径 C 需先上传音频
+      const audioOk = audioSource !== 'upload' || !!uploadedAudioUrl
       return presenceOk && audioOk
     }
+    if (step === 2) return true // B-Roll 配置可选
     return false
   }
 
@@ -474,12 +473,12 @@ export default function LipSyncWizard() {
   }
 
   const handleNext = () => {
-    if (step === 2) {
-      if (resultUrl) goStep(3)
+    if (step === 3) {
+      if (resultUrl) goStep(4)
       else if (!producing) produce()
       return
     }
-    if (step === 3) {
+    if (step === 4) {
       if (resultUrl) goPublish()
       return
     }
@@ -501,13 +500,13 @@ export default function LipSyncWizard() {
           message="发视频已升级为口播向导——你的文案已自动带入"
         />
       )}
-      {error && step !== 2 && step !== 3 && (
+      {error && step !== 3 && step !== 4 && (
         <Alert
           type="error" showIcon className="wz-draft-banner"
           message={error}
           action={failedStage ? (
-            <Button size="small" onClick={() => produce(failedStage === 'ref' ? 'ref' : failedStage === 'lipsync' ? 'lipsync' : 'tts')}>
-              从失败步骤重试
+            <Button size="small" onClick={() => produce()}>
+              重新生成
             </Button>
           ) : undefined}
         />
@@ -524,13 +523,13 @@ export default function LipSyncWizard() {
           message={<>请先在 <Link to="/m/brands">账号人设</Link> 选择品牌，生成内容将关联到该品牌</>}
         />
       )}
-      <CapabilityBanner required={['lip_sync', 'tts', 'reference2video']} />
+      <CapabilityBanner required={['lip_sync', 'reference2video']} />
     </>
   )
 
-  const footerNextLabel = step === 2
+  const footerNextLabel = step === 3
     ? (resultUrl ? '下一步：发布' : producing ? '生成中…' : '一键成片')
-    : step === 3
+    : step === 4
       ? '去发布'
       : undefined
 
@@ -553,7 +552,7 @@ export default function LipSyncWizard() {
       }
       onBack={handleBack}
       onNext={handleNext}
-      nextDisabled={((step === 0 || step === 1) && !canNext()) || ((step === 2 || step === 3) && producing)}
+      nextDisabled={((step === 0 || step === 1) && !canNext()) || ((step === 3 || step === 4) && producing)}
       nextHint={nextHint()}
       nextLoading={extracting || rewriting || producing}
       nextLabel={footerNextLabel}
@@ -848,9 +847,9 @@ export default function LipSyncWizard() {
                       .filter((e) => e.state === 'success' && e.serverId)
                       .map((e) => ({ value: e.serverId, label: e.name }))}
                   />
-                  {envSubjectId && audioSource === 'direct' && (
+                  {envSubjectId && audioSource === 'text' && (
                     <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
-                      「文本直生」路径台词即提示词，环境暂不注入画面——建议改用「文本 + 音色配音」获得组合出镜效果
+                      文本配音模式下台词即语音内容，环境暂不注入画面——需分身在店内出镜请改用「上传已录音频」模式
                     </Text>
                   )}
                 </div>
@@ -859,35 +858,19 @@ export default function LipSyncWizard() {
           </div>
 
           <div className="ip-form-stack ip-stagger" style={{ marginTop: 18 }}>
-          <label><SoundOutlined /> 音频来源（三选一）</label>
+          <label><SoundOutlined /> 声音来源（两选一）</label>
           <div className="wz-source-grid">
-            {/* 路径 A：文本 + 音色 → TTS（默认推荐） */}
+            {/* 文本驱动（01 号默认）：台词即语音提示——真人走 lip_sync(text+音色)，分身走台词直驱；无独立 TTS */}
             <button
               type="button"
-              className={`wz-source-card${audioSource === 'tts' ? ' is-active' : ''}`}
-              onClick={() => setAudioSource('tts')}
+              className={`wz-source-card${audioSource === 'text' ? ' is-active' : ''}`}
+              onClick={() => setAudioSource('text')}
             >
               <span className="wz-source-card-icon"><SoundOutlined /></span>
-              <strong>文本 + 音色配音 <Tag color="green" style={{ marginInlineEnd: 0 }}>推荐</Tag></strong>
-              <span>选音色合成语音，声音稳定可控</span>
+              <strong>文本配音 <Tag color="green" style={{ marginInlineEnd: 0 }}>推荐</Tag></strong>
+              <span>台词驱动模型端内合成语音，一步出片；音色可选（默认已选中）</span>
             </button>
-            {/* 路径 B：文本直生（仅数字分身） */}
-            <button
-              type="button"
-              className={`wz-source-card${audioSource === 'direct' ? ' is-active' : ''}`}
-              onClick={() => {
-                if (presence === 'real') {
-                  message.info('「文本直生」由数字分身端内合成语音——真人出镜请配音色或上传录音')
-                  return
-                }
-                setAudioSource('direct')
-              }}
-            >
-              <span className="wz-source-card-icon"><RocketOutlined /></span>
-              <strong>文本直生 <Tag color="blue" style={{ marginInlineEnd: 0 }}>最快</Tag></strong>
-              <span>{presence === 'real' ? '仅数字分身可用（真人需真实音源）' : '台词直接驱动分身开口，单步出片'}</span>
-            </button>
-            {/* 路径 C：上传已录音频 */}
+            {/* 上传已录音频：audio_url 直传对口型 */}
             <button
               type="button"
               className={`wz-source-card${audioSource === 'upload' ? ' is-active' : ''}`}
@@ -899,21 +882,15 @@ export default function LipSyncWizard() {
             </button>
           </div>
 
-          {audioSource === 'tts' && (
+          {audioSource === 'text' && (
             <div className="wz-source-expand">
-              <label style={{ marginTop: 0 }}><SoundOutlined /> 选择口播音色（可试听，可跳过用默认）</label>
+              <label style={{ marginTop: 0 }}><SoundOutlined /> 选择口播音色（可试听，不选则用默认音色）</label>
               <VoicePicker value={voiceId} onChange={setVoiceId} myVoices={myVoices} style={{ maxWidth: 480 }} />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                想用自己的声音？<a href="/m/compose/tools?tab=media" target="_blank" rel="noreferrer">去声音克隆</a>
-              </Text>
-            </div>
-          )}
-
-          {audioSource === 'direct' && (
-            <div className="wz-source-expand">
-              <Text type="secondary" style={{ fontSize: 12.5, lineHeight: 1.7 }}>
-                台词文本将直接驱动数字分身开口（语音由模型端内合成，无需配音）。
-                成片最快，但音色由分身决定——需要指定音色请回到「文本 + 音色」。
+                {presence === 'avatar'
+                  ? '音色优先用分身绑定值，显式选择将覆盖；想用自己的声音？'
+                  : '想用自己的声音？'}
+                <a href="/m/compose/tools?tab=media" target="_blank" rel="noreferrer">去声音克隆</a>
               </Text>
             </div>
           )}
@@ -959,24 +936,90 @@ export default function LipSyncWizard() {
 
       {step === 2 && (
         <div className="ip-stagger">
+          <Alert
+            type="info" showIcon
+            message="生成前配置 B-Roll（可选）——视频生成后系统自动定位台词并合成插入画面，一次等待拿到最终视频"
+            description="一行一句对应一个插入点；片段支持图片（按句静态显示）与视频（从该句起自然播放）。跳过此步生成纯口播成片，生成后仍可在完成页手动插入。"
+          />
+          <div className="ip-panel" style={{ padding: '12px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <Text strong>逐句插入点</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>已配置 {brollCount} 句</Text>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {scriptLinesIdx.map(({ t, i }) => {
+                const media = brollMap[i]
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10,
+                      border: `1px solid ${media ? 'var(--wr-primary-border)' : 'var(--wr-border)'}`,
+                      background: media ? 'var(--wr-primary-bg)' : 'transparent',
+                    }}
+                  >
+                    <Tag style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>第 {i + 1} 行 · 约 {Math.ceil(t.length / 3)}s</Tag>
+                    <Text style={{ flex: 1, fontSize: 13 }} ellipsis={{ tooltip: t }}>{t}</Text>
+                    {media ? (
+                      <Space size={4}>
+                        <Tag color="purple" style={{ margin: 0 }}>已配置</Tag>
+                        <Button size="small" type="text" onClick={() => setBrollPickerIndex(i)}>更换</Button>
+                        <Button
+                          size="small" type="text" danger
+                          onClick={() => setBrollMap((prev) => { const n = { ...prev }; delete n[i]; return n })}
+                        >
+                          移除
+                        </Button>
+                      </Space>
+                    ) : (
+                      <Button size="small" icon={<PlusOutlined />} onClick={() => setBrollPickerIndex(i)}>
+                        插入画面
+                      </Button>
+                    )}
+                  </div>
+                )
+              })}
+              {scriptLinesIdx.length === 0 && (
+                <Text type="secondary">请先在第一步填写文案（一行一句）</Text>
+              )}
+            </div>
+          </div>
+          <AssetPicker
+            open={brollPickerIndex !== null}
+            mode="single"
+            accept="visual"
+            title={`选择插入片段（第 ${(brollPickerIndex ?? 0) + 1} 句）`}
+            onClose={() => setBrollPickerIndex(null)}
+            onSelect={(assets) => {
+              if (brollPickerIndex !== null && assets[0]?.url) {
+                setBrollMap((prev) => ({ ...prev, [brollPickerIndex]: assets[0].url }))
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="ip-stagger">
           <div className="wz-ready-tags">
             <Tag color="green">文案 {script.length} 字 · 约 {scriptSec} 秒</Tag>
             <Tag color="green">{presence === 'real' ? '真人出镜' : '数字分身'}</Tag>
             <Tag color={voiceId ? 'green' : 'default'}>
-              {audioSource === 'direct' ? '文本直生（分身端内合成语音）'
-                : audioSource === 'upload' ? '已录音频' : (voiceId ? '音色已选' : '默认音色')}
+              {audioSource === 'upload' ? '已录音频' : (voiceId ? '音色已选' : '默认音色')}
             </Tag>
-            {selectedEnv && (
+            {selectedEnv && audioSource === 'upload' && (
               <Tag color="cyan" icon={<EnvironmentOutlined />}>出镜环境：{selectedEnv.name}</Tag>
             )}
+            {brollCount > 0 && (
+              <Tag color="purple" icon={<VideoCameraAddOutlined />}>B-Roll {brollCount} 句</Tag>
+            )}
             <Tag color="blue">
-              {audioSource === 'direct'
-                ? '链路：台词直生成片（单步）'
-                : audioSource === 'upload'
-                  ? '链路：上传音频 → 对口型（跳过配音）'
-                  : presence === 'real'
-                    ? '链路：配音 → 对口型（口型与音频对齐）'
-                    : '链路：配音 → 主体一致性成片（画面由分身生成）'}
+              {audioSource === 'upload'
+                ? '链路：上传音频 → 对口型'
+                : presence === 'real'
+                  ? '链路：文本驱动对口型（端内合成语音）'
+                  : '链路：台词直驱分身成片'}
+              {brollCount > 0 ? ' → 自动合成插入画面' : ''}
             </Tag>
             <Tag icon={<ClockCircleOutlined />}>{produceEta}</Tag>
           </div>
@@ -1030,7 +1073,7 @@ export default function LipSyncWizard() {
               />
               <div className="wz-produce-actions">
                 <Button href={resultUrl} target="_blank" download>下载成片</Button>
-                <Button type="primary" icon={<RightOutlined />} onClick={() => goStep(3)}>
+                <Button type="primary" icon={<RightOutlined />} onClick={() => goStep(4)}>
                   下一步：发布
                 </Button>
               </div>
@@ -1039,13 +1082,13 @@ export default function LipSyncWizard() {
         </div>
       )}
 
-      {step === 3 && (
+      {step === 4 && (
         <div className="ip-stagger">
           {!resultUrl ? (
             <Alert
               type="info" showIcon
               message="尚未生成成片"
-              description={<Button size="small" onClick={() => goStep(2)}>返回上一步生成</Button>}
+              description={<Button size="small" onClick={() => goStep(3)}>返回上一步生成</Button>}
             />
           ) : (
             <>
@@ -1083,7 +1126,7 @@ export default function LipSyncWizard() {
       <BrollDrawer
         open={brollOpen}
         onClose={() => setBrollOpen(false)}
-        source={lipsyncTaskId ? { taskId: lipsyncTaskId, title: topic || '口播成片', videoUrl: resultUrl || undefined } : null}
+        source={videoTaskId ? { taskId: videoTaskId, title: topic || '口播成片', videoUrl: resultUrl || undefined } : null}
       />
     </WizardShell>
   )

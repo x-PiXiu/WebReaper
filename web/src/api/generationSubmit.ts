@@ -29,7 +29,7 @@ export type UnifiedSubmitPayload = {
 }
 
 /** 主体引用（reference2video 一致性——BE-SUBJ-01） */
-export type SubjectRef = { name: string; server_id?: string; images?: string[] }
+export type SubjectRef = { name: string; server_id?: string; images?: string[]; voice_id?: string }
 
 /** 合并统一提交高级参数（model / seed / voice_setting_* 等——服务端 params 白名单合并） */
 export function mergeSubmitParams(
@@ -298,11 +298,15 @@ export function buildSubjectReferencePayload(input: {
   audioMaterialId?: string
   /** 组合出镜（25 号 §6.5）：环境主体作为第二参考主体——分身在环境里口播 */
   envSubject?: { serverId: string; name?: string }
+  /** 文本驱动时的音色（01 号"选音色默认已选中"——显式选择写入主体覆盖分身绑定值） */
+  voiceId?: string
 }): UnifiedSubmitPayload {
-  const subjects: SubjectRef[] = [{
+  const main: SubjectRef = {
     name: (input.name || '主体').trim() || '主体',
     server_id: input.server_id.trim(),
-  }]
+  }
+  if (input.voiceId) main.voice_id = input.voiceId
+  const subjects: SubjectRef[] = [main]
   if (input.envSubject?.serverId) {
     subjects.push({ name: (input.envSubject.name || '环境').trim(), server_id: input.envSubject.serverId })
   }
