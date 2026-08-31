@@ -753,6 +753,17 @@ export default function Chat() {
               ))}
             </div>
           )}
+          {/* 管理员快捷操作（Admin Tools）：常用系统管理一键直达 */}
+          {!isMerchantChat && (
+            <div style={{ maxWidth: 1080, margin: '0 auto 8px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 11, flexShrink: 0 }}>管理：</Text>
+              <Button size="small" disabled={streaming} onClick={() => doSend('系统健康状态怎么样？')} style={{ fontSize: 12 }}>系统状态</Button>
+              <Button size="small" disabled={streaming} onClick={() => doSend('最近有哪些失败的生成任务？')} style={{ fontSize: 12 }}>失败任务</Button>
+              <Button size="small" disabled={streaming} onClick={() => doSend('Vidu 积分余额多少？')} style={{ fontSize: 12 }}>Vidu 积分</Button>
+              <Button size="small" disabled={streaming} onClick={() => doSend('现在有哪些平台音色？默认是哪个？')} style={{ fontSize: 12 }}>平台音色</Button>
+              <Button size="small" disabled={streaming} onClick={() => doSend('有哪些官方主体？')} style={{ fontSize: 12 }}>官方主体</Button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 12, maxWidth: 1080, margin: '0 auto' }}>
             <TextArea value={input} onChange={e => setInput(e.target.value)} placeholder="回车发送，Shift+回车换行..." autoSize={{ minRows: 1, maxRows: 4 }} onKeyDown={handleKeyDown} style={{ borderRadius: 12 }} disabled={streaming} />
             {streaming ? (

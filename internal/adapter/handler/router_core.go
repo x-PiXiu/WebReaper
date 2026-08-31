@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/gin-gonic/gin"
+
+	"webreaper/internal/adapter/agent"
 )
 
 // registerCoreRoutes 基础能力路由：AI 对话 / 工具面板 / 站内通知 / 仪表盘统计 /
@@ -13,6 +15,15 @@ func (r *Router) registerCoreRoutes(api *gin.RouterGroup) {
 	if r.ai != nil {
 		chatHandler := NewChatHandler(r.ai)
 		chatHandler.SetQuotaGate(r.quotaGate)
+		// Admin chat 增强：管理员会话的系统提示词注入实时系统健康数据
+		// （admin chat 问"系统怎么样"时 LLM 有数据直接回答——Admin Tools 落地）
+		if r.generationUC != nil {
+			chatHandler.SetAdminHealthProvider(func() string {
+				return agent.BuildHealthSummary(
+					r.generationUC, r.generationVoices, r.subjectAssetRepo, r.generationProvider,
+				)
+			})
+		}
 		api.POST("/chat", chatHandler.HandleStream)
 	}
 	// 工具面板（需 toolRegistry）
