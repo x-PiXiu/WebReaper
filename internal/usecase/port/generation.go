@@ -85,7 +85,7 @@ type ModelAutoSelector interface {
 // SyncSubmitter 同步端点（可选能力——EndpointAdapter 类型断言获得）：
 // 提交响应即终态，没有 task_id 轮询语义。
 // 典型：Vidu 主体 API（POST /ent/v2/subjects）同步返回主体对象
-//（id=server_id），既无 task_id 也无 state——若按异步任务轮询
+// （id=server_id），既无 task_id 也无 state——若按异步任务轮询
 // /ent/v2/tasks/{id}/creations 必然 404，任务永远停在 queueing。
 // usecase 对此类端点：提交成功 → 直接终态 success，服务商资源 ID
 // 存 ProviderTaskID 且以 creations[0].id 暴露给前端引用。
@@ -98,7 +98,7 @@ type SyncSubmitter interface {
 // CallbackEndpoint 支持回调的异步端点（可选能力——EndpointAdapter 类型断言获得）。
 //
 // Vidu 约定：创建任务时传入 callback_url，任务状态变化时主动 POST 回调
-//（结构同查询任务 API 返回体；HMAC-SHA256 验签 + Date/nonce 防重放）。
+// （结构同查询任务 API 返回体；HMAC-SHA256 验签 + Date/nonce 防重放）。
 // 仅文档声明了 callback_url 参数的端点实现本接口（text2video/reference2video/
 // text2image/multiframe）——对其余端点注入未声明参数有被拒风险。
 // 未实现/未配置公网回调地址时自动退化为纯轮询（20s 周期，双通道幂等合并）。
@@ -189,7 +189,9 @@ type MediaAssetStore interface {
 // handler 直接依赖（同 MediaAssetStore 模式）：无任务语义，不需用例封装。
 type VoiceLibrary interface {
 	// List 音色列表（language 为空=全部；keyword 模糊匹配 voice_id/名称）。
-	List(ctx context.Context, language, keyword string) ([]entity.GenerationVoice, error)
+	// tenantID 非空=租户视图：clone 行仅返回本租户的、且只含 status=active
+	// （隔离修复：此前无过滤，A 租户可见/试听 B 租户克隆音色）；空=管理端全量。
+	List(ctx context.Context, language, keyword, tenantID string) ([]entity.GenerationVoice, error)
 	// SeedIfEmpty 表空时写入种子数据（返回写入条数；已非空返回 0）。
 	SeedIfEmpty(ctx context.Context, voices []entity.GenerationVoice) (int, error)
 	// Upsert 按 voice_id 主键幂等写入（26号计划——voice_clone 物化钩子调用）。
@@ -200,7 +202,7 @@ type VoiceLibrary interface {
 //
 // 差距修复：异步任务（视频/图片）在轮询周期内完成，商户不留在页面上就永远
 // 不知道结果；同步任务（主体/TTS）提交即终态但用户可能在后台运行。终态
-//（success/failed）转换恰好发生一次（IsTerminal 幂等护栏），在此处通知不会重复。
+// （success/failed）转换恰好发生一次（IsTerminal 幂等护栏），在此处通知不会重复。
 type TaskNotifier interface {
 	// NotifyTaskTerminal 任务进入终态时回调（同步执行，实现应快速失败不影响主流程）。
 	NotifyTaskTerminal(ctx context.Context, task entity.GenerationTask)

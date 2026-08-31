@@ -122,7 +122,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 		if r.generationRegistry != nil && r.generationSpecRepo != nil {
 			gh := NewGenerationAdminHandler(r.generationRegistry, r.generationSpecRepo)
 			adminGroup.GET("/generation/specs", gh.HandleListSpecs)
-			adminGroup.GET("/generation/modes", gh.HandleListModes)   // 模式开关（sub_type 批量启停）
+			adminGroup.GET("/generation/modes", gh.HandleListModes) // 模式开关（sub_type 批量启停）
 			adminGroup.PUT("/generation/modes/:subType", gh.HandleSetMode)
 			adminGroup.POST("/generation/modes/apply-recommended", gh.HandleApplyRecommendedModes) // 一键收敛到推荐档位
 			adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
@@ -139,7 +139,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 		}
 		// 官方音色管理（27号优化——运营可管理官方音色）
 		if r.generationVoices != nil {
-			avh := NewAdminVoiceHandler(r.generationVoices, nil, r.mediaStore)
+			avh := NewAdminVoiceHandler(r.generationVoices, r.adminVoiceSynth, r.mediaStore)
 			adminGroup.POST("/voices", avh.HandleCreateVoice)
 			adminGroup.GET("/voices", avh.HandleListVoices)
 			adminGroup.PUT("/voices/:id", avh.HandleUpdateVoice)
@@ -157,7 +157,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.PUT("/integrations/vendors/:id", ih.HandleSaveVendor)
 			adminGroup.GET("/integrations/capabilities", ih.HandleCapabilities)
 			adminGroup.PUT("/integrations/capabilities/:id/default", ih.HandleSetCapabilityDefault)
-			adminGroup.PUT("/integrations/capabilities/save", ih.HandleSaveCapability)    // id 在请求体（# 在 URL 中被截断）
+			adminGroup.PUT("/integrations/capabilities/save", ih.HandleSaveCapability)        // id 在请求体（# 在 URL 中被截断）
 			adminGroup.DELETE("/integrations/capabilities/delete", ih.HandleDeleteCapability) // 同上
 		}
 		// 厂商配置管理（按厂商设置 API Key——保存后对已装配厂商热生效）

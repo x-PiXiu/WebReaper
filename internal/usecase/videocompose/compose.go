@@ -51,7 +51,7 @@ func (uc *UseCase) SubmitCompose(ctx context.Context, in port.ComposeInput) (por
 		return port.ComposeResult{}, fmt.Errorf("源成片尚未定位台词时间轴——请先调用 POST timeline 定位")
 	}
 
-	// §5.3 校验：句号有效 + 窗口互不重叠 + 时间窗换算
+	// §5.3 校验：句号有效 + 同句重复检测（29 号：重叠检测已移除——重叠时后续片段优先）
 	var resolved []resolvedSeg
 	for _, s := range in.Segments {
 		if s.SentenceIndex < 0 || s.SentenceIndex >= len(meta.Lines) {
@@ -83,20 +83,20 @@ func (uc *UseCase) SubmitCompose(ctx context.Context, in port.ComposeInput) (por
 	now := time.Now()
 	params := map[string]any{
 		"source_task_id": in.SourceTaskID,
-		"segments":        in.Segments,
-		"script":          taskScript(src), // 台词随链继承（链式再 compose 直接可用）
+		"segments":       in.Segments,
+		"script":         taskScript(src), // 台词随链继承（链式再 compose 直接可用）
 	}
 	paramsJSON, _ := json.Marshal(params)
 	task := entity.GenerationTask{
-		ID:          fmt.Sprintf("comp-%d", now.UnixNano()),
-		TenantID:    in.TenantID,
-		BrandID:     in.BrandID,
-		Type:        entity.GenerationTypeOther,
-		SubType:     "compose",
-		Model:       "local-ffmpeg",
-		Provider:    "local",
-		State:       entity.TaskStateQueueing,
-		ParamsJSON:  string(paramsJSON),
+		ID:           fmt.Sprintf("comp-%d", now.UnixNano()),
+		TenantID:     in.TenantID,
+		BrandID:      in.BrandID,
+		Type:         entity.GenerationTypeOther,
+		SubType:      "compose",
+		Model:        "local-ffmpeg",
+		Provider:     "local",
+		State:        entity.TaskStateQueueing,
+		ParamsJSON:   string(paramsJSON),
 		TimelineJSON: src.TimelineJSON, // 链式继承（§10.1④：禁止重检测）
 	}
 	if err := uc.tasks.Save(ctx, task); err != nil {

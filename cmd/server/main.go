@@ -22,22 +22,24 @@ import (
 	agentadapter "webreaper/internal/adapter/agent"
 	"webreaper/internal/adapter/ai"
 	"webreaper/internal/adapter/asropenai"
-	"webreaper/internal/adapter/cache"
-	"webreaper/internal/adapter/integration"
-	"webreaper/internal/adapter/media"
-	"webreaper/internal/adapter/mediaav"
-	"webreaper/internal/adapter/metrics"
 	authadapter "webreaper/internal/adapter/auth"
+	"webreaper/internal/adapter/biliweb"
 	"webreaper/internal/adapter/bing"
+	"webreaper/internal/adapter/cache"
 	"webreaper/internal/adapter/crawler"
 	douyincrawler "webreaper/internal/adapter/crawler/douyin"
 	"webreaper/internal/adapter/crypto"
+	"webreaper/internal/adapter/douyinoauth"
+	"webreaper/internal/adapter/douyinweb"
 	geoadapter "webreaper/internal/adapter/geo"
-	"webreaper/internal/adapter/ttsmimo"
 	"webreaper/internal/adapter/handler"
+	"webreaper/internal/adapter/integration"
 	kbretriever "webreaper/internal/adapter/knowledge"
 	"webreaper/internal/adapter/lock"
 	zaplogger "webreaper/internal/adapter/logger"
+	"webreaper/internal/adapter/media"
+	"webreaper/internal/adapter/mediaav"
+	"webreaper/internal/adapter/metrics"
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/payment"
 	"webreaper/internal/adapter/provider"
@@ -45,17 +47,15 @@ import (
 	"webreaper/internal/adapter/provider/viduendpoint"
 	"webreaper/internal/adapter/publisher"
 	transport "webreaper/internal/adapter/publisher/transport"
-	"webreaper/internal/adapter/douyinoauth"
-	"webreaper/internal/adapter/biliweb"
-	"webreaper/internal/adapter/douyinweb"
-	"webreaper/internal/adapter/videolink"
 	"webreaper/internal/adapter/qrlogin"
 	"webreaper/internal/adapter/repository"
 	"webreaper/internal/adapter/scheduledtask"
-	"webreaper/internal/adapter/urlprobe"
 	"webreaper/internal/adapter/storage"
 	"webreaper/internal/adapter/telemetry"
+	"webreaper/internal/adapter/ttsmimo"
+	"webreaper/internal/adapter/urlprobe"
 	"webreaper/internal/adapter/urlsubmit"
+	"webreaper/internal/adapter/videolink"
 	"webreaper/internal/config"
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/account"
@@ -64,11 +64,9 @@ import (
 	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/generation"
-	"webreaper/internal/usecase/videocompose"
-	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/geo"
-	"webreaper/internal/usecase/works"
 	"webreaper/internal/usecase/indexing"
+	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/notification"
@@ -79,7 +77,9 @@ import (
 	"webreaper/internal/usecase/stats"
 	"webreaper/internal/usecase/structured"
 	"webreaper/internal/usecase/systemsettings"
+	"webreaper/internal/usecase/videocompose"
 	"webreaper/internal/usecase/videotranscript"
+	"webreaper/internal/usecase/works"
 )
 
 func main() {
@@ -518,7 +518,7 @@ func main() {
 			ai.NewSeedSource(aiGenerator),                                    // 种子词拓展
 			ai.NewFileSource(aiGenerator),                                    // 文件内容
 			ai.NewWebSource(aiGenerator, webFetcher),                         // 网络爬取
-			ai.NewQuestionSource(aiGenerator),                              // 提问词挖掘（问题库）
+			ai.NewQuestionSource(aiGenerator),                                // 提问词挖掘（问题库）
 		)
 		geoDistillUCRef = geoDistillUC
 		router.SetKeywordDistill(geoDistillUC)
@@ -530,9 +530,9 @@ func main() {
 	// 多平台发布账号域装配（扫码绑定 + 半自动/全自动发布）。需要 DB 才启用。
 	var geoAccountUC *account.AccountUseCase
 	var geoPublishUC *account.PublishUseCase
-	var accountRepos *accountRepos // 提升到外层：平台总览统计需要发布任务计数
+	var accountRepos *accountRepos         // 提升到外层：平台总览统计需要发布任务计数
 	var socialSearcher *douyinweb.Searcher // 提升到外层：生成域提取管线复用（分享链解析）
-	var cookieVault port.CookieVault // 提升到外层：爬虫管理（cookie 加解密）复用
+	var cookieVault port.CookieVault       // 提升到外层：爬虫管理（cookie 加解密）复用
 	if geoRepos != nil {
 		accountRepos = initAccountRepositories(cfg.DB)
 		if accountRepos != nil {
@@ -950,12 +950,17 @@ func main() {
 				log.Info("小米MiMo API Key 从声音克隆能力路由配置读取")
 			}
 		}
+		var adminVoiceSynth port.AudioSynthesizer
 		if mimoKey != "" {
 			mimoTTS := ttsmimo.NewMiMoTTSProvider(mimoKey, "")
 			providers["xiaomi-mimo"] = ttsmimo.NewMiMoAsGenerationProvider(mimoTTS)
+			adminVoiceSynth = mimoTTS // 管理后台官方音色创建（04 号 §10.2#1 修复：此前装配 nil）
 			log.Info("小米MiMo TTS provider 已注册（音频/TTS/声音克隆）")
 		} else {
 			log.Warn("小米MiMo TTS 未启用（MIMO_API_KEY 未配置且管理后台未设置 API Key）")
+		}
+		if adminVoiceSynth != nil {
+			router.SetAdminVoiceSynth(adminVoiceSynth)
 		}
 
 		genUC := generation.NewGenerationUseCase(providers, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))

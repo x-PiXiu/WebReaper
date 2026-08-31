@@ -187,7 +187,7 @@ func (h *AdminVoiceHandler) HandleUpdateVoice(c *gin.Context) {
 	}
 
 	// 查询现有音色
-	voices, err := h.voiceRepo.List(c.Request.Context(), "", voiceID)
+	voices, err := h.voiceRepo.List(c.Request.Context(), "", voiceID, "")
 	if err != nil || len(voices) == 0 {
 		fail(c, fmt.Errorf("音色不存在"))
 		return
@@ -223,7 +223,7 @@ func (h *AdminVoiceHandler) HandleDeleteVoice(c *gin.Context) {
 	}
 
 	// 检查是否为平台音色（只允许删除 platform scope）
-	voices, err := h.voiceRepo.List(c.Request.Context(), "", voiceID)
+	voices, err := h.voiceRepo.List(c.Request.Context(), "", voiceID, "")
 	if err != nil || len(voices) == 0 {
 		fail(c, fmt.Errorf("音色不存在"))
 		return
@@ -249,7 +249,7 @@ func (h *AdminVoiceHandler) HandleListVoices(c *gin.Context) {
 	language := c.Query("language")
 	q := c.Query("q")
 
-	voices, err := h.voiceRepo.List(c.Request.Context(), language, q)
+	voices, err := h.voiceRepo.List(c.Request.Context(), language, q, "") // 管理端全量（含 clone/停用行）
 	if err != nil {
 		fail(c, err)
 		return

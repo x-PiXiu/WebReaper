@@ -479,6 +479,20 @@ export const businessApi = {
   rewriteScript: (data: { raw_text: string; topic?: string; requirement?: string }) =>
     apiClient.post<unknown, { clean: string; rewrite: string }>('/api/v1/generation/transcript/rewrite', data),
 
+  // ---- 管理后台·官方音色（27号/04号 §10.2——运营管理 platform 音色）----
+  adminListVoices: (params?: { language?: string; q?: string; scope?: string }) =>
+    apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/admin/voices', { params }),
+  adminCreateVoice: (form: FormData) =>
+    apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  adminCreateVoiceByUrl: (data: { audio_url: string; text: string; name?: string; language?: string }) =>
+    apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices', data),
+  adminUpdateVoice: (voiceId: string, data: { name?: string; language?: string; status?: string }) =>
+    apiClient.put<unknown, GenerationVoice>(`/api/v1/admin/voices/${encodeURIComponent(voiceId)}`, data),
+  adminDeleteVoice: (voiceId: string) =>
+    apiClient.delete<unknown, unknown>(`/api/v1/admin/voices/${encodeURIComponent(voiceId)}`),
+
   // ---- 口播 B-Roll（22/23 号计划：成片后按句插入画面）----
   // 台词时间轴：首次点「插入画面」时 POST 定位（静音检测，秒级）；支持重跑或仅修正文字（lines_override 不改切换点）
   locateTaskTimeline: (taskId: string, body?: { force?: boolean; lines_override?: { index: number; text: string }[] }) =>

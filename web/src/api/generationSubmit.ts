@@ -67,7 +67,7 @@ export type LegacyGenerationSubmit = {
 
 const VIDEO_SUBTYPES = new Set([
   'text2video', 'img2video', 'start_end2video', 'reference2video',
-  'multiframe', 'lip_sync', 'digital_human',
+  'multiframe', 'lip_sync',
 ])
 
 async function uploadAssetFile(file: File) {
@@ -217,9 +217,8 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
   else if (sub === 'tts' || sub === 'text2audio' || sub === 'sound_effect') type = 'audio'
   else if (sub === 'voice_clone') type = 'voice'
   else if (sub === 'digital_human') {
-    const hasAudioHint = !!(params.audio_url || refIds(data.refs, 'audio').length)
-    // 文档：1图+1音频 → digital_human（不传 type）；仅图+文 → type=video → img2video
-    type = hasAudioHint ? undefined : 'video'
+    // Vidu digital_human 端点已废弃（2026-08-27 确认）——不再提交，引导走口播主链
+    throw new Error('数字人直生已下线——请用「拍口播」向导（数字分身 + reference2video）')
   } else if (sub === 'lip_sync') {
     type = undefined
   } else if (VIDEO_SUBTYPES.has(sub)) {

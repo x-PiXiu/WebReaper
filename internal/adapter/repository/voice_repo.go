@@ -32,7 +32,7 @@ func NewGormVoiceRepository(db *gorm.DB) *GormVoiceRepository {
 	return &GormVoiceRepository{db: db}
 }
 
-func (r *GormVoiceRepository) List(ctx context.Context, language, keyword string) ([]entity.GenerationVoice, error) {
+func (r *GormVoiceRepository) List(ctx context.Context, language, keyword, tenantID string) ([]entity.GenerationVoice, error) {
 	q := r.db.WithContext(ctx).Model(&GenerationVoicePO{})
 	if language != "" {
 		q = q.Where("language = ?", language)
@@ -40,6 +40,10 @@ func (r *GormVoiceRepository) List(ctx context.Context, language, keyword string
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		q = q.Where("voice_id LIKE ? OR name LIKE ?", like, like)
+	}
+	if tenantID != "" {
+		// 租户隔离（04 号 §10.2#3）：克隆音色仅本租户可见；只展示启用行
+		q = q.Where("(scope IS NULL OR scope <> 'clone' OR tenant_id = ?) AND status = 'active'", tenantID)
 	}
 	var pos []GenerationVoicePO
 	// 全量 300 条级——一次取回由前端分组/搜索，不分页
