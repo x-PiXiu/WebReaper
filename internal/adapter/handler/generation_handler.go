@@ -18,8 +18,9 @@ import (
 
 // GenerationHandler 统一生成任务 API。
 type GenerationHandler struct {
-	uc     *generation.GenerationUseCase
-	voices port.VoiceLibrary // 可选；nil=音色端点不注册
+	uc               *generation.GenerationUseCase
+	voices           port.VoiceLibrary            // 可选；nil=音色端点不注册
+	subjectAssetRepo port.SubjectAssetRepository  // 可选；26 号计划——资产读路径
 }
 
 // NewGenerationHandler 创建生成任务 handler。
@@ -30,6 +31,11 @@ func NewGenerationHandler(uc *generation.GenerationUseCase) *GenerationHandler {
 // SetVoiceLibrary 注入官方音色库（可选——main 装配 seed 完成后传入）。
 func (h *GenerationHandler) SetVoiceLibrary(v port.VoiceLibrary) {
 	h.voices = v
+}
+
+// SetSubjectAssetRepo 注入主体资产仓储（可选——26 号计划读路径）。
+func (h *GenerationHandler) SetSubjectAssetRepo(r port.SubjectAssetRepository) {
+	h.subjectAssetRepo = r
 }
 
 // HandleVoices GET /api/v1/generation/voices?language=&q= —— 官方音色库
@@ -378,4 +384,30 @@ func (h *GenerationHandler) HandleListSubjects(c *gin.Context) {
 	default:
 		fail(c, fmt.Errorf("不支持的 ownership 值: %s（可选 system / private）", ownership))
 	}
+}
+
+// HandleListSubjectAssets GET /api/v1/subjects/mine?kind=&limit=&offset=
+// 个人主体资产列表（26 号计划——从 subject_assets 表读取，失败任务天然不出现）。
+func (h *GenerationHandler) HandleListSubjectAssets(c *gin.Context) {
+	if h.subjectAssetRepo == nil {
+		fail(c, fmt.Errorf("主体资产服务未配置"))
+		return
+	}
+	tenantID := middleware.CurrentTenantID(c)
+	kind := c.Query("kind") // person / scene / 空=全部
+	limit := 20
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	offset := 0
+	if v, err := strconv.Atoi(c.Query("offset")); err == nil && v >= 0 {
+		offset = v
+	}
+
+	assets, total, err := h.subjectAssetRepo.ListByTenant(c.Request.Context(), tenantID, entity.SubjectScopePersonal, kind, limit, offset)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"assets": assets, "total": total})
 }

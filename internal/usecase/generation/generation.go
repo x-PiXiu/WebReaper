@@ -84,6 +84,8 @@ type GenerationUseCase struct {
 	defaultProvider string
 	// urlResolver 素材 URL 可达性解析（可选；nil=不转换——SRP：URL 判断+格式转换移至 Adapter 层）
 	urlResolver port.MaterialURLResolver
+	// subjectAssetRepo 主体资产仓储（可选；26 号计划——终态物化钩子写入）。
+	subjectAssetRepo port.SubjectAssetRepository
 }
 
 // NewGenerationUseCase 创建统一生成用例（支持多厂商）。
@@ -319,11 +321,142 @@ func (uc *GenerationUseCase) notifyTerminal(ctx context.Context, task entity.Gen
 	uc.notifier.NotifyTaskTerminal(ctx, task)
 }
 
+// maybeMaterializeAsset 终态物化钩子（26 号计划——任务终态 success 时快照到独立资产表）。
+//
+// 规则：
+//   - sub_type=subject && state=success → upsert subject_assets（server_id 唯一键幂等）
+//   - sub_type=reference2video && params.avatar_video=true && state=success → 回填
+//     对应 subject_assets.avatar_video_url（按 subjects[0].server_id 定位）
+//
+// 失败/取消不物化——留在任务中心可重试，资产列表天然干净。
+// fire-and-forget：物化失败仅日志，不影响状态机。
+func (uc *GenerationUseCase) maybeMaterializeAsset(ctx context.Context, task entity.GenerationTask) {
+	if uc.subjectAssetRepo == nil {
+		return
+	}
+	if task.State != entity.TaskStateSuccess {
+		return
+	}
+
+	switch task.SubType {
+	case "subject":
+		uc.materializeSubject(ctx, task)
+	case "reference2video":
+		uc.maybeBackfillAvatarVideo(ctx, task)
+	}
+}
+
+// materializeSubject 将成功的主体任务物化到 subject_assets 表。
+func (uc *GenerationUseCase) materializeSubject(ctx context.Context, task entity.GenerationTask) {
+	var p map[string]any
+	if err := json.Unmarshal([]byte(task.ParamsJSON), &p); err != nil {
+		return
+	}
+
+	serverID := task.ProviderTaskID
+	if serverID == "" {
+		serverID = firstCreationID(task.CreationsJSON)
+	}
+	if serverID == "" {
+		return // 无 server_id 不可物化
+	}
+
+	name, _ := p["name"].(string)
+	if name == "" {
+		name = "未命名分身"
+	}
+	voiceID, _ := p["voice_id"].(string)
+	kind := entity.SubjectKindPerson
+	if k, _ := p["kind"].(string); k == "scene" {
+		kind = entity.SubjectKindScene
+	}
+
+	// 封面图：images[0] 或 creations 中的 cover_url
+	var portraitURL string
+	if imgs, ok := p["images"].([]any); ok && len(imgs) > 0 {
+		portraitURL, _ = imgs[0].(string)
+	}
+	if portraitURL == "" {
+		var creations []map[string]any
+		if json.Unmarshal([]byte(task.CreationsJSON), &creations) == nil && len(creations) > 0 {
+			portraitURL, _ = creations[0]["cover_url"].(string)
+		}
+	}
+
+	asset := entity.SubjectAsset{
+		ID:           task.ID,
+		TenantID:     task.TenantID,
+		Scope:        entity.SubjectScopePersonal,
+		Kind:         kind,
+		Name:         name,
+		ServerID:     serverID,
+		PortraitURL:  portraitURL,
+		VoiceID:      voiceID,
+		SourceTaskID: task.ID,
+		Status:       entity.SubjectStatusActive,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	if err := uc.subjectAssetRepo.Upsert(ctx, asset); err != nil {
+		log.Printf("[materialize] 主体 %s 物化失败（不影响任务状态）: %v", task.ID, err)
+	}
+}
+
+// maybeBackfillAvatarVideo 链式形象视频成功后回填 subject_assets.avatar_video_url。
+func (uc *GenerationUseCase) maybeBackfillAvatarVideo(ctx context.Context, task entity.GenerationTask) {
+	var p map[string]any
+	if err := json.Unmarshal([]byte(task.ParamsJSON), &p); err != nil {
+		return
+	}
+	// 仅处理链式形象视频（params.avatar_video=true）
+	isAvatar, _ := p["avatar_video"].(bool)
+	if !isAvatar {
+		return
+	}
+
+	// 从 subjects[0].server_id 定位主体资产
+	subjects, ok := p["subjects"].([]any)
+	if !ok || len(subjects) == 0 {
+		return
+	}
+	subj, ok := subjects[0].(map[string]any)
+	if !ok {
+		return
+	}
+	serverID, _ := subj["server_id"].(string)
+	if serverID == "" {
+		return
+	}
+
+	// 取形象视频产物 URL
+	videoURL := ""
+	var creations []map[string]any
+	if json.Unmarshal([]byte(task.CreationsJSON), &creations) == nil && len(creations) > 0 {
+		videoURL, _ = creations[0]["stored_url"].(string)
+		if videoURL == "" {
+			videoURL, _ = creations[0]["url"].(string)
+		}
+	}
+	if videoURL == "" {
+		return
+	}
+
+	if err := uc.subjectAssetRepo.UpdateAvatarVideoURL(ctx, serverID, videoURL); err != nil {
+		log.Printf("[materialize] 形象视频回填失败（server_id=%s）: %v", serverID, err)
+	}
+}
+
 // SetAssetStore 注入媒体资产存储（可选；nil=产物不转存）。
 func (uc *GenerationUseCase) SetAssetStore(s port.MediaAssetStore) {
 	if s != nil {
 		uc.asset = s
 	}
+}
+
+// SetSubjectAssetRepo 注入主体资产仓储（可选；26 号计划——终态物化钩子）。
+func (uc *GenerationUseCase) SetSubjectAssetRepo(r port.SubjectAssetRepository) {
+	uc.subjectAssetRepo = r
 }
 
 // SetQuotaGate 注入配额门（可选；generation 场景按次限额）。
@@ -518,6 +651,7 @@ func (uc *GenerationUseCase) applySubmitResult(ctx context.Context, task *entity
 		creationsJSON, _ := json.Marshal([]entity.CreationItem{{ID: res.TaskID}})
 		task.CreationsJSON = string(creationsJSON)
 		uc.notifyTerminal(ctx, *task)
+		uc.maybeMaterializeAsset(ctx, *task) // 26 号：终态物化
 		return
 	}
 	switch res.State {
@@ -887,6 +1021,7 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 	// 终态转换恰好一次（PollDue/HandleCallback 均有 IsTerminal 幂等护栏）——
 	// 在此通知不会重复；异步任务的完成感知差距（不留在页面就不知道结果）由此闭合
 	uc.notifyTerminal(ctx, *task)
+	uc.maybeMaterializeAsset(ctx, *task) // 26 号：终态物化
 	return nil
 }
 

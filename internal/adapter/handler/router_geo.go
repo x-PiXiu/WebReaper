@@ -196,6 +196,9 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	if r.generationVoices != nil {
 		gh.SetVoiceLibrary(r.generationVoices)
 	}
+	if r.subjectAssetRepo != nil {
+		gh.SetSubjectAssetRepo(r.subjectAssetRepo)
+	}
 	// 统一提交API（傻瓜式：客户端不需要选择端点/模型）
 	// 注意：原有 POST /generation/tasks 已删除，只保留统一提交API
 	api.POST("/generation/submit", gh.HandleUnifiedSubmit)
@@ -209,6 +212,10 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	api.GET("/generation/voices", gh.HandleVoices)
 	// 主体库代理（25 号阶段一 + 27 号优化：官方主体 + 个人分身）
 	api.GET("/subjects", gh.HandleListSubjects)
+	// 个人主体资产列表（26 号计划——从 subject_assets 表读取，失败任务天然不出现）
+	if r.subjectAssetRepo != nil {
+		api.GET("/subjects/mine", gh.HandleListSubjectAssets)
+	}
 	// B-Roll 台词时间轴（22 计划 §5.4①②——composer 未注入不注册）
 	if r.composerUC != nil {
 		th := NewTimelineHandler(r.composerUC)

@@ -110,6 +110,8 @@ type Router struct {
 	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
+	// 主体资产仓储（26 号计划——资产读路径；可选）
+	subjectAssetRepo port.SubjectAssetRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
 	billingUC *billing.BillingUseCase
 	// 配额检查门（注入到 ChatHandler 等无独立 usecase 的端点）——通过 SetQuotaGate 注入，可选
@@ -277,6 +279,11 @@ func (r *Router) SetTemplate(uc *generation.TemplateUseCase) {
 // SetGenerationVoices 注入官方音色库（可选——未注入则 /generation/voices 不返回数据）。
 func (r *Router) SetGenerationVoices(v port.VoiceLibrary) {
 	r.generationVoices = v
+}
+
+// SetSubjectAssetRepo 注入主体资产仓储（可选——26 号计划读路径；未注入则 /subjects/mine 不注册）。
+func (r *Router) SetSubjectAssetRepo(repo port.SubjectAssetRepository) {
+	r.subjectAssetRepo = repo
 }
 
 // SetComposer 注入 B-Roll 合成编排（可选——未注入则 timeline/compose 端点不注册）。
