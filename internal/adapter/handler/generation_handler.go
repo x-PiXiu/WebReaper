@@ -347,9 +347,10 @@ func (h *GenerationHandler) HandleRetryAvatarVideo(c *gin.Context) {
 	success(c, generationTaskToView(task))
 }
 
-// HandleListSubjects GET /api/v1/subjects?ownership=system|private&page_token=&count=
+// HandleListSubjects GET /api/v1/subjects?ownership=system|official|private&page_token=&count=
 // 主体库代理（25 号阶段一 + 27 号优化）：
 //   - ownership=system：官方主体缓存代理（前端读本地端点，不直连 Vidu）
+//   - ownership=official：管理后台创建的官方主体（从 subject_assets 表读取 scope=official）
 //   - ownership=private：个人分身列表（本地 generation_tasks 聚合已注册成功的主体）
 //   - ownership 空/不传：默认 system（向后兼容）
 func (h *GenerationHandler) HandleListSubjects(c *gin.Context) {
@@ -374,6 +375,21 @@ func (h *GenerationHandler) HandleListSubjects(c *gin.Context) {
 			return
 		}
 		success(c, res)
+	case "official":
+		// 管理后台创建的官方主体（从 subject_assets 表读取 scope=official）
+		if h.subjectAssetRepo == nil {
+			fail(c, fmt.Errorf("主体资产服务未配置"))
+			return
+		}
+		assets, total, err := h.subjectAssetRepo.ListByTenant(
+			c.Request.Context(), middleware.CurrentTenantID(c),
+			entity.SubjectScopeOfficial, "", count, 0,
+		)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		success(c, gin.H{"subjects": assets, "total": total})
 	case "private":
 		res, err := h.uc.ListPersonalSubjects(c.Request.Context(), middleware.CurrentTenantID(c), count)
 		if err != nil {
@@ -382,7 +398,7 @@ func (h *GenerationHandler) HandleListSubjects(c *gin.Context) {
 		}
 		success(c, res)
 	default:
-		fail(c, fmt.Errorf("不支持的 ownership 值: %s（可选 system / private）", ownership))
+		fail(c, fmt.Errorf("不支持的 ownership 值: %s（可选 system / official / private）", ownership))
 	}
 }
 

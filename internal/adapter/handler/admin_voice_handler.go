@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"webreaper/internal/adapter/handler/middleware"
+	"webreaper/internal/domain/entity"
 	"webreaper/internal/usecase/port"
 )
 
@@ -91,10 +92,20 @@ func (h *AdminVoiceHandler) HandleCreateVoice(c *gin.Context) {
 	// 生成 voice_id
 	voiceID := fmt.Sprintf("platform-%d", time.Now().UnixNano())
 
-	// 写入 generation_voices
-	// 注意：这里需要一个可以写入的方法，VoiceLibrary 只有 List 和 SeedIfEmpty
-	// 我们需要扩展接口或直接用 repo
-	// 暂时通过 success 返回，后续扩展写入逻辑
+	// 写入 generation_voices（scope=platform）
+	voice := entity.GenerationVoice{
+		VoiceID:   voiceID,
+		Language:  language,
+		Name:      name,
+		SampleURL: sampleURL,
+		Scope:     "platform",
+		Status:    "active",
+	}
+	if err := h.voiceRepo.Upsert(c.Request.Context(), voice); err != nil {
+		fail(c, fmt.Errorf("保存音色失败: %w", err))
+		return
+	}
+
 	success(c, gin.H{
 		"voice_id":   voiceID,
 		"name":       name,
