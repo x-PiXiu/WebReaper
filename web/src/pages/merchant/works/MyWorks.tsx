@@ -58,7 +58,7 @@ export default function MyWorks() {
   const { works = [], tasks, isLoading, isError, refetch } = usePublishableWorks()
 
   // B-Roll 血缘标记（§6.2）：compose 产物标"B-Roll"，被插过画面的源片标"已插画面"
-  const { composeWorkIds, brollSourceWorkIds } = useMemo(() => brollLineage(tasks), [tasks])
+  const { composeWorkIds, brollSourceWorkIds } = useMemo(() => brollLineage(works, tasks), [works, tasks])
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()

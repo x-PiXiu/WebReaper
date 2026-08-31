@@ -124,10 +124,15 @@ export default function VoiceModule() {
     }))
   }, [official])
 
-  const recommendCards = useMemo(
-    () => officialCards.slice(0, 12).map((c) => ({ ...c, tag: c.tag || '公共', id: `rec-${c.voiceId}` })),
-    [officialCards],
-  )
+  // 推荐走服务端 recommend 标记（077 迁移）；旧库未打标时兜底前 12 条
+  const recommendCards = useMemo(() => {
+    const marked = (official as GenerationVoice[]).filter((v) => v.recommend)
+    const base = marked.length ? marked : (official as GenerationVoice[]).slice(0, 12)
+    const ids = new Set(base.map((v) => v.voice_id))
+    return officialCards
+      .filter((c) => ids.has(c.voiceId))
+      .map((c) => ({ ...c, tag: c.tag || '精选', id: `rec-${c.voiceId}` }))
+  }, [official, officialCards])
 
   const cards = useMemo(() => {
     const needle = q.trim().toLowerCase()

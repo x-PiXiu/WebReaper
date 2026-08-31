@@ -64,55 +64,25 @@ export function filterPublishableWorks(
   return works.filter((w) => isPublishableWorkItem(w, taskById))
 }
 
-/** compose 任务 → 作品条目（标题取合成台词首句） */
-export function composeTaskToWorkItem(t: GenerationTask): WorkItem | null {
-  if ((t.sub_type || '').toLowerCase() !== 'compose' || t.state !== 'success') return null
-  const url = t.creations?.[0]?.stored_url || t.creations?.[0]?.url || ''
-  if (!url) return null
-  const p = t.params && typeof t.params === 'object' ? t.params : {}
-  const script = typeof p.script === 'string' ? p.script : ''
-  const firstLine = script.split('\n').map((l) => l.trim()).find(Boolean) || ''
-  return {
-    id: `g-${t.id}`,
-    kind: 'video',
-    title: firstLine.slice(0, 40) || 'B-Roll 合成成片',
-    brand_id: t.brand_id,
-    status: 'ready',
-    media_urls: [url],
-    platforms: [],
-    views: 0,
-    likes: 0,
-    comments: 0,
-    created_at: t.created_at,
-  }
-}
-
-/**
- * 补齐 compose 产物（B-Roll 合成成片）到作品列表。
- * 服务端 ListWorks 的 deliverableSubTypes 暂不含 compose（见 Docs/问题反馈.md），
- * 前端从生成任务补齐；服务端补上后按 id 自动去重。
- */
-export function appendComposeWorks(works: WorkItem[], tasks?: GenerationTask[]): WorkItem[] {
-  if (!tasks?.length) return works
-  const existing = new Set(works.map((w) => w.id))
-  const extras = tasks
-    .map(composeTaskToWorkItem)
-    .filter((w): w is WorkItem => w !== null && !existing.has(w.id))
-  if (!extras.length) return works
-  return [...works, ...extras]
-}
-
 /**
  * B-Roll 血缘标记（23 号计划 §6.2：作品卡显示 B-Roll 标记）。
  * - composeWorkIds：compose 产物的作品 id（g-<taskId>）→ 标"B-Roll"
  * - brollSourceWorkIds：被插入过画面的源片作品 id → 标"已插画面"
  */
-export function brollLineage(tasks?: GenerationTask[]): {
+export function brollLineage(works: WorkItem[], tasks?: GenerationTask[]): {
   composeWorkIds: Set<string>
   brollSourceWorkIds: Set<string>
 } {
   const composeWorkIds = new Set<string>()
   const brollSourceWorkIds = new Set<string>()
+  // 首选：服务端 WorkItem.parent_task_id（works.go 原生血缘）
+  for (const w of works) {
+    if (w.parent_task_id) {
+      composeWorkIds.add(w.id)
+      brollSourceWorkIds.add(`g-${w.parent_task_id}`)
+    }
+  }
+  // 兜底：任务 params 解析（服务端未升级 parent_task_id 时）
   for (const t of tasks || []) {
     if ((t.sub_type || '').toLowerCase() !== 'compose') continue
     composeWorkIds.add(`g-${t.id}`)

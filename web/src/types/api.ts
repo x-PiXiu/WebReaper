@@ -417,6 +417,7 @@ export interface WorkItem {
   comments: number
   created_at: string
   published_at?: string
+  parent_task_id?: string // B-Roll 血缘：compose 产物的源片任务 ID
 }
 
 // ---- 作品数据页聚合（/m/analytics 数据源）----
@@ -620,6 +621,7 @@ export interface GenerationVoice {
   language: string
   name: string
   sample_url: string
+  recommend?: boolean // 精选推荐（服务端标记——077 迁移）
 }
 
 // 第三方集成中心（08 计划 D7——能力路由模型）

@@ -262,12 +262,11 @@ export default function LipSyncWizard() {
     setRewriting(true)
     setRewritePopOpen(false)
     try {
-      // 服务端 rewrite 的 topic 是自由文本进 LLM 提示——需求拼入（待服务端加独立字段）
-      const topicFull = [
-        topic.trim() || '口播获客',
-        req.trim() ? `润色要求：${req.trim()}` : '',
-      ].filter(Boolean).join('；')
-      const rw = await businessApi.rewriteScript({ raw_text: script, topic: topicFull })
+      const rw = await businessApi.rewriteScript({
+        raw_text: script,
+        topic: topic.trim() || '口播获客',
+        requirement: req.trim() || undefined,
+      })
       setCleanText(rw.clean)
       setRewriteText(rw.rewrite || rw.clean)
       setScript(rw.rewrite || rw.clean)

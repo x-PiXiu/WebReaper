@@ -464,7 +464,7 @@ export const businessApi = {
     apiClient.get<unknown, { status?: string; task_id?: string; raw_text?: string; raw_text_lines?: string[]; title?: string; method?: string }>(`/api/v1/generation/transcript/extract/tasks/${id}`),
 
   // 原文 → 双产出（clean=用原文按钮 / rewrite=默认填入）
-  rewriteScript: (data: { raw_text: string; topic?: string }) =>
+  rewriteScript: (data: { raw_text: string; topic?: string; requirement?: string }) =>
     apiClient.post<unknown, { clean: string; rewrite: string }>('/api/v1/generation/transcript/rewrite', data),
 
   // ---- 口播 B-Roll（22/23 号计划：成片后按句插入画面）----
@@ -474,9 +474,9 @@ export const businessApi = {
   // 读取已定位时间轴（未定位时服务端 404）
   getTaskTimeline: (taskId: string) =>
     apiClient.get<unknown, TaskTimeline>(`/api/v1/generation/tasks/${taskId}/timeline`),
-  // 提交插入合成（type=compose，统一提交体系；只传句号，时间窗由后端换算，防客户端错位）
+  // 提交插入合成（sub_type=compose 走统一提交分发；source_task_id/segments 须在 params 内；只传句号，时间窗由后端换算）
   submitCompose: (data: { source_task_id: string; segments: { sentence_index: number; media_url: string }[] }) =>
-    apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', { type: 'compose', ...data }),
+    apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', { sub_type: 'compose', params: data }),
 
   // 素材库（上传/列表/删除——本地托管，P2 换 OSS 前端零改动）
   uploadAsset: (file: File) => {
