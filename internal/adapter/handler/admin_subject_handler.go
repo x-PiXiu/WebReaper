@@ -7,6 +7,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -22,7 +23,7 @@ import (
 
 // AdminSubjectHandler 管理后台官方主体管理。
 type AdminSubjectHandler struct {
-	genUC          *generation.GenerationUseCase
+	genUC            *generation.GenerationUseCase
 	subjectAssetRepo port.SubjectAssetRepository
 	mediaStore       port.MediaAssetStore
 }
@@ -101,10 +102,13 @@ func (h *AdminSubjectHandler) HandleCreateOfficialSubject(c *gin.Context) {
 		return
 	}
 
-	// 自动触发链式形象视频
-	go func() {
-		_, _ = h.genUC.RetryAvatarVideo(c.Request.Context(), middleware.CurrentTenantID(c), task.ID)
-	}()
+	// 自动触发链式形象视频（⚠️ 必须用独立 ctx：请求 ctx 在 handler 返回后即取消，
+	// 早期版本传 c.Request.Context() 导致 goroutine 内提交被立即取消——链式从未触发）
+	go func(tenantID, taskID string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+		defer cancel()
+		_, _ = h.genUC.RetryAvatarVideo(ctx, tenantID, taskID)
+	}(middleware.CurrentTenantID(c), task.ID)
 
 	success(c, gin.H{
 		"id":        asset.ID,

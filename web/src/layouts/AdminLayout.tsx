@@ -21,6 +21,7 @@ const adminMenu: NavItem[] = [
       { key: '/admin/contents', label: '内容管理' },
       { key: '/admin/billing', label: '计费管理' },
       { key: '/admin/voices', label: '官方音色' },
+      { key: '/admin/subjects', label: '官方主体' },
     ],
   },
   {

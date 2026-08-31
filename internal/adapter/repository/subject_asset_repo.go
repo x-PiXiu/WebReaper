@@ -61,11 +61,13 @@ func NewGormSubjectAssetRepository(db *gorm.DB) *GormSubjectAssetRepository {
 }
 
 // Upsert 按 server_id 唯一键幂等写入（INSERT ... ON DUPLICATE KEY UPDATE）。
+// 冲突更新列含 scope/tenant_id/sort_order：管理后台创建官方主体与终态物化钩子
+// 竞争同 server_id（物化先写 personal 行），后写方（admin official）必须能改写归属。
 func (r *GormSubjectAssetRepository) Upsert(ctx context.Context, asset entity.SubjectAsset) error {
 	po := subjectAssetToPO(asset)
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "server_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"name", "portrait_url", "avatar_video_url", "voice_id", "tags", "status", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"scope", "tenant_id", "name", "portrait_url", "avatar_video_url", "voice_id", "tags", "sort_order", "status", "updated_at"}),
 	}).Create(&po).Error
 }
 

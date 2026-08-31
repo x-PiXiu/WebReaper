@@ -31,19 +31,19 @@ const (
 // 物化时机：sub_type=subject 任务终态 success 时，server_id 唯一键幂等 upsert。
 // 读路径：用户"我的分身"改读本表（不再从 tasks 聚合——失败任务天然不出现）。
 type SubjectAsset struct {
-	ID             string    // 主键（与任务 ID 同源：task-{nano}）
-	TenantID       string    // 租户隔离（官方行用平台运营租户）
-	Scope          string    // personal / official
-	Kind           string    // person / scene
-	Name           string    // 主体名称
-	ServerID       string    // Vidu 主体 id（唯一索引——幂等 upsert 键）
-	PortraitURL    string    // 封面图 URL（images[0] 或视频封面）
-	AvatarVideoURL string    // 链式形象视频产物 URL（成功后回填）
-	VoiceID        string    // 绑定音色 ID
-	Tags           string    // 标签（JSON 数组或逗号分隔）
-	SortOrder      int       // 官方主体排序
-	Status         string    // active / disabled
-	SourceTaskID   string    // 溯源任务 ID（仅记录，不做外键依赖）
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID             string    `json:"id"`               // 主键（与任务 ID 同源：task-{nano}）
+	TenantID       string    `json:"tenant_id"`        // 租户隔离（官方行用平台运营租户）
+	Scope          string    `json:"scope"`            // personal / official
+	Kind           string    `json:"kind"`             // person / scene
+	Name           string    `json:"name"`             // 主体名称
+	ServerID       string    `json:"server_id"`        // Vidu 主体 id（唯一索引——幂等 upsert 键）
+	PortraitURL    string    `json:"portrait_url"`     // 封面图 URL（images[0] 或视频封面）
+	AvatarVideoURL string    `json:"avatar_video_url"` // 链式形象视频产物 URL（成功后回填）
+	VoiceID        string    `json:"voice_id"`         // 绑定音色 ID
+	Tags           string    `json:"tags"`             // 标签（JSON 数组或逗号分隔）
+	SortOrder      int       `json:"sort_order"`       // 官方主体排序
+	Status         string    `json:"status"`           // active / disabled
+	SourceTaskID   string    `json:"source_task_id"`   // 溯源任务 ID（仅记录，不做外键依赖）
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }

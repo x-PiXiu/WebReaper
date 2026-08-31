@@ -479,6 +479,22 @@ export const businessApi = {
   rewriteScript: (data: { raw_text: string; topic?: string; requirement?: string }) =>
     apiClient.post<unknown, { clean: string; rewrite: string }>('/api/v1/generation/transcript/rewrite', data),
 
+  // ---- 管理后台·官方主体（27号/25号二′b——运营管理 official 主体，创建走 Vidu 注册+链式形象视频）----
+  adminListSubjects: (params?: { kind?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, { subjects: SubjectAsset[]; total: number }>('/api/v1/admin/subjects', { params }),
+  adminCreateSubject: (data: {
+    name: string
+    images: string[]
+    voice_id?: string
+    kind?: 'person' | 'scene'
+    tags?: string
+    sort_order?: number
+  }) => apiClient.post<unknown, { id: string; server_id: string; name: string }>('/api/v1/admin/subjects', data),
+  adminUpdateSubject: (id: string, data: { name?: string; tags?: string; sort_order?: number; status?: string }) =>
+    apiClient.put<unknown, unknown>(`/api/v1/admin/subjects/${encodeURIComponent(id)}`, data),
+  adminDeleteSubject: (id: string) =>
+    apiClient.delete<unknown, unknown>(`/api/v1/admin/subjects/${encodeURIComponent(id)}`),
+
   // ---- 管理后台·官方音色（27号/04号 §10.2——运营管理 platform 音色）----
   adminListVoices: (params?: { language?: string; q?: string; scope?: string }) =>
     apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/admin/voices', { params }),

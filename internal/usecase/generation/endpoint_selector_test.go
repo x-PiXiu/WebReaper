@@ -149,7 +149,8 @@ func TestEndpointSelector_Select_TwoImages(t *testing.T) {
 }
 
 func TestEndpointSelector_Select_ImageAndAudio(t *testing.T) {
-	// 测试：1张图片+1个音频 → digital_human
+	// 测试：1张图片+1个音频 → lip_sync（digital_human 端点已废弃 2026-08-27，
+	// 图+音频统一走对口型——远端改造后本用例断言未同步，现按现行为修正）
 	mediaStore := &MockMediaAssetStore{
 		materials: []entity.MediaAsset{
 			{
@@ -178,8 +179,8 @@ func TestEndpointSelector_Select_ImageAndAudio(t *testing.T) {
 		t.Fatalf("Select failed: %v", err)
 	}
 
-	if result.SubType != "digital_human" {
-		t.Errorf("Expected subType 'digital_human', got '%s'", result.SubType)
+	if result.SubType != "lip_sync" {
+		t.Errorf("Expected subType 'lip_sync', got '%s'", result.SubType)
 	}
 }
 

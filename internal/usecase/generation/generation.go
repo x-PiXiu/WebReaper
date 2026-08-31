@@ -1738,8 +1738,14 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 	}
 
 	// 4. 29号计划：如果携带了 B-Roll 配置，创建链式任务
+	// ⚠️ 必须用独立 ctx：请求 ctx 在 HTTP handler 返回后即取消，早期版本传 ctx
+	// 导致 goroutine 首次查询就 context canceled——链式从未真正执行。
 	if len(in.BrollSegments) > 0 && uc.composer != nil {
-		go uc.chainBrollAfterGeneration(ctx, task, in.BrollSegments)
+		go func(src entity.GenerationTask, segs []BrollSegment) {
+			cctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
+			defer cancel()
+			uc.chainBrollAfterGeneration(cctx, src, segs)
+		}(task, in.BrollSegments)
 	}
 
 	return task, nil
@@ -1752,8 +1758,9 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 //   ② 自动定位时间轴
 //   ③ 自动提交 compose
 func (uc *GenerationUseCase) chainBrollAfterGeneration(ctx context.Context, sourceTask entity.GenerationTask, segments []BrollSegment) {
-	// ① 等待视频生成完成（轮询，最多等10分钟）
-	deadline := time.Now().Add(10 * time.Minute)
+	// ① 等待视频生成完成（轮询，最多等15分钟——Vidu q3 实测偶发 10 分钟+才出片，
+	// 早期 10min deadline 会把慢任务跳过导致链式合成丢失）
+	deadline := time.Now().Add(15 * time.Minute)
 	for time.Now().Before(deadline) {
 		task, err := uc.repo.FindByID(ctx, sourceTask.TenantID, sourceTask.ID)
 		if err != nil {

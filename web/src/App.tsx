@@ -38,6 +38,7 @@ const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
 const Notifications = lazy(() => import('./pages/merchant/Notifications'))
 const AdminUsers = lazy(() => import('./pages/admin/Users'))
 const AdminVoices = lazy(() => import('./pages/admin/Voices'))
+const AdminSubjects = lazy(() => import('./pages/admin/Subjects'))
 const Indexing = lazy(() => import('./pages/admin/Indexing'))
 const Knowledge = lazy(() => import('./pages/admin/Knowledge'))
 const AdminBrands = lazy(() => import('./pages/admin/Brands'))
@@ -141,6 +142,7 @@ export default function App() {
           <Route path="/admin" element={<LazyPage><Dashboard /></LazyPage>} />
           <Route path="/admin/users" element={<LazyPage><AdminUsers /></LazyPage>} />
           <Route path="/admin/voices" element={<LazyPage><AdminVoices /></LazyPage>} />
+          <Route path="/admin/subjects" element={<LazyPage><AdminSubjects /></LazyPage>} />
           <Route path="/admin/brands" element={<LazyPage><AdminBrands /></LazyPage>} />
           <Route path="/admin/contents" element={<LazyPage><AdminContents /></LazyPage>} />
           <Route path="/admin/settings" element={<LazyPage><AdminSettings /></LazyPage>} />
