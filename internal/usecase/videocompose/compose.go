@@ -70,14 +70,11 @@ func (uc *UseCase) SubmitCompose(ctx context.Context, in port.ComposeInput) (por
 			url:  s.MediaURL,
 		})
 	}
+	// 29号改进：保留重复检测，移除重叠检测（重叠时后续片段优先）
 	for i := 0; i < len(resolved); i++ {
 		for j := i + 1; j < len(resolved); j++ {
 			if resolved[i].idx == resolved[j].idx {
 				return port.ComposeResult{}, fmt.Errorf("第 %d 句重复配置片段", resolved[i].idx)
-			}
-			a, b := resolved[i], resolved[j]
-			if a.spec.StartMs < meta.Lines[b.idx].EndMs && meta.Lines[b.idx].StartMs < a.spec.EndMs {
-				return port.ComposeResult{}, fmt.Errorf("第 %d 句与第 %d 句的窗口重叠", a.idx, b.idx)
 			}
 		}
 	}

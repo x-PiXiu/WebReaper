@@ -37,14 +37,16 @@ func (t *FFmpegTool) ComposeInsertSegments(ctx context.Context, mainVideoPath st
 		inputIdx := i + 1
 		args = append(args, "-i", seg.MediaPath)
 		out := fmt.Sprintf("[v%d]", inputIdx)
-		// 预处理：cover 适配 + 定格兜底（短片段铺满窗口；长片段 overlay 窗口外不显示即截断）
+		// 29号改进：只做缩放+裁剪，不加 tpad（不定格）
+		// 片段播完后 overlay 自动失效，原片自然显示
 		filterParts = append(filterParts, fmt.Sprintf(
-			"[%d:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1,"+
-				"tpad=stop_mode=clone:stop_duration=3600[s%d]",
+			"[%d:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1[s%d]",
 			inputIdx, w, h, w, h, inputIdx))
-		// overlay 时间窗（shortest=1 必带——实测踩坑：tpad 拉长的辅输入会把输出时长拖长）
+		// 29号改进：移除 shortest=1，让片段自然播放
+		// enable='between(t,S,E)' 控制显示时间窗
+		// 片段比时间窗长时继续播放（不截断），片段比时间窗短时原片自然显示（不定格）
 		filterParts = append(filterParts, fmt.Sprintf(
-			"%s[s%d]overlay=0:0:enable='between(t,%.3f,%.3f)':shortest=1%s",
+			"%s[s%d]overlay=0:0:enable='between(t,%.3f,%.3f)'%s",
 			prev, inputIdx, float64(seg.StartMs)/1000, float64(seg.EndMs)/1000, out))
 		prev = out
 	}

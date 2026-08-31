@@ -1298,6 +1298,16 @@ type UnifiedSubmitInput struct {
 	// SubType 显式端点覆盖（空=selector 按素材自动选择）。当前支持 "subject"：
 	// 数字分身主体注册（Vidu /ent/v2/subjects 同步端点——name+形象照+音色）。
 	SubType string
+	// BrollSegments B-Roll 配置（29号计划——单阶段优化）。
+	// 携带时，系统自动在视频生成后执行 B-Roll 合成。
+	// 不携带时，行为不变（纯口播视频）。
+	BrollSegments []BrollSegment
+}
+
+// BrollSegment B-Roll 片段配置（29号计划）。
+type BrollSegment struct {
+	SentenceIndex int    `json:"sentence_index"` // 插入到第几句（从0开始）
+	MediaURL      string `json:"media_url"`      // 片段URL（图片或视频）
 }
 
 // submitSubject 数字分身主体注册（/ent/v2/subjects 同步端点）。
@@ -1713,7 +1723,7 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 
 	// 3. 调用原有的Submit方法
 	// BE-GEN-06：透传 Refs——translateRefs 按端点×能力向量翻译 @引用
-	return uc.Submit(ctx, SubmitInput{
+	task, err := uc.Submit(ctx, SubmitInput{
 		TenantID:  in.TenantID,
 		BrandID:   in.BrandID,
 		SubType:   selectResult.SubType,
@@ -1723,4 +1733,74 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 		Watermark: in.Watermark,
 		OffPeak:   in.OffPeak,
 	})
+	if err != nil {
+		return task, err
+	}
+
+	// 4. 29号计划：如果携带了 B-Roll 配置，创建链式任务
+	if len(in.BrollSegments) > 0 && uc.composer != nil {
+		go uc.chainBrollAfterGeneration(ctx, task, in.BrollSegments)
+	}
+
+	return task, nil
+}
+
+// chainBrollAfterGeneration 视频生成完成后自动执行 B-Roll 合成（29号计划——单阶段优化）。
+//
+// 流程：
+//   ① 等待视频生成完成（轮询）
+//   ② 自动定位时间轴
+//   ③ 自动提交 compose
+func (uc *GenerationUseCase) chainBrollAfterGeneration(ctx context.Context, sourceTask entity.GenerationTask, segments []BrollSegment) {
+	// ① 等待视频生成完成（轮询，最多等10分钟）
+	deadline := time.Now().Add(10 * time.Minute)
+	for time.Now().Before(deadline) {
+		task, err := uc.repo.FindByID(ctx, sourceTask.TenantID, sourceTask.ID)
+		if err != nil {
+			log.Printf("[broll] 查询源任务失败: %v", err)
+			return
+		}
+		if entity.IsTerminal(task.State) {
+			if task.State != entity.TaskStateSuccess {
+				log.Printf("[broll] 源视频生成失败，跳过B-Roll合成: %s", sourceTask.ID)
+				return
+			}
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	if time.Now().After(deadline) {
+		log.Printf("[broll] 等待源视频超时: %s", sourceTask.ID)
+		return
+	}
+
+	// ② 自动定位时间轴
+	_, _, err := uc.composer.LocateTimeline(ctx, sourceTask.TenantID, sourceTask.ID, false, nil)
+	if err != nil {
+		log.Printf("[broll] 时间轴定位失败: %v", err)
+		return
+	}
+
+	// ③ 转换片段配置
+	composeSegments := make([]port.ComposeSegment, len(segments))
+	for i, s := range segments {
+		composeSegments[i] = port.ComposeSegment{
+			SentenceIndex: s.SentenceIndex,
+			MediaURL:      s.MediaURL,
+		}
+	}
+
+	// ④ 提交compose
+	_, err = uc.composer.SubmitCompose(ctx, port.ComposeInput{
+		TenantID:     sourceTask.TenantID,
+		BrandID:      sourceTask.BrandID,
+		SourceTaskID: sourceTask.ID,
+		Segments:     composeSegments,
+	})
+	if err != nil {
+		log.Printf("[broll] B-Roll合成失败: %v", err)
+		return
+	}
+
+	log.Printf("[broll] B-Roll合成已提交: %s", sourceTask.ID)
 }
