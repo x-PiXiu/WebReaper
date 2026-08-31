@@ -2,10 +2,10 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // Vite 配置：dev server 端口 5173，通过 proxy 代理 /api 和 /public 到后端。
-// 代理目标来自 VITE_API_PROXY_TARGET（默认 192.168.1.34:8082）。
+// 代理目标来自 VITE_API_PROXY_TARGET（默认 localhost:8082；后端在别的机器时在 .env.local 覆盖）。
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://192.168.1.34:8082'
+  const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:8082'
 
   return {
     plugins: [react()],
