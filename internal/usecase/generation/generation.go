@@ -10,15 +10,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"regexp"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"webreaper/internal/domain/entity"
@@ -51,12 +52,12 @@ var subTypeToCapID = map[string]string{
 //   - getProvider()：根据 subType 动态选择 provider
 type GenerationUseCase struct {
 	providers map[string]port.GenerationProvider // 多厂商 provider
-	resolver  port.CapabilityResolver           // 能力路由解析器（可选；nil=使用默认provider）
+	resolver  port.CapabilityResolver            // 能力路由解析器（可选；nil=使用默认provider）
 	registry  port.EndpointRegistry
 	repo      port.GenerationTaskRepository
 	asset     port.MediaAssetStore // 可选；nil=不转存（产物仅保留 24h URL）
-	quotaGate port.QuotaStore     // 可选；generation 场景配额
-	usageRec  port.UsageRecorder  // 可选；generation 场景计量
+	quotaGate port.QuotaStore      // 可选；generation 场景配额
+	usageRec  port.UsageRecorder   // 可选；generation 场景计量
 	// submitSem 并发节流（P3）：限制同时提交到上游的请求数，防瞬时高峰触发
 	// Vidu QuotaExceeded/429。nil=不节流（向后兼容）。容量由 SetConcurrency 配置。
 	submitSem chan struct{}
@@ -67,6 +68,9 @@ type GenerationUseCase struct {
 	notifier port.TaskNotifier
 	// settingRepo 系统设置（可选；傻瓜式默认值通道——watermark/off_peak 等管理后台全局默认）
 	settingRepo port.SystemSettingRepository
+	// 官方主体缓存（25 号阶段一——subject_library.go；键=next_page_token）
+	officialSubjectMu    sync.Mutex
+	officialSubjectCache map[string]officialSubjectCacheEntry
 	// templateRepo 生成模板（可选；傻瓜式默认值通道——模板 default_params 填充未显式指定的参数）
 	templateRepo port.TemplateRepository
 	// callbackURL 公网回调地址（可选；空=纯轮询。注入到支持回调的端点请求体——
@@ -154,7 +158,9 @@ type memoryNonceStore struct {
 	nonces map[string]time.Time
 }
 
-func newMemoryNonceStore() *memoryNonceStore { return &memoryNonceStore{nonces: map[string]time.Time{}} }
+func newMemoryNonceStore() *memoryNonceStore {
+	return &memoryNonceStore{nonces: map[string]time.Time{}}
+}
 
 func (s *memoryNonceStore) Seen(_ context.Context, nonce string) bool {
 	now := time.Now()
@@ -267,8 +273,8 @@ func (uc *GenerationUseCase) getDefaultModel(ctx context.Context, subType string
 
 // inlineMediaKeys 请求体中承载媒体 URL 的字段（数组与单值两种形态）。
 var inlineMediaKeys = [2][]string{
-	{"images", "videos"},                        // 数组字段
-	{"image", "start_image", "audio_url"},       // 单值字段
+	{"images", "videos"},                  // 数组字段
+	{"image", "start_image", "audio_url"}, // 单值字段
 }
 
 // inlineLocalMedia 本站托管素材 → base64 data URI 内联（body 级——ParamsJSON/
@@ -344,13 +350,13 @@ func (uc *GenerationUseCase) SetConcurrency(n int) {
 
 // SubmitInput 提交生成任务的输入（API 契约由 handler 转换）。
 type SubmitInput struct {
-	TenantID string
-	BrandID  string
-	SubType  string
-	Model    string
-	Params   entity.GenerationParams
-	Refs     []entity.PromptRef // @引用素材（服务端翻译层按端点格式映射）
-	OffPeak  bool
+	TenantID  string
+	BrandID   string
+	SubType   string
+	Model     string
+	Params    entity.GenerationParams
+	Refs      []entity.PromptRef // @引用素材（服务端翻译层按端点格式映射）
+	OffPeak   bool
 	Watermark bool
 }
 
@@ -430,19 +436,19 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 
 	now := time.Now()
 	task := entity.GenerationTask{
-		ID:        fmt.Sprintf("gen-%d", now.UnixNano()),
-		TenantID:  in.TenantID,
-		BrandID:   in.BrandID,
-		Type:      adapter.Category(),
-		SubType:   in.SubType,
-		Model:     model,
-		Provider:  provider.Name(),  // 使用动态选择的 provider
-		State:     entity.TaskStateCreated,
+		ID:         fmt.Sprintf("gen-%d", now.UnixNano()),
+		TenantID:   in.TenantID,
+		BrandID:    in.BrandID,
+		Type:       adapter.Category(),
+		SubType:    in.SubType,
+		Model:      model,
+		Provider:   provider.Name(), // 使用动态选择的 provider
+		State:      entity.TaskStateCreated,
 		ParamsHash: hash,
-		OffPeak:   in.OffPeak,
-		Watermark: in.Watermark,
-		CreatedAt: now,
-		UpdatedAt: now,
+		OffPeak:    in.OffPeak,
+		Watermark:  in.Watermark,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	paramsJSON, _ := json.Marshal(params)
 	task.ParamsJSON = string(paramsJSON)
@@ -535,10 +541,10 @@ func (uc *GenerationUseCase) recordUsage(ctx context.Context, tenantID, provider
 		return
 	}
 	_ = uc.usageRec.RecordUsage(ctx, entity.UsageRecord{
-		TenantID:    tenantID,
-		Scene:       "generation",
-		LLMConfigName: providerName,  // 使用传入的 provider 名称
-		Model:       model,
+		TenantID:      tenantID,
+		Scene:         "generation",
+		LLMConfigName: providerName, // 使用传入的 provider 名称
+		Model:         model,
 		// Vidu 无 token 概念：LLMCalls=1 按次计数；credits 记入 CompletionTokens
 		// 供成本分析按积分核算（字段语义在 usages 侧按 scene 解释）
 		CompletionTokens: credits,
@@ -820,7 +826,7 @@ func (uc *GenerationUseCase) CleanupOldTasks(ctx context.Context, retainDays int
 var urlPattern = regexp.MustCompile(`https?://[^\s"\\,}\]]+`)
 
 // referencedMediaURLs 收集仍可能被引用的媒体 URL：活跃任务全部 + 近期任务
-//（保留窗口内的终态任务未删，其产物 URL 仍会出现在前端/分发中心）。
+// （保留窗口内的终态任务未删，其产物 URL 仍会出现在前端/分发中心）。
 func (uc *GenerationUseCase) referencedMediaURLs(ctx context.Context) map[string]bool {
 	exclude := map[string]bool{}
 	active, _ := uc.repo.ListActive(ctx, 200)
@@ -859,17 +865,17 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 			creationsJSON, _ = json.Marshal(st.Creations)
 			task.CreationsJSON = string(creationsJSON)
 		}
-		case entity.TaskStateFailed:
-			task.State = entity.TaskStateFailed
-			task.ErrCode = st.ErrCode
-			// 动态选择 provider 翻译错误
-			provider, pErr := uc.getProvider(ctx, task.SubType)
-			if pErr == nil {
-				task.ErrMsg = provider.TranslateError(st.ErrCode)
-			}
-			if task.ErrMsg == "" {
-				task.ErrMsg = "生成失败"
-			}
+	case entity.TaskStateFailed:
+		task.State = entity.TaskStateFailed
+		task.ErrCode = st.ErrCode
+		// 动态选择 provider 翻译错误
+		provider, pErr := uc.getProvider(ctx, task.SubType)
+		if pErr == nil {
+			task.ErrMsg = provider.TranslateError(st.ErrCode)
+		}
+		if task.ErrMsg == "" {
+			task.ErrMsg = "生成失败"
+		}
 		task.FinishedAt = nowPtr(time.Now())
 	default: // created/queueing/processing
 		task.State = st.State
@@ -890,9 +896,9 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 type RetryClass int
 
 const (
-	RetryAuto    RetryClass = iota // 自动重试（限流/内部错误）
-	RetryManual                   // 人工重试（积分/风控——提示后前端"重新生成"）
-	RetryTerminal                 // 不可重试（素材问题）
+	RetryAuto     RetryClass = iota // 自动重试（限流/内部错误）
+	RetryManual                     // 人工重试（积分/风控——提示后前端"重新生成"）
+	RetryTerminal                   // 不可重试（素材问题）
 )
 
 // ClassifyError 失败分类（TooManyRequests 自动退避；风控/积分人工；素材问题终态）。
@@ -1188,8 +1194,8 @@ func (uc *GenerationUseCase) localizePrivateMaterials(ctx context.Context, param
 
 // inlineURLResolver 内置 URL 解析器（兼容模式，后续迁移完成后移除）。
 type inlineURLResolver struct {
-	asset     port.MediaAssetStore
-	maxBytes  int
+	asset    port.MediaAssetStore
+	maxBytes int
 }
 
 func (r *inlineURLResolver) Resolve(ctx context.Context, rawURL string) (string, bool, error) {
@@ -1347,12 +1353,12 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 	// 3. 调用原有的Submit方法
 	// BE-GEN-06：透传 Refs——translateRefs 按端点×能力向量翻译 @引用
 	return uc.Submit(ctx, SubmitInput{
-		TenantID: in.TenantID,
-		BrandID:  in.BrandID,
-		SubType:  selectResult.SubType,
-		Model:    "", // 空=自动选择
-		Params:   selectResult.Params,
-		Refs:     in.Refs,
+		TenantID:  in.TenantID,
+		BrandID:   in.BrandID,
+		SubType:   selectResult.SubType,
+		Model:     "", // 空=自动选择
+		Params:    selectResult.Params,
+		Refs:      in.Refs,
 		Watermark: in.Watermark,
 		OffPeak:   in.OffPeak,
 	})

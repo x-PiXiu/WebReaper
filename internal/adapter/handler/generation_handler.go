@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -32,7 +33,7 @@ func (h *GenerationHandler) SetVoiceLibrary(v port.VoiceLibrary) {
 }
 
 // HandleVoices GET /api/v1/generation/voices?language=&q= —— 官方音色库
-//（TTS voice_setting_voice_id / 主体与数字人 voice_id 的取值来源）。
+// （TTS voice_setting_voice_id / 主体与数字人 voice_id 的取值来源）。
 func (h *GenerationHandler) HandleVoices(c *gin.Context) {
 	if h.voices == nil {
 		fail(c, fmt.Errorf("音色库未配置"))
@@ -70,19 +71,19 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 	}
 
 	var req struct {
-		BrandID     string              `json:"brand_id"`
-		Text        string              `json:"text"`
-		Materials   []string            `json:"materials"`
-		Template    string              `json:"template"`
-		Type        string              `json:"type"` // 生成类型：video/image/audio/voice
-		Duration    int                 `json:"duration"`
-		Quality     string              `json:"quality"`
-		AspectRatio string              `json:"aspect_ratio"` // 画面比例（9:16 等——竖版封面/配图必需，此前全链丢弃致恒 16:9）
-		Params      map[string]any      `json:"params"`       // 高级参数透传（seed/style/voice_setting_* 等白名单合并）
-		Refs        []entity.PromptRef  `json:"refs"`         // BE-GEN-06：@引用素材（translateRefs 按端点翻译）
-		Watermark   bool                `json:"watermark"`    // 带水印（傻瓜式客户端不传——管理后台默认值通道）
-		OffPeak     bool                `json:"off_peak"`     // 错峰生成（更便宜但更慢；同上）
-		SubType     string              `json:"sub_type"`     // 显式端点覆盖（subject 创建主体等——空=自动选择）
+		BrandID     string             `json:"brand_id"`
+		Text        string             `json:"text"`
+		Materials   []string           `json:"materials"`
+		Template    string             `json:"template"`
+		Type        string             `json:"type"` // 生成类型：video/image/audio/voice
+		Duration    int                `json:"duration"`
+		Quality     string             `json:"quality"`
+		AspectRatio string             `json:"aspect_ratio"` // 画面比例（9:16 等——竖版封面/配图必需，此前全链丢弃致恒 16:9）
+		Params      map[string]any     `json:"params"`       // 高级参数透传（seed/style/voice_setting_* 等白名单合并）
+		Refs        []entity.PromptRef `json:"refs"`         // BE-GEN-06：@引用素材（translateRefs 按端点翻译）
+		Watermark   bool               `json:"watermark"`    // 带水印（傻瓜式客户端不传——管理后台默认值通道）
+		OffPeak     bool               `json:"off_peak"`     // 错峰生成（更便宜但更慢；同上）
+		SubType     string             `json:"sub_type"`     // 显式端点覆盖（subject 创建主体等——空=自动选择）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -184,7 +185,7 @@ func (h *GenerationHandler) HandleCancel(c *gin.Context) {
 }
 
 // HandleDelete DELETE /api/v1/generation/tasks/:id —— 删除本地产任务记录
-//（资产库"删除数字人"；非终态先尽力取消上游。Vidu 无删主体 API，仅移除本地展示）。
+// （资产库"删除数字人"；非终态先尽力取消上游。Vidu 无删主体 API，仅移除本地展示）。
 func (h *GenerationHandler) HandleDelete(c *gin.Context) {
 	if h.uc == nil {
 		fail(c, fmt.Errorf("生成服务未配置"))
@@ -299,10 +300,10 @@ func generationTaskToView(t entity.GenerationTask) gin.H {
 		"provider": t.Provider, "provider_task_id": t.ProviderTaskID,
 		"state": t.State, "err_code": t.ErrCode, "err_msg": t.ErrMsg,
 		"retry_hint": retryHintFromErrCode(t.ErrCode),
-		"params": t.ParamsJSON, "creations": creations,
+		"params":     t.ParamsJSON, "creations": creations,
 		"credits": t.Credits, "off_peak": t.OffPeak, "watermark": t.Watermark,
 		"retry_count": t.RetryCount,
-		"created_at": t.CreatedAt, "finished_at": t.FinishedAt,
+		"created_at":  t.CreatedAt, "finished_at": t.FinishedAt,
 	}
 }
 
@@ -323,4 +324,31 @@ func validateRefsOwnership(tenantID string, refs []entity.PromptRef) error {
 		}
 	}
 	return nil
+}
+
+// HandleListOfficialSubjects GET /api/v1/subjects?ownership=system&page_token=&count=
+// 官方主体缓存代理（25 号阶段一——23 号 §2.2：前端读本地端点，不直连 Vidu）。
+// 仅支持 ownership=system（个人主体走本地 subject 任务聚合，不查服务商）。
+func (h *GenerationHandler) HandleListOfficialSubjects(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	if own := c.Query("ownership"); own != "" && own != "system" {
+		fail(c, fmt.Errorf("仅支持官方主体（ownership=system）；个人分身请走生成任务列表"))
+		return
+	}
+	count := 20
+	if v, err := strconv.Atoi(c.Query("count")); err == nil && v > 0 {
+		count = v
+	}
+	if count > 100 {
+		count = 100 // Vidu 契约上限
+	}
+	res, err := h.uc.ListOfficialSubjects(c.Request.Context(), c.Query("page_token"), count)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, res)
 }

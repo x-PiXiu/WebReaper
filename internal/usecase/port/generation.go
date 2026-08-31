@@ -39,16 +39,16 @@ type GenerationProvider interface {
 
 // SubmitResult 提交结果（同步/异步统一承载）。
 type SubmitResult struct {
-	TaskID    string           // 服务商任务 ID（主体 API 等资源型端点为资源 id）
-	Credits   int              // 本次消耗积分
-	State     string           // 空=异步（进轮询）；entity.TaskStateSuccess/Failed=提交即终态
+	TaskID    string                // 服务商任务 ID（主体 API 等资源型端点为资源 id）
+	Credits   int                   // 本次消耗积分
+	State     string                // 空=异步（进轮询）；entity.TaskStateSuccess/Failed=提交即终态
 	Creations []entity.CreationItem // 终态时的产物（TTS file_url / 复刻 demo_audio）
 }
 
 // GenerationStatus 任务轮询结果。
 type GenerationStatus struct {
-	State     string               // entity.TaskState*
-	ErrCode   string               // 服务商原始错误码
+	State     string                // entity.TaskState*
+	ErrCode   string                // 服务商原始错误码
 	Creations []entity.CreationItem // 生成物（success 时有）
 }
 
@@ -255,4 +255,29 @@ type ConfigurableProvider interface {
 // Redis 实现 SETNX+EX 原子判重）。 Seen 首次见到 nonce 返回 true（可处理）；重复/已过期返回 false。
 type CallbackNonceStore interface {
 	Seen(ctx context.Context, nonce string) bool
+}
+
+// ---- 主体库（25 号阶段一：官方主体即选即用）----
+
+// SubjectInfo 服务商主体（官方/个人）。官方主体不返回 style/description（Vidu 契约）。
+type SubjectInfo struct {
+	ServerID string   `json:"server_id"`          // 主体 id（reference2video subjects[].server_id 直用）
+	Name     string   `json:"name"`               // 主体名称
+	Images   []string `json:"images,omitempty"`   // 主体图片（images[0] 作封面）
+	Videos   []string `json:"videos,omitempty"`   // 主体视频
+	VoiceID  string   `json:"voice_id,omitempty"` // 绑定音色（B 路径文本直生可用）
+}
+
+// SubjectListResult 主体分页列表（Vidu GET /ent/v2/subjects 透传形态）。
+type SubjectListResult struct {
+	Subjects      []SubjectInfo `json:"subjects"`
+	NextPageToken string        `json:"next_page_token,omitempty"`
+	Count         int           `json:"count"`
+}
+
+// SubjectLister 列出服务商主体（可选能力——Vidu 实现；mock 不实现，
+// 演示模式下官方主体区返回"暂未开放"）。个人主体不查服务商（本地 subject 任务聚合）。
+type SubjectLister interface {
+	// ListSubjects ownership: "system"=官方主体 / "private"=个人（产品只用 system）。
+	ListSubjects(ctx context.Context, ownership, pageToken string, count int) (SubjectListResult, error)
 }
