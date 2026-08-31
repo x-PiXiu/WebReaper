@@ -137,6 +137,14 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.PUT("/subjects/:id", ash.HandleUpdateOfficialSubject)
 			adminGroup.DELETE("/subjects/:id", ash.HandleDeleteOfficialSubject)
 		}
+		// 官方音色管理（27号优化——运营可管理官方音色）
+		if r.generationVoices != nil {
+			avh := NewAdminVoiceHandler(r.generationVoices, nil, r.mediaStore)
+			adminGroup.POST("/voices", avh.HandleCreateVoice)
+			adminGroup.GET("/voices", avh.HandleListVoices)
+			adminGroup.PUT("/voices/:id", avh.HandleUpdateVoice)
+			adminGroup.DELETE("/voices/:id", avh.HandleDeleteVoice)
+		}
 		// 第三方集成中心（08 计划 D7——能力路由模型：统一视图/双分组/厂商详情/健康检查）
 		if r.providerConfigUC != nil {
 			ih := NewIntegrationHandler(r.providerConfigUC, r.generationSpecRepo, r.llmCfgUC, r.generationRegistry, r.generationProvider, r.integrationRepo)
