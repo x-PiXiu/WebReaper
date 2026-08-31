@@ -105,9 +105,10 @@ func (t *FFmpegTool) ProbeHasVideoStream(ctx context.Context, mediaPath string) 
 	return strings.Contains(string(out), "video"), nil
 }
 
-// LoopImageToVideo 图片转 loop 视频（compose 片段输入统一为视频形态——
-// 图片由用例/CLI 层预转，adapter 保持单一输入形态）。dur 秒、分辨率同图片。
-func (t *FFmpegTool) LoopImageToVideo(ctx context.Context, imgPath string, durSec float64, outPath string) error {
+// StaticImageToVideo 图片转静态视频（compose 片段输入统一为视频形态）。
+// 效果：图片静态显示 durSec 秒（不循环动画），到时间窗结束自动切换回原片。
+// 技术：ffmpeg -loop 1 保持图片持续输出，-t 截止到指定时长。
+func (t *FFmpegTool) StaticImageToVideo(ctx context.Context, imgPath string, durSec float64, outPath string) error {
 	cmd := exec.CommandContext(ctx, t.bin("ffmpeg"), "-y",
 		"-loop", "1", "-t", fmt.Sprintf("%.2f", durSec), "-i", imgPath,
 		"-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", outPath)

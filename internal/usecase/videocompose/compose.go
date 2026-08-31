@@ -180,7 +180,7 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 		if isImagePath(segPath) {
 			dur := float64(r.spec.EndMs-r.spec.StartMs) / 1000
 			loopPath := segPath + ".loop.mp4"
-			if lerr := uc.av.(imageLooper).LoopImageToVideo(ctx, segPath, dur, loopPath); lerr != nil {
+			if lerr := uc.av.(imageLooper).StaticImageToVideo(ctx, segPath, dur, loopPath); lerr != nil {
 				setState(entity.TaskStateFailed, fmt.Sprintf("图片转视频失败（第 %d 句）: %v", r.idx, lerr))
 				return
 			}
@@ -215,9 +215,9 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 	log.Printf("[videocompose] 合成完成 %s → %s", taskID, outURL)
 }
 
-// imageLooper LoopImageToVideo 的窄接口（port.MediaAVTool 主体外的 adapter 附加能力）。
+// imageLooper StaticImageToVideo 的窄接口（port.MediaAVTool 主体外的 adapter 附加能力）。
 type imageLooper interface {
-	LoopImageToVideo(ctx context.Context, imgPath string, durSec float64, outPath string) error
+	StaticImageToVideo(ctx context.Context, imgPath string, durSec float64, outPath string) error
 }
 
 // CreationUploader 产物上传窄接口（main 装配注入 mediaStore 适配器）。

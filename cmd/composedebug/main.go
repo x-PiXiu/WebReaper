@@ -104,5 +104,5 @@ func main() {
 func loopImage(tool *mediaav.FFmpegTool, imgPath string, dur float64, outPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	return tool.LoopImageToVideo(ctx, imgPath, dur, outPath)
+	return tool.StaticImageToVideo(ctx, imgPath, dur, outPath)
 }
