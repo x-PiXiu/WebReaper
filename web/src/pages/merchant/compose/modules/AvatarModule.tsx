@@ -8,7 +8,6 @@ import {
   Modal,
   Popconfirm,
   Spin,
-  Tag,
 } from 'antd'
 import {
   DeleteOutlined,
@@ -375,29 +374,12 @@ export default function AvatarModule() {
         </div>
       </header>
 
-      {/* 官方主体区（平台自建资产——25 号阶段二′b 管理后台上线前占位） */}
+      {/* 官方资产 Tab（平台自建资产——subject_assets scope=official） */}
+      {activeTab === 'official' && (
       <section className="dh-lib-section">
         <div className="dh-lib-section-head">
           <h2 className="dh-lib-section-title">官方资产</h2>
-          <Tag color="orange">筹备中</Tag>
-          <span className="dh-lib-section-note">平台定制的人物形象 / 环境模板 / 音色——陆续上线</span>
-          <Popconfirm
-            title={`删除选中的 ${selected.length} 项？`}
-            description="仅移除本地记录，Vidu 侧主体不受影响"
-            okText="删除"
-            okButtonProps={{ danger: true, loading: deleting }}
-            cancelText="取消"
-            disabled={selected.length === 0}
-            onConfirm={batchDelete}
-          >
-            <Button
-              className="dh-lib-btn-ghost"
-              icon={<DeleteOutlined />}
-              disabled={selected.length === 0}
-            >
-              批量删除 ({selected.length})
-            </Button>
-          </Popconfirm>
+          <span className="dh-lib-section-note">平台定制的人物形象 / 环境模板——即选即用</span>
         </div>
         {officialLoading ? (
           <div className="dh-lib-empty"><Spin /></div>
@@ -423,8 +405,10 @@ export default function AvatarModule() {
           </ul>
         )}
       </section>
+      )}
 
-      {/* 我的环境（25 号 §6.5：组合出镜资产——分身 × 环境） */}
+      {/* 我的环境 Tab（25 号 §6.5：组合出镜资产——分身 × 环境） */}
+      {activeTab === 'scenes' && (
       <section className="dh-lib-section">
         <div className="dh-lib-section-head">
           <h2 className="dh-lib-section-title">我的环境</h2>
@@ -444,8 +428,10 @@ export default function AvatarModule() {
           </ul>
         )}
       </section>
+      )}
 
-      {/* 我的分身（§2.3 下区；三态：创建中/形象视频生成中/可用） */}
+      {/* 我的分身 Tab（§2.3；三态：创建中/形象视频生成中/可用） */}
+      {activeTab === 'persons' && (
       <section className="dh-lib-section">
         <div className="dh-lib-section-head">
           <h2 className="dh-lib-section-title">我的分身</h2>
@@ -469,6 +455,7 @@ export default function AvatarModule() {
           </ul>
         )}
       </section>
+      )}
 
       <CreateSubjectModal
         open={createOpen}
