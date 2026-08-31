@@ -615,7 +615,7 @@ export interface GenerationTask {
   finished_at: string | null
 }
 
-// 官方音色（Vidu 语音合成音色表——TTS/主体/数字人音色选择的取值来源）
+// 官方音色（白牌化——用户端仅显示 platform + 自己的 clone；Vidu 仅管理端参考源）
 export interface GenerationVoice {
   voice_id: string
   language: string
@@ -625,6 +625,7 @@ export interface GenerationVoice {
   scope?: string // vidu(官方seed) / platform(官方复刻) / clone(用户克隆)
   tenant_id?: string // clone行归属
   status?: string // active / disabled
+  is_default?: boolean // 平台默认音色（scope=platform 内仅一条——083 迁移）
 }
 
 // 主体资产（26号计划——从generation_tasks物化到独立资产表）

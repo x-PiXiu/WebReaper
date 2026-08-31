@@ -30,6 +30,80 @@ func NewAdminVoiceHandler(voices port.VoiceLibrary, synth port.AudioSynthesizer,
 	return &AdminVoiceHandler{voiceRepo: voices, audioSynth: synth, mediaStore: store}
 }
 
+// HandleCreateFromVidu POST /api/admin/voices/from-vidu
+// 从 Vidu 音色克隆平台音色（白牌化——管理后台用上游音色做种子，产出平台自建音色）：
+// 选择一个 Vidu voice_id → 直接下载其 sample_url 官方试听音频作为克隆样本 →
+// 克隆出平台 voice_id → 写入 generation_voices(scope=platform)。
+// （跳过 TTS 环节——MiMo 不认 Vidu voice_id，且 sample_url 音频品质最接近原声）
+func (h *AdminVoiceHandler) HandleCreateFromVidu(c *gin.Context) {
+	if h.audioSynth == nil {
+		fail(c, fmt.Errorf("音色合成功能未配置"))
+		return
+	}
+	var req struct {
+		ViduVoiceID string `json:"vidu_voice_id" binding:"required"` // Vidu 音色 ID（scope=vidu 的参考源）
+		Text        string `json:"text"`                              // 试听文本（克隆合成的朗读内容）
+		Name        string `json:"name"`                              // 平台音色名称
+		Language    string `json:"language"`                          // 语言/分组
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, fmt.Errorf("参数错误: %w", err))
+		return
+	}
+	if req.Text == "" {
+		req.Text = "欢迎来到智宸AI，用一句话介绍你的店铺，让更多客人找到你。"
+	}
+	if req.Name == "" {
+		req.Name = "平台音色-" + req.ViduVoiceID[:min(8, len(req.ViduVoiceID))]
+	}
+	if req.Language == "" {
+		req.Language = "平台精选"
+	}
+
+	// ① 查 Vidu 音色的 sample_url（官方试听音频，5-15 秒人声——克隆最佳样本）
+	vd, err := h.voiceRepo.ListForAdmin(c.Request.Context(), "vidu")
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var source *entity.GenerationVoice
+	for i := range vd {
+		if vd[i].VoiceID == req.ViduVoiceID {
+			source = &vd[i]
+			break
+		}
+	}
+	if source == nil || source.SampleURL == "" {
+		fail(c, fmt.Errorf("Vidu 音色 %s 不存在或无试听音频", req.ViduVoiceID))
+		return
+	}
+
+	// ② 下载 sample_url 音频作为克隆样本
+	audioData, dlErr := downloadAudio(source.SampleURL)
+	if dlErr != nil {
+		fail(c, fmt.Errorf("下载 Vidu 试听音频失败: %w", dlErr))
+		return
+	}
+	if len(audioData) < 1024 {
+		fail(c, fmt.Errorf("Vidu 试听音频过短（%d 字节），不适合做克隆样本", len(audioData)))
+		return
+	}
+
+	// ③ 用样本做克隆 → 生成平台音色
+	h.processVoice(c, audioData, req.Text, req.Name, req.Language)
+}
+
+// HandleListViduVoices GET /api/admin/voices/vidu-sources
+// 列出 Vidu 上游音色（scope=vidu）——仅管理端可见，作为克隆参考源。
+func (h *AdminVoiceHandler) HandleListViduVoices(c *gin.Context) {
+	voices, err := h.voiceRepo.ListForAdmin(c.Request.Context(), "vidu")
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"voices": voices})
+}
+
 // HandleCreateVoice POST /api/admin/voices
 // 创建官方音色：音频样本（文件上传或URL）+ 文本 → 克隆音色 → TTS 生成试听 → 写入 generation_voices。
 //
@@ -186,15 +260,26 @@ func (h *AdminVoiceHandler) HandleUpdateVoice(c *gin.Context) {
 		return
 	}
 
-	// 查询现有音色
-	voices, err := h.voiceRepo.List(c.Request.Context(), "", voiceID, "")
-	if err != nil || len(voices) == 0 {
+	// 查询现有音色（全量后按 voice_id 精确匹配——音色无单查接口）
+	all, err := h.voiceRepo.ListForAdmin(c.Request.Context(), "")
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var found *entity.GenerationVoice
+	for i := range all {
+		if all[i].VoiceID == voiceID {
+			found = &all[i]
+			break
+		}
+	}
+	if found == nil {
 		fail(c, fmt.Errorf("音色不存在"))
 		return
 	}
 
 	// 更新字段
-	voice := voices[0]
+	voice := *found
 	if req.Name != "" {
 		voice.Name = req.Name
 	}
@@ -223,18 +308,29 @@ func (h *AdminVoiceHandler) HandleDeleteVoice(c *gin.Context) {
 	}
 
 	// 检查是否为平台音色（只允许删除 platform scope）
-	voices, err := h.voiceRepo.List(c.Request.Context(), "", voiceID, "")
-	if err != nil || len(voices) == 0 {
+	all, err := h.voiceRepo.ListForAdmin(c.Request.Context(), "")
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var target *entity.GenerationVoice
+	for i := range all {
+		if all[i].VoiceID == voiceID {
+			target = &all[i]
+			break
+		}
+	}
+	if target == nil {
 		fail(c, fmt.Errorf("音色不存在"))
 		return
 	}
-	if voices[0].Scope != "platform" {
+	if target.Scope != "platform" {
 		fail(c, fmt.Errorf("只能删除平台创建的音色"))
 		return
 	}
 
 	// 标记为删除（不物理删除，保留历史记录）
-	voice := voices[0]
+	voice := *target
 	voice.Status = "deleted"
 	if err := h.voiceRepo.Upsert(c.Request.Context(), voice); err != nil {
 		fail(c, fmt.Errorf("删除音色失败: %w", err))
@@ -244,30 +340,30 @@ func (h *AdminVoiceHandler) HandleDeleteVoice(c *gin.Context) {
 	success(c, gin.H{"deleted": voiceID})
 }
 
-// HandleListVoices GET /api/admin/voices?language=&q=&scope=
+// HandleListVoices GET /api/admin/voices?scope=vidu|platform|clone
+// 管理端全量音色：scope=vidu（克隆参考源）/ platform（平台音色管理）/ clone（用户克隆）。
 func (h *AdminVoiceHandler) HandleListVoices(c *gin.Context) {
-	language := c.Query("language")
-	q := c.Query("q")
-
-	voices, err := h.voiceRepo.List(c.Request.Context(), language, q, "") // 管理端全量（含 clone/停用行）
+	voices, err := h.voiceRepo.ListForAdmin(c.Request.Context(), c.Query("scope"))
 	if err != nil {
 		fail(c, err)
 		return
 	}
-
-	// 按 scope 过滤
-	scope := c.Query("scope")
-	if scope != "" {
-		var filtered []entity.GenerationVoice
-		for _, v := range voices {
-			if v.Scope == scope {
-				filtered = append(filtered, v)
-			}
-		}
-		voices = filtered
-	}
-
 	success(c, gin.H{"voices": voices})
+}
+
+// HandleSetDefaultVoice PUT /api/admin/voices/:id/default
+// 设为平台默认音色（scope=platform 内仅一条 is_default=true）。
+func (h *AdminVoiceHandler) HandleSetDefaultVoice(c *gin.Context) {
+	voiceID := c.Param("id")
+	if voiceID == "" {
+		fail(c, fmt.Errorf("缺少音色 ID"))
+		return
+	}
+	if err := h.voiceRepo.SetDefault(c.Request.Context(), voiceID); err != nil {
+		fail(c, fmt.Errorf("设置默认音色失败: %w", err))
+		return
+	}
+	success(c, gin.H{"set_default": voiceID})
 }
 
 // downloadAudio 从 URL 下载音频。

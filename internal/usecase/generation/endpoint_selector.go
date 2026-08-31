@@ -36,9 +36,15 @@ type EndpointSelectorImpl struct {
 	mediaStore   port.MediaAssetStore
 	templateRepo port.TemplateRepository
 	settingRepo  port.SystemSettingRepository // 可选；nil 时使用硬编码默认值
+	voiceRepo    port.VoiceLibrary           // 可选；平台默认音色查询（白牌化）
 }
 
 var _ port.EndpointSelector = (*EndpointSelectorImpl)(nil)
+
+// SetVoiceRepo 注入音色库（平台默认音色查询——白牌化：默认音色不再硬编码 Vidu ID）。
+func (s *EndpointSelectorImpl) SetVoiceRepo(v port.VoiceLibrary) {
+	s.voiceRepo = v
+}
 
 func NewEndpointSelector(mediaStore port.MediaAssetStore, templateRepo port.TemplateRepository) *EndpointSelectorImpl {
 	return &EndpointSelectorImpl{
@@ -586,11 +592,13 @@ func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.
 	return params
 }
 
-// applyDefaultVoice 为需要音色的端点应用默认音色（27 号硬编码治理）。
-// TTS 用 voice_setting_voice_id；lip-sync 用 voice_id。
-// 用户显式指定时不覆盖（builder 已设置）。
+// applyDefaultVoice 为需要音色的端点应用默认音色（白牌化 2026-09-01）。
+// 优先级：① voiceRepo 中 scope=platform 且 is_default=true 的平台默认音色
+//        ② system_settings 的 gen_default_voice_id
+//        ③ 兜底 "mimo_default"（MiMo 预置——不暴露 Vidu 音色 ID 给用户端）
+// TTS 用 voice_setting_voice_id；lip-sync 用 voice_id。用户显式指定时不覆盖。
 func (s *EndpointSelectorImpl) applyDefaultVoice(ctx context.Context, params entity.GenerationParams, subType string) {
-	defaultVoice := s.settingString(ctx, entity.SettingKeyGenDefaultVoiceID, "female-shaonv")
+	defaultVoice := s.resolveDefaultVoice(ctx)
 	switch subType {
 	case "tts":
 		if _, ok := params["voice_setting_voice_id"]; !ok {
@@ -601,6 +609,16 @@ func (s *EndpointSelectorImpl) applyDefaultVoice(ctx context.Context, params ent
 			params["voice_id"] = defaultVoice
 		}
 	}
+}
+
+// resolveDefaultVoice 解析平台默认音色：平台 is_default > settings > 兜底。
+func (s *EndpointSelectorImpl) resolveDefaultVoice(ctx context.Context) string {
+	if s.voiceRepo != nil {
+		if v, err := s.voiceRepo.GetDefault(ctx); err == nil && v.VoiceID != "" {
+			return v.VoiceID
+		}
+	}
+	return s.settingString(ctx, entity.SettingKeyGenDefaultVoiceID, "mimo_default")
 }
 
 // settingString 从 system_settings 读取字符串值（未配置/读取失败回落 fallback）。

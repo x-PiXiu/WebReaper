@@ -137,13 +137,17 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.PUT("/subjects/:id", ash.HandleUpdateOfficialSubject)
 			adminGroup.DELETE("/subjects/:id", ash.HandleDeleteOfficialSubject)
 		}
-		// 官方音色管理（27号优化——运营可管理官方音色）
+		// 官方音色管理（白牌化——运营可管理平台音色；Vidu 音色仅作克隆参考源）
 		if r.generationVoices != nil {
 			avh := NewAdminVoiceHandler(r.generationVoices, r.adminVoiceSynth, r.mediaStore)
 			adminGroup.POST("/voices", avh.HandleCreateVoice)
 			adminGroup.GET("/voices", avh.HandleListVoices)
 			adminGroup.PUT("/voices/:id", avh.HandleUpdateVoice)
 			adminGroup.DELETE("/voices/:id", avh.HandleDeleteVoice)
+			// 白牌化新增：从 Vidu 音色克隆 + Vidu 参考源列表 + 设为默认
+			adminGroup.POST("/voices/from-vidu", avh.HandleCreateFromVidu)
+			adminGroup.GET("/voices/vidu-sources", avh.HandleListViduVoices)
+			adminGroup.PUT("/voices/:id/default", avh.HandleSetDefaultVoice)
 		}
 		// 第三方集成中心（08 计划 D7——能力路由模型：统一视图/双分组/厂商详情/健康检查）
 		if r.providerConfigUC != nil {

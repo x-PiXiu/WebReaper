@@ -35,32 +35,24 @@ export default function VoicePicker({
     staleTime: 24 * 60 * 60 * 1000, // 静态参考数据——当天内不重拉
   })
 
-  // 分组：平台精选音色 → 各语言官方音色 → 我的音色
+  // 分组（白牌化 2026-09-01）：平台音色 → 我的克隆 → 按 recommend 标记精选
+  // 服务端 ListForUser 已过滤——只返回 scope=platform + 本租户 clone，不含 Vidu scope。
   const groups = useMemo(() => {
     const platform: GenerationVoice[] = []
-    const byLang = new Map<string, GenerationVoice[]>()
+    const clone: GenerationVoice[] = []
+    const recommended: GenerationVoice[] = []
     for (const v of voices) {
-      // platform scope = 管理后台创建的官方复刻音色（置顶显示）
       if (v.scope === 'platform') {
-        platform.push(v)
-        continue
+        if (v.recommend) recommended.push(v)
+        else platform.push(v)
+      } else if (v.scope === 'clone') {
+        clone.push(v)
       }
-      // recommend = 精选推荐（口播常用音色）
-      const lang = v.recommend ? '★ 精选推荐' : (v.language || '其他')
-      if (!byLang.has(lang)) byLang.set(lang, [])
-      byLang.get(lang)!.push(v)
     }
-    // 平台精选音色置顶
-    if (platform.length > 0) {
-      byLang.set('🎤 平台精选', platform)
-    }
-    // 精选推荐组排在最前
     const sorted = new Map<string, GenerationVoice[]>()
-    const recommendKey = '★ 精选推荐'
-    if (byLang.has(recommendKey)) sorted.set(recommendKey, byLang.get(recommendKey)!)
-    for (const [k, v] of byLang) {
-      if (k !== recommendKey) sorted.set(k, v)
-    }
+    if (recommended.length > 0) sorted.set('★ 精选推荐', recommended)
+    if (platform.length > 0) sorted.set('🎤 平台音色', platform)
+    if (clone.length > 0) sorted.set('我的克隆音色', clone)
     return sorted
   }, [voices])
 

@@ -495,9 +495,18 @@ export const businessApi = {
   adminDeleteSubject: (id: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/admin/subjects/${encodeURIComponent(id)}`),
 
-  // ---- 管理后台·官方音色（27号/04号 §10.2——运营管理 platform 音色）----
-  adminListVoices: (params?: { language?: string; q?: string; scope?: string }) =>
+  // ---- 管理后台·官方音色（白牌化——运营管理 platform 音色；Vidu 仅作克隆参考源）----
+  adminListVoices: (params?: { scope?: string }) =>
     apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/admin/voices', { params }),
+  // Vidu 上游音色参考源（仅管理端——白牌化不暴露给用户）
+  adminListViduVoices: () =>
+    apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/admin/voices/vidu-sources'),
+  // 从 Vidu 音色克隆平台音色（选 Vidu voice_id + 介绍文本 → TTS → 克隆 → 发布）
+  adminCreateVoiceFromVidu: (data: { vidu_voice_id: string; text?: string; name?: string; language?: string }) =>
+    apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices/from-vidu', data),
+  // 设为平台默认音色（scope=platform 内仅一条 is_default）
+  adminSetDefaultVoice: (voiceId: string) =>
+    apiClient.put<unknown, unknown>(`/api/v1/admin/voices/${encodeURIComponent(voiceId)}/default`),
   adminCreateVoice: (form: FormData) =>
     apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices', form, {
       headers: { 'Content-Type': 'multipart/form-data' },

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Input, Modal, Popconfirm, Segmented, Space, Switch,
+  Alert, Button, Input, Modal, Popconfirm, Segmented, Space, Spin, Switch,
   Table, Tag, Typography, Upload,
 } from 'antd'
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons'
@@ -37,13 +37,66 @@ function AdminVoices() {
   const [editName, setEditName] = useState('')
   const [editLang, setEditLang] = useState('')
   const [editActive, setEditActive] = useState(true)
+  // Vidu 克隆 Tab
+  const [viduOpen, setViduOpen] = useState(false)
+  const [viduVoices, setViduVoices] = useState<GenerationVoice[]>([])
+  const [viduLoading, setViduLoading] = useState(false)
+  const [viduQ, setViduQ] = useState('')
+  const [viduSelected, setViduSelected] = useState<GenerationVoice | null>(null)
+  const [viduText, setViduText] = useState('欢迎来到智宸AI，用一句话介绍你的店铺，让更多客人找到你。')
+  const [viduName, setViduName] = useState('')
+  const [viduCloning, setViduCloning] = useState(false)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-voices', scope, q],
-    queryFn: () => businessApi.adminListVoices({ scope, q }).then((r) => r.voices),
+    queryKey: ['admin-voices', scope],
+    queryFn: () => businessApi.adminListVoices({ scope }).then((r) => r.voices),
   })
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin-voices'] })
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['admin-voices'] })
+  }
+
+  const openViduTab = async () => {
+    setViduOpen(true)
+    if (viduVoices.length === 0) {
+      setViduLoading(true)
+      try {
+        const r = await businessApi.adminListViduVoices()
+        setViduVoices(r.voices || [])
+      } catch { /* 拦截器已提示 */ } finally {
+        setViduLoading(false)
+      }
+    }
+  }
+
+  const doViduClone = async () => {
+    if (!viduSelected) { message.warning('请选择一个 Vidu 音色作为克隆源'); return }
+    if (!viduText.trim()) { message.warning('请填写介绍文本'); return }
+    setViduCloning(true)
+    try {
+      await businessApi.adminCreateVoiceFromVidu({
+        vidu_voice_id: viduSelected.voice_id,
+        text: viduText.trim(),
+        name: viduName.trim() || undefined,
+      })
+      message.success(`已从「${viduSelected.name}」克隆出平台音色——用户端即显`)
+      setViduOpen(false)
+      setViduSelected(null)
+      setViduName('')
+      setScope('platform')
+      refresh()
+    } catch { /* 拦截器已提示 */ } finally {
+      setViduCloning(false)
+    }
+  }
+
+  const doSetDefault = async (voiceId: string) => {
+    try {
+      await businessApi.adminSetDefaultVoice(voiceId)
+      message.success('已设为平台默认音色——用户不选音色时使用')
+      refresh()
+    } catch { /* 拦截器已提示 */ }
+  }
 
   const doCreate = async () => {
     if (!audioFile && !audioUrl.trim()) { message.warning('请上传样本音频或填写音频 URL'); return }
@@ -93,11 +146,16 @@ function AdminVoices() {
       <div className="ip-page-hero">
         <div>
           <h1>官方音色</h1>
-          <p className="ip-lead">运营复刻平台音色（样本+介绍文本）——用户端「平台精选」置顶展示</p>
+          <p className="ip-lead">运营创建平台音色——用户端仅显示此处创建的内容（白牌化：上游 Vidu 音色仅作克隆参考源）</p>
         </div>
-        <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          创建官方音色
-        </Button>
+        <Space size={8}>
+          <Button size="large" onClick={openViduTab}>
+            从 Vidu 音色克隆
+          </Button>
+          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            上传样本创建
+          </Button>
+        </Space>
       </div>
 
       <Alert
@@ -140,8 +198,11 @@ function AdminVoices() {
             ),
           },
           {
-            title: '状态', dataIndex: 'status', width: 90, render: (st: string) => (
-              <Tag color={st === 'active' ? 'green' : 'default'}>{st === 'active' ? '启用' : st === 'deleted' ? '已删' : '停用'}</Tag>
+            title: '状态', dataIndex: 'status', width: 110, render: (_, v) => (
+              <Space size={4}>
+                <Tag color={v.status === 'active' ? 'green' : 'default'}>{v.status === 'active' ? '启用' : v.status === 'deleted' ? '已删' : '停用'}</Tag>
+                {v.is_default && <Tag color="gold">默认</Tag>}
+              </Space>
             ),
           },
           {
@@ -150,8 +211,18 @@ function AdminVoices() {
             ) : <Text type="secondary">无</Text>,
           },
           {
-            title: '操作', width: 150, render: (_, v) => (
+            title: '操作', width: 200, render: (_, v) => (
               <Space size={4}>
+                {v.scope === 'platform' && !v.is_default && (
+                  <Popconfirm
+                    title="设为平台默认音色？"
+                    description="用户不选音色时自动使用此音色"
+                    okText="设为默认" cancelText="取消"
+                    onConfirm={() => doSetDefault(v.voice_id)}
+                  >
+                    <Button size="small" type="link">设为默认</Button>
+                  </Popconfirm>
+                )}
                 <Button size="small" onClick={() => {
                   setEditing(v)
                   setEditName(v.name)
@@ -235,6 +306,84 @@ function AdminVoices() {
             <Switch checked={editActive} onChange={setEditActive} />
             <Text>{editActive ? '启用（用户端可见）' : '停用（用户端隐藏）'}</Text>
           </Space>
+        </Space>
+      </Modal>
+
+      {/* Vidu 音色克隆弹窗（白牌化——用上游音色做种子，产出平台自建音色） */}
+      <Modal
+        open={viduOpen}
+        title="从 Vidu 音色克隆平台音色"
+        okText="克隆并发布" cancelText="取消"
+        width={640}
+        confirmLoading={viduCloning}
+        onOk={doViduClone}
+        onCancel={() => setViduOpen(false)}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info" showIcon
+            message="选择一个 Vidu 音色作为克隆源 → 系统用它生成一段介绍词 TTS → 以此音频克隆出平台专属音色"
+            description="用户端不会看到任何 Vidu 标识——最终展示的是你命名的平台音色。"
+          />
+          <Input.Search
+            allowClear
+            placeholder="搜索 Vidu 音色（名称 / voice_id / 语言）"
+            value={viduQ}
+            onChange={(e) => setViduQ(e.target.value)}
+          />
+          <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--wr-border)', borderRadius: 8, padding: 8 }}>
+            {viduLoading ? (
+              <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+            ) : (
+              (viduQ.trim()
+                ? viduVoices.filter((v) =>
+                    v.name.toLowerCase().includes(viduQ.toLowerCase()) ||
+                    v.voice_id.toLowerCase().includes(viduQ.toLowerCase()) ||
+                    v.language.includes(viduQ))
+                : viduVoices
+              ).slice(0, 50).map((v) => (
+                <div
+                  key={v.voice_id}
+                  onClick={() => setViduSelected(v)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                    border: `1px solid ${viduSelected?.voice_id === v.voice_id ? 'var(--wr-primary-border)' : 'transparent'}`,
+                    background: viduSelected?.voice_id === v.voice_id ? 'var(--wr-primary-bg)' : 'transparent',
+                    marginBottom: 4,
+                  }}
+                >
+                  <Text strong style={{ minWidth: 100 }}>{v.name}</Text>
+                  <Text type="secondary" style={{ fontSize: 12, flex: 1 }}>{v.language}</Text>
+                  {v.sample_url && (
+                    <audio
+                      controls preload="none" src={v.sample_url}
+                      style={{ height: 28, maxWidth: 180 }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+          {viduSelected && (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              已选：<Text strong>{viduSelected.name}</Text>（{viduSelected.voice_id}）
+            </Text>
+          )}
+          <Input.TextArea
+            rows={2}
+            maxLength={500}
+            showCount
+            placeholder="介绍文本（TTS + 克隆共用此文本作为试听内容）"
+            value={viduText}
+            onChange={(e) => setViduText(e.target.value)}
+          />
+          <Input
+            placeholder="平台音色名称（如：平台·温柔女声；留空自动生成）"
+            value={viduName}
+            onChange={(e) => setViduName(e.target.value)}
+            maxLength={64}
+          />
         </Space>
       </Modal>
     </div>

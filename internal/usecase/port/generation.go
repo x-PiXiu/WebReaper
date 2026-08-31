@@ -187,15 +187,25 @@ type MediaAssetStore interface {
 
 // VoiceLibrary 官方音色库（只读查询——seed 进 DB 的静态参考数据）。
 // handler 直接依赖（同 MediaAssetStore 模式）：无任务语义，不需用例封装。
+//
+// 白牌化（用户确认 2026-09-01）：用户端只显示 scope=platform（管理后台创建）
+// 和 scope=clone 且属于本租户的克隆音色。scope=vidu（上游 302 条）仅管理端可见
+// ——作为克隆参考源，不暴露给用户。
 type VoiceLibrary interface {
-	// List 音色列表（language 为空=全部；keyword 模糊匹配 voice_id/名称）。
-	// tenantID 非空=租户视图：clone 行仅返回本租户的、且只含 status=active
-	// （隔离修复：此前无过滤，A 租户可见/试听 B 租户克隆音色）；空=管理端全量。
-	List(ctx context.Context, language, keyword, tenantID string) ([]entity.GenerationVoice, error)
+	// ListForUser 用户端音色列表：scope=platform（active）+ 本租户 clone（active）。
+	// tenantID 必传——空则返回空列表（防御）。
+	ListForUser(ctx context.Context, tenantID string) ([]entity.GenerationVoice, error)
+	// ListForAdmin 管理端全量音色（含 vidu/platform/clone 所有 scope、含停用行）。
+	// scope 非空时仅返回该 scope（vidu=克隆参考源 / platform=平台音色管理）。
+	ListForAdmin(ctx context.Context, scope string) ([]entity.GenerationVoice, error)
 	// SeedIfEmpty 表空时写入种子数据（返回写入条数；已非空返回 0）。
 	SeedIfEmpty(ctx context.Context, voices []entity.GenerationVoice) (int, error)
 	// Upsert 按 voice_id 主键幂等写入（26号计划——voice_clone 物化钩子调用）。
 	Upsert(ctx context.Context, voice entity.GenerationVoice) error
+	// GetDefault 获取平台默认音色（scope=platform 且 is_default=true 的首条；无则空）。
+	GetDefault(ctx context.Context) (entity.GenerationVoice, error)
+	// SetDefault 设为平台默认音色（同一 scope=platform 内仅一条 default=true）。
+	SetDefault(ctx context.Context, voiceID string) error
 }
 
 // TaskNotifier 生成任务终态通知（可选注入——站内信主动唤醒）。

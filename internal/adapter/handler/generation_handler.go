@@ -38,14 +38,16 @@ func (h *GenerationHandler) SetSubjectAssetRepo(r port.SubjectAssetRepository) {
 	h.subjectAssetRepo = r
 }
 
-// HandleVoices GET /api/v1/generation/voices?language=&q= —— 官方音色库
-// （TTS voice_setting_voice_id / 主体与数字人 voice_id 的取值来源）。
+// HandleVoices GET /api/v1/generation/voices —— 用户端音色列表（白牌化）
+// 只返回 scope=platform（管理后台创建）+ 本租户 scope=clone（用户克隆）。
+// 上游 Vidu 音色（scope=vidu）不暴露——白牌化原则（用户确认 2026-09-01）。
 func (h *GenerationHandler) HandleVoices(c *gin.Context) {
 	if h.voices == nil {
 		fail(c, fmt.Errorf("音色库未配置"))
 		return
 	}
-	list, err := h.voices.List(c.Request.Context(), c.Query("language"), c.Query("q"), middleware.CurrentTenantID(c))
+	tenantID := middleware.CurrentTenantID(c)
+	list, err := h.voices.ListForUser(c.Request.Context(), tenantID)
 	if err != nil {
 		fail(c, err)
 		return

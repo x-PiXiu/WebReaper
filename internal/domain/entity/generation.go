@@ -263,6 +263,9 @@ func InferTypeFromMime(mime string) string {
 // GenerationVoice 官方音色（Vidu 语音合成音色表——静态参考数据）。
 // 启动 seed 进 generation_voices 表，客户端查询/筛选（TTS 的
 // voice_setting_voice_id、主体的 voice_id、数字人 voice_id 均可引用）。
+//
+// 白牌化：scope=vidu 仅管理端可见（克隆参考源）；scope=platform 为管理后台创建
+// 的平台音色（用户端可见）；scope=clone 为用户克隆（仅本租户可见）。
 type GenerationVoice struct {
 	VoiceID      string `json:"voice_id"`                  // 音色 ID（提交参数的取值）
 	Language     string `json:"language"`                  // 语言（中文 (普通话)/英文/日文…分组用）
@@ -273,6 +276,7 @@ type GenerationVoice struct {
 	TenantID     string `json:"tenant_id,omitempty"`       // clone行归属；官方行空
 	SourceTaskID string `json:"source_task_id,omitempty"`  // 溯源任务ID
 	Status       string `json:"status,omitempty"`          // active / disabled
+	IsDefault    bool   `json:"is_default"`                // 平台默认音色（scope=platform 内仅一条 true；用户不选时后端 fallback）
 }
 
 // PromptRef 提示词 @引用（客户端从素材库选择，提交给服务端统一翻译）。
