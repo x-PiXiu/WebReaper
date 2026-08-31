@@ -19,6 +19,7 @@ type GenerationSpecPO struct {
 	IsDefault        bool      `gorm:"default:0"`
 	SortOrder        int       `gorm:"default:0"`
 	CapabilitiesJSON string    `gorm:"type:text"`
+	CostCredits      int       `gorm:"default:0"` // 27 号：每次调用消耗积分（0=使用服务商返回值）
 	UpdatedAt        time.Time
 }
 
@@ -58,7 +59,7 @@ func (r *GormGenerationSpecRepository) Upsert(ctx context.Context, spec entity.G
 		SubType: spec.SubType, Model: spec.Model, Provider: spec.Provider,
 		Endpoint: spec.Endpoint, Enabled: spec.Enabled, IsDefault: spec.IsDefault,
 		SortOrder: spec.SortOrder, CapabilitiesJSON: spec.CapabilitiesJSON,
-		UpdatedAt: time.Now(),
+		CostCredits: spec.CostCredits, UpdatedAt: time.Now(),
 	}
 	return r.db.WithContext(ctx).Save(&po).Error
 }
@@ -112,6 +113,7 @@ func generationSpecFromPO(p GenerationSpecPO) entity.GenerationSpec {
 	return entity.GenerationSpec{
 		SubType: p.SubType, Model: p.Model, Provider: p.Provider,
 		Endpoint: p.Endpoint, Enabled: p.Enabled, IsDefault: p.IsDefault,
-		SortOrder: p.SortOrder, CapabilitiesJSON: p.CapabilitiesJSON, UpdatedAt: p.UpdatedAt,
+		SortOrder: p.SortOrder, CapabilitiesJSON: p.CapabilitiesJSON,
+		CostCredits: p.CostCredits, UpdatedAt: p.UpdatedAt,
 	}
 }

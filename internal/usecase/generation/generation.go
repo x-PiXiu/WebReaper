@@ -712,11 +712,11 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		return task, fmt.Errorf("提交失败: %w", err)
 	}
 	task.ProviderTaskID = res.TaskID
-	task.Credits = res.Credits
+	task.Credits = uc.resolveCredits(ctx, task.SubType, task.Model, res.Credits)
 	uc.applySubmitResult(ctx, &task, adapter, res)
 	_ = uc.repo.Save(ctx, task)
 	// 计量（F3：generation 场景按次计费的数据地基——失败仅忽略，不影响主流程）
-	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, res.Credits)
+	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, task.Credits)
 	return task, nil
 }
 
@@ -750,6 +750,23 @@ func (uc *GenerationUseCase) applySubmitResult(ctx context.Context, task *entity
 		task.State = entity.TaskStateQueueing
 		task.UpdatedAt = time.Now()
 	}
+}
+
+// resolveCredits 解析实际消耗积分（27 号：模型差异化计费）。
+//
+// 优先级：generation_specs.cost_credits > 服务商返回值。
+// 管理后台配置 cost_credits>0 时覆盖服务商返回值（固定成本模型）；
+// cost_credits=0（默认）时使用服务商返回值（按量计费模型）。
+func (uc *GenerationUseCase) resolveCredits(ctx context.Context, subType, model string, providerCredits int) int {
+	if uc.registry == nil {
+		return providerCredits
+	}
+	for _, s := range uc.registry.AllSpecs(ctx) {
+		if s.SubType == subType && s.Model == model && s.CostCredits > 0 {
+			return s.CostCredits
+		}
+	}
+	return providerCredits
 }
 
 // recordUsage 记一次生成用量（usages 表——成本分析/配额核对的唯一数据源；
@@ -926,14 +943,14 @@ func (uc *GenerationUseCase) retrySubmit(ctx context.Context, task *entity.Gener
 		return false
 	}
 	task.ProviderTaskID = res.TaskID
-	task.Credits = res.Credits
+	task.Credits = uc.resolveCredits(ctx, task.SubType, task.Model, res.Credits)
 	task.State = entity.TaskStateQueueing
 	task.ErrCode = ""
 	task.ErrMsg = ""
 	task.FinishedAt = nil
 	uc.applySubmitResult(ctx, task, adapter, res)
 	_ = uc.repo.Save(ctx, *task)
-	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, res.Credits)
+	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, task.Credits)
 	return true
 }
 

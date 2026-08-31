@@ -105,6 +105,7 @@ type ModelCapability struct {
 //   - Provider 字段区分不同厂商（vidu/kling/...）
 //   - IsDefault 字段标记每个端点的默认模型
 //   - 管理后台可以为每个厂商的每个端点配置默认模型
+//   - CostCredits 字段标记每次调用消耗积分（27 号：模型差异化计费）
 type GenerationSpec struct {
 	SubType          string `json:"sub_type"`           // 端点类型（text2video/…）
 	Model            string `json:"model"`              // 模型名
@@ -114,6 +115,7 @@ type GenerationSpec struct {
 	IsDefault        bool   `json:"is_default"`         // 是否为默认模型
 	SortOrder        int    `json:"sort_order"`         // 排序
 	CapabilitiesJSON string `json:"capabilities_json"`  // 能力向量 JSON（管理后台可编辑）
+	CostCredits      int    `json:"cost_credits"`       // 每次调用消耗积分（0=使用服务商返回值；>0=覆盖）
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
