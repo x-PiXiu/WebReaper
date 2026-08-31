@@ -13,7 +13,7 @@ type Props = {
   maxReachableStep: number
   onStepChange: (index: number) => void
   children: React.ReactNode
-  preview: React.ReactNode
+  preview?: React.ReactNode
   onBack: () => void
   onNext: () => void
   nextDisabled?: boolean
@@ -22,11 +22,18 @@ type Props = {
   backLabel?: string
   nextLabel?: string
   alerts?: React.ReactNode
+  /** 成片完成后隐藏底栏主按钮 */
+  hideNext?: boolean
+  /**
+   * studio：参考式全宽工作台（步骤进度沉底栏，预览可嵌入页内或弹窗）
+   * split：旧版左操作 / 右手机预览
+   */
+  layout?: 'studio' | 'split'
 }
 
 /**
- * 通用向导壳：顶步骤 + 左操作 / 右手机预览 + 底栏动作
- * 基于 ComposeFlowShell（cf-*）布局，口播向导专用扩展（wz-*）
+ * 通用向导壳。
+ * studio 布局对齐参考稿：顶标题 → 全宽工作区 → 底栏「创作进度 n/4 + 下一步」。
  */
 export function WizardShell({
   breadcrumb = '拍同款口播',
@@ -44,59 +51,70 @@ export function WizardShell({
   backLabel,
   nextLabel,
   alerts,
+  hideNext,
+  layout = 'studio',
 }: Props) {
   const step = steps[stepIndex]
   const [previewOpen, setPreviewOpen] = useState(false)
-
-  const previewHead = (
-    <div className="cf-preview-head">
-      <strong>成片预览</strong>
-      <span className="cf-preview-step">{stepIndex + 1}/{steps.length}</span>
-    </div>
-  )
+  const isStudio = layout === 'studio'
 
   return (
-    <div className="wz-root cf-root cf-platform-douyin">
+    <div className={`wz-root cf-root cf-platform-douyin${isStudio ? ' cf-root--studio' : ''}`}>
       <header className="cf-top">
         <div className="cf-top-left">
           <Link to="/m/compose" className="cf-crumb">工作台</Link>
           <span className="cf-crumb-sep">/</span>
           <span className="cf-crumb-cur">{breadcrumb}</span>
         </div>
-        <nav className="cf-steps" aria-label="向导步骤">
-          {steps.map((s, i) => {
-            const state = i === stepIndex ? 'active' : i < stepIndex ? 'done' : 'todo'
-            const reachable = i <= maxReachableStep
-            return (
-              <button
-                key={s.key}
-                type="button"
-                className={`cf-step cf-step-${state}${!reachable ? ' cf-step-locked' : ''}`}
-                disabled={!reachable}
-                onClick={() => reachable && onStepChange(i)}
-              >
-                <span className="cf-step-num">{i + 1}</span>
-                <span className="cf-step-label">{s.label}</span>
-              </button>
-            )
-          })}
-        </nav>
+        {!isStudio && (
+          <nav className="cf-steps" aria-label="向导步骤">
+            {steps.map((s, i) => {
+              const state = i === stepIndex ? 'active' : i < stepIndex ? 'done' : 'todo'
+              const reachable = i <= maxReachableStep
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  className={`cf-step cf-step-${state}${!reachable ? ' cf-step-locked' : ''}`}
+                  disabled={!reachable}
+                  onClick={() => reachable && onStepChange(i)}
+                >
+                  <span className="cf-step-num">{i + 1}</span>
+                  <span className="cf-step-label">{s.label}</span>
+                </button>
+              )
+            })}
+          </nav>
+        )}
+        {isStudio && preview && (
+          <div className="cf-top-right">
+            <button
+              type="button"
+              className="cf-preview-toggle"
+              onClick={() => setPreviewOpen(true)}
+            >
+              <EyeOutlined /> 预览
+            </button>
+          </div>
+        )}
       </header>
 
-      <div className="cf-body">
+      <div className={`cf-body${isStudio ? ' cf-body--studio' : ''}`}>
         <main className="cf-main">
           <div className="cf-main-head">
             <div className="cf-main-head-row">
               <h1>{step.title}</h1>
-              <button
-                type="button"
-                className="cf-preview-toggle"
-                onClick={() => setPreviewOpen(true)}
-              >
-                <EyeOutlined /> 预览
-              </button>
+              {!isStudio && preview && (
+                <button
+                  type="button"
+                  className="cf-preview-toggle"
+                  onClick={() => setPreviewOpen(true)}
+                >
+                  <EyeOutlined /> 预览
+                </button>
+              )}
             </div>
-            <p className="cf-main-tip">{step.tip}</p>
+            {step.tip && <p className="cf-main-tip">{step.tip}</p>}
           </div>
 
           {alerts}
@@ -115,29 +133,41 @@ export function WizardShell({
             nextDisabled={nextDisabled}
             nextHint={nextHint}
             nextLoading={nextLoading}
+            hideNext={hideNext}
+            progressIndex={stepIndex}
+            progressTotal={steps.length}
+            steps={steps}
+            maxReachableStep={maxReachableStep}
+            onStepChange={onStepChange}
           />
         </main>
 
-        <aside className="cf-preview" aria-label="预览区">
-          {previewHead}
-          <div className="cf-preview-body cf-preview-sticky">{preview}</div>
-        </aside>
+        {!isStudio && preview && (
+          <aside className="cf-preview" aria-label="预览区">
+            <div className="cf-preview-head">
+              <strong>成片预览</strong>
+              <span className="cf-preview-step">{stepIndex + 1}/{steps.length}</span>
+            </div>
+            <div className="cf-preview-body cf-preview-sticky">{preview}</div>
+          </aside>
+        )}
       </div>
 
-      <Modal
-        title="成片预览"
-        open={previewOpen}
-        onCancel={() => setPreviewOpen(false)}
-        width={MODAL_W.md}
-        footer={null}
-        destroyOnHidden
-        className="cf-preview-modal wr-modal-preview"
-      >
-        <div className="cf-preview-drawer-inner cf-platform-douyin">
-          {previewHead}
-          <div className="cf-preview-body">{preview}</div>
-        </div>
-      </Modal>
+      {preview && (
+        <Modal
+          title="成片预览"
+          open={previewOpen}
+          onCancel={() => setPreviewOpen(false)}
+          width={MODAL_W.md}
+          footer={null}
+          destroyOnHidden
+          className="cf-preview-modal wr-modal-preview"
+        >
+          <div className="cf-preview-drawer-inner cf-platform-douyin">
+            <div className="cf-preview-body">{preview}</div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

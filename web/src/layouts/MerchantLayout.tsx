@@ -27,8 +27,10 @@ const menu: NavItem[] = [
     label: '创作',
     children: [
       { key: '/m/compose', label: '首页', icon: <HomeOutlined /> },
+      { key: '/m/compose/avatar', label: '分身准备', icon: <UserOutlined /> },
       { key: '/m/compose/lipsync', label: '视频创作', icon: <VideoCameraOutlined /> },
-      { key: '/m/compose/avatar', label: '数字人库', icon: <UserOutlined /> },
+      { key: '/m/works', label: '我的作品', icon: <FolderOpenOutlined /> },
+      { key: '/m/distribution', label: '账号发布', icon: <ExportOutlined /> },
       { key: '/m/compose/voice', label: '音色库', icon: <AudioOutlined /> },
       { key: '/m/compose/copy', label: '文案工作室', icon: <EditOutlined /> },
       { key: '/m/assets', label: '分镜素材', icon: <DatabaseOutlined /> },
@@ -38,8 +40,6 @@ const menu: NavItem[] = [
     key: 'grp-grow',
     label: '经营',
     children: [
-      { key: '/m/distribution', label: '账号发布', icon: <ExportOutlined /> },
-      { key: '/m/works', label: '我的作品', icon: <FolderOpenOutlined /> },
       { key: '/m/brands', label: '账号人设', icon: <IdcardOutlined /> },
       { key: '/m/inspire', label: '灵感广场', icon: <FireOutlined /> },
       { key: '/m/analytics', label: '作品数据', icon: <FundOutlined /> },

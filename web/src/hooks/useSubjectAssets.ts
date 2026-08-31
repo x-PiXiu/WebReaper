@@ -66,6 +66,7 @@ export function assetToViduSubject(asset: SubjectAsset) {
     hasVideo: !!asset.avatar_video_url,
     imageCount: asset.portrait_url ? 1 : 0,
     portraitUrl: asset.portrait_url,
+    videoUrl: asset.avatar_video_url || '',
     errMsg: '',
     createdAt: asset.created_at,
     avatarTaskId: '',

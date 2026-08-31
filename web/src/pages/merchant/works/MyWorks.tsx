@@ -7,7 +7,7 @@ import { brollLineage } from '../../../utils/publishableWorks'
 import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
 import QueryBoundary from '../../../components/QueryBoundary'
 import { cleanWorkTitle } from '../../../utils/workTitle'
-import BrollDrawer, { type BrollSource } from '../../../components/compose/BrollDrawer'
+import OralJourneyNav from '../../../components/compose/OralJourneyNav'
 import { VideoFrameCover } from '../../../components/VideoFrameCover'
 import { ImageCover } from '../../../components/ImageCover'
 import type { MediaAsset, WorkItem } from '../../../types/api'
@@ -46,14 +46,13 @@ function distributionPath(w: WorkItem) {
 
 /**
  * 我的作品：三源聚合的真实作品库（文章 + 多媒体产物 + 发布状态 + 互动数据）。
- * 无数据空态引导去内容合成；待发布直达发布中心。
+ * 视频成片点进作品详情（§8#4）；待发布直达发布中心。
  */
 export default function MyWorks() {
   const navigate = useNavigate()
   const [filter, setFilter] = useState<Filter>('all')
   const [q, setQ] = useState('')
   const [previewAsset, setPreviewAsset] = useState<MediaAsset | null>(null)
-  const [brollSource, setBrollSource] = useState<BrollSource | null>(null)
 
   const { works = [], tasks, isLoading, isError, refetch } = usePublishableWorks()
 
@@ -69,12 +68,15 @@ export default function MyWorks() {
     })
   }, [works, filter, q])
 
+  const openDetail = (w: WorkItem) => navigate(`/m/works/${encodeURIComponent(w.id)}`)
+
   return (
     <div className="wr-page-content ip-page">
+      <OralJourneyNav />
       <div className="ip-page-hero">
         <div>
           <h1>我的作品</h1>
-          <p className="ip-lead">内容合成产出的可发布成片与文章——待发布可直达发布中心</p>
+          <p className="ip-lead">成片可插入画面后再发布；待发布可直达发布中心</p>
         </div>
         <Button type="primary" size="large" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => navigate('/m/compose')}>
           去内容合成
@@ -114,47 +116,65 @@ export default function MyWorks() {
               ? { background: `linear-gradient(180deg, rgba(8,8,14,0.2), rgba(8,8,14,0.72)), url(${w.cover_url}) center/cover` }
               : undefined
             const previewBtn = previewUrl ? (
-              <Button size="small" onClick={() => setPreviewAsset({
-                    id: w.id,
-                    tenant_id: '',
-                    brand_id: w.brand_id || '',
-                    owner_type: 'creation',
-                    type: w.kind,
-                    name: w.title,
-                    url: previewUrl,
-                    mime: w.kind === 'image' ? 'image/jpeg' : 'video/mp4',
-                    size_bytes: 0,
-                    width: 0,
-                    height: 0,
-                    duration: 0,
-                    created_at: w.created_at,
-                })}>
-                  预览
-                </Button>
+              <Button size="small" onClick={(e) => {
+                e.stopPropagation()
+                setPreviewAsset({
+                  id: w.id,
+                  tenant_id: '',
+                  brand_id: w.brand_id || '',
+                  owner_type: 'creation',
+                  type: w.kind,
+                  name: w.title,
+                  url: previewUrl,
+                  mime: w.kind === 'image' ? 'image/jpeg' : 'video/mp4',
+                  size_bytes: 0,
+                  width: 0,
+                  height: 0,
+                  duration: 0,
+                  created_at: w.created_at,
+                })
+              }}>
+                预览
+              </Button>
             ) : null
             const publishBtn = w.status !== 'published' ? (
-              <Button type="primary" size="small" icon={<SendOutlined />} onClick={() => navigate(distributionPath(w))}>
+              <Button type="primary" size="small" icon={<SendOutlined />} onClick={(e) => {
+                e.stopPropagation()
+                navigate(distributionPath(w))
+              }}>
                 去发布
               </Button>
             ) : null
             const brollBtn = canBroll ? (
-              <Button size="small" icon={<VideoCameraAddOutlined />} onClick={() => setBrollSource({
-                taskId: w.id.slice(2),
-                title: w.title,
-                videoUrl: w.media_urls?.[0],
-              })}>
+              <Button size="small" icon={<VideoCameraAddOutlined />} onClick={(e) => {
+                e.stopPropagation()
+                openDetail(w)
+              }}>
                 插入画面
               </Button>
             ) : null
+            const detailBtn = (
+              <Button size="small" onClick={(e) => { e.stopPropagation(); openDetail(w) }}>
+                详情
+              </Button>
+            )
             const actions = (
               <>
                 {publishBtn}
                 {brollBtn}
+                {detailBtn}
                 {previewBtn}
               </>
             )
             return (
-              <div key={w.id} className={`mw-card mw-card--${w.status}`}>
+              <div
+                key={w.id}
+                className={`mw-card mw-card--${w.status}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openDetail(w)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openDetail(w) }}
+              >
                 <div className="mw-cover" style={w.cover_url || previewUrl ? undefined : coverStyle}>
                   {w.kind === 'video' && w.media_urls?.[0] && (
                     <VideoFrameCover url={w.media_urls[0]} poster={w.cover_url} />
@@ -198,8 +218,10 @@ export default function MyWorks() {
                 </div>
 
                 {/* 静态主操作：无 hover 设备/快速直达 */}
-                <div className="mw-actions-static">
+                <div className="mw-actions-static" onClick={(e) => e.stopPropagation()}>
+                  {brollBtn}
                   {publishBtn}
+                  {detailBtn}
                   {w.status === 'published' && previewBtn}
                 </div>
               </div>
@@ -213,9 +235,6 @@ export default function MyWorks() {
         asset={previewAsset}
         onClose={() => setPreviewAsset(null)}
       />
-
-      <BrollDrawer open={!!brollSource} source={brollSource} onClose={() => setBrollSource(null)} />
-
     </div>
   )
 }

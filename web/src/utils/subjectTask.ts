@@ -11,10 +11,12 @@ export type ViduSubject = {
   hasVideo: boolean
   imageCount: number
   portraitUrl: string
-  errMsg: string
-  createdAt: string
+  /** 主体视频 URL（注册时上传的 ≤5s 视频，或 creations 中的视频产物兜底） */
+  videoUrl: string
   /** 链式形象视频任务 ID（25 号阶段二；空=未生成/失败） */
   avatarTaskId: string
+  errMsg: string
+  createdAt: string
 }
 
 /** 解析任务 params（后端存 JSON 字符串或对象） */
@@ -36,6 +38,11 @@ export function parseSubjectFromTask(t: GenerationTask): ViduSubject | null {
   const images = Array.isArray(p.images)
     ? p.images.filter((u): u is string => typeof u === 'string')
     : []
+  const videos = Array.isArray(p.videos)
+    ? p.videos.filter((u): u is string => typeof u === 'string')
+    : []
+  const creationUrl = t.creations?.[0]?.stored_url || t.creations?.[0]?.url || ''
+  const videoUrl = videos[0] || (/\.(mp4|webm|mov)(\?|$)/i.test(creationUrl) ? creationUrl : '')
   return {
     taskId: t.id,
     state: t.state,
@@ -43,10 +50,11 @@ export function parseSubjectFromTask(t: GenerationTask): ViduSubject | null {
     serverId: subjectServerId(t),
     voiceId: typeof p.voice_id === 'string' ? p.voice_id : '',
     kind: p.kind === 'scene' ? 'scene' : 'person',
-    hasVideo: Array.isArray(p.videos) && p.videos.length > 0,
-    avatarTaskId: typeof p.avatar_task_id === 'string' ? p.avatar_task_id : '',
+    hasVideo: videos.length > 0 || !!videoUrl,
     imageCount: images.length,
-    portraitUrl: images[0] || t.creations?.[0]?.url || '',
+    portraitUrl: images[0] || (!videoUrl ? creationUrl : '') || '',
+    videoUrl,
+    avatarTaskId: typeof p.avatar_task_id === 'string' ? p.avatar_task_id : '',
     errMsg: t.err_msg || '',
     createdAt: t.created_at,
   }

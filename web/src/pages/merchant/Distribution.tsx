@@ -13,6 +13,7 @@ import { PublishResultPanel } from './distribution/PublishResultPanel'
 import type { WizardDraft } from './distribution/wizardModel'
 import type { Account, PublishJob } from '../../types/api'
 import { message } from '../../utils/antdApp'
+import OralJourneyNav from '../../components/compose/OralJourneyNav'
 
 const { Text, Paragraph } = Typography
 
@@ -230,6 +231,7 @@ export default function Distribution() {
   return (
     <div className="wr-page-content ip-page dist-page ch-creative" style={{ paddingTop: 4, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
+        <OralJourneyNav />
         <section className="ch-hero dist-hero">
           <div className="ch-hero-copy">
             <p className="ch-hero-kicker">账号发布</p>

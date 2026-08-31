@@ -5,7 +5,6 @@ import {
   Checkbox,
   Empty,
   Input,
-  Modal,
   Popconfirm,
   Spin,
 } from 'antd'
@@ -16,10 +15,10 @@ import {
   PlusOutlined,
   SearchOutlined,
   UserOutlined,
-  VideoCameraOutlined,
 } from '@ant-design/icons'
 import { businessApi } from '../../../../api/business'
 import { CreateSubjectModal } from '../../../../components/compose/CreateSubjectModal'
+import { SubjectPreviewModal } from '../../../../components/compose/SubjectPreviewModal'
 import { useSubjectList } from '../../../../hooks/useSubjectList'
 import { useOfficialSubjects } from '../../../../hooks/useSubjectAssets'
 import { parseGenerationTaskParams, listSceneSubjects } from '../../../../utils/subjectTask'
@@ -27,7 +26,7 @@ import type { ViduSubject } from '../../../../utils/subjectTask'
 import { message } from '../../../../utils/antdApp'
 import { CREATIVE_CDN } from '../../../../config/creativeCdn'
 import type { GenerationTask } from '../../../../types/api'
-
+import OralJourneyNav from '../../../../components/compose/OralJourneyNav'
 
 type LibCard = {
   id: string
@@ -298,6 +297,7 @@ export default function AvatarModule() {
 
   return (
     <div className="dh-lib">
+      <OralJourneyNav />
       <header className="dh-lib-head">
         <div className="dh-lib-titles">
           <h1 className="dh-lib-title">数字资产管理</h1>
@@ -470,37 +470,16 @@ export default function AvatarModule() {
         }}
       />
 
-      {/* 分身预览弹窗（§2.3：形象视频 10s 循环 + 用此分身去创作） */}
-      <Modal
+      {/* 分身预览弹窗（远端组件承载；videoUrl 用链式形象视频产物覆盖） */}
+      <SubjectPreviewModal
         open={!!preview}
-        onCancel={() => setPreview(null)}
-        footer={null}
-        width={480}
-        title={<span><VideoCameraOutlined /> 分身预览 · {preview?.subject.name}</span>}
-      >
-        {preview?.url ? (
-          <video
-            src={preview.url}
-            controls
-            autoPlay
-            loop
-            muted
-            style={{ width: '100%', maxHeight: 520, borderRadius: 12, background: '#000' }}
-          />
-        ) : null}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-          <Button onClick={() => setPreview(null)}>关闭</Button>
-          <Button
-            type="primary"
-            onClick={() => {
-              navigate(`/m/compose/lipsync?subject=${encodeURIComponent(preview!.subject.serverId)}`)
-              setPreview(null)
-            }}
-          >
-            用此分身去创作
-          </Button>
-        </div>
-      </Modal>
+        subject={preview ? { ...preview.subject, videoUrl: preview.url || preview.subject.videoUrl } : null}
+        onClose={() => setPreview(null)}
+        onUse={(serverId) => {
+          setPreview(null)
+          navigate(`/m/compose/lipsync?subject=${encodeURIComponent(serverId)}`)
+        }}
+      />
     </div>
   )
 }

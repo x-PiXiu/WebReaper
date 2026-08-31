@@ -241,7 +241,8 @@ export default function LipSyncWizard() {
     return () => window.clearInterval(timer)
   }, [extracting])
 
-  const extractWithPolling = async (payload: { share_url?: string; video_url?: string }) => {
+  // 链接与上传均走异步轮询（23 §3.2——上传用 video_url=本站素材公网地址，避免同步 120s 超时）
+  const extractWithPolling = async (payload: { share_url?: string; video_url?: string; asset_url?: string }) => {
     const start = await businessApi.extractTranscriptAsync(payload)
     const deadline = Date.now() + 29 * 60 * 1000
     while (Date.now() < deadline) {
@@ -256,9 +257,9 @@ export default function LipSyncWizard() {
   const doExtract = async (payload: { share_url?: string; asset_url?: string }) => {
     setExtracting(true); setError('')
     try {
-      // asset_url（本站素材）走同步接口；链接走异步轮询——长视频不再受 120s 连接超时约束
+      // 上传素材同样走异步轮询（远端 4e49eeb 合入：video_url=素材公网地址）
       const r = payload.asset_url
-        ? await businessApi.extractTranscript(payload)
+        ? await extractWithPolling({ video_url: payload.asset_url, asset_url: payload.asset_url })
         : await extractWithPolling(payload.share_url ? { share_url: payload.share_url } : {})
       const lines = transcriptLines(r.raw_text, r.raw_text_lines)
       setExtractLineCount(lines.length)

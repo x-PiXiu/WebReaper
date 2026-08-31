@@ -32,6 +32,7 @@ const ImagesModule = lazy(() => import('./pages/merchant/compose/modules/ImagesM
 const InspirationPlaza = lazy(() => import('./pages/merchant/inspire/InspirationPlaza'))
 const AssetLibrary = lazy(() => import('./pages/merchant/assets/AssetLibrary'))
 const MyWorks = lazy(() => import('./pages/merchant/works/MyWorks'))
+const WorkDetail = lazy(() => import('./pages/merchant/works/WorkDetail'))
 const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
 const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
 const Notifications = lazy(() => import('./pages/merchant/Notifications'))
@@ -115,6 +116,7 @@ export default function App() {
           <Route path="/m/compose/images" element={<LazyPage><ImagesModule /></LazyPage>} />
           <Route path="/m/compose/tools" element={<LazyPage><Studio /></LazyPage>} />
           <Route path="/m/works" element={<LazyPage><MyWorks /></LazyPage>} />
+          <Route path="/m/works/:workId" element={<LazyPage><WorkDetail /></LazyPage>} />
           <Route path="/m/analytics" element={<LazyPage><WorksAnalytics /></LazyPage>} />
           {/* 兼容旧路由 */}
           {/* 旧 checkup 深链保留 ?tab=ask|report|records → 作品数据 AI Drawer */}

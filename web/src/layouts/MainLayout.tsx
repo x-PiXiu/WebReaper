@@ -322,21 +322,6 @@ export function AppShell({
               <span className="wr-crumb-sep">/</span>
               <span className="wr-crumb-current">{pageTitle}</span>
             </nav>
-            {showRoleSwitch && (
-              <Button
-                className="wr-header-role-switch"
-                size="small"
-                onClick={() => navigate(roleSwitchTarget)}
-                style={{
-                  marginLeft: 4,
-                  background: 'var(--wr-bg-elevated)',
-                  color: 'var(--wr-text-secondary)',
-                  border: '1px solid var(--wr-border)',
-                }}
-              >
-                {inAdmin ? '← 返回用户界面' : '管理后台 →'}
-              </Button>
-            )}
             {!inAdmin && (
               <div data-tour="merchant-search" style={{ marginLeft: 'auto' }}>
                 <AutoComplete
