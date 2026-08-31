@@ -17,7 +17,7 @@ const { Text } = Typography
  * + 列表（person/scene 过滤）+ 编辑（名称/标签/排序/上下架）+ 删除。
  * 用户端数字资产页「官方资产」区即显（/api/v1/subjects scope=official）。
  */
-function AdminSubjects() {
+function AdminSubjects({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const [kind, setKind] = useState<'all' | 'person' | 'scene'>('all')
   const [createOpen, setCreateOpen] = useState(false)
@@ -86,16 +86,26 @@ function AdminSubjects() {
   }
 
   return (
-    <div className="wr-page-content ip-page">
-      <div className="ip-page-hero">
-        <div>
-          <h1>官方主体</h1>
-          <p className="ip-lead">运营制作官方数字分身/环境模板——用户端「官方资产」区即选即用</p>
+    <div className={embedded ? '' : 'wr-page-content ip-page'}>
+      {!embedded && (
+        <div className="ip-page-hero">
+          <div>
+            <h1>官方主体</h1>
+            <p className="ip-lead">运营制作官方数字分身/环境模板——用户端「官方资产」区即选即用</p>
+          </div>
+          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            创建官方主体
+          </Button>
         </div>
-        <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          创建官方主体
-        </Button>
-      </div>
+      )}
+      {embedded && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text type="secondary">运营制作官方数字分身——用户端即选即用</Text>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            创建官方主体
+          </Button>
+        </div>
+      )}
 
       <Alert
         type="info" showIcon style={{ marginBottom: 16 }}

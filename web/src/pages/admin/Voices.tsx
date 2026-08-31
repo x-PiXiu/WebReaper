@@ -22,7 +22,7 @@ const VOICE_SCOPES = [
   { value: 'clone', label: '用户克隆' },
 ]
 
-function AdminVoices() {
+function AdminVoices({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const [scope, setScope] = useState('platform')
   const [q, setQ] = useState('')
@@ -142,21 +142,34 @@ function AdminVoices() {
   }
 
   return (
-    <div className="wr-page-content ip-page">
-      <div className="ip-page-hero">
-        <div>
-          <h1>官方音色</h1>
-          <p className="ip-lead">运营创建平台音色——用户端仅显示此处创建的内容（白牌化：上游 Vidu 音色仅作克隆参考源）</p>
+    <div className={embedded ? '' : 'wr-page-content ip-page'}>
+      {!embedded && (
+        <div className="ip-page-hero">
+          <div>
+            <h1>官方音色</h1>
+            <p className="ip-lead">运营创建平台音色——用户端仅显示此处创建的内容（白牌化：上游 Vidu 音色仅作克隆参考源）</p>
+          </div>
+          <Space size={8}>
+            <Button size="large" onClick={openViduTab}>
+              从 Vidu 音色克隆
+            </Button>
+            <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              上传样本创建
+            </Button>
+          </Space>
         </div>
-        <Space size={8}>
-          <Button size="large" onClick={openViduTab}>
-            从 Vidu 音色克隆
-          </Button>
-          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            上传样本创建
-          </Button>
-        </Space>
-      </div>
+      )}
+      {embedded && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text type="secondary">用户端仅显示此处创建的音色（白牌化）</Text>
+          <Space size={8}>
+            <Button onClick={openViduTab}>从 Vidu 音色克隆</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              上传样本创建
+            </Button>
+          </Space>
+        </div>
+      )}
 
       <Alert
         type="info" showIcon style={{ marginBottom: 16 }}

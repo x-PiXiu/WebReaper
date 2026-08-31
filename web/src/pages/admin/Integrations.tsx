@@ -46,13 +46,14 @@ const MODE_LABELS: Record<string, string> = {
  * 厂商卡片网格 + 点击展开详情（Key/启停/能力路由/首选模型/音色库）。
  * 一个页面，无 tab 切换——按厂商组织，能力路由内联展示。
  */
-export default function IntegrationsPage() {
+export default function IntegrationsPage({ embedded = false }: { embedded?: boolean }) {
   const { id } = useParams<{ id: string }>()
-  return id ? <IntegrationDetail id={id} /> : <IntegrationCenter />
+  if (id) return <IntegrationDetail id={id} />
+  return <IntegrationCenter embedded={embedded} />
 }
 
 // ---- 主页面：厂商卡片 + 内联详情 ----
-function IntegrationCenter() {
+function IntegrationCenter({ embedded = false }: { embedded?: boolean }) {
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null)
 
   const { data: vendorsData, isLoading: vendorsLoading, isError: vendorsError, refetch: refetchVendors } = useQuery({
@@ -83,7 +84,7 @@ function IntegrationCenter() {
   }
 
   return (
-    <div className="wr-page-content" style={{ paddingTop: 8 }}>
+    <div className={embedded ? '' : 'wr-page-content'} style={embedded ? undefined : { paddingTop: 8 }}>
       <div className="wr-page-header" style={{ marginBottom: 16 }}>
         <h1>第三方集成</h1>
         <p>厂商配置 + 能力路由——点击厂商卡片展开详情，切换默认 ≤10s 生效</p>

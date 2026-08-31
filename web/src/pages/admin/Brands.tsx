@@ -9,7 +9,7 @@ const { Text } = Typography
 
 // 品牌统一管理（管理后台）：全平台品牌资产一览 + 行展开详情 + 删除。
 // admin 租户为空 → geo 接口返回全局数据（绝对控制落点）。
-export default function AdminBrands() {
+export default function AdminBrands({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const { data: brands = [] } = useQuery({
     queryKey: ['admin-brands'],
@@ -73,7 +73,7 @@ export default function AdminBrands() {
   ]
 
   return (
-    <div className="wr-page-content">
+    <div className={embedded ? "" : "wr-page-content"}>
       <div className="wr-page-header">
         <h1>品牌管理</h1>
         <p>全平台品牌资产一览 · 绝对控制（删除将级联清理关键词与内容）</p>

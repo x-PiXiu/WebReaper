@@ -11,7 +11,8 @@ const { Text } = Typography
 // 平台知识库：向量嵌入/向量库配置（30s 生效免重启）· 行业采集配置 · 素材管理与向量重建。
 // 背景（Docs/Plans/04）：平台按行业持续采集网页素材（保留来源 URL+原文）→ 生成前按
 // "品牌行业+关键词"向量检索素材（带来源）→ 规格化 prompt → 上游 LLM 生成。
-export default function Knowledge() {
+export default function Knowledge({ embedded: _embedded = false }: { embedded?: boolean }) {
+  void _embedded
   const queryClient = useQueryClient()
   const [embForm] = Form.useForm()
   const [crawlForm] = Form.useForm()

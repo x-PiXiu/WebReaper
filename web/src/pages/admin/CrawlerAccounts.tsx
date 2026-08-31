@@ -28,7 +28,8 @@ const HEALTH_COLORS: Record<string, string> = {
 }
 
 // 平台方账号管理页面
-export default function CrawlerAccounts() {
+export default function CrawlerAccounts({ embedded: _embedded = false }: { embedded?: boolean }) {
+  void _embedded
   const queryClient = useQueryClient()
   const [isQRModalOpen, setIsQRModalOpen] = useState(false)
   const [isManualModalOpen, setIsManualModalOpen] = useState(false)

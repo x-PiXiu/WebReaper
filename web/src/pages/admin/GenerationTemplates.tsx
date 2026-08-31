@@ -31,7 +31,7 @@ const SUB_TYPE_OPTIONS = [
 ]
 
 // 生成模板管理页面
-export default function AdminGenerationTemplates() {
+export default function AdminGenerationTemplates({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const [editingTemplate, setEditingTemplate] = useState<GenerationTemplate | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
@@ -196,7 +196,7 @@ export default function AdminGenerationTemplates() {
   }
 
   return (
-    <div className="wr-page-content">
+    <div className={embedded ? "" : "wr-page-content"}>
       <div className="wr-page-header">
         <h1>生成模板管理</h1>
         <p>管理生成模板，配置默认参数和必需素材——用户端选择模板后自动填充</p>

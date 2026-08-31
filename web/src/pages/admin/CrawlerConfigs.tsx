@@ -10,7 +10,8 @@ const { Text } = Typography
 const { TextArea } = Input
 
 // 爬虫配置管理页面
-export default function CrawlerConfigs() {
+export default function CrawlerConfigs({ embedded: _embedded = false }: { embedded?: boolean }) {
+  void _embedded
   const queryClient = useQueryClient()
   const [editingConfig, setEditingConfig] = useState<CrawlerConfig | null>(null)
   const [form] = Form.useForm()

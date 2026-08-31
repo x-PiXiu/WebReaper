@@ -8,7 +8,7 @@ const { Text } = Typography
 
 // 平台设置（管理后台）：仅平台级运行时开关——修改即时生效，无需重启。
 // 提示词模板管理已迁至独立页（/admin/prompt-templates，属 GEO 内容引擎域）。
-export default function AdminSettings() {
+export default function AdminSettings({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
 
   const { data: autoMonitor, isLoading } = useQuery({
@@ -54,7 +54,7 @@ export default function AdminSettings() {
   })
 
   return (
-    <div className="wr-page-content">
+    <div className={embedded ? "" : "wr-page-content"}>
       <div className="wr-page-header">
         <h1>平台设置</h1>
         <p>平台级运行时开关——修改即时生效，无需重启服务</p>
