@@ -233,8 +233,8 @@
   margin: 16px 0 0;
   padding: 2px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
 }
 
 .sb-lib-card {
@@ -277,7 +277,8 @@
   box-sizing: border-box;
   position: relative;
   display: block;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 10;
+  min-height: 196px;
   cursor: pointer;
   overflow: hidden;
   background: linear-gradient(160deg, #eceaf6, #d9d6e8);
@@ -435,8 +436,11 @@
     width: 100%;
   }
   .sb-lib-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+  }
+  .sb-lib-card-cover {
+    min-height: 140px;
   }
 }
 

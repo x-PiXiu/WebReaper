@@ -9,6 +9,8 @@ export type ViduSubject = {
   hasVideo: boolean
   imageCount: number
   portraitUrl: string
+  /** 形象视频 URL（链式 10s 视频上线后回写；当前可能为空） */
+  videoUrl: string
   errMsg: string
   createdAt: string
 }
@@ -32,15 +34,21 @@ export function parseSubjectFromTask(t: GenerationTask): ViduSubject | null {
   const images = Array.isArray(p.images)
     ? p.images.filter((u): u is string => typeof u === 'string')
     : []
+  const videos = Array.isArray(p.videos)
+    ? p.videos.filter((u): u is string => typeof u === 'string')
+    : []
+  const creationUrl = t.creations?.[0]?.stored_url || t.creations?.[0]?.url || ''
+  const videoUrl = videos[0] || (/\.(mp4|webm|mov)(\?|$)/i.test(creationUrl) ? creationUrl : '')
   return {
     taskId: t.id,
     state: t.state,
     name: (typeof p.name === 'string' && p.name) || t.id.slice(0, 12),
     serverId: subjectServerId(t),
     voiceId: typeof p.voice_id === 'string' ? p.voice_id : '',
-    hasVideo: Array.isArray(p.videos) && p.videos.length > 0,
+    hasVideo: videos.length > 0 || !!videoUrl,
     imageCount: images.length,
-    portraitUrl: images[0] || t.creations?.[0]?.url || '',
+    portraitUrl: images[0] || (!videoUrl ? creationUrl : '') || '',
+    videoUrl,
     errMsg: t.err_msg || '',
     createdAt: t.created_at,
   }

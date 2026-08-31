@@ -18,11 +18,13 @@ import {
 } from '@ant-design/icons'
 import { businessApi } from '../../../../api/business'
 import { CreateSubjectModal } from '../../../../components/compose/CreateSubjectModal'
+import { SubjectPreviewModal } from '../../../../components/compose/SubjectPreviewModal'
 import { useSubjectList } from '../../../../hooks/useSubjectList'
 import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
 import type { ViduSubject } from '../../../../utils/subjectTask'
 import { message } from '../../../../utils/antdApp'
 import { CREATIVE_CDN } from '../../../../config/creativeCdn'
+import OralJourneyNav from '../../../../components/compose/OralJourneyNav'
 
 type LibCard = {
   id: string
@@ -135,6 +137,7 @@ export default function AvatarModule() {
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
+  const [previewSubject, setPreviewSubject] = useState<ViduSubject | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
@@ -184,16 +187,20 @@ export default function AvatarModule() {
   }
 
   const onCardAction = (card: LibCard) => {
+    if (card.subject) {
+      setPreviewSubject(card.subject)
+      return
+    }
     if (card.ready && card.serverId) {
       navigate(`/m/compose/lipsync?subject=${encodeURIComponent(card.serverId)}`)
       return
     }
-    message.info(card.subject?.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中')
+    message.info('数字人仍在创建中')
   }
 
   const renderCard = (card: LibCard, opts: { official?: boolean }) => {
     const checked = selected.includes(card.id)
-    const actionLabel = opts.official ? '即将接入' : card.ready ? '拍口播' : '查看状态'
+    const actionLabel = opts.official ? '即将接入' : '预览'
     const publicTag = card.tag === '公共' || card.tag === '影视' || card.tag === '商务'
     return (
       <li key={card.id} className="dh-lib-card">
@@ -261,6 +268,7 @@ export default function AvatarModule() {
 
   return (
     <div className="dh-lib">
+      <OralJourneyNav />
       <header className="dh-lib-head">
         <div className="dh-lib-titles">
           <h1 className="dh-lib-title">分身管理</h1>
@@ -352,6 +360,16 @@ export default function AvatarModule() {
           if (searchParams.get('from') === 'wizard' && serverId) {
             navigate(`/m/compose/lipsync?subject=${encodeURIComponent(serverId)}`)
           }
+        }}
+      />
+
+      <SubjectPreviewModal
+        open={!!previewSubject}
+        subject={previewSubject}
+        onClose={() => setPreviewSubject(null)}
+        onUse={(serverId) => {
+          setPreviewSubject(null)
+          navigate(`/m/compose/lipsync?subject=${encodeURIComponent(serverId)}`)
         }}
       />
     </div>

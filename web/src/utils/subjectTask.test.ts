@@ -57,6 +57,7 @@ describe('parseSubjectFromTask', () => {
     expect(s.serverId).toBe('srv-001')
     expect(s.portraitUrl).toBe('https://cdn/p.jpg')
     expect(s.hasVideo).toBe(true)
+    expect(s.videoUrl).toBe('https://cdn/v.mp4')
     expect(s.voiceId).toBe('voice-1')
   })
 

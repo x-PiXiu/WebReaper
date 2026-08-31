@@ -24,7 +24,12 @@ export default function Login() {
   useEffect(() => {
     const saved = localStorage.getItem(REMEMBER_KEY)
     if (saved) form.setFieldsValue({ username: saved })
-  }, [form])
+  }, [form, mode])
+
+  const switchMode = (next: Mode) => {
+    setMode(next)
+    form.resetFields(['password', 'confirm'])
+  }
 
   const handleLogin = async (values: { username: string; password: string }) => {
     setLoading(true)
@@ -40,6 +45,7 @@ export default function Login() {
       const fallback = res.role === 'admin' ? '/admin' : '/m/compose'
       navigate(from && from.startsWith('/') ? from : fallback, { replace: true })
     } catch {
+      // 业务/网络错误已由 apiClient 拦截器 toast
     } finally {
       setLoading(false)
     }
@@ -50,8 +56,9 @@ export default function Login() {
     try {
       await authApi.register(values)
       message.success('注册成功，请登录')
-      setMode('login')
+      switchMode('login')
     } catch {
+      // 业务/网络错误已由 apiClient 拦截器 toast
     } finally {
       setLoading(false)
     }
@@ -74,27 +81,8 @@ export default function Login() {
           <div className="wr-login-logo">
             <img src={logoUrl} alt="智宸AI logo" />
           </div>
-          <p className="wr-login-kicker">ZHICHEN AI · IP GROWTH AGENT</p>
           <h1 className="wr-login-title">智宸AI获客智能体</h1>
-          <p className="wr-login-lead">
-            对标爆款、口播成片、一键分发、看清线索——
-            为人设获客而生，而不是堆一堆通用 AI 工具。
-          </p>
-
-          <ul className="wr-login-stats">
-            <li>
-              <strong>对标爆款</strong>
-              <span>灵感库驱动选题</span>
-            </li>
-            <li>
-              <strong>口播成片</strong>
-              <span>AI 一键生成</span>
-            </li>
-            <li>
-              <strong>一键分发</strong>
-              <span>多平台同步触达</span>
-            </li>
-          </ul>
+          <p className="wr-login-lead">对标爆款 · 口播成片 · 一键分发，为人设获客而生。</p>
         </div>
 
         <footer className="wr-login-flow wr-login-rise wr-login-rise--delay">
@@ -113,7 +101,7 @@ export default function Login() {
           <div className="wr-login-form-head">
             <h2>{mode === 'login' ? '欢迎回来' : '创建账号'}</h2>
             <p>
-              {mode === 'login' ? '请输入您的账号信息' : '注册后即可开始打造账号 IP'}
+              {mode === 'login' ? '登录后继续打造账号 IP' : '注册后即可开始打造账号 IP'}
             </p>
           </div>
 
@@ -122,7 +110,7 @@ export default function Login() {
             form={form}
             layout="vertical"
             onFinish={mode === 'login' ? handleLogin : handleRegister}
-            autoComplete="off"
+            autoComplete="on"
             requiredMark={false}
             className="wr-login-form"
           >
@@ -131,15 +119,50 @@ export default function Login() {
               name="username"
               rules={[{ required: true, min: 3, message: '至少 3 个字符' }]}
             >
-              <Input placeholder="请输入用户名" size="large" prefix={<UserOutlined />} autoFocus />
+              <Input
+                placeholder="请输入用户名"
+                size="large"
+                prefix={<UserOutlined />}
+                autoFocus
+                autoComplete="username"
+              />
             </Form.Item>
             <Form.Item
               label="密码"
               name="password"
               rules={[{ required: true, min: 6, message: '至少 6 个字符' }]}
             >
-              <Input.Password placeholder="请输入密码" size="large" prefix={<LockOutlined />} />
+              <Input.Password
+                placeholder="请输入密码"
+                size="large"
+                prefix={<LockOutlined />}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              />
             </Form.Item>
+
+            {mode === 'register' && (
+              <Form.Item
+                label="确认密码"
+                name="confirm"
+                dependencies={['password']}
+                rules={[
+                  { required: true, message: '请再次输入密码' },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || getFieldValue('password') === value) return Promise.resolve()
+                      return Promise.reject(new Error('两次密码不一致'))
+                    },
+                  }),
+                ]}
+              >
+                <Input.Password
+                  placeholder="请再次输入密码"
+                  size="large"
+                  prefix={<LockOutlined />}
+                  autoComplete="new-password"
+                />
+              </Form.Item>
+            )}
 
             {mode === 'login' && (
               <div className="wr-login-remember">
@@ -158,7 +181,7 @@ export default function Login() {
 
           <p className="wr-login-footnote">
             {mode === 'login' ? '还没有账号？' : '已有账号？'}
-            <button type="button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
+            <button type="button" onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}>
               {mode === 'login' ? '立即注册' : '直接登录'}
             </button>
           </p>

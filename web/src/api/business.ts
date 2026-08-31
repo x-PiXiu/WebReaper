@@ -458,7 +458,8 @@ export const businessApi = {
   extractTranscript: (data: { video_url?: string; share_url?: string; asset_url?: string; title?: string }) =>
     apiClient.post<unknown, { raw_text: string; raw_text_lines?: string[]; title: string; method: string }>('/api/v1/generation/transcript/extract', data),
   // 异步提取（长视频防 120s 连接超时）：提交拿 task_id，轮询 getTranscriptTask
-  extractTranscriptAsync: (data: { video_url?: string; share_url?: string; title?: string }) =>
+  // 上传素材可传 video_url（本站 asset URL）或 asset_url（服务端若支持）
+  extractTranscriptAsync: (data: { video_url?: string; share_url?: string; asset_url?: string; title?: string }) =>
     apiClient.post<unknown, { task_id: string; status: string }>('/api/v1/generation/transcript/extract/async', data),
   getTranscriptTask: (id: string) =>
     apiClient.get<unknown, { status?: string; task_id?: string; raw_text?: string; raw_text_lines?: string[]; title?: string; method?: string }>(`/api/v1/generation/transcript/extract/tasks/${id}`),

@@ -227,6 +227,7 @@ export default function QuickGenerate() {
   return (
     <WizardShell
       breadcrumb="快速生成"
+      layout="split"
       steps={QUICK_STEPS}
       stepIndex={step}
       maxReachableStep={1}

@@ -7,6 +7,7 @@ import { useComposeDraft } from '../../../store/composeDraft'
 import { useComposeTaskPoll } from '../../../hooks/useComposeTaskPoll'
 import { composeProgressLabel, composeResumeHint, hasComposeDraft, composeResumePath, composeResumeLabel } from '../../../utils/composeProgress'
 import MerchantOnboardingTour from '../../../components/onboarding/MerchantOnboardingTour'
+import OralJourneyNav from '../../../components/compose/OralJourneyNav'
 import { useMerchantOnboarding } from '../../../hooks/useMerchantOnboarding'
 import { useGenerationTypes } from '../../../hooks/useGenerationTypes'
 import { CREATIVE_CDN } from '../../../config/creativeCdn'
@@ -193,6 +194,7 @@ export default function ComposeHub() {
     <div className="wr-page-content ch-hub ch-creative ch-creative--pro ch-studio ip-page">
       <div className="ch-atmosphere" aria-hidden />
       <MerchantOnboardingTour open={tourOpen} onClose={skipTour} onFinish={finishTour} />
+      <OralJourneyNav />
 
       <section className="ch-hero">
         <div className="ch-hero-copy">
@@ -202,7 +204,7 @@ export default function ComposeHub() {
           </p>
           <h1 className="ch-hero-title">从文案到成片，一气呵成。</h1>
           <p className="ch-hero-lead">
-            文案、配音、数字人、成片与发布，在同一条流水线完成。
+            分身准备 → 口播创作 → 作品插画面 → 多平台发布，同一条旅程。
           </p>
         </div>
         <div className="ch-hero-cta">
