@@ -130,16 +130,20 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
             size="small"
             pagination={false}
             columns={[
-              { title: '作品键', dataIndex: 'work_key', width: 200, ellipsis: true },
-              { title: '处置', dataIndex: 'action', width: 80, render: (a: string) => <Tag color={actionMeta[a]?.color}>{actionMeta[a]?.label || a}</Tag> },
-              { title: '处置原因', dataIndex: 'reason', width: 180, ellipsis: true },
-              { title: '申诉理由', dataIndex: 'appeal_text', ellipsis: true },
-              { title: '租户', dataIndex: 'tenant_id', width: 120, ellipsis: true },
               {
-                title: '操作', key: 'ops', width: 160,
+                title: '作品键', dataIndex: 'work_key', width: 180, ellipsis: true,
+                render: (k: string) => <a onClick={(e) => { e.preventDefault(); setDetailKey(k) }}>{k}</a>,
+              },
+              { title: '处置', dataIndex: 'action', width: 80, render: (a: string) => <Tag color={actionMeta[a]?.color}>{actionMeta[a]?.label || a}</Tag> },
+              { title: '处置原因', dataIndex: 'reason', width: 160, ellipsis: true },
+              { title: '申诉理由', dataIndex: 'appeal_text', ellipsis: true },
+              { title: '租户', dataIndex: 'tenant_id', width: 110, ellipsis: true },
+              {
+                title: '操作', key: 'ops', width: 220,
                 render: (_, a: AdminWorkFlagged) => (
                   <Space>
-                    <Popconfirm title="采纳申诉并恢复该作品？" onConfirm={() => releaseFlagged(a)}>
+                    <Button size="small" icon={<EyeOutlined />} onClick={() => setDetailKey(a.work_key)}>查看</Button>
+                    <Popconfirm title="采纳申诉并恢复该作品？（建议先点查看确认内容）" onConfirm={() => releaseFlagged(a)}>
                       <Button size="small" type="primary">采纳</Button>
                     </Popconfirm>
                     <Popconfirm title="维持处置？（终审驳回，24 小时内不可再申诉）" onConfirm={() => rejectAppeal(a.work_key)}>
@@ -166,15 +170,19 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
             size="small"
             pagination={false}
             columns={[
-              { title: '作品键', dataIndex: 'work_key', width: 220, ellipsis: true },
-              { title: '类型', dataIndex: 'work_kind', width: 70, render: (k: string) => <Tag>{kindMeta[k]?.label || k}</Tag> },
-              { title: '租户', dataIndex: 'tenant_id', width: 130, ellipsis: true },
-              { title: '机审理由', dataIndex: 'reason', ellipsis: true },
-              { title: '标记时间', dataIndex: 'updated_at', width: 150, render: (t: string) => new Date(t).toLocaleString('zh-CN', { hour12: false }) },
               {
-                title: '操作', key: 'ops', width: 160,
+                title: '作品键', dataIndex: 'work_key', width: 200, ellipsis: true,
+                render: (k: string) => <a onClick={(e) => { e.preventDefault(); setDetailKey(k) }}>{k}</a>,
+              },
+              { title: '类型', dataIndex: 'work_kind', width: 70, render: (k: string) => <Tag>{kindMeta[k]?.label || k}</Tag> },
+              { title: '租户', dataIndex: 'tenant_id', width: 110, ellipsis: true },
+              { title: '机审理由', dataIndex: 'reason', ellipsis: true },
+              { title: '标记时间', dataIndex: 'updated_at', width: 140, render: (t: string) => new Date(t).toLocaleString('zh-CN', { hour12: false }) },
+              {
+                title: '操作', key: 'ops', width: 200,
                 render: (_, f: AdminWorkFlagged) => (
                   <Space>
+                    <Button size="small" icon={<EyeOutlined />} onClick={() => setDetailKey(f.work_key)}>查看</Button>
                     <Button size="small" danger onClick={() => disposeFlagged(f)}>处置</Button>
                     <Popconfirm title="确认放行？（清除标记，复审不再提示）" onConfirm={() => releaseFlagged(f)}>
                       <Button size="small" type="primary" ghost>放行</Button>
