@@ -277,6 +277,9 @@ type GenerationVoice struct {
 	SourceTaskID string `json:"source_task_id,omitempty"`  // 溯源任务ID
 	Status       string `json:"status,omitempty"`          // active / disabled
 	IsDefault    bool   `json:"is_default"`                // 平台默认音色（scope=platform 内仅一条 true；用户不选时后端 fallback）
+	// ViduRegisteredAt Vidu 侧注册/最近续期时间（31号：注册是可重建缓存——同 ID 复注册幂等）。
+	// NULL=未注册或未知。仅 Vidu 有注册制；MiMo 无状态无需跟踪。
+	ViduRegisteredAt *time.Time `json:"vidu_registered_at,omitempty"`
 }
 
 // PromptRef 提示词 @引用（客户端从素材库选择，提交给服务端统一翻译）。

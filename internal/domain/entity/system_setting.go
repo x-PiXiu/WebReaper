@@ -27,4 +27,12 @@ const (
 	SettingKeyGenDefaultAspectRatio = "gen_default_aspect_ratio"  // 默认画面比例（如 "16:9"）
 	SettingKeyGenDefaultDuration    = "gen_default_duration"      // 默认时长（秒，如 5）
 	SettingKeyGenDefaultAvatarPrompt = "gen_default_avatar_prompt" // 默认形象视频 prompt（28号计划）
+
+	// ---- 31号：音色物化架构（样本为源、注册为缓存）----
+
+	SettingKeyGenViduVoiceWindow    = "gen_vidu_voice_window"     // Vidu 注册缓存窗口（小时；默认144=6天，上游7天过期留1天余量）
+	SettingKeyGenVoiceMaterializer  = "gen_voice_materializer_enabled" // 音色物化层总开关（false=回退旧行为直传 ID；灰度用）
+	SettingKeyGenVoiceAuditionText  = "gen_voice_audition_text"   // 注册/续期时的固定试听文案（Vidu audio-clone text 必填 ≤1000）
+	SettingKeyGenLipsyncAutoChain   = "gen_lipsync_auto_chain"    // 口播画面复用开关（subjects+文本/音频 → 复用分身形象视频直接 lip_sync——对齐 23 号目标态；默认关——前端单步契约未适配）
+	SettingKeyGenLipsyncTwoStep     = "gen_lipsync_two_step"      // 备胎道开关（lip_sync 注册失败自动降级：tts样本合成→音频驱动；零厂商ID依赖）
 )

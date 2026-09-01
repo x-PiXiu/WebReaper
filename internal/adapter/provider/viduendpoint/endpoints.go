@@ -243,6 +243,12 @@ func (reference2videoAdapter) BuildRequest(ctx context.Context, model string, p 
 	if v := getInt(p, "duration"); v > 0 {
 		body["duration"] = v
 	}
+	// audio 音画同出开关（Q3 系列默认开）。31号 §4.1：仅显式传入才透传——
+	// 平台内部链的画面素材（口播链第①步/形象视频）显式 false（静默画面，
+	// 防 lip_sync 对带声画面二次驱动劣化）；用户直发不传保持上游默认。
+	if v, ok := p["audio"].(bool); ok {
+		body["audio"] = v
+	}
 	if payload != "" {
 		body["payload"] = payload
 	}

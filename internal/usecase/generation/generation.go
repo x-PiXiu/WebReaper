@@ -591,8 +591,20 @@ func (uc *GenerationUseCase) materializeVoiceClone(ctx context.Context, task ent
 		Status:       "active",
 	}
 
+	// 31号 L4-①：本次克隆走 Vidu = 创建即注册（记录缓存窗口起点）
+	if task.Provider == "vidu" {
+		now := time.Now()
+		voice.ViduRegisteredAt = &now
+	}
+
 	if err := uc.voiceRepo.Upsert(ctx, voice); err != nil {
 		log.Printf("[materialize] 音色 %s 物化失败（不影响任务状态）: %v", voiceID, err)
+		return
+	}
+	// 31号 L4-②：非 Vidu 创建（MiMo 路由/降级）→ 异步补注册（正常几秒内就绪，
+	// 首次口播命中窗口零开销；失败静默——按需保障兜底）
+	if task.Provider != "vidu" {
+		uc.warmUpViduRegistration(task.TenantID, voiceID)
 	}
 }
 
@@ -679,38 +691,61 @@ func (uc *GenerationUseCase) SetVoiceRepo(r port.VoiceLibrary) {
 	uc.voiceRepo = r
 }
 
-// maybeRewriteSampleSynthesis 缺口C：tts 改走"已存样本合成"（厂商隔离）。
+// maybeRewriteSampleSynthesis 缺口C + 31号 L3：tts 改走"已存样本合成"（厂商隔离 + 厂商感知）。
 //
-// 触发条件（全部满足）：
-//   - subType == "tts"（lip_sync 文本模式的 voice_id 经 Vidu lip-sync 直用且每次使用
-//     即续期，无需改写）
-//   - voiceRepo 已注入且 voice_setting_voice_id 命中 generation_voices 行
-//   - 该行 scope ∈ {clone, platform} 且 sample_url 为永久 http(s)（转存产物）
-//   - 合成文本 ≤1000 字（Vidu audio-clone 试听文本上限；超长保持原 tts 流程——
-//     Vidu 注册制克隆音色可走 10000 字 TTS，platform 音色超长将收到上游可读错误）
+// 触发条件：
+//   - subType == "tts"（lip_sync 文本驱动经 ensureViduVoiceID 保障，不走本改写）
+//   - voiceRepo 已注入且 voice_setting_voice_id 命中 generation_voices 行（scope ∈ {clone, platform}）
+//   - 租户归属：clone 行仅归属租户可用（31号 §4.3 越权修复——不满足显式报错"音色不存在"）
+//
+// 厂商感知路由（ttsProvider 为改写前的 tts 通道厂商）：
+//   - MiMo：一律样本化（mimo-v2.5-tts 仅支持 9 预置 ID——用户定案 2026-09-01；
+//     voiceclone 无字数限制，实测 2049 字 OK）
+//   - Vidu ≤1000 字：样本化（audio-clone 同 ID 复注册续期 + demo_audio 即产物）
+//   - Vidu >1000 字：保持 tts+voice_id（上限 10000 字），注册由 ensureViduVoiceID（L2）保障
 //
 // 改写结果：subType → voice_clone，params = {audio_url: sample_url, voice_id, text}。
-// 语义：两厂商的克隆端点均支持"样本+文本→音频"——MiMo 原生（audio.voice=样本）、
-// Vidu audio-clone（同 voice_id 幂等复注册 + demo_audio 即合成产物）。
-// 返回 true 表示已改写（调用方需重路由 provider）。
-func (uc *GenerationUseCase) maybeRewriteSampleSynthesis(ctx context.Context, in *SubmitInput) bool {
+// 返回 (true, nil) 表示已改写（调用方需重路由 provider）；
+// (false, nil) 保持原流程；(false, err) 提交失败（宁报错不变声）。
+func (uc *GenerationUseCase) maybeRewriteSampleSynthesis(ctx context.Context, in *SubmitInput, ttsProvider port.GenerationProvider) (bool, error) {
 	if in.SubType != "tts" || uc.voiceRepo == nil {
-		return false
+		return false, nil
 	}
 	voiceID, _ := in.Params["voice_setting_voice_id"].(string)
 	if voiceID == "" {
-		return false
+		return false, nil
+	}
+	text, _ := in.Params["text"].(string)
+	if text == "" {
+		return false, nil
 	}
 	v, err := uc.voiceRepo.FindByVoiceID(ctx, voiceID)
 	if err != nil || (v.Scope != "clone" && v.Scope != "platform") {
-		return false
+		return false, nil // 不在库（上游原生 ID）——原流程
+	}
+	// 租户归属校验（31号 §4.3）：clone 行跨租户 → 显式"音色不存在"（不泄露存在性）
+	if v.Scope == "clone" && v.TenantID != in.TenantID {
+		return false, fmt.Errorf("音色不存在")
+	}
+
+	isMiMo := ttsProvider != nil && ttsProvider.Name() == "xiaomi-mimo"
+	if !isMiMo && len([]rune(text)) > 1000 {
+		// Vidu 超长：保持 tts+voice_id（10000 字上限）——注册前置保障（L2）
+		if _, vErr := uc.ensureViduVoiceID(ctx, in.TenantID, voiceID); vErr != nil {
+			return false, vErr
+		}
+		return false, nil
 	}
 	if !strings.HasPrefix(v.SampleURL, "http://") && !strings.HasPrefix(v.SampleURL, "https://") {
-		return false // 无永久样本（转存未完成/失败）——保持原流程
-	}
-	text, _ := in.Params["text"].(string)
-	if text == "" || len([]rune(text)) > 1000 {
-		return false // 空文本或超样本合成上限——保持原流程
+		// 无永久样本（转存未完成/失败）：MiMo 通道将显式报错（mimoVoiceID 校验），
+		// Vidu 通道 tts+ID 需注册就绪——均不静默变声
+		if isMiMo {
+			return false, fmt.Errorf("音色样本转存未完成，请稍后重试")
+		}
+		if _, vErr := uc.ensureViduVoiceID(ctx, in.TenantID, voiceID); vErr != nil {
+			return false, vErr
+		}
+		return false, nil
 	}
 
 	in.Params = entity.GenerationParams{
@@ -719,7 +754,7 @@ func (uc *GenerationUseCase) maybeRewriteSampleSynthesis(ctx context.Context, in
 		"text":      text,
 	}
 	in.SubType = "voice_clone"
-	return true
+	return true, nil
 }
 
 // SetQuotaGate 注入配额门（可选；generation 场景按次限额）。
@@ -783,13 +818,40 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		}
 	}
 
-	// 缺口C（厂商隔离）：tts 使用克隆/平台音色时改走"已存样本合成"——
-	// 不依赖厂商 voice_id 生命周期（Vidu 7 天不用即删 / platform-* ID 各厂商均未注册），
-	// 附件收益：Vidu 通道复注册同 voice_id 自动续期 7 天窗口。
-	if uc.maybeRewriteSampleSynthesis(ctx, &in) {
+	// 缺口C（厂商隔离）+ 31号 L3（厂商感知路由）：tts 使用克隆/平台音色时改走"已存样本合成"——
+	// 不依赖厂商 voice_id 生命周期（Vidu 7 天不用即删 / platform-* ID 各厂商均未注册）。
+	// MiMo 通道一律样本化（mimo-v2.5-tts 仅支持 9 预置 ID——2026-09-01 用户定案）；
+	// Vidu 通道 ≤1000 字样本化（audio-clone 同 ID 复注册续期），>1000 字保持 tts+ID（注册由 L2 保障）。
+	rewrote, rwErr := uc.maybeRewriteSampleSynthesis(ctx, &in, provider)
+	if rwErr != nil {
+		return entity.GenerationTask{}, rwErr
+	}
+	if rewrote {
 		provider, err = uc.getProvider(ctx, in.SubType) // subType 已变（tts→voice_clone），厂商重路由
 		if err != nil {
 			return entity.GenerationTask{}, fmt.Errorf("获取生成服务提供商失败: %w", err)
+		}
+	}
+
+	// 31号 L4：lip_sync 文本驱动的 voice_id 前置保障——全链路唯一 ID 刚性端点
+	//（平台音色未注册/克隆 7 天过期/非 Vidu 创建 → 窗口检查 + 幂等注册/续期）。
+	// 音频驱动（audio_url）不需要音色，不触发。
+	// L4-⑤ 备胎道：注册类失败（基础设施错误，非用户错误）且开关开启时自动降级
+	// 两步链（tts 样本合成 → 音频驱动 lip_sync），零厂商 ID 依赖。
+	if in.SubType == "lip_sync" {
+		if vid, _ := in.Params["voice_id"].(string); vid != "" {
+			if au, _ := in.Params["audio_url"].(string); au == "" {
+				ensured, vErr := uc.ensureViduVoiceID(ctx, in.TenantID, vid)
+				if vErr != nil {
+					if isRegistrationFailure(vErr) && uc.generationBoolDefault(ctx, entity.SettingKeyGenLipsyncTwoStep, false) {
+						return uc.submitLipSyncViaTTS(ctx, in, vid)
+					}
+					return entity.GenerationTask{}, vErr
+				}
+				if ensured != vid {
+					in.Params["voice_id"] = ensured
+				}
+			}
 		}
 	}
 
@@ -909,6 +971,9 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		task.ErrMsg = fmt.Sprintf("提交失败: %v", err)
 		task.FinishedAt = nowPtr(now)
 		_ = uc.repo.Save(ctx, task)
+		// 31号 L4-④：提交失败不经 applyStatus——音色缺失自愈在此补挂
+		//（窗口误判"有效"但厂商侧已删 → 失效缓存，重试即重建，防死循环）
+		uc.maybeInvalidateVoiceOnVendorMiss(ctx, task)
 		return task, fmt.Errorf("提交失败: %w", err)
 	}
 	task.ProviderTaskID = res.TaskID
@@ -1191,6 +1256,15 @@ func (uc *GenerationUseCase) DeleteTask(ctx context.Context, tenantID, taskID st
 			_ = provider.Cancel(ctx, task.ProviderTaskID)
 		}
 	}
+	// 31号 U4：克隆任务删除联动清理物化音色行（此前仅删任务行——音色残留列表）。
+	// Vidu 侧注册不清理（无注销 API；7 天不用自然过期，且删除后不再被引用）。
+	if task.SubType == "voice_clone" && uc.voiceRepo != nil {
+		if vid, ok := taskParamsVoiceID(task); ok {
+			if dErr := uc.voiceRepo.DeleteClone(ctx, tenantID, vid); dErr != nil {
+				log.Printf("[deleteTask] 克隆音色行清理失败（不影响任务删除）task=%s voice=%s err=%v", taskID, vid, dErr)
+			}
+		}
+	}
 	return uc.repo.Delete(ctx, tenantID, taskID)
 }
 
@@ -1359,6 +1433,7 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 	// 在此通知不会重复；异步任务的完成感知差距（不留在页面就不知道结果）由此闭合
 	uc.notifyTerminal(ctx, *task)
 	uc.maybeMaterializeAsset(ctx, *task) // 26 号：终态物化
+	uc.maybeInvalidateVoiceOnVendorMiss(ctx, *task) // 31号 L4-④：音色缺失自愈（失效缓存→下次重建）
 	return nil
 }
 
@@ -1878,6 +1953,25 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 		return entity.GenerationTask{}, fmt.Errorf("端点选择失败: %w", err)
 	}
 
+	// 31号 §4.2（对齐 23 号目标态——2026-09-01 用户定案：只保留画面复用一条路）：
+	// subjects+（文案|音频）不产生 reference2video 任务——解析分身形象视频
+	// 直接提交 lip_sync（B/C 路径单段）；形象视频缺失显式报错，绝不现场生成画面。
+	if chain := extractLipsyncChain(selectResult.Params); chain != nil {
+		task, err := uc.submitReuseLipSync(ctx, in, selectResult.Params["subjects"], *chain)
+		if err != nil {
+			return task, err
+		}
+		// B-Roll 挂链尾（复用路径链尾即本 lip_sync 任务）
+		if len(in.BrollSegments) > 0 && uc.composer != nil {
+			go func(src entity.GenerationTask, segs []BrollSegment) {
+				cctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
+				defer cancel()
+				uc.chainBrollAfterGeneration(cctx, src, segs)
+			}(task, in.BrollSegments)
+		}
+		return task, nil
+	}
+
 	// 3. 调用原有的Submit方法
 	// BE-GEN-06：透传 Refs——translateRefs 按端点×能力向量翻译 @引用
 	task, err := uc.Submit(ctx, SubmitInput{
@@ -1897,7 +1991,8 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 	// 4. 29号计划：如果携带了 B-Roll 配置，创建链式任务
 	// ⚠️ 必须用独立 ctx：请求 ctx 在 HTTP handler 返回后即取消，早期版本传 ctx
 	// 导致 goroutine 首次查询就 context canceled——链式从未真正执行。
-	if len(in.BrollSegments) > 0 && uc.composer != nil {
+	// task.SubType != "tts"：备胎道链头（tts）无视频链尾，暂不携带单阶段 B-Roll。
+	if len(in.BrollSegments) > 0 && uc.composer != nil && task.SubType != "tts" {
 		go func(src entity.GenerationTask, segs []BrollSegment) {
 			cctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
 			defer cancel()

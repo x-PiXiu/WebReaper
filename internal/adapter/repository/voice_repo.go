@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -21,6 +22,7 @@ type GenerationVoicePO struct {
 	SourceTaskID string `gorm:"size:64;not null;default:''"`     // 溯源任务ID
 	Status       string `gorm:"size:16;not null;default:active"` // active / disabled
 	IsDefault    bool   `gorm:"not null;default:0"`              // 平台默认音色（scope=platform 内仅一条）
+	ViduRegisteredAt *time.Time `gorm:"column:vidu_registered_at;index"` // Vidu 注册/续期时间（31号 L1；NULL=未注册）
 }
 
 func (GenerationVoicePO) TableName() string { return "generation_voices" }
@@ -39,6 +41,7 @@ func poToVoice(p GenerationVoicePO) entity.GenerationVoice {
 		VoiceID: p.VoiceID, Language: p.Language, Name: p.Name, SampleURL: p.SampleURL,
 		Recommend: p.Recommend, Scope: p.Scope, TenantID: p.TenantID,
 		SourceTaskID: p.SourceTaskID, Status: p.Status, IsDefault: p.IsDefault,
+		ViduRegisteredAt: p.ViduRegisteredAt,
 	}
 }
 
@@ -101,6 +104,20 @@ func (r *GormVoiceRepository) FindByVoiceID(ctx context.Context, voiceID string)
 		return entity.GenerationVoice{}, err
 	}
 	return poToVoice(po), nil
+}
+
+// UpdateViduRegisteredAt 记录/清除 Vidu 侧注册时间（31号 L2——窗口判定与缓存失效）。
+func (r *GormVoiceRepository) UpdateViduRegisteredAt(ctx context.Context, voiceID string, t *time.Time) error {
+	return r.db.WithContext(ctx).Model(&GenerationVoicePO{}).
+		Where("voice_id = ?", voiceID).
+		Update("vidu_registered_at", t).Error
+}
+
+// DeleteClone 删除克隆音色行（31号 U4：删除任务联动清理；scope+租户双条件防御）。
+func (r *GormVoiceRepository) DeleteClone(ctx context.Context, tenantID, voiceID string) error {
+	return r.db.WithContext(ctx).
+		Where("voice_id = ? AND scope = ? AND tenant_id = ?", voiceID, "clone", tenantID).
+		Delete(&GenerationVoicePO{}).Error
 }
 
 // Upsert 按 voice_id 主键幂等写入（26号计划——voice_clone 物化钩子调用）。

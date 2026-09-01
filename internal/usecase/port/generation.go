@@ -211,6 +211,12 @@ type VoiceLibrary interface {
 	SetDefault(ctx context.Context, voiceID string) error
 	// FindByVoiceID 按音色 ID 精确查询单条（缺口C：克隆/平台音色的样本合成通道定位样本音频）。
 	FindByVoiceID(ctx context.Context, voiceID string) (entity.GenerationVoice, error)
+	// UpdateViduRegisteredAt 记录/清除 Vidu 侧注册时间（31号 L2——注册缓存窗口判定）。
+	// t 为 nil 时清除（缓存失效：厂商侧报"音色不存在"后强制下次重建）。
+	UpdateViduRegisteredAt(ctx context.Context, voiceID string, t *time.Time) error
+	// DeleteClone 删除克隆音色行（31号 U4：删除任务联动清理——仅 scope=clone 且
+	// 归属租户匹配才删；platform/vidu 行不受影响）。Vidu 侧注册无需清理（7 天自然过期）。
+	DeleteClone(ctx context.Context, tenantID, voiceID string) error
 }
 
 // TaskNotifier 生成任务终态通知（可选注入——站内信主动唤醒）。

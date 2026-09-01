@@ -70,7 +70,10 @@ func (p *MiMoAsGenerationProvider) Submit(ctx context.Context, endpoint string, 
 	} else {
 		// 标准TTS
 		voiceID, _ := body["voice_setting_voice_id"].(string)
-		voiceID = mimoVoiceID(voiceID) // Vidu 音色 ID → MiMo 预置音色映射
+		voiceID, err = mimoVoiceID(voiceID) // 31号：宁报错不变声——删除静默降级
+		if err != nil {
+			return port.SubmitResult{}, err
+		}
 		audioData, _, err = p.tts.Synthesize(ctx, text, voiceID)
 	}
 	
@@ -148,14 +151,17 @@ var mimoVoices = map[string]bool{
 	"Mia": true, "Chloe": true, "Milo": true, "Dean": true,
 }
 
-// mimoVoiceID 音色 ID 映射：MiMo 预置音色直传；Vidu 音色 ID 或未知值降级为 mimo_default。
-// MiMo 的 audio.voice 字段仅接受 9 个预置音色 ID，不接受 Vidu 的 302 个音色 ID。
-func mimoVoiceID(voiceID string) string {
+// mimoVoiceID 音色 ID 校验（31号 L3：宁报错不变声——静默降级已删除）。
+// MiMo 的 audio.voice 字段仅接受 9 个预置音色 ID。克隆/平台音色的正规路径是
+// 样本合成改写（maybeRewriteSampleSynthesis → voice_clone+audio_url，不走本分支）；
+// 未知 ID 到达此处 = 样本通道未覆盖（音色不在库/样本未转存/越权）——显式报错，
+// 不再静默替换成 mimo_default（用户选 A 出来 B 的变声缺陷根除）。
+func mimoVoiceID(voiceID string) (string, error) {
 	if voiceID == "" || voiceID == "default" {
-		return "mimo_default"
+		return "mimo_default", nil
 	}
 	if mimoVoices[voiceID] {
-		return voiceID
+		return voiceID, nil
 	}
-	return "mimo_default" // Vidu 音色 ID（如 female-shaonv）降级
+	return "", fmt.Errorf("音色 %s 在小米通道不可用（仅支持预置音色；克隆/平台音色需样本转存完成后重试）", voiceID)
 }

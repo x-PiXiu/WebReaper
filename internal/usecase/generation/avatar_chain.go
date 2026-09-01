@@ -90,6 +90,9 @@ func (uc *GenerationUseCase) chainAvatarVideo(ctx context.Context, subject entit
 			"aspect_ratio": "9:16",
 			"subjects":     subjects,
 			"avatar_video": true,
+			// 31号 §4.1：形象视频是内部链画面素材（分身预览/lip_sync 输入）——
+			// 显式静默（Q3 音画同出默认开，带声画面二次驱动对口型效果劣化）
+			"audio": false,
 		},
 	})
 	if err != nil {
