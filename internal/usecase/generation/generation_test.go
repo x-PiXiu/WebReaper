@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/pkg"
 	"webreaper/internal/usecase/port"
 )
 
@@ -150,6 +151,14 @@ func (r *fakeRepo) ListBySubType(context.Context, string, string, string, int) (
 	return nil, nil
 }
 func (r *fakeRepo) ListTransferPending(context.Context, time.Time, int) ([]entity.GenerationTask, error) {
+	return nil, nil
+}
+
+func (r *fakeRepo) FindSuccessTaskByMediaURL(context.Context, string) (entity.GenerationTask, error) {
+	return entity.GenerationTask{}, pkg.ErrNotFound
+}
+
+func (r *fakeRepo) ListRecentSuccessAll(context.Context, int) ([]entity.GenerationTask, error) {
 	return nil, nil
 }
 

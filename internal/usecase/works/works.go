@@ -11,6 +11,7 @@ package works
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -43,12 +44,147 @@ type WorksUseCase struct {
 	contentRepo port.OptimizedContentRepository
 	taskRepo    port.GenerationTaskRepository
 	jobRepo     port.PublishJobRepository
-	metricRepo  port.VideoMetricRepository // 可选（未注入则互动数据为 0）
+	metricRepo  port.VideoMetricRepository       // 可选（未注入则互动数据为 0）
+	modRepo     port.WorkModerationRepository    // 可选（32号：未注入则处置/过滤能力关闭）
 }
 
 func NewWorksUseCase(cr port.OptimizedContentRepository, tr port.GenerationTaskRepository,
 	jr port.PublishJobRepository, mr port.VideoMetricRepository) *WorksUseCase {
 	return &WorksUseCase{contentRepo: cr, taskRepo: tr, jobRepo: jr, metricRepo: mr}
+}
+
+// SetModerationRepo 注入作品处置仓储（32号：用户端过滤 + 管理端巡查/处置）。
+func (uc *WorksUseCase) SetModerationRepo(r port.WorkModerationRepository) {
+	if r != nil {
+		uc.modRepo = r
+	}
+}
+
+// ModerationEnabled 处置能力是否就绪（路由注册与前端能力探测用）。
+func (uc *WorksUseCase) ModerationEnabled() bool { return uc.modRepo != nil }
+
+// moderatedKeys 租户在效处置的作品键集合（hidden/deleted）。
+func (uc *WorksUseCase) moderatedKeys(ctx context.Context, tenantID string) map[string]bool {
+	if uc.modRepo == nil {
+		return nil
+	}
+	ms, err := uc.modRepo.ListByTenant(ctx, tenantID)
+	if err != nil || len(ms) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(ms))
+	for _, m := range ms {
+		if m.Active() {
+			set[m.WorkKey] = true
+		}
+	}
+	return set
+}
+
+// HideWork 下架/逻辑删除作品（32号：管理端处置；重复处置幂等覆盖）。
+// action ∈ {hidden, deleted}；reason 必填（审计）。
+func (uc *WorksUseCase) HideWork(ctx context.Context, workKey, kind, tenantID, action, reason, operator string) error {
+	if uc.modRepo == nil {
+		return fmt.Errorf("作品处置服务未配置")
+	}
+	if workKey == "" {
+		return fmt.Errorf("缺少作品标识")
+	}
+	if reason == "" {
+		return fmt.Errorf("处置原因必填")
+	}
+	if action != entity.WorkActionHidden && action != entity.WorkActionDeleted {
+		return fmt.Errorf("无效处置动作：%s", action)
+	}
+	if kind == "" {
+		kind = "video"
+	}
+	if operator == "" {
+		operator = "admin"
+	}
+	return uc.modRepo.Upsert(ctx, entity.WorkModeration{
+		ID: "wm-" + fmt.Sprintf("%d", time.Now().UnixNano()),
+		WorkKey: workKey, WorkKind: kind, TenantID: tenantID,
+		Action: action, Reason: reason, Operator: operator,
+	})
+}
+
+// RestoreWork 恢复作品（清除处置记录）。
+func (uc *WorksUseCase) RestoreWork(ctx context.Context, workKey string) error {
+	if uc.modRepo == nil {
+		return fmt.Errorf("作品处置服务未配置")
+	}
+	if workKey == "" {
+		return fmt.Errorf("缺少作品标识")
+	}
+	return uc.modRepo.Delete(ctx, workKey)
+}
+
+// AdminWorkItem 管理端作品巡查视图（32号）：成片条目 + 归属租户 + 处置状态。
+type AdminWorkItem struct {
+	WorkItem
+	TenantID         string `json:"tenant_id"`
+	ModerationAction string `json:"moderation_action,omitempty"` // hidden / deleted（空=未处置）
+	ModerationReason string `json:"moderation_reason,omitempty"`
+}
+
+// ListRecentForAdmin 跨租户作品巡查流（32号）：最近成功成片倒序 + 处置状态关联。
+// 文章类管理走既有 /admin/contents（一审一听一改），本流聚焦成片。
+func (uc *WorksUseCase) ListRecentForAdmin(ctx context.Context, limit int) ([]AdminWorkItem, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	tasks, err := uc.taskRepo.ListRecentSuccessAll(ctx, limit*2) // 预留 deliverable 过滤损耗
+	if err != nil {
+		return nil, err
+	}
+	modByWork := map[string]entity.WorkModeration{}
+	if uc.modRepo != nil {
+		if ms, mErr := uc.modRepo.ListRecent(ctx, 500); mErr == nil {
+			for _, m := range ms {
+				modByWork[m.WorkKey] = m
+			}
+		}
+	}
+	out := make([]AdminWorkItem, 0, limit)
+	for _, t := range tasks {
+		if t.State != entity.TaskStateSuccess || !isDeliverableTask(t) {
+			continue
+		}
+		creations := parseCreations(t.CreationsJSON)
+		if len(creations) == 0 {
+			continue
+		}
+		kind := t.Type
+		if kind == entity.GenerationTypeDigitalHuman || kind == entity.GenerationTypeOther {
+			kind = entity.GenerationTypeVideo
+		}
+		var urls []string
+		var cover string
+		for _, cr := range creations {
+			urls = append(urls, cr.URL)
+			if cover == "" {
+				cover = cr.CoverURL
+			}
+		}
+		it := AdminWorkItem{
+			WorkItem: WorkItem{
+				ID: "g-" + t.ID, Kind: kind, Title: titleFromTask(t, kind),
+				BrandID: t.BrandID, Status: "ready",
+				MediaURLs: urls, CoverURL: cover, CreatedAt: t.CreatedAt,
+			},
+			TenantID: t.TenantID,
+		}
+		if m, ok := modByWork["g-"+t.ID]; ok && m.Active() {
+			it.ModerationAction = m.Action
+			it.ModerationReason = m.Reason
+		}
+		out = append(out, it)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 // ListWorks 聚合租户全部作品（按创建时间倒序）。
@@ -83,6 +219,9 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 
 	items := make([]WorkItem, 0, 32)
 
+	// 32号：在效处置过滤（hidden/deleted 作品用户端不可见——列表/详情/预填同源）
+	hidden := uc.moderatedKeys(ctx, tenantID)
+
 	applyPublish := func(it *WorkItem, js []entity.PublishJob, matched *entity.PublishJob) {
 		if matched != nil && matched.ID != "" {
 			it.Status = "published"
@@ -114,6 +253,9 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 	contents, err := uc.contentRepo.ListByTenant(ctx, tenantID, 200)
 	if err == nil {
 		for _, c := range contents {
+			if hidden["c-"+c.ID] {
+				continue // 已被平台处置
+			}
 			it := WorkItem{
 				ID:        "c-" + c.ID,
 				Kind:      "article",
@@ -138,6 +280,9 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 		for _, t := range tasks {
 			if t.State != entity.TaskStateSuccess {
 				continue // 生成中/失败的任务不进作品库（任务列表页管）
+			}
+			if hidden["g-"+t.ID] {
+				continue // 已被平台处置
 			}
 			if !isDeliverableTask(t) {
 				continue // 文生图/TTS/素材片段等仅进素材库

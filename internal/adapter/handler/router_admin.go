@@ -223,6 +223,13 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.GET("/billing/payment-config", r.HandleGetPaymentConfig) // 支付网关配置
 			adminGroup.PUT("/billing/payment-config", r.HandleSetPaymentConfig) // 保存支付配置
 		}
+
+		// 32号：作品管理与内容安全——跨租户巡查流 + 下架/恢复（处置动作与业务表解耦）。
+		if r.worksUC != nil {
+			adminGroup.GET("/works", r.HandleAdminWorksList)
+			adminGroup.POST("/works/:key/hide", r.HandleAdminWorkHide)
+			adminGroup.POST("/works/:key/restore", r.HandleAdminWorkRestore)
+		}
 	}
 }
 

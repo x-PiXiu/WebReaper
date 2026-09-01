@@ -133,6 +133,11 @@ type GenerationTaskRepository interface {
 	List(ctx context.Context, tenantID string, limit int) ([]entity.GenerationTask, error)
 	// ListActive 轮询用：全部租户未终态任务（阶段 1 单机扫描）。
 	ListActive(ctx context.Context, limit int) ([]entity.GenerationTask, error)
+	// ListRecentSuccessAll 跨租户最近成功任务倒序（32号：管理端作品巡查流）。
+	ListRecentSuccessAll(ctx context.Context, limit int) ([]entity.GenerationTask, error)
+	// FindSuccessTaskByMediaURL 按产物 URL 反查成功任务（32号 P1：发布拦截的
+	// media_urls → 成片 work_key 桥接；LIKE 匹配 creations_json，查不到返回 ErrNotFound）。
+	FindSuccessTaskByMediaURL(ctx context.Context, mediaURL string) (entity.GenerationTask, error)
 	// ListFailed 自动重试用：全部租户 failed 任务（按 updated_at 升序——
 	// 最久未动者优先；是否可重试由用例层 ClassifyError 判定，仓储不掺业务）。
 	ListFailed(ctx context.Context, limit int) ([]entity.GenerationTask, error)

@@ -578,6 +578,8 @@ func main() {
 			}
 			// 注入发布效果追踪（发布成功后自动触发监测对比提及率）
 			geoPublishUC.SetMonitorTrigger(geoMonitorUCRef)
+			// 32号 P1：作品处置发布拦截（防扩散）
+			geoPublishUC.SetWorkModeration(repository.NewGormWorkModerationRepository(geoRepos.db), repository.NewGormGenerationTaskRepository(geoRepos.db))
 			// 注入公开站根地址（发布内容尾部带公开站链接，加速爬虫发现）
 			geoPublishUC.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 			// 注入账号池（全自动发布时自动选最优账号——最久未使用优先）
@@ -594,6 +596,8 @@ func main() {
 			router.SetTransportRegistry(transportRegistry, settingRepo)
 			// 作品库三源聚合（文章 + 多媒体产物 + 发布状态 + 互动数据）
 			worksUC := works.NewWorksUseCase(geoRepos.content, repository.NewGormGenerationTaskRepository(geoRepos.db), accountRepos.job, accountRepos.metric)
+			// 32号：作品处置（管理端巡查/下架/恢复 + 用户端过滤）
+			worksUC.SetModerationRepo(repository.NewGormWorkModerationRepository(geoRepos.db))
 			router.SetWorks(worksUC)
 
 			// 商户主 Agent 工具集（Agent-as-Tool：获客管家对话编排；二期+增长子Agent/硬确认）

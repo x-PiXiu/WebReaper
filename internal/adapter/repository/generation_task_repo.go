@@ -148,6 +148,39 @@ func (r *GormGenerationTaskRepository) ListActive(ctx context.Context, limit int
 	return out, nil
 }
 
+// ListRecentSuccessAll 跨租户最近成功任务倒序（32号：管理端作品巡查流）。
+func (r *GormGenerationTaskRepository) ListRecentSuccessAll(ctx context.Context, limit int) ([]entity.GenerationTask, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var pos []GenerationTaskPO
+	if err := r.db.WithContext(ctx).
+		Where("state = ?", entity.TaskStateSuccess).
+		Order("created_at DESC").Limit(limit).Find(&pos).Error; err != nil {
+		return nil, err
+	}
+	out := make([]entity.GenerationTask, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, generationTaskFromPO(p))
+	}
+	return out, nil
+}
+
+// FindSuccessTaskByMediaURL 按产物 URL 反查成功任务（32号 P1 发布拦截桥接）。
+// LIKE 匹配 creations_json 的 url/stored_url 字段值；量级小（成功任务数）可接受全扫。
+func (r *GormGenerationTaskRepository) FindSuccessTaskByMediaURL(ctx context.Context, mediaURL string) (entity.GenerationTask, error) {
+	if mediaURL == "" {
+		return entity.GenerationTask{}, gorm.ErrRecordNotFound
+	}
+	var po GenerationTaskPO
+	if err := r.db.WithContext(ctx).
+		Where("state = ? AND creations_json LIKE ?", entity.TaskStateSuccess, "%\""+mediaURL+"\"%").
+		Order("created_at DESC").First(&po).Error; err != nil {
+		return entity.GenerationTask{}, err
+	}
+	return generationTaskFromPO(po), nil
+}
+
 // ListFailed 自动重试用：failed 任务按 updated_at 升序（最久未动者优先；
 // 可重试分类/退避窗口由用例层判定——仓储只做数据访问）。
 func (r *GormGenerationTaskRepository) ListFailed(ctx context.Context, limit int) ([]entity.GenerationTask, error) {

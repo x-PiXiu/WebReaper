@@ -260,9 +260,9 @@ func TestEndpointSelector_Select_ThreeImages(t *testing.T) {
 }
 
 func TestEndpointSelector_Select_SubjectsWithAudio(t *testing.T) {
-	// 测试（N1）：subjects（分身）+ 音频素材 → 显式报错而非静默丢音频。
-	// reference2video 端点无外部音频字段，此前 subjects 分支最优先命中会把音频素材
-	// 静默丢弃——修复后应拒绝并引导两步链（① subjects 生成视频 → ② 视频+音频 lip_sync）。
+	// 31号定案（旧 N1 拒绝已删除）：subjects（分身）+ 音频素材 → 画面复用路径
+	// 装配 __chain_* 标记（音频进 __chain_audio_url，由 UnifiedSubmit 解析分身
+	// 形象视频直接提交 lip_sync——音频不再被丢弃，也无需手动两步链）。
 	mediaStore := &MockMediaAssetStore{
 		materials: []entity.MediaAsset{
 			{
@@ -285,16 +285,20 @@ func TestEndpointSelector_Select_SubjectsWithAudio(t *testing.T) {
 	}
 
 	result, err := selector.Select(context.Background(), req)
-	if err == nil {
-		t.Fatalf("Expected error for subjects+audio (audio must not be silently dropped), got result: %+v", result)
+	if err != nil {
+		t.Fatalf("subjects+音频应走复用路径而非拒绝: %v", err)
 	}
-	if result.SubType != "" || result.Params != nil {
-		t.Errorf("Expected empty result on error, got subType='%s'", result.SubType)
+	if result.Params["__chain_audio_url"] != "https://example.com/voice.mp3" {
+		t.Errorf("音频应进 __chain_audio_url: %+v", result.Params)
+	}
+	if result.Params["__chain_text"] != "场景意图描述" {
+		t.Errorf("文案应进 __chain_text: %+v", result.Params)
 	}
 }
 
 func TestEndpointSelector_Select_SubjectsOnly(t *testing.T) {
-	// 测试：仅 subjects（无音频）→ reference2video 不受 N1 守卫影响。
+	// 31号定案：subjects+文案无语音信号 = 旧单步残留 → 显式报错
+	//（旧 ref2video 端内合成语音路径已删除；口播一律走画面复用）。
 	mediaStore := &MockMediaAssetStore{
 		materials: []entity.MediaAsset{},
 	}
@@ -309,12 +313,8 @@ func TestEndpointSelector_Select_SubjectsOnly(t *testing.T) {
 		},
 	}
 
-	result, err := selector.Select(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Select failed: %v", err)
-	}
-	if result.SubType != "reference2video" {
-		t.Errorf("Expected subType 'reference2video', got '%s'", result.SubType)
+	if _, err := selector.Select(context.Background(), req); err == nil {
+		t.Fatal("subjects+文案无语音信号应显式报错（旧单步已下线）")
 	}
 }
 

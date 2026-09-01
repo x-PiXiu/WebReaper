@@ -148,7 +148,7 @@ export async function runLipSyncPipeline(
     onTaskSubmit?.('video', task.id)
     videoTask = await waitGenerationTask(task.id)
   } else {
-    // 分身：reference2video 主体一致性
+    // 分身：画面复用（31号——服务端解析分身预生成形象视频直接对口型）
     if (!input.subjectServerId) {
       throw new Error(
         '请先在数字资产页创建数字分身（上传形象照即可），再选择该分身生成分身口播视频。' +
@@ -156,37 +156,34 @@ export async function runLipSyncPipeline(
       )
     }
 
-    if (audioSource === 'upload') {
-      // 分身 + 上传音频（N1 修复）：两步链——
-      // ① reference2video 生成分身视觉（纯画面，无音频—— Vidu 主体模式不支持外部音频）
-      // ② lip_sync 将上传音频与生成的视频合成对口型
-      const env = input.envSubject
-      const sceneIntent = input.intent?.trim() || input.script.slice(0, 2000)
-      const ref = await submitUnified(buildSubjectReferencePayload({
-        brand_id: input.brandId,
-        server_id: input.subjectServerId,
-        name: input.subjectName,
-        text: env ? `${sceneIntent}（在「${env.name || '环境'}」中）` : sceneIntent,
-        envSubject: env ? { serverId: env.serverId, name: env.name } : undefined,
-      }))
-      onTaskSubmit?.('video', ref.id)
-      const refDone = await waitGenerationTask(ref.id)
-      const refVideoUrl = creationUrl(refDone)
-      if (!refVideoUrl) throw new Error('分身视频产物缺失（可重试）')
+    // 环境主体组合出镜需要现场生成画面，与画面复用路径不兼容——显式拦截（待产品重新设计）
+    if (input.envSubject) {
+      throw new Error(
+        '环境主体组合出镜在新版口播路径暂不支持（画面固定复用分身形象视频）——' +
+        '请移除环境主体后重试；组合出镜能力待产品在分身资产侧重新设计。',
+      )
+    }
 
-      // ② lip_sync：分身视频 + 上传音频
-      const videoId = await ensureMaterialId(refVideoUrl)
+    if (audioSource === 'upload') {
+      // 分身 + 上传音频（31号画面复用）：单段提交——服务端解析分身预生成形象视频
+      // 与上传音频直接合成 lip_sync（C 路径，音频驱动免音色）；不再两步生成画面
       const audioId = await ensureMaterialId(input.uploadedAudioUrl!)
       const lipsync = await submitUnified({
-        brand_id: input.brandId,
-        materials: [videoId, audioId],
-        params: deliverableWorkParams(),
+        ...buildSubjectReferencePayload({
+          brand_id: input.brandId,
+          server_id: input.subjectServerId,
+          name: input.subjectName,
+          text: input.script,
+          audioMaterialId: audioId,
+          oral: true,
+        }),
         broll_segments: input.brollSegments,
       })
       onTaskSubmit?.('video', lipsync.id)
       videoTask = await waitGenerationTask(lipsync.id)
     } else {
-      // 分身 + 文本驱动：单步 reference2video（台词直驱，Vidu 端内合成语音）
+      // 分身 + 文本驱动（31号画面复用）：单段提交——服务端复用分身形象视频，
+      // 文案 + 音色（显式选定，未选时服务端回落分身绑定音色）直接 lip_sync
       const ref = await submitUnified({
         ...buildSubjectReferencePayload({
           brand_id: input.brandId,
@@ -194,6 +191,7 @@ export async function runLipSyncPipeline(
           name: input.subjectName,
           text: input.script,
           voiceId: input.voiceId,
+          oral: true,
         }),
         broll_segments: input.brollSegments,
       })

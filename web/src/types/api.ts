@@ -133,6 +133,21 @@ export interface StatsView {
 }
 
 // ---- GEO：品牌资产 ----
+/** 管理端作品巡查条目（32号：作品管理与内容安全） */
+export interface AdminWorkItem {
+  id: string
+  kind: string
+  title: string
+  brand_id?: string
+  status: string
+  media_urls?: string[]
+  cover_url?: string
+  created_at: string
+  tenant_id: string
+  moderation_action?: string // hidden / deleted（空=未处置）
+  moderation_reason?: string
+}
+
 export interface Brand {
   id: string
   tenant_id: string

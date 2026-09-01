@@ -65,11 +65,13 @@ func TestExtractLipsyncChain(t *testing.T) {
 	}
 }
 
-// TestSelectorAutoChainMarkers 开关联动：关=现状（prompt=文案，无链标记）；
-// 开=链标记（文案/音色进 __chain_*，不再有画面 prompt/audio 装配）。
-func TestSelectorAutoChainMarkers(t *testing.T) {
+// TestSelectorReuseMarkers 旧单步已删除：subjects+语音信号（voice_id/oral/音频）
+// 恒定装配复用标记；无信号（旧单步残留调用）显式报错。
+func TestSelectorReuseMarkers(t *testing.T) {
 	mediaStore := &MockMediaAssetStore{materials: []entity.MediaAsset{}}
 	selector := NewEndpointSelector(mediaStore, &MockTemplateRepository{})
+
+	// subjects+文案+音色 → 复用标记（B 路径）
 	req := entity.UnifiedGenerationRequest{
 		Text: "大家好欢迎光临",
 		Params: map[string]any{
@@ -77,32 +79,50 @@ func TestSelectorAutoChainMarkers(t *testing.T) {
 			"voice_id": "platform-9",
 		},
 	}
-
 	res, err := selector.Select(context.Background(), req)
 	if err != nil {
-		t.Fatalf("开关关时 subjects+文本应正常: %v", err)
-	}
-	if res.SubType != "reference2video" || res.Params["prompt"] != "大家好欢迎光临" {
-		t.Errorf("开关关应保持现状: subType=%s prompt=%v", res.SubType, res.Params["prompt"])
-	}
-	if _, ok := res.Params["__chain"]; ok {
-		t.Error("开关关不应装配复用标记")
-	}
-
-	selector.SetSettingRepo(&chainSettingRepo{values: map[string]string{
-		entity.SettingKeyGenLipsyncAutoChain: "true",
-	}})
-	res, err = selector.Select(context.Background(), req)
-	if err != nil {
-		t.Fatalf("开关开时应放行: %v", err)
+		t.Fatalf("subjects+文本+音色应装配复用标记: %v", err)
 	}
 	if res.Params["__chain_text"] != "大家好欢迎光临" || res.Params["__chain_voice_id"] != "platform-9" {
-		t.Error("文案/音色应进 __chain_* 复用标记")
+		t.Error("文案/音色应进 __chain_* 复用标记（唯一路径，无开关）")
+	}
+
+	// subjects+文案+oral 显式标记（未选音色）→ 复用标记（B 路径默认分身绑定音色）
+	reqOral := entity.UnifiedGenerationRequest{
+		Text: "大家好",
+		Params: map[string]any{
+			"subjects": []any{map[string]any{"server_id": "srv-001"}},
+			"oral":     true,
+		},
+	}
+	resOral, err := selector.Select(context.Background(), reqOral)
+	if err != nil {
+		t.Fatalf("subjects+oral 应装配复用标记: %v", err)
+	}
+	if resOral.Params["__chain_text"] != "大家好" {
+		t.Error("oral 标记路径文案应进 __chain_text")
+	}
+
+	// subjects+文案 无任何语音信号（旧单步残留）→ 显式报错
+	reqOld := entity.UnifiedGenerationRequest{
+		Text:   "旧单步残留调用",
+		Params: map[string]any{"subjects": []any{map[string]any{"server_id": "srv-001"}}},
+	}
+	if _, err := selector.Select(context.Background(), reqOld); err == nil {
+		t.Error("无语音信号的 subjects+文本应显式报错（旧单步已下线）")
+	}
+
+	// subjects 裸提交（无文案无信号）→ 报错
+	reqBare := entity.UnifiedGenerationRequest{
+		Params: map[string]any{"subjects": []any{map[string]any{"server_id": "srv-001"}}},
+	}
+	if _, err := selector.Select(context.Background(), reqBare); err == nil {
+		t.Error("裸 subjects 提交应报错（缺少文案或音频）")
 	}
 }
 
-// TestSelectorAutoChainAudio subjects+音频：开关开时放行（N1 守卫升级）。
-func TestSelectorAutoChainAudio(t *testing.T) {
+// TestSelectorReuseAudio subjects+音频 → 复用标记 C 路径（旧 N1 拒绝已删除）。
+func TestSelectorReuseAudio(t *testing.T) {
 	mediaStore := &MockMediaAssetStore{materials: []entity.MediaAsset{
 		{ID: "mat-audio-001", Type: entity.MaterialTypeAudio, SourceURL: "https://example.com/v.mp3"},
 	}}
@@ -111,15 +131,9 @@ func TestSelectorAutoChainAudio(t *testing.T) {
 		Materials: []string{"mat-audio-001"},
 		Params:    map[string]any{"subjects": []any{map[string]any{"server_id": "srv-001"}}},
 	}
-	if _, err := selector.Select(context.Background(), req); err == nil {
-		t.Fatal("开关关时 subjects+音频应保持 N1 拒绝")
-	}
-	selector.SetSettingRepo(&chainSettingRepo{values: map[string]string{
-		entity.SettingKeyGenLipsyncAutoChain: "true",
-	}})
 	res, err := selector.Select(context.Background(), req)
 	if err != nil {
-		t.Fatalf("开关开时 subjects+音频应放行: %v", err)
+		t.Fatalf("subjects+音频应走复用路径（N1 拒绝已删）: %v", err)
 	}
 	if res.Params["__chain_audio_url"] != "https://example.com/v.mp3" {
 		t.Error("音频应进 __chain_audio_url")

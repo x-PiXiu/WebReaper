@@ -403,6 +403,8 @@ type PublishUseCase struct {
 	resolver       port.CredentialResolver    // 可选：凭证解析（rpa→cookie/api→token，用例层不碰 vault）
 	usageRepo      port.PublishUsageRepository // 可选：发布用量记账（限流读写两侧——缺此发布不限速且配额恒 0）
 	configRepo     port.BrandPublishConfigRepository // 可选：品牌限流配置（服务端强制限流用）
+	modRepo        port.WorkModerationRepository // 可选（32号 P1：作品处置发布拦截；缺此不拦截）
+	taskRepo       port.GenerationTaskRepository // 可选（32号 P1：媒体 URL 反查成片任务→work_key）
 }
 
 func NewPublishUseCase(jr port.PublishJobRepository, reg port.PublishChannelRegistry, ar port.AccountRepository, vault port.CookieVault) *PublishUseCase {
@@ -412,6 +414,41 @@ func NewPublishUseCase(jr port.PublishJobRepository, reg port.PublishChannelRegi
 // SetPublishUsage 注入发布用量与品牌配置仓储（可选；记账+服务端限流）。
 func (uc *PublishUseCase) SetPublishUsage(ur port.PublishUsageRepository, cr port.BrandPublishConfigRepository) {
 	uc.usageRepo, uc.configRepo = ur, cr
+}
+
+// SetWorkModeration 注入作品处置拦截（32号 P1：防扩散——被平台处置的作品
+// 不允许发布；媒体 URL 反查需要任务仓储）。可选依赖，缺省不拦截。
+func (uc *PublishUseCase) SetWorkModeration(mr port.WorkModerationRepository, tr port.GenerationTaskRepository) {
+	uc.modRepo, uc.taskRepo = mr, tr
+}
+
+// checkWorkModeration 发布前作品处置校验（32号 P1）。
+// 文章：content_id → c-{id}；多媒体：media_urls 反查成功成片任务 → g-{taskID}。
+// hidden/deleted 均拒绝（换入口也发不出去）；查不到处置记录=放行（不阻断主流程）。
+func (uc *PublishUseCase) checkWorkModeration(ctx context.Context, in PublishInput) error {
+	if uc.modRepo == nil {
+		return nil
+	}
+	if in.ContentID != "" {
+		if m, err := uc.modRepo.FindByKey(ctx, "c-"+in.ContentID); err == nil && m.Active() {
+			return fmt.Errorf("该作品已被平台处置（%s），无法发布", m.Action)
+		}
+	}
+	if uc.taskRepo != nil {
+		for _, u := range in.MediaURLs {
+			if u == "" {
+				continue
+			}
+			t, err := uc.taskRepo.FindSuccessTaskByMediaURL(ctx, u)
+			if err != nil || t.ID == "" {
+				continue // 非成片产物（直传素材）——无处置关联
+			}
+			if m, mErr := uc.modRepo.FindByKey(ctx, "g-"+t.ID); mErr == nil && m.Active() {
+				return fmt.Errorf("该作品已被平台处置（%s），无法发布", m.Action)
+			}
+		}
+	}
+	return nil
 }
 
 // checkPublishLimit 服务端限流闸门（品牌配置了日上限且已用尽时拒绝）。
@@ -638,6 +675,11 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 		return entity.PublishJob{}, lErr
 	}
 
+	// 32号 P1：作品处置拦截（防扩散——被下架/删除的作品换入口也发不出去）
+	if mErr := uc.checkWorkModeration(ctx, in); mErr != nil {
+		return entity.PublishJob{}, mErr
+	}
+
 	// 发布前处理：Markdown 转纯文本（社媒平台不渲染 Markdown）。
 	// 先过滤 think 标签（兜底：历史内容可能在生成期未被过滤，防止思考过程泄漏到平台）。
 	publishContent := pkg.MarkdownToPlainText(pkg.StripThinkTags(in.Content))
@@ -717,6 +759,16 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 
 // publishAuto 全自动发布：查账号→解密cookie→后台goroutine执行chromedp。
 func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob, ch port.PublishChannel) (entity.PublishJob, error) {
+	// 32号 P1：RPA 执行前复检（提交后处置的竞态兜底——执行中发现处置则中止）
+	if uc.modRepo != nil {
+		in := PublishInput{ContentID: job.ContentID, MediaURLs: job.MediaURLs}
+		if mErr := uc.checkWorkModeration(ctx, in); mErr != nil {
+			job.Status = entity.PublishStatusFailed
+			job.ErrorMsg = mErr.Error()
+			_ = uc.jobRepo.Save(ctx, job)
+			return job, mErr
+		}
+	}
 	// 检查通道是否支持全自动
 	autoCh, ok := ch.(port.AutoPublishChannel)
 	if !ok {

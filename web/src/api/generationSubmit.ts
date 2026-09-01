@@ -286,8 +286,8 @@ export function buildSubjectRegisterPayload(input: {
 }
 
 /**
- * 已注册分身 + 口播文案 → reference2video（主体 server_id 一致性）。
- * 可选附带 audio 素材 ID（服务端当前以 subjects 路径为主，音频供后续扩展）。
+ * 已注册分身口播提交（31号画面复用）：服务端解析分身预生成形象视频
+ * 直接提交 lip_sync——音频素材=C 路径（音频驱动），否则 B 路径（文本驱动+音色）。
  */
 export function buildSubjectReferencePayload(input: {
   brand_id: string
@@ -299,6 +299,8 @@ export function buildSubjectReferencePayload(input: {
   envSubject?: { serverId: string; name?: string }
   /** 文本驱动时的音色（01 号"选音色默认已选中"——显式选择写入主体覆盖分身绑定值） */
   voiceId?: string
+  /** 口播显式标记（31号服务端信号——未选音色时也走口播，服务端回落分身绑定音色） */
+  oral?: boolean
 }): UnifiedSubmitPayload {
   const main: SubjectRef = {
     name: (input.name || '主体').trim() || '主体',
@@ -313,7 +315,7 @@ export function buildSubjectReferencePayload(input: {
     brand_id: input.brand_id,
     text: input.text.trim(),
     materials: input.audioMaterialId ? [input.audioMaterialId] : undefined,
-    params: deliverableWorkParams({ subjects }),
+    params: deliverableWorkParams({ subjects, ...(input.oral ? { oral: true } : {}) }),
   }
 }
 

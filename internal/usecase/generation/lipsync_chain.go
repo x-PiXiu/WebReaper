@@ -94,20 +94,36 @@ func (uc *GenerationUseCase) submitReuseLipSync(ctx context.Context, in UnifiedS
 // firstSubjectServerID 解析 subjects[0].server_id（主体一致性路径的主主体）。
 // 容忍 []any(map)/[]map[string]any 两种形态；解析失败返回空由调用方报错。
 func firstSubjectServerID(subjects any) string {
-	list, ok := subjects.([]any)
-	if !ok || len(list) == 0 {
-		if typed, ok2 := subjects.([]map[string]any); ok2 && len(typed) > 0 {
-			vid, _ := typed[0]["server_id"].(string)
-			return vid
-		}
-		return ""
-	}
-	m, ok := list[0].(map[string]any)
-	if !ok {
+	m := firstSubjectMap(subjects)
+	if m == nil {
 		return ""
 	}
 	vid, _ := m["server_id"].(string)
 	return vid
+}
+
+// firstSubjectVoiceID 解析 subjects[0].voice_id（前端显式选音色写入主体引用——01号语义）。
+func firstSubjectVoiceID(subjects any) string {
+	m := firstSubjectMap(subjects)
+	if m == nil {
+		return ""
+	}
+	vid, _ := m["voice_id"].(string)
+	return vid
+}
+
+// firstSubjectMap 解析 subjects[0] 为 map 形态（[]any(map) / []map[string]any 双兼容）。
+func firstSubjectMap(subjects any) map[string]any {
+	if list, ok := subjects.([]any); ok && len(list) > 0 {
+		if m, ok := list[0].(map[string]any); ok {
+			return m
+		}
+		return nil
+	}
+	if typed, ok := subjects.([]map[string]any); ok && len(typed) > 0 {
+		return typed[0]
+	}
+	return nil
 }
 
 // submitLipSyncViaTTS 备胎道（31号 L4-⑤）＝23号 A 路径同构：lip_sync 注册类失败

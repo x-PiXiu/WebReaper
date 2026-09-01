@@ -206,34 +206,39 @@ func (s *EndpointSelectorImpl) selectEndpoint(ctx context.Context, req entity.Un
 		return s.selectByType(req, stats, hasText)
 	}
 
-	// BE-SUBJ-01：主体一致性路径——params.subjects 含已注册分身 server_id 时
-	// 优先 reference2video（同一分身跨视频脸部一致），而非每次图+音重生成数字人
+	// BE-SUBJ-01 + 31号 §4.2 定案（2026-09-01，旧单步分支已彻底删除）：
+	// 画面复用是分身口播的唯一路径——subjects 提交一律装配 __chain_* 标记，
+	// 由 UnifiedSubmit 解析分身预生成形象视频直接提交 lip_sync。
+	// 语音信号三选一：音频素材 / params.voice_id / params.oral（口播显式标记）——
+	// 缺信号 = 旧单步（ref2video 端内合成语音）调用残留，显式报错引导改造。
+	//（分身画面资产生成走阶段0 avatar_chain，直接 Submit 不经本选择器，不受影响）
 	if subjects, ok := req.Params["subjects"]; ok && subjects != nil {
-		// N1（2026-09-01）+ 31号 §4.2：reference2video 端点无外部音频字段。
-		// 自动链关闭（默认）：显式报错引导调用方手动两步链（失败可见，不静默丢素材）；
-		// 自动链开启：subjects+（文案|音频）放行——服务端链式（①静默画面→②语音注入）。
-		autoChain := s.settingBool(ctx, entity.SettingKeyGenLipsyncAutoChain, false)
-		if stats.AudioCount > 0 && !autoChain {
-			return "", nil, fmt.Errorf("分身生成（subjects）不支持外部音频素材（reference2video 无音频字段，为避免静默丢弃已拒绝）——请分两步：先用 subjects 生成视频，再用该视频+音频提交 lip_sync")
+		// 音色信号两处可来：顶层 params.voice_id 或 subjects[0].voice_id
+		//（前端 buildSubjectReferencePayload 将显式选择写入主体引用——01号语义）
+		vid, _ := req.Params["voice_id"].(string)
+		if vid == "" {
+			vid = firstSubjectVoiceID(subjects)
+		}
+		oral, _ := req.Params["oral"].(bool)
+		if stats.AudioCount == 0 && vid == "" && !oral {
+			if hasText {
+				return "", nil, fmt.Errorf("分身口播请选择音色或上传音频（旧单步端内合成已下线——画面复用分身的预生成形象视频）")
+			}
+			return "", nil, fmt.Errorf("分身提交缺少文案或音频")
 		}
 		params := entity.GenerationParams{
 			"prompt":   req.Text,
 			"subjects": subjects,
+			"__chain":  true,
 		}
-		if autoChain && (hasText || stats.AudioCount > 0) {
-			// 31号 §4.2（对齐 23 号目标态）：画面复用——口播不生成画面任务。
-			// __chain_* 标记文案/音频/音色，由 UnifiedSubmit 解析分身形象视频后
-			// 直接提交 lip_sync（B/C 路径单段）；形象视频缺失显式报错，不回退现场生成。
-			params["__chain"] = true
-			if hasText {
-				params["__chain_text"] = req.Text
-			}
-			if stats.AudioCount > 0 {
-				params["__chain_audio_url"] = stats.Audios[0].SourceURL
-			}
-			if vid, ok := req.Params["voice_id"].(string); ok && vid != "" {
-				params["__chain_voice_id"] = vid
-			}
+		if hasText {
+			params["__chain_text"] = req.Text
+		}
+		if stats.AudioCount > 0 {
+			params["__chain_audio_url"] = stats.Audios[0].SourceURL
+		}
+		if vid != "" {
+			params["__chain_voice_id"] = vid
 		}
 		params["__sub_type"] = "reference2video"
 		return "reference2video", params, nil
@@ -656,19 +661,7 @@ func (s *EndpointSelectorImpl) settingString(ctx context.Context, key, fallback 
 }
 
 // settingBool 布尔配置读取（"true"/"1" 为真；未配置/读取失败回落 fallback）。
-func (s *EndpointSelectorImpl) settingBool(ctx context.Context, key string, fallback bool) bool {
-	raw := s.settingString(ctx, key, "")
-	switch raw {
-	case "":
-		return fallback
-	case "true", "1", "on", "yes":
-		return true
-	case "false", "0", "off", "no":
-		return false
-	default:
-		return fallback
-	}
-}
+// （31号旧单步删除后暂无调用方——保留供后续布尔配置使用）
 
 // settingInt 从 system_settings 读取整数值（未配置/读取失败/解析失败回落 fallback）。
 func (s *EndpointSelectorImpl) settingInt(ctx context.Context, key string, fallback int) int {
