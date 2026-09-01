@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
@@ -30,6 +31,13 @@ func (m *memModerationRepo) Upsert(_ context.Context, v entity.WorkModeration) e
 }
 func (m *memModerationRepo) Delete(_ context.Context, key string) error {
 	delete(m.byKey, key)
+	return nil
+}
+func (m *memModerationRepo) UpdateAppeal(_ context.Context, key, status, text string, at *time.Time) error {
+	if v, ok := m.byKey[key]; ok {
+		v.AppealStatus, v.AppealText, v.AppealedAt = status, text, at
+		m.byKey[key] = v
+	}
 	return nil
 }
 func (m *memModerationRepo) ListByTenant(_ context.Context, tenantID string) ([]entity.WorkModeration, error) {
@@ -85,31 +93,70 @@ func TestHideWorkValidation(t *testing.T) {
 	}
 }
 
-func TestModeratedKeysFilter(t *testing.T) {
+func TestModeratedByKeyAnnotation(t *testing.T) {
 	uc, repo := newModerationUC()
 	ctx := context.Background()
 	_ = uc.HideWork(ctx, "g-task-1", "video", "t1", "hidden", "违规", "op")
 	_ = uc.HideWork(ctx, "c-cont-2", "article", "t1", "deleted", "违规", "op")
 	_ = uc.HideWork(ctx, "g-task-3", "video", "t2", "hidden", "他租户", "op") // 其他租户
 
-	keys := uc.moderatedKeys(ctx, "t1")
-	if !keys["g-task-1"] || !keys["c-cont-2"] {
-		t.Error("本租户 hidden/deleted 作品应进过滤集合")
+	byKey := uc.moderatedByKey(ctx, "t1")
+	if byKey["g-task-1"].Action != entity.WorkActionHidden || byKey["c-cont-2"].Action != entity.WorkActionDeleted {
+		t.Error("本租户 hidden/deleted 作品应进标注索引")
 	}
-	if keys["g-task-3"] {
-		t.Error("他租户处置不应影响本租户过滤")
+	if byKey["g-task-3"].Action != "" {
+		t.Error("他租户处置不应影响本租户标注")
 	}
 
-	// 恢复后不再过滤
+	// 恢复后不再标注
 	if err := uc.RestoreWork(ctx, "g-task-1"); err != nil {
 		t.Fatalf("恢复失败: %v", err)
 	}
-	keys = uc.moderatedKeys(ctx, "t1")
-	if keys["g-task-1"] {
-		t.Error("恢复后不应再过滤")
+	if uc.moderatedByKey(ctx, "t1")["g-task-1"].Action != "" {
+		t.Error("恢复后不应再标注")
 	}
 	if _, err := repo.FindByKey(ctx, "g-task-1"); err == nil {
 		t.Error("恢复应清除处置记录")
+	}
+}
+
+// TestAppealFlow 申诉全流程（32号 P2 终批）：提交→防滥用→维持→限频→再申诉。
+func TestAppealFlow(t *testing.T) {
+	uc, _ := newModerationUC()
+	ctx := context.Background()
+	_ = uc.HideWork(ctx, "g-appeal-1", "video", "t1", "hidden", "违规", "op")
+
+	// 未处置作品申诉拒绝
+	if err := uc.AppealWork(ctx, "t1", "g-none", "我是清白的"); err == nil {
+		t.Error("无处置记录的申诉应拒绝")
+	}
+	// 空理由拒绝
+	if err := uc.AppealWork(ctx, "t1", "g-appeal-1", "  "); err == nil {
+		t.Error("空申诉理由应拒绝")
+	}
+	// 合法申诉
+	if err := uc.AppealWork(ctx, "t1", "g-appeal-1", "内容是正规美食探店，请复核"); err != nil {
+		t.Fatalf("合法申诉应成功: %v", err)
+	}
+	// 申诉中重复提交拒绝
+	if err := uc.AppealWork(ctx, "t1", "g-appeal-1", "再申诉"); err == nil || !strings.Contains(err.Error(), "审核中") {
+		t.Errorf("申诉中应拒绝重复提交: %v", err)
+	}
+	// 跨租户申诉（记录带租户时）
+	if err := uc.AppealWork(ctx, "t2", "g-appeal-1", "别人的作品"); err == nil {
+		t.Error("他租户申诉应拒绝（记录带租户归属时）")
+	}
+	// 管理员维持
+	if err := uc.RejectAppeal(ctx, "g-appeal-1"); err != nil {
+		t.Fatalf("维持处置应成功: %v", err)
+	}
+	// 无 pending 时再维持拒绝
+	if err := uc.RejectAppeal(ctx, "g-appeal-1"); err == nil {
+		t.Error("无待审申诉时维持应拒绝")
+	}
+	// 维持后 24h 内再申诉拒绝
+	if err := uc.AppealWork(ctx, "t1", "g-appeal-1", "马上再试"); err == nil || !strings.Contains(err.Error(), "24") {
+		t.Errorf("维持后 24h 内应拒绝再申诉: %v", err)
 	}
 }
 

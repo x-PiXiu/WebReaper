@@ -606,6 +606,7 @@ func main() {
 			workModerationRepo := repository.NewGormWorkModerationRepository(geoRepos.db)
 			contentModerator := moderation.NewModerator(aiGenerator, workModerationRepo, settingRepo)
 			worksUC.SetModerationRepo(workModerationRepo)
+			worksUC.SetModerator(contentModerator) // P2 终批：申诉文本机审（防申诉通道滥用）
 			geoContentUCRef.SetModerator(contentModerator) // ② GEO 内容生成后（内层作用域经 ref 注入）
 			geoPublishUC.SetModerator(contentModerator) // ③ 发布前文本复检
 			router.SetWorks(worksUC)

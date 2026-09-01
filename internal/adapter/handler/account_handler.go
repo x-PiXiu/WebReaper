@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -525,6 +526,28 @@ func (h *AccountHandler) HandleListWorks(c *gin.Context) {
 		return
 	}
 	success(c, items)
+}
+
+// HandleAppealWork POST /api/v1/merchant/works/:key/appeal —— 用户申诉被处置作品
+//（32号 P2 终批：防滥用一天一次；申诉中文本过机审防展示位滥用）。
+func (h *AccountHandler) HandleAppealWork(c *gin.Context) {
+	if h.worksUC == nil || !h.worksUC.ModerationEnabled() {
+		fail(c, fmt.Errorf("申诉服务未启用"))
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, err)
+		return
+	}
+	if err := h.worksUC.AppealWork(c.Request.Context(), middleware.CurrentTenantID(c),
+		strings.TrimSpace(c.Param("key")), req.Reason); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"appealed": true})
 }
 
 // HandleAnalyticsSummary GET /api/v1/merchant/works/analytics-summary —— 作品数据页聚合

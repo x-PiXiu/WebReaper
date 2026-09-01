@@ -356,6 +356,15 @@ export const businessApi = {
   adminRestoreWork: (workKey: string) =>
     apiClient.post<unknown, { work_key: string; restored: boolean }>(`/api/v1/admin/works/${encodeURIComponent(workKey)}/restore`),
 
+  adminListAppeals: (limit = 100) =>
+    apiClient.get<unknown, { items: AdminWorkFlagged[]; total: number }>(`/api/v1/admin/works/appeals?limit=${limit}`),
+
+  adminRejectAppeal: (workKey: string) =>
+    apiClient.post<unknown, { work_key: string; appeal: string }>(`/api/v1/admin/works/${encodeURIComponent(workKey)}/appeal/reject`),
+
+  appealWork: (workKey: string, reason: string) =>
+    apiClient.post<unknown, { appealed: boolean }>(`/api/v1/merchant/works/${encodeURIComponent(workKey)}/appeal`, { reason }),
+
   adminSetContentStatus: (contentId: string, status: 'draft' | 'published') =>
     apiClient.post<unknown, OptimizedContent>(`/api/v1/admin/contents/${contentId}/status`, { status }),
 

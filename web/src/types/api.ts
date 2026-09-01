@@ -141,6 +141,9 @@ export interface AdminWorkFlagged {
   reason: string
   source: string
   updated_at: string
+  action?: string              // hidden / deleted（申诉记录必带）
+  appeal_status?: string       // 32号 P2 终批
+  appeal_text?: string
 }
 
 /** 管理端作品巡查条目（32号：作品管理与内容安全） */
@@ -443,6 +446,10 @@ export interface WorkItem {
   created_at: string
   published_at?: string
   parent_task_id?: string // B-Roll 血缘：compose 产物的源片任务 ID
+  // 32号 P2 终批：处置标注态（条目保留+原因+申诉入口；发布由服务端拦截）
+  moderated_action?: string // hidden / deleted
+  moderated_reason?: string
+  appeal_status?: string    // none / pending / rejected
 }
 
 // ---- 作品数据页聚合（/m/analytics 数据源）----

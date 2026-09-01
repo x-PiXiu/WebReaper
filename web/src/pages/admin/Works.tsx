@@ -45,9 +45,25 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
   })
   const flagged = flaggedData?.items ?? []
 
+  // 32号 P2 终批：用户申诉待复核队列（采纳=恢复 / 维持=终审驳回）
+  const { data: appealsData } = useQuery({
+    queryKey: ['admin-works-appeals'],
+    queryFn: () => businessApi.adminListAppeals(200),
+  })
+  const appeals = appealsData?.items ?? []
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['admin-works'] })
     queryClient.invalidateQueries({ queryKey: ['admin-works-flagged'] })
+    queryClient.invalidateQueries({ queryKey: ['admin-works-appeals'] })
+  }
+
+  const rejectAppeal = async (workKey: string) => {
+    try {
+      await businessApi.adminRejectAppeal(workKey)
+      toast.ok('已维持处置（终审；用户 24 小时后可再申诉）')
+      refresh()
+    } catch { /* 拦截器已提示 */ }
   }
 
   const submitHide = async () => {
@@ -99,6 +115,40 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
 
   return (
     <div style={embedded ? undefined : { padding: 24 }}>
+      {appeals.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Space style={{ marginBottom: 8 }}>
+            <Tag color="red">用户申诉</Tag>
+            <Text type="secondary">{appeals.length} 条待复核——采纳=恢复作品；维持=终审驳回（用户 24 小时后可再申诉）</Text>
+          </Space>
+          <Table
+            rowKey="work_key"
+            dataSource={appeals}
+            size="small"
+            pagination={false}
+            columns={[
+              { title: '作品键', dataIndex: 'work_key', width: 200, ellipsis: true },
+              { title: '处置', dataIndex: 'action', width: 80, render: (a: string) => <Tag color={actionMeta[a]?.color}>{actionMeta[a]?.label || a}</Tag> },
+              { title: '处置原因', dataIndex: 'reason', width: 180, ellipsis: true },
+              { title: '申诉理由', dataIndex: 'appeal_text', ellipsis: true },
+              { title: '租户', dataIndex: 'tenant_id', width: 120, ellipsis: true },
+              {
+                title: '操作', key: 'ops', width: 160,
+                render: (_, a: AdminWorkFlagged) => (
+                  <Space>
+                    <Popconfirm title="采纳申诉并恢复该作品？" onConfirm={() => releaseFlagged(a)}>
+                      <Button size="small" type="primary">采纳</Button>
+                    </Popconfirm>
+                    <Popconfirm title="维持处置？（终审驳回，24 小时内不可再申诉）" onConfirm={() => rejectAppeal(a.work_key)}>
+                      <Button size="small" danger>维持</Button>
+                    </Popconfirm>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </div>
+      )}
       {flagged.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <Space style={{ marginBottom: 8 }}>

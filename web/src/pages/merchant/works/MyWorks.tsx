@@ -47,9 +47,10 @@ type WorkCardProps = {
   onPreview: (asset: MediaAsset) => void
   onPublish: () => void
   onRename?: () => void
+  onAppeal?: () => void
 }
 
-function WorkCard({ work, isCompose, isBrollSource, onOpen, onPreview, onPublish, onRename }: WorkCardProps) {
+function WorkCard({ work, isCompose, isBrollSource, onOpen, onPreview, onPublish, onRename, onAppeal }: WorkCardProps) {
   const title = cleanWorkTitle(work.title)
   const kind = KIND_META[work.kind] || { label: work.kind, icon: <FileTextOutlined />, tone: 'article' }
   const previewUrl = work.kind === 'video' || work.kind === 'image' ? work.media_urls?.[0] : undefined
@@ -101,6 +102,11 @@ function WorkCard({ work, isCompose, isBrollSource, onOpen, onPreview, onPublish
         <div className="mw-badge-row">
           <span className={`mw-status mw-status--${work.status}`}>{statusLabel}</span>
           <div className="mw-badge-row-right">
+            {work.moderated_action && (
+              <span className="mw-chip" style={{ background: '#fff1f0', color: '#cf1322', border: '1px solid #ffa39e' }}>
+                {work.moderated_action === 'deleted' ? '已删除' : '已下架'}
+              </span>
+            )}
             {isCompose && <span className="mw-chip mw-chip--broll">B-Roll</span>}
             {isBrollSource && <span className="mw-chip mw-chip--broll-src">已插画面</span>}
             <span className="mw-chip mw-chip--kind">{kind.label}</span>
@@ -129,6 +135,11 @@ function WorkCard({ work, isCompose, isBrollSource, onOpen, onPreview, onPublish
         </div>
 
         <div className="mw-foot" onClick={(e) => e.stopPropagation()}>
+          {work.moderated_action && (
+            <button type="button" className="mw-action mw-action--ghost" style={{ color: '#cf1322' }} onClick={onAppeal}>
+              {work.appeal_status === 'pending' ? '申诉审核中' : work.appeal_status === 'rejected' ? '已维持·再申诉' : '申诉'}
+            </button>
+          )}
           {canBroll && work.status !== 'published' && (
             <button type="button" className="mw-action" onClick={onOpen}>
               <VideoCameraAddOutlined /> 插入画面
@@ -178,6 +189,27 @@ export default function MyWorks() {
   const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [renaming, setRenaming] = useState(false)
+  // 32号 P2 终批：被处置作品申诉
+  const [appealTarget, setAppealTarget] = useState<{ id: string; reason: string } | null>(null)
+  const [appealText, setAppealText] = useState('')
+  const [appealing, setAppealing] = useState(false)
+
+  const doAppeal = async () => {
+    if (!appealTarget || !appealText.trim()) {
+      toast.warn('请填写申诉理由')
+      return
+    }
+    setAppealing(true)
+    try {
+      await businessApi.appealWork(appealTarget.id, appealText.trim())
+      toast.ok('申诉已提交，管理员会尽快复核')
+      setAppealTarget(null)
+      setAppealText('')
+      queryClient.invalidateQueries()
+    } catch { /* 拦截器已提示 */ } finally {
+      setAppealing(false)
+    }
+  }
 
   const doRename = async () => {
     if (!renameTarget || !renameValue.trim()) return
@@ -284,6 +316,7 @@ export default function MyWorks() {
                 setRenameTarget({ id: w.id, title: w.title })
                 setRenameValue(cleanWorkTitle(w.title))
               } : undefined}
+              onAppeal={() => setAppealTarget({ id: w.id, reason: w.moderated_reason || '' })}
             />
           ))}
         </div>
@@ -311,6 +344,28 @@ export default function MyWorks() {
           showCount
           placeholder="输入新名称"
           onPressEnter={doRename}
+        />
+      </Modal>
+
+      {/* 32号 P2 终批：被处置作品申诉（防滥用：一天一次，服务端校验） */}
+      <Modal
+        title="申诉作品处置"
+        open={!!appealTarget}
+        onOk={doAppeal}
+        onCancel={() => setAppealTarget(null)}
+        confirmLoading={appealing}
+        okText="提交申诉"
+      >
+        {appealTarget?.reason && (
+          <p style={{ color: '#cf1322', marginBottom: 8 }}>平台处置原因：{appealTarget.reason}</p>
+        )}
+        <Input.TextArea
+          value={appealText}
+          onChange={(e) => setAppealText(e.target.value)}
+          rows={4}
+          maxLength={500}
+          showCount
+          placeholder="请说明申诉理由（为什么该内容符合平台规范）"
         />
       </Modal>
     </div>

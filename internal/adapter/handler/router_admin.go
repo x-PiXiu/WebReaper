@@ -229,8 +229,10 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 		if r.worksUC != nil {
 			adminGroup.GET("/works", r.HandleAdminWorksList)
 			adminGroup.GET("/works/flagged", r.HandleAdminWorksFlagged) // 32号 P2：机审待复核队列
+			adminGroup.GET("/works/appeals", r.HandleAdminWorkAppeals)  // 32号 P2 终批：申诉待复核
 			adminGroup.POST("/works/:key/hide", r.HandleAdminWorkHide)
 			adminGroup.POST("/works/:key/restore", r.HandleAdminWorkRestore)
+			adminGroup.POST("/works/:key/appeal/reject", r.HandleAdminWorkAppealReject) // 32号 P2 终批：申诉维持
 		}
 	}
 }

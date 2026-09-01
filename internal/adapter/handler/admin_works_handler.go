@@ -98,3 +98,32 @@ func (r *Router) HandleAdminWorksFlagged(c *gin.Context) {
 	}
 	success(c, gin.H{"items": items, "total": len(items)})
 }
+
+// HandleAdminWorkAppealReject POST /admin/works/:key/appeal/reject —— 申诉终审维持处置
+//（32号 P2 终批；申诉采纳复用既有 restore 端点=恢复作品）。
+func (r *Router) HandleAdminWorkAppealReject(c *gin.Context) {
+	if r.worksUC == nil || !r.worksUC.ModerationEnabled() {
+		fail(c, pkg.ErrTaskNotExecutable)
+		return
+	}
+	if err := r.worksUC.RejectAppeal(c.Request.Context(), strings.TrimSpace(c.Param("key"))); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"work_key": c.Param("key"), "appeal": "rejected"})
+}
+
+// HandleAdminWorkAppeals GET /admin/works/appeals —— 申诉待复核队列（32号 P2 终批）。
+func (r *Router) HandleAdminWorkAppeals(c *gin.Context) {
+	if r.worksUC == nil || !r.worksUC.ModerationEnabled() {
+		fail(c, pkg.ErrTaskNotExecutable)
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	items, err := r.worksUC.ListAppealsForAdmin(c.Request.Context(), limit)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"items": items, "total": len(items)})
+}

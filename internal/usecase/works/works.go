@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/moderation"
 	"webreaper/internal/usecase/port"
 )
 
@@ -37,6 +38,10 @@ type WorkItem struct {
 	CreatedAt   time.Time `json:"created_at"`
 	PublishedAt *time.Time `json:"published_at,omitempty"`
 	ParentTaskID string    `json:"parent_task_id,omitempty"` // B-Roll 血缘：compose 产物的源片任务 ID
+	// 32号 P2 终批：处置标注态（条目保留+原因+申诉入口；发布由服务端拦截兜底）
+	ModeratedAction string `json:"moderated_action,omitempty"` // hidden / deleted
+	ModeratedReason string `json:"moderated_reason,omitempty"`
+	AppealStatus    string `json:"appeal_status,omitempty"`    // none/pending/rejected
 }
 
 // WorksUseCase 作品库聚合。
@@ -46,6 +51,7 @@ type WorksUseCase struct {
 	jobRepo     port.PublishJobRepository
 	metricRepo  port.VideoMetricRepository       // 可选（未注入则互动数据为 0）
 	modRepo     port.WorkModerationRepository    // 可选（32号：未注入则处置/过滤能力关闭）
+	moderator   *moderation.Moderator            // 可选（32号 P2 终批：申诉文本机审）
 }
 
 func NewWorksUseCase(cr port.OptimizedContentRepository, tr port.GenerationTaskRepository,
@@ -63,8 +69,9 @@ func (uc *WorksUseCase) SetModerationRepo(r port.WorkModerationRepository) {
 // ModerationEnabled 处置能力是否就绪（路由注册与前端能力探测用）。
 func (uc *WorksUseCase) ModerationEnabled() bool { return uc.modRepo != nil }
 
-// moderatedKeys 租户在效处置的作品键集合（hidden/deleted）。
-func (uc *WorksUseCase) moderatedKeys(ctx context.Context, tenantID string) map[string]bool {
+// moderatedByKey 租户在效处置记录索引（hidden/deleted——申诉流后用户端改为
+// 标注态展示：条目保留 + 处置信息可见 + 申诉入口；发布拦截仍在服务端双端点兜底）。
+func (uc *WorksUseCase) moderatedByKey(ctx context.Context, tenantID string) map[string]entity.WorkModeration {
 	if uc.modRepo == nil {
 		return nil
 	}
@@ -72,13 +79,13 @@ func (uc *WorksUseCase) moderatedKeys(ctx context.Context, tenantID string) map[
 	if err != nil || len(ms) == 0 {
 		return nil
 	}
-	set := make(map[string]bool, len(ms))
-	for _, m := range ms {
-		if m.Active() {
-			set[m.WorkKey] = true
+	m := make(map[string]entity.WorkModeration, len(ms))
+	for _, v := range ms {
+		if v.Active() {
+			m[v.WorkKey] = v
 		}
 	}
-	return set
+	return m
 }
 
 // HideWork 下架/逻辑删除作品（32号：管理端处置；重复处置幂等覆盖）。
@@ -109,6 +116,30 @@ func (uc *WorksUseCase) HideWork(ctx context.Context, workKey, kind, tenantID, a
 	})
 }
 
+// ListAppealsForAdmin 申诉待复核队列（32号 P2 终批：appeal_status=pending 倒序）。
+func (uc *WorksUseCase) ListAppealsForAdmin(ctx context.Context, limit int) ([]entity.WorkModeration, error) {
+	if uc.modRepo == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	ms, err := uc.modRepo.ListRecent(ctx, 400)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.WorkModeration, 0, limit)
+	for _, m := range ms {
+		if m.AppealStatus == entity.AppealPending {
+			out = append(out, m)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 // ListFlaggedForAdmin 机审待复核队列（32号 P2：flagged 记录倒序——含非成片 key
 // 如克隆文案/配音文案等，管理员统一在此放行或处置）。
 func (uc *WorksUseCase) ListFlaggedForAdmin(ctx context.Context, limit int) ([]entity.WorkModeration, error) {
@@ -134,7 +165,70 @@ func (uc *WorksUseCase) ListFlaggedForAdmin(ctx context.Context, limit int) ([]e
 	return out, nil
 }
 
-// RestoreWork 恢复作品（清除处置记录）。
+// SetModerator 注入内容机审（可选；32号 P2 终批——申诉文本过机审，
+// 防申诉通道成为违规内容展示位）。
+func (uc *WorksUseCase) SetModerator(m *moderation.Moderator) {
+	if m != nil {
+		uc.moderator = m
+	}
+}
+
+// AppealWork 用户申诉被处置作品（32号 P2 终批）。
+// 防滥用：申诉中不可重复；被维持（rejected）24h 后可再申诉。
+// 申诉文本异步过机审（独立 key appeal-{workKey}，不覆盖处置主记录）。
+func (uc *WorksUseCase) AppealWork(ctx context.Context, tenantID, workKey, text string) error {
+	if uc.modRepo == nil {
+		return fmt.Errorf("申诉服务未配置")
+	}
+	if workKey == "" || strings.TrimSpace(text) == "" {
+		return fmt.Errorf("缺少作品标识或申诉理由")
+	}
+	if len([]rune(strings.TrimSpace(text))) > 500 {
+		return fmt.Errorf("申诉理由过长（≤500 字）")
+	}
+	m, err := uc.modRepo.FindByKey(ctx, workKey)
+	if err != nil || !m.Active() {
+		return fmt.Errorf("该作品不存在有效处置记录，无需申诉")
+	}
+	// 租户归属：admin 处置时带租户则校验（未带的记录放行——v1 宽松，见 32号 §六）
+	if m.TenantID != "" && tenantID != "" && m.TenantID != tenantID {
+		return fmt.Errorf("作品不存在")
+	}
+	switch m.AppealStatus {
+	case entity.AppealPending:
+		return fmt.Errorf("该作品申诉审核中，请耐心等待")
+	case entity.AppealRejected:
+		if m.AppealedAt != nil && time.Since(*m.AppealedAt) < 24*time.Hour {
+			return fmt.Errorf("该作品申诉已被维持，24 小时后可再次申诉")
+		}
+	}
+	now := time.Now()
+	if uErr := uc.modRepo.UpdateAppeal(ctx, workKey, entity.AppealPending, strings.TrimSpace(text), &now); uErr != nil {
+		return uErr
+	}
+	// 申诉文本机审（异步标记，不阻断申诉提交；独立 key 不覆盖处置记录）
+	if uc.moderator != nil {
+		uc.moderator.ModerateTextAsync(tenantID, "appeal-"+workKey, m.WorkKind, text)
+	}
+	return nil
+}
+
+// RejectAppeal 管理员维持处置（申诉终审驳回；记录保留，用户 24h 后可再申诉）。
+func (uc *WorksUseCase) RejectAppeal(ctx context.Context, workKey string) error {
+	if uc.modRepo == nil {
+		return fmt.Errorf("作品处置服务未配置")
+	}
+	m, err := uc.modRepo.FindByKey(ctx, workKey)
+	if err != nil {
+		return fmt.Errorf("作品不存在处置记录")
+	}
+	if m.AppealStatus != entity.AppealPending {
+		return fmt.Errorf("该作品没有待审核的申诉")
+	}
+	return uc.modRepo.UpdateAppeal(ctx, workKey, entity.AppealRejected, m.AppealText, m.AppealedAt)
+}
+
+// RestoreWork 恢复作品（清除处置记录；申诉采纳复用此路径——恢复即记录清除）。
 func (uc *WorksUseCase) RestoreWork(ctx context.Context, workKey string) error {
 	if uc.modRepo == nil {
 		return fmt.Errorf("作品处置服务未配置")
@@ -245,7 +339,7 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 	items := make([]WorkItem, 0, 32)
 
 	// 32号：在效处置过滤（hidden/deleted 作品用户端不可见——列表/详情/预填同源）
-	hidden := uc.moderatedKeys(ctx, tenantID)
+	hidden := uc.moderatedByKey(ctx, tenantID)
 
 	applyPublish := func(it *WorkItem, js []entity.PublishJob, matched *entity.PublishJob) {
 		if matched != nil && matched.ID != "" {
@@ -278,9 +372,6 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 	contents, err := uc.contentRepo.ListByTenant(ctx, tenantID, 200)
 	if err == nil {
 		for _, c := range contents {
-			if hidden["c-"+c.ID] {
-				continue // 已被平台处置
-			}
 			it := WorkItem{
 				ID:        "c-" + c.ID,
 				Kind:      "article",
@@ -295,6 +386,13 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 			} else if c.Status == "published" {
 				it.Status = "ready" // 内容标记已发布但无发布记录（历史数据）→ 待发布态展示
 			}
+			// 32号 P2 终批：被处置作品改为标注态（保留条目+原因+申诉入口），
+			// 发布拦截由服务端双端点兜底——用户知情权与申诉通道。
+			if m := hidden["c-"+c.ID]; m.Action != "" {
+				it.ModeratedAction = m.Action
+				it.ModeratedReason = m.Reason
+				it.AppealStatus = m.AppealStatus
+			}
 			items = append(items, it)
 		}
 	}
@@ -305,9 +403,6 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 		for _, t := range tasks {
 			if t.State != entity.TaskStateSuccess {
 				continue // 生成中/失败的任务不进作品库（任务列表页管）
-			}
-			if hidden["g-"+t.ID] {
-				continue // 已被平台处置
 			}
 			if !isDeliverableTask(t) {
 				continue // 文生图/TTS/素材片段等仅进素材库
@@ -346,6 +441,12 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 				if json.Unmarshal([]byte(t.ParamsJSON), &pp) == nil && pp.SourceTaskID != "" {
 					it.ParentTaskID = pp.SourceTaskID
 				}
+			}
+			// 32号 P2 终批：被处置成片标注态（同文章源）
+			if m := hidden["g-"+t.ID]; m.Action != "" {
+				it.ModeratedAction = m.Action
+				it.ModeratedReason = m.Reason
+				it.AppealStatus = m.AppealStatus
 			}
 			// 发布关联：任一产物 URL 出现在已发布 job 的 media_urls 里
 			var matched *entity.PublishJob

@@ -142,6 +142,7 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 	if r.worksUC != nil {
 		accountHandler.SetWorksUC(r.worksUC)
 		api.GET("/merchant/works", accountHandler.HandleListWorks) // 作品库三源聚合
+		api.POST("/merchant/works/:key/appeal", accountHandler.HandleAppealWork) // 32号 P2 终批：处置申诉
 	}
 	if r.pendingPublish != nil {
 		accountHandler.SetPendingPublishStore(r.pendingPublish)

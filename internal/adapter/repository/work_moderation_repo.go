@@ -20,8 +20,12 @@ type WorkModerationPO struct {
 	Reason    string `gorm:"size:512;not null;default:''"`
 	Source    string `gorm:"size:16;not null;default:admin"`
 	Operator  string `gorm:"size:64;not null;default:''"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// 申诉流（32号 P2 终批）
+	AppealStatus string     `gorm:"size:16;not null;default:none"`
+	AppealText   string     `gorm:"size:512;not null;default:''"`
+	AppealedAt   *time.Time `gorm:"column:appealed_at"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func (WorkModerationPO) TableName() string { return "work_moderations" }
@@ -39,6 +43,7 @@ func poToModeration(p WorkModerationPO) entity.WorkModeration {
 	return entity.WorkModeration{
 		ID: p.ID, WorkKey: p.WorkKey, WorkKind: p.WorkKind, TenantID: p.TenantID,
 		Action: p.Action, Reason: p.Reason, Source: p.Source, Operator: p.Operator,
+		AppealStatus: p.AppealStatus, AppealText: p.AppealText, AppealedAt: p.AppealedAt,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
@@ -55,8 +60,20 @@ func (r *GormWorkModerationRepository) Upsert(ctx context.Context, m entity.Work
 	po := WorkModerationPO{
 		ID: m.ID, WorkKey: m.WorkKey, WorkKind: m.WorkKind, TenantID: m.TenantID,
 		Action: m.Action, Reason: m.Reason, Source: m.Source, Operator: m.Operator,
+		AppealStatus: m.AppealStatus, AppealText: m.AppealText, AppealedAt: m.AppealedAt,
 	}
 	return r.db.WithContext(ctx).Save(&po).Error
+}
+
+// UpdateAppeal 申诉状态定向更新（不动处置主字段——申诉与处置生命周期分离）。
+func (r *GormWorkModerationRepository) UpdateAppeal(ctx context.Context, workKey, status, text string, appealedAt *time.Time) error {
+	return r.db.WithContext(ctx).Model(&WorkModerationPO{}).
+		Where("work_key = ?", workKey).
+		Updates(map[string]any{
+			"appeal_status": status,
+			"appeal_text":   text,
+			"appealed_at":   appealedAt,
+		}).Error
 }
 
 func (r *GormWorkModerationRepository) Delete(ctx context.Context, workKey string) error {

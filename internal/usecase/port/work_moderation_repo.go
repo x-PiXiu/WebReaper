@@ -2,6 +2,7 @@ package port
 
 import (
 	"context"
+	"time"
 
 	"webreaper/internal/domain/entity"
 )
@@ -14,6 +15,8 @@ type WorkModerationRepository interface {
 	Upsert(ctx context.Context, m entity.WorkModeration) error
 	// Delete 清除处置记录（restore 恢复）。
 	Delete(ctx context.Context, workKey string) error
+	// UpdateAppeal 申诉状态定向更新（32号 P2 终批：申诉与处置生命周期分离）。
+	UpdateAppeal(ctx context.Context, workKey, status, text string, appealedAt *time.Time) error
 	// ListByTenant 租户在效处置集合（用户端聚合过滤：hidden/deleted 的 work_key）。
 	ListByTenant(ctx context.Context, tenantID string) ([]entity.WorkModeration, error)
 	// ListRecent 全平台处置记录倒序（管理端"已处置"列表/审计）。
