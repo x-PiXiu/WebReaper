@@ -102,7 +102,7 @@ func NewVaultCredentialResolver(v port.CookieVault, ar port.AccountRepository) *
 	return &VaultCredentialResolver{vault: v, accounts: ar}
 }
 
-// Resolve rpa → cookie 解密；api → access_token 解密。账号不存在/密文缺失报错（不降级标记——由用例层判断）。
+// Resolve rpa → cookie 解密。账号不存在/密文缺失报错（不降级标记——由用例层判断）。
 func (r *VaultCredentialResolver) Resolve(ctx context.Context, tenantID, accountID, kind string) (string, string, error) {
 	acc, err := r.accounts.FindByID(ctx, tenantID, accountID)
 	if err != nil {
@@ -118,15 +118,6 @@ func (r *VaultCredentialResolver) Resolve(ctx context.Context, tenantID, account
 			return "", "", fmt.Errorf("cookie 解密失败: %w", dErr)
 		}
 		return cookie, "", nil
-	case port.TransportAPI:
-		if acc.AccessTokenEnc == "" {
-			return "", "", fmt.Errorf("该账号无官方通道凭证（OAuth 未授权）")
-		}
-		token, dErr := r.vault.Decrypt(acc.AccessTokenEnc)
-		if dErr != nil {
-			return "", "", fmt.Errorf("token 解密失败: %w", dErr)
-		}
-		return "", token, nil
 	default: // link 无需凭证
 		return "", "", nil
 	}

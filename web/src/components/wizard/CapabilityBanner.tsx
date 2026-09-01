@@ -37,7 +37,7 @@ export function CapabilityBanner({ required = ['lip_sync', 'tts'], className }: 
       description={
         isError
           ? '生成服务连接失败，请稍后重试或联系管理员检查第三方集成配置。'
-          : `请联系管理员在后台「第三方集成」中启用相关能力。提交前请确认 Vidu 已配置且积分充足。`
+          : `请联系管理员在后台「第三方集成」中启用相关能力。提交前请确认生成服务已配置且积分充足。`
       }
     />
   )

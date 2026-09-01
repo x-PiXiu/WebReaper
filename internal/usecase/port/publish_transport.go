@@ -15,14 +15,15 @@ import (
 //   - CredentialResolver 把凭证解析（rpa→cookie / api→token）从用例层收口到适配器——
 //     用例只表达业务意图，不碰解密细节
 //
-// 通道选择策略（用例层）：自动降级链 [override > api(OAuth账号) > rpa(cookie账号) > link]，
+// 通道选择策略（用例层）：自动降级链 [override > rpa(cookie账号) > link]，
 // 手动 override 是优先级而非死命令——失败仍沿链降级。
+// API 通道已删除（2026-09-01 用户确认不用）——恢复时：加回 TransportAPI 常量 +
+// transports.go Resolve 一个 case + account.go 候选链一个元素。
 
 // TransportKind 执行机制标识。
 const (
 	TransportLink = "link" // 半自动：生成预填发布页 URL，用户手动确认
 	TransportRPA  = "rpa"  // 浏览器自动化（cookie 会话）
-	TransportAPI  = "api"  // 官方开放平台接口（OAuth token）
 )
 
 // TransportRequest 通道执行请求（凭证已由 resolver 解析完毕——通道拿到即用）。

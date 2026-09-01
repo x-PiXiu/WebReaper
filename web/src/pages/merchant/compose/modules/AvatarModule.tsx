@@ -355,7 +355,7 @@ export default function AvatarModule() {
             </Button>
             <Popconfirm
               title={`删除选中的 ${selected.length} 项？`}
-              description="仅移除本地记录，Vidu 侧主体不受影响"
+              description="仅移除本地记录，不影响已发布的视频"
               okText="删除"
               okButtonProps={{ danger: true, loading: deleting }}
               cancelText="取消"

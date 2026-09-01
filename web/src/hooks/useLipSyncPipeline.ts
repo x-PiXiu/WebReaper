@@ -155,23 +155,51 @@ export async function runLipSyncPipeline(
         '数字分身能保证跨视频的人物一致性，且不依赖已废弃的数字人接口。',
       )
     }
-    const env = audioSource === 'upload' ? input.envSubject : undefined
-    const sceneIntent = input.intent?.trim() || input.script.slice(0, 2000)
-    const ref = await submitUnified({
-      ...buildSubjectReferencePayload({
+
+    if (audioSource === 'upload') {
+      // 分身 + 上传音频（N1 修复）：两步链——
+      // ① reference2video 生成分身视觉（纯画面，无音频—— Vidu 主体模式不支持外部音频）
+      // ② lip_sync 将上传音频与生成的视频合成对口型
+      const env = input.envSubject
+      const sceneIntent = input.intent?.trim() || input.script.slice(0, 2000)
+      const ref = await submitUnified(buildSubjectReferencePayload({
         brand_id: input.brandId,
         server_id: input.subjectServerId,
         name: input.subjectName,
-        // 文本驱动：text=台词（音色可选，分身绑定优先）；上传音频：text=场景意图
-        text: audioSource === 'upload' ? (env ? `${sceneIntent}（在「${env.name || '环境'}」中）` : sceneIntent) : input.script,
-        audioMaterialId: audioSource === 'upload' ? await ensureMaterialId(input.uploadedAudioUrl!) : undefined,
+        text: env ? `${sceneIntent}（在「${env.name || '环境'}」中）` : sceneIntent,
         envSubject: env ? { serverId: env.serverId, name: env.name } : undefined,
-        voiceId: audioSource === 'text' ? input.voiceId : undefined,
-      }),
-      broll_segments: input.brollSegments,
-    })
-    onTaskSubmit?.('video', ref.id)
-    videoTask = await waitGenerationTask(ref.id)
+      }))
+      onTaskSubmit?.('video', ref.id)
+      const refDone = await waitGenerationTask(ref.id)
+      const refVideoUrl = creationUrl(refDone)
+      if (!refVideoUrl) throw new Error('分身视频产物缺失（可重试）')
+
+      // ② lip_sync：分身视频 + 上传音频
+      const videoId = await ensureMaterialId(refVideoUrl)
+      const audioId = await ensureMaterialId(input.uploadedAudioUrl!)
+      const lipsync = await submitUnified({
+        brand_id: input.brandId,
+        materials: [videoId, audioId],
+        params: deliverableWorkParams(),
+        broll_segments: input.brollSegments,
+      })
+      onTaskSubmit?.('video', lipsync.id)
+      videoTask = await waitGenerationTask(lipsync.id)
+    } else {
+      // 分身 + 文本驱动：单步 reference2video（台词直驱，Vidu 端内合成语音）
+      const ref = await submitUnified({
+        ...buildSubjectReferencePayload({
+          brand_id: input.brandId,
+          server_id: input.subjectServerId,
+          name: input.subjectName,
+          text: input.script,
+          voiceId: input.voiceId,
+        }),
+        broll_segments: input.brollSegments,
+      })
+      onTaskSubmit?.('video', ref.id)
+      videoTask = await waitGenerationTask(ref.id)
+    }
   }
 
   const videoUrl = creationUrl(videoTask)
