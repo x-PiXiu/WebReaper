@@ -7,7 +7,7 @@ import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
 import { extractShareUrl, isKuaishouUrl } from '../../../../utils/shareUrl'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -45,21 +45,21 @@ export default function BenchmarkModule() {
       transcript: text,
       script: text,
     })
-    message.success('已写入共享草稿，可去「文案工作室」继续')
+    toast.ok('已写入草稿，可去文案工作室继续', 'bench-apply')
   }
 
   const extractFromLink = async () => {
     if (!url.trim()) {
-      message.warning('请先粘贴爆款链接')
+      toast.warn('请先粘贴爆款链接', 'bench-link')
       return
     }
     if (isKuaishouUrl(url)) {
-      message.info('快手暂不支持链接提取，请下载视频后用上传方式')
+      toast.info('快手暂不支持链接提取，请下载后上传', 'bench-ks')
       return
     }
     const link = extractShareUrl(url)
     if (!link) {
-      message.warning('未识别到抖音/B站链接。请粘贴完整分享口令（需含 https://v.douyin.com/…）')
+      toast.warn('未识别到有效链接，请粘贴完整分享口令', 'bench-link')
       return
     }
     if (link !== url.trim()) setUrl(link)

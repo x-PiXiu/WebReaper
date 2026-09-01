@@ -4,7 +4,7 @@ import { PlusOutlined, TeamOutlined, CrownOutlined, ShopOutlined } from '@ant-de
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { UserView } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -26,7 +26,7 @@ export default function AdminUsers() {
   const handleCreate = async (values: { username: string; password: string; tenant_id?: string }) => {
     try {
       await businessApi.createMerchant(values)
-      message.success(`商户「${values.username}」创建成功`)
+      toast.ok(`商户「${values.username}」创建成功`)
       setModalOpen(false)
       form.resetFields()
       queryClient.invalidateQueries({ queryKey: ['admin-users'] })
@@ -36,7 +36,7 @@ export default function AdminUsers() {
   const handleDelete = async (id: string) => {
     try {
       await businessApi.deleteUser(id)
-      message.success('已删除')
+      toast.ok('已删除')
       queryClient.invalidateQueries({ queryKey: ['admin-users'] })
     } catch {}
   }

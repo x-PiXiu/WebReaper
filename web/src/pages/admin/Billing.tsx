@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Plan, Subscription, SceneCost } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -45,17 +45,17 @@ export default function AdminBilling() {
 
   const savePlanMut = useMutation({
     mutationFn: (p: Plan) => businessApi.adminSavePlan(p),
-    onSuccess: () => { message.success('套餐已保存'); setPlanModal(null); queryClient.invalidateQueries({ queryKey: ['admin-plans'] }) },
-    onError: () => message.error('保存失败'),
+    onSuccess: () => { toast.ok('套餐已保存'); setPlanModal(null); queryClient.invalidateQueries({ queryKey: ['admin-plans'] }) },
+    onError: () => toast.fail('保存失败'),
   })
   const deletePlanMut = useMutation({
     mutationFn: (id: string) => businessApi.adminDeletePlan(id),
-    onSuccess: () => { message.success('套餐已删除'); queryClient.invalidateQueries({ queryKey: ['admin-plans'] }) },
+    onSuccess: () => { toast.ok('套餐已删除'); queryClient.invalidateQueries({ queryKey: ['admin-plans'] }) },
   })
   const assignMut = useMutation({
     mutationFn: ({ tenant, planId }: { tenant: string; planId: string }) => businessApi.adminAssignPlan(tenant, planId),
-    onSuccess: () => { message.success('套餐已开通'); setAssignModal({ open: false, tenant: '', planId: '' }); queryClient.invalidateQueries({ queryKey: ['admin-subs'] }) },
-    onError: () => message.error('开通失败'),
+    onSuccess: () => { toast.ok('套餐已开通'); setAssignModal({ open: false, tenant: '', planId: '' }); queryClient.invalidateQueries({ queryKey: ['admin-subs'] }) },
+    onError: () => toast.fail('开通失败'),
   })
 
   const openNewPlan = () => {

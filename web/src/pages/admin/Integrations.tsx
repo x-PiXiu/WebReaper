@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, Typography, Tag, Space, Button, Descriptions, Switch, Input, Select, Alert, Empty, Tabs, Collapse, Table, Form, InputNumber, Modal, Popconfirm, Tooltip } from 'antd'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 import QueryBoundary from '../../components/QueryBoundary'
 import {
   CloudServerOutlined, RobotOutlined, AudioOutlined, SearchOutlined, WalletOutlined,
@@ -188,7 +188,7 @@ function VendorDetailInline({ vendor, vendorCaps, onClose }: {
       enabled,
     }),
     onSuccess: () => {
-      message.success('已保存')
+      toast.ok('已保存')
       queryClient.invalidateQueries({ queryKey: ['admin-integration-vendors'] })
       queryClient.invalidateQueries({ queryKey: ['admin-integrations'] })
     },
@@ -198,7 +198,7 @@ function VendorDetailInline({ vendor, vendorCaps, onClose }: {
     mutationFn: ({ capId, vendorId }: { capId: string; vendorId: string }) =>
       businessApi.setCapabilityDefault(capId, vendorId),
     onSuccess: () => {
-      message.success('默认已切换（≤10s 生效）')
+      toast.ok('默认已切换')
       queryClient.invalidateQueries({ queryKey: ['admin-integration-capabilities'] })
     },
   })
@@ -206,7 +206,7 @@ function VendorDetailInline({ vendor, vendorCaps, onClose }: {
   const saveCapMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => businessApi.saveIntegrationCapability(id, data),
     onSuccess: () => {
-      message.success('能力配置已保存')
+      toast.ok('能力配置已保存')
       queryClient.invalidateQueries({ queryKey: ['admin-integration-capabilities'] })
     },
   })
@@ -215,7 +215,7 @@ function VendorDetailInline({ vendor, vendorCaps, onClose }: {
   const addCapMutation = useMutation({
     mutationFn: (data: { id: string; data: any }) => businessApi.saveIntegrationCapability(data.id, data.data),
     onSuccess: () => {
-      message.success('能力已添加')
+      toast.ok('能力已添加')
       setAddingCap(false)
       queryClient.invalidateQueries({ queryKey: ['admin-integration-capabilities'] })
       queryClient.invalidateQueries({ queryKey: ['admin-integration-vendors'] })
@@ -226,7 +226,7 @@ function VendorDetailInline({ vendor, vendorCaps, onClose }: {
   const deleteCapMutation = useMutation({
     mutationFn: (id: string) => businessApi.deleteIntegrationCapability(id),
     onSuccess: () => {
-      message.success('能力已删除')
+      toast.ok('能力已删除')
       queryClient.invalidateQueries({ queryKey: ['admin-integration-capabilities'] })
       queryClient.invalidateQueries({ queryKey: ['admin-integration-vendors'] })
     },
@@ -422,7 +422,7 @@ function ViduModelPanel() {
   const saveMut = useMutation({
     mutationFn: ({ subType, model, body }: any) => businessApi.adminSaveGenerationSpec(subType, model, body),
     onSuccess: () => {
-      message.success('已保存（30s 热生效）')
+      toast.ok('已保存')
       setEditing(null); setAdding(false)
       queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] })
     },
@@ -430,13 +430,13 @@ function ViduModelPanel() {
 
   const deleteMut = useMutation({
     mutationFn: ({ subType, model }: any) => businessApi.adminDeleteGenerationSpec(subType, model),
-    onSuccess: () => { message.success('已恢复出厂默认'); queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] }) },
+    onSuccess: () => { toast.ok('已恢复出厂默认'); queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] }) },
   })
 
   const setModeMut = useMutation({
     mutationFn: ({ subType, enabled }: any) => businessApi.adminSetGenerationMode(subType, enabled),
     onSuccess: () => {
-      message.success('模式开关已更新')
+      toast.ok('模式开关已更新')
       queryClient.invalidateQueries({ queryKey: ['admin-gen-modes'] })
       queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] })
     },
@@ -584,7 +584,7 @@ function CapabilityRoutingTable({ capsByType, vendors }: {
     mutationFn: ({ capId, vendorId }: { capId: string; vendorId: string }) =>
       businessApi.setCapabilityDefault(capId, vendorId),
     onSuccess: () => {
-      message.success('默认已切换')
+      toast.ok('默认已切换')
       queryClient.invalidateQueries({ queryKey: ['admin-integration-capabilities'] })
     },
   })
@@ -718,7 +718,7 @@ function APIKeySection({ data, meta, queryClient }: { data: any; meta: any; quer
   const [enabled, setEnabled] = useState(data.enabled ?? true)
   const saveMutation = useMutation({
     mutationFn: () => businessApi.saveProviderConfig(meta.id, { api_key: key || undefined, enabled }),
-    onSuccess: () => { message.success('已保存'); queryClient.invalidateQueries({ queryKey: ['admin-integration', meta.id] }) },
+    onSuccess: () => { toast.ok('已保存'); queryClient.invalidateQueries({ queryKey: ['admin-integration', meta.id] }) },
   })
   return (
     <Space direction="vertical" size={10} style={{ maxWidth: 500 }}>
@@ -733,7 +733,7 @@ function APIKeySection({ data, meta, queryClient }: { data: any; meta: any; quer
 function ModesSection({ data, queryClient }: { data: any; queryClient: any }) {
   const toggleMutation = useMutation({
     mutationFn: ({ subType, enabled }: { subType: string; enabled: boolean }) => businessApi.adminSetGenerationMode(subType, enabled),
-    onSuccess: () => { message.success('已保存'); queryClient.invalidateQueries({ queryKey: ['admin-integration'] }) },
+    onSuccess: () => { toast.ok('已保存'); queryClient.invalidateQueries({ queryKey: ['admin-integration'] }) },
   })
   return (
     <div>
@@ -757,7 +757,7 @@ function PreferredModelSection({ data, queryClient }: { data: any; queryClient: 
   const [videoModel, setVideoModel] = useState(data?.video_subject || '')
   const saveMutation = useMutation({
     mutationFn: () => businessApi.setViduPreferredModel({ image_subject: imageModel || undefined, video_subject: videoModel || undefined }),
-    onSuccess: () => { message.success('首选模型已保存'); queryClient.invalidateQueries({ queryKey: ['admin-integration'] }) },
+    onSuccess: () => { toast.ok('首选模型已保存'); queryClient.invalidateQueries({ queryKey: ['admin-integration'] }) },
   })
   return (
     <Space direction="vertical" size={10} style={{ maxWidth: 500 }}>
@@ -773,7 +773,7 @@ function LLMConfigsSection({ data }: { data: any[] }) {
   const queryClient = useQueryClient()
   const setDefaultMutation = useMutation({
     mutationFn: (name: string) => businessApi.setLLMDefault(name),
-    onSuccess: () => { message.success('默认模型已切换'); queryClient.invalidateQueries({ queryKey: ['admin-integration', 'llm'] }) },
+    onSuccess: () => { toast.ok('默认模型已切换'); queryClient.invalidateQueries({ queryKey: ['admin-integration', 'llm'] }) },
   })
   if (!data || data.length === 0) return <Empty description="暂无 LLM 配置" />
   return (
@@ -811,7 +811,7 @@ function ASRConfigSection({ data, queryClient }: { data: any; queryClient: any }
 
   const saveMutation = useMutation({
     mutationFn: () => businessApi.saveProviderConfig('asr', { api_key: key || undefined, base_url: endpoint || undefined, enabled, extra_json: JSON.stringify({ model }) }),
-    onSuccess: () => { message.success('ASR 配置已保存（≤10s 生效）'); queryClient.invalidateQueries({ queryKey: ['admin-integration', 'asr'] }) },
+    onSuccess: () => { toast.ok('ASR 配置已保存'); queryClient.invalidateQueries({ queryKey: ['admin-integration', 'asr'] }) },
   })
 
   return (

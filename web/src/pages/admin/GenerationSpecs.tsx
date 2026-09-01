@@ -3,7 +3,7 @@ import { Typography, Table, Tag, Button, Space, Modal, Form, Input, InputNumber,
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationSpec, GenerationModeView } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -74,12 +74,12 @@ export default function GenerationSpecs() {
     mutationFn: ({ subType, enabled }: { subType: string; enabled: boolean }) =>
       businessApi.adminSetGenerationMode(subType, enabled),
     onSuccess: (_d, v) => {
-      message.success(`${MODE_LABEL[v.subType] || v.subType} 已${v.enabled ? '开启' : '关闭'}（30 秒热生效）`)
+      toast.ok(`${MODE_LABEL[v.subType] || v.subType} 已${v.enabled ? '开启' : '关闭'}`)
       queryClient.invalidateQueries({ queryKey: ['admin-gen-modes'] })
       queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] })
       queryClient.invalidateQueries({ queryKey: ['generation-types'] })
     },
-    onError: (e: Error) => message.error('切换失败：' + e.message),
+    onError: (e: Error) => toast.fail('切换失败：' + e.message),
   })
   const tierOrder: Record<string, number> = { default: 0, advanced: 1, closed: 2 }
   const sortedModes = [...modes].sort((a, b) => (tierOrder[a.tier] ?? 9) - (tierOrder[b.tier] ?? 9))
@@ -88,22 +88,22 @@ export default function GenerationSpecs() {
     mutationFn: ({ subType, model, body }: { subType: string; model: string; body: { capability: GenerationCapability; enabled: boolean } }) =>
       businessApi.adminSaveGenerationSpec(subType, model, body),
     onSuccess: () => {
-      message.success('已保存（30 秒内热生效，无需重启）')
+      toast.ok('已保存')
       setEditing(null)
       setAdding(false)
       queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] })
     },
-    onError: (e: Error) => message.error('保存失败：' + e.message),
+    onError: (e: Error) => toast.fail('保存失败：' + e.message),
   })
 
   const deleteMut = useMutation({
     mutationFn: ({ subType, model }: { subType: string; model: string }) =>
       businessApi.adminDeleteGenerationSpec(subType, model),
     onSuccess: () => {
-      message.success('已删除（恢复出厂默认）')
+      toast.ok('已删除，恢复默认', 'admin-spec-del')
       queryClient.invalidateQueries({ queryKey: ['admin-gen-specs'] })
     },
-    onError: (e: Error) => message.error('删除失败：' + e.message),
+    onError: (e: Error) => toast.fail('删除失败：' + e.message),
   })
 
   const openEdit = (spec: GenerationSpec) => {

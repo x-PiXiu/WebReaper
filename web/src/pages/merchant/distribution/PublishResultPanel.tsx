@@ -1,5 +1,5 @@
 import { Alert, Button, Card, Progress, Space, Typography } from 'antd'
-import { CheckCircleFilled, CloseCircleFilled, FundOutlined, LoadingOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
+import { CheckCircleFilled, CloseCircleFilled, ExportOutlined, FundOutlined, LinkOutlined, LoadingOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { PlatformBadge } from '../../../components/PlatformBadge'
 
@@ -15,22 +15,27 @@ export type PublishJobStatus = {
 
 type Props = {
   jobs: PublishJobStatus[]
+  mode?: 'auto' | 'semi'
   onRetry?: () => void
   onDismiss: () => void
+  onMarkPublished?: (jobId: string) => void
 }
 
-/** 发布结果面板：展示多平台并行发布的实时进度与最终结果 */
-export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
+/** 发布结果面板：全自动进度追踪，或半自动「前往发布」引导 */
+export function PublishResultPanel({ jobs, mode = 'auto', onRetry, onDismiss, onMarkPublished }: Props) {
   const navigate = useNavigate()
   if (jobs.length === 0) return null
 
+  const isSemi = mode === 'semi'
   const total = jobs.length
-  const done = jobs.filter((j) => j.status === 'published' || j.status === 'failed')
+  const done = isSemi
+    ? jobs.filter((j) => j.status === 'published')
+    : jobs.filter((j) => j.status === 'published' || j.status === 'failed')
   const success = jobs.filter((j) => j.status === 'published')
   const failed = jobs.filter((j) => j.status === 'failed')
-  const inFlight = total - done.length
-  const allDone = done.length === total
-  const percent = Math.round((done.length / total) * 100)
+  const inFlight = isSemi ? 0 : total - done.length
+  const allDone = isSemi ? success.length === total : done.length === total
+  const percent = isSemi ? (success.length / total) * 100 : Math.round((done.length / total) * 100)
 
   return (
     <Card
@@ -40,7 +45,9 @@ export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
         <Space>
           <RocketOutlined />
           <Title level={5} style={{ margin: 0 }}>
-            {allDone ? '发布完成' : '发布进行中'}
+            {isSemi
+              ? (allDone ? '半自动发布已完成' : '半自动发布 · 请前往各平台')
+              : (allDone ? '发布完成' : '发布进行中')}
           </Title>
           {allDone && (
             <Text type="secondary">
@@ -52,9 +59,13 @@ export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
       }
       extra={
         <Space>
-          {/* 闭环入口：发布完成 → 引导去看数据表现 */}
           {allDone && success.length > 0 && (
-            <Button size="small" type="primary" ghost icon={<FundOutlined />} onClick={() => navigate('/m/analytics')}>
+            <Button size="small" type="primary" ghost onClick={() => navigate('/m/works')}>
+              回作品库
+            </Button>
+          )}
+          {allDone && success.length > 0 && !isSemi && (
+            <Button size="small" icon={<FundOutlined />} onClick={() => navigate('/m/analytics')}>
               查看数据
             </Button>
           )}
@@ -71,13 +82,32 @@ export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
         </Space>
       }
     >
-      {!allDone && (
+      {!allDone && !isSemi && (
         <div style={{ marginBottom: 12 }}>
           <Progress percent={percent} size="small" status="active" />
           <Text type="secondary" style={{ fontSize: 12 }}>
             {inFlight > 0 && `${inFlight} 个平台正在发布...`}
           </Text>
         </div>
+      )}
+
+      {isSemi && !allDone && (
+        <Alert
+          type="success"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="内容已准备就绪"
+          description="点击下方「前往发布」打开各平台发布页，完成后点「已发布」标记。"
+        />
+      )}
+
+      {isSemi && jobs.some((j) => j.platform === 'zhihu') && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="知乎需手动粘贴正文（平台限制），点击「前往发布」后请 Ctrl+V"
+        />
       )}
 
       <Space direction="vertical" style={{ width: '100%' }} size={8}>
@@ -118,10 +148,24 @@ export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
                   ✗ {job.error_msg || '发布失败'}
                 </Text>
               )}
-              {(job.status === 'pending' || job.status === 'processing') && (
+              {!isSemi && (job.status === 'pending' || job.status === 'processing') && (
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {job.status === 'pending' ? '排队中...' : 'RPA 自动发布中...'}
                 </Text>
+              )}
+              {isSemi && job.status !== 'published' && job.status !== 'failed' && (
+                <Space>
+                  {job.external_url && (
+                    <Button size="small" type="primary" icon={<ExportOutlined />} href={job.external_url} target="_blank">
+                      前往发布
+                    </Button>
+                  )}
+                  {onMarkPublished && (
+                    <Button size="small" type="link" icon={<LinkOutlined />} onClick={() => onMarkPublished(job.id)}>
+                      已发布
+                    </Button>
+                  )}
+                </Space>
               )}
             </div>
           </div>
@@ -134,7 +178,7 @@ export function PublishResultPanel({ jobs, onRetry, onDismiss }: Props) {
           showIcon
           style={{ marginTop: 12 }}
           message={`${failed.length} 个平台发布失败`}
-          description="可能是平台风控或页面结构变化。可点击「重试失败项」重新发布，或切换到半自动模式（生成链接手动发布）。"
+          description="可能是平台风控或页面结构变化。可重试失败项，或改用半自动（生成链接后手动发布）。"
         />
       )}
     </Card>

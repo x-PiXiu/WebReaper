@@ -5,7 +5,7 @@ import { CloudServerOutlined, SaveOutlined, KeyOutlined, SafetyCertificateOutlin
 import { businessApi } from '../../api/business'
 import type { ProviderConfig } from '../../types/api'
 import QueryBoundary from '../../components/QueryBoundary'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -29,10 +29,10 @@ export default function Providers() {
     mutationFn: (p: { provider: string; data: { api_key?: string; base_url?: string; enabled?: boolean } }) =>
       businessApi.saveProviderConfig(p.provider, p.data),
     onSuccess: () => {
-      message.success('已保存（对已接入厂商即时生效）')
+      toast.ok('已保存', 'admin-provider')
       queryClient.invalidateQueries({ queryKey: ['admin-provider-configs'] })
     },
-    onError: (e) => message.error(`保存失败：${(e as Error).message}`),
+    onError: (e) => toast.fail(`保存失败：${(e as Error).message}`),
   })
 
   const draftOf = (p: string): { api_key: string; base_url: string; enabled: boolean } =>
@@ -197,7 +197,7 @@ function TavilySection() {
   const handleToggle = async (enabled: boolean) => {
     try {
       await businessApi.updateTavilyKey({ enabled })
-      message.success(enabled ? 'Tavily 已启用' : 'Tavily 已禁用')
+      toast.ok(enabled ? 'Tavily 已启用' : 'Tavily 已禁用')
       queryClient.invalidateQueries({ queryKey: ['tavily-status'] })
     } catch {}
   }
@@ -260,8 +260,8 @@ function PaymentSection() {
 
   const saveMut = useMutation({
     mutationFn: (vals: any) => businessApi.adminSetPaymentConfig(vals),
-    onSuccess: () => { message.success('支付配置已保存（重启服务后生效）'); queryClient.invalidateQueries({ queryKey: ['payment-config'] }) },
-    onError: () => message.error('保存失败'),
+    onSuccess: () => { toast.ok('支付配置已保存，重启后生效', 'admin-pay'); queryClient.invalidateQueries({ queryKey: ['payment-config'] }) },
+    onError: () => toast.fail('保存失败'),
   })
 
   return (

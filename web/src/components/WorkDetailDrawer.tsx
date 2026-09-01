@@ -6,7 +6,7 @@ import { LazyLine } from './charts/LazyCharts'
 import { businessApi } from '../api/business'
 import { PlatformBadge } from './PlatformBadge'
 import { MODAL_W, modalBodyScroll } from '../ui/modalFit'
-import { message } from '../utils/antdApp'
+import { toast } from '../utils/feedback'
 
 const { Text, Title } = Typography
 
@@ -66,12 +66,12 @@ export default function WorkDetailDrawer({ open, onClose, work }: {
     setRefreshing(true)
     try {
       const r = await businessApi.refreshJobMetrics(work.jobId)
-      message.success(`已回读：播放 ${r.views.toLocaleString()} · 赞 ${r.likes.toLocaleString()}`)
+      toast.ok(`已更新：播放 ${r.views.toLocaleString()} · 赞 ${r.likes.toLocaleString()}`, 'metrics-refresh')
       queryClient.invalidateQueries({ queryKey: ['job-metrics', work.jobId] })
       queryClient.invalidateQueries({ queryKey: ['analytics-summary'] })
       queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
     } catch (e: any) {
-      message.error(e?.response?.data?.msg || '回读失败（需该平台浏览器通道账号）')
+      toast.fail(e?.response?.data?.msg || '回读失败，请确认账号仍在登录态', 'metrics-refresh')
     } finally {
       setRefreshing(false)
     }

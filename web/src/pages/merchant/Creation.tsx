@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Tabs, Typography, Select, Input, InputNumber, Switch, Slider, Button, Space, Tag, Table, Modal, Empty, Popconfirm, Tooltip, Alert, Badge, Collapse, AutoComplete, Upload } from 'antd'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 import {
   VideoCameraOutlined, PictureOutlined, AudioOutlined, RobotOutlined, AppstoreOutlined,
   ReloadOutlined, PlayCircleOutlined, SoundOutlined,
@@ -17,6 +17,7 @@ import { useBrandContext } from '../../hooks/useBrands'
 import { normalizeUploadedAsset } from '../../hooks/useMediaAssets'
 import type { GenerationTask, GenerationType, ModelCapability, MediaAsset, PromptRef } from '../../types/api'
 import RetryHint from '../../components/RetryHint'
+import { PageBackLink } from '../../components/PageBackLink'
 import { SubjectPicker } from '../../components/compose/SubjectPicker'
 import { useSubjectList } from '../../hooks/useSubjectList'
 
@@ -231,18 +232,18 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
       return businessApi.submitGenerationTask(data)
     },
     onSuccess: () => {
-      message.success('生成任务已提交')
+      toast.ok('生成任务已提交')
       queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
     },
     onError: (e: Error) => {
-      if (e?.message) message.error(e.message)
+      if (e?.message) toast.fail(e.message)
     },
   })
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => businessApi.cancelGenerationTask(id),
     onSuccess: () => {
-      message.success('已取消')
+      toast.ok('已取消')
       queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
     },
   })
@@ -391,14 +392,14 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     setParams(parseTaskParams(task))
     setOffPeak(task.off_peak)
     setWatermark(task.watermark)
-    message.info('已回填参数，可调整后重新提交')
+    toast.info('已回填参数，可调整后重新提交')
   }
 
   const canSubmit = model && subType && cap
 
   const submit = () => {
     if (!canSubmit) {
-      message.warning('请选择模型与生成模式')
+      toast.warn('请选择模型与生成模式')
       return
     }
     const clean: Record<string, unknown> = {}
@@ -410,40 +411,40 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
     const submitRefs = (clean.refs as PromptRef[]) || []
     delete clean.refs
     if (submitRefs.length > 0 && refKinds.length === 0) {
-      message.warning('该模式不支持素材引用')
+      toast.warn('该模式不支持素材引用')
       return
     }
     // 必填校验（服务端兜底）
-    if (subType === 'tts' && !clean.text) { message.warning('请输入合成文本'); return }
+    if (subType === 'tts' && !clean.text) { toast.warn('请输入合成文本'); return }
     // 统一 submit 不传音色（文档 type=audio + text）；音色选择不阻断提交
-    if (subType === 'voice_clone' && !submitRefs.some(r => r.kind === 'audio') && !clean.audio_url) { message.warning('请引用音频素材（声音克隆的原料）'); return }
+    if (subType === 'voice_clone' && !submitRefs.some(r => r.kind === 'audio') && !clean.audio_url) { toast.warn('请引用音频素材作为克隆原料', 'creation-voice'); return }
     if (subType === 'digital_human') {
       const hasImage = submitRefs.some(r => r.kind === 'image') || !!clean.image
-      if (!hasImage) { message.warning('请引用人像图片'); return }
+      if (!hasImage) { toast.warn('请引用人像图片'); return }
       const hasAudio = submitRefs.some(r => r.kind === 'audio') || !!clean.audio_url
       if (!hasAudio) {
-        message.warning('数字人口播需要「人像图 + 音频」。请先配音，或改用「图生视频」模式')
+        toast.warn('数字人口播需要人像图和音频，请先配音或改用图生视频', 'creation-dh')
         return
       }
     }
-    if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { message.warning('请至少添加一个音效事件'); return }
+    if (subType === 'sound_effect' && !(clean.timing_prompts as any[])?.length) { toast.warn('请至少添加一个音效事件'); return }
     if (subType === 'lip_sync') {
       const hasVideo = submitRefs.some(r => r.kind === 'video') || clean.video_url
-      if (!hasVideo) { message.warning('请引用一个出镜视频（@视频）'); return }
+      if (!hasVideo) { toast.warn('请引用一个出镜视频（@视频）'); return }
       const hasAudio = submitRefs.some(r => r.kind === 'audio') || clean.audio_url || clean.text
-      if (!hasAudio) { message.warning('请引用语音音频或在上方输入正文文本'); return }
+      if (!hasAudio) { toast.warn('请引用语音音频或在上方输入正文文本'); return }
     }
     if (subType === 'reference2video') {
       const subs = (clean.subjects as { server_id?: string }[] | undefined) || []
-      if (!subs[0]?.server_id) { message.warning('请选择数字分身'); return }
+      if (!subs[0]?.server_id) { toast.warn('请选择数字分身'); return }
     }
     if (!clean.prompt && !clean.text && subType !== 'subject' && subType !== 'multiframe' && subType !== 'lip_sync') {
       if (subType !== 'tts' && subType !== 'voice_clone' && subType !== 'sound_effect') {
-        message.warning('请输入提示词/文本'); return
+        toast.warn('请输入提示词/文本'); return
       }
     }
     if (!brandId) {
-      message.warning('请先选择人设/品牌后再生成')
+      toast.warn('请先选择人设后再生成', 'creation-brand')
       return
     }
     if (model) clean.model = model
@@ -922,7 +923,7 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
                     try {
                       const asset = normalizeUploadedAsset(await businessApi.uploadAsset(file))
                       addRefsFromAssets([asset], 'refs')
-                      message.success('已添加参考图')
+                      toast.ok('已添加参考图')
                     } catch { /* */ }
                     return false
                   }}
@@ -1233,10 +1234,11 @@ export default function CreationWorkbench({ embedded, initialPrompt }: { embedde
         {!embedded && (
           <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
             <div>
-              <h1>多媒体创作</h1>
+              <PageBackLink to="/m/compose" label="工作台" />
+              <h1 style={{ marginTop: 10 }}>多媒体创作</h1>
               <p>视频 / 图片 / 音频生成——属于「内容生成」子能力</p>
             </div>
-            <Button type="link" onClick={() => navigate('/m/compose/tools?tab=article')}>← 返回写文章</Button>
+            <PageBackLink to="/m/compose/tools?tab=article" label="写文章" />
           </div>
         )}
 

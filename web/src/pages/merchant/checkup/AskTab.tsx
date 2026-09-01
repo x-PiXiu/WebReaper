@@ -7,7 +7,7 @@ import { businessApi } from '../../../api/business'
 import { useBrandContext } from '../../../hooks/useBrands'
 import { engineLabel, MENTION_RATE_TIP } from '../../../utils/geoTerms'
 import type { Keyword, MonitoringResult, EngineOption } from '../../../types/api'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 
 const { Text, Paragraph } = Typography
 
@@ -232,8 +232,8 @@ export default function AskTab({
   }
 
   const run = async (overrideQuestion?: string) => {
-    if (!brandId) { message.warning('请先选择品牌'); return }
-    if (selectedEngines.length === 0) { message.warning('请至少选择一个 AI'); return }
+    if (!brandId) { toast.warn('请先选择品牌'); return }
+    if (selectedEngines.length === 0) { toast.warn('请至少选择一个 AI'); return }
 
     // 组装本轮要问的问题列表
     let questions: string[]
@@ -241,10 +241,10 @@ export default function AskTab({
       questions = [overrideQuestion]
     } else if (mode === 'manual') {
       const q = questionText.trim() || brandKeywords.find((k) => k.id === pickedKwId)?.term || ''
-      if (!q) { message.warning('输入一个问题，或从问题库选一个'); return }
+      if (!q) { toast.warn('输入一个问题，或从问题库选一个'); return }
       questions = [q]
     } else {
-      if (checkedQs.length === 0) { message.warning('先让 AI 出题并勾选要测的问题'); return }
+      if (checkedQs.length === 0) { toast.warn('先让 AI 出题并勾选要测的问题'); return }
       questions = checkedQs
     }
 
@@ -269,7 +269,7 @@ export default function AskTab({
 
   // AI 帮我出题（问题词蒸馏——先勾选确认再测，不浪费额度、不问歪）
   const generateQuestions = async () => {
-    if (!brandId) { message.warning('请先选择品牌'); return }
+    if (!brandId) { toast.warn('请先选择品牌'); return }
     setGenerating(true)
     try {
       const res = await businessApi.distillKeywords({ source: 'questions', brand_id: brandId } as never)

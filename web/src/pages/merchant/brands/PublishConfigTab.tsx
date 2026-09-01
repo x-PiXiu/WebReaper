@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Form, Input, InputNumber, Select, Space, Switch, Table, Tag, Typography, Modal, Popconfirm } from 'antd'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, LinkOutlined,
 } from '@ant-design/icons'
@@ -61,11 +61,11 @@ export default function PublishConfigTab({ brandId }: Props) {
       businessApi.updateBrandPublishConfig(brandId, config),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['brand-publish-configs', brandId] })
-      message.success('配置已保存')
+      toast.ok('配置已保存')
       setEditModalVisible(false)
       form.resetFields()
     },
-    onError: () => message.error('保存失败'),
+    onError: () => toast.fail('保存失败'),
   })
 
   // 删除配置
@@ -74,9 +74,9 @@ export default function PublishConfigTab({ brandId }: Props) {
       businessApi.deleteBrandPublishConfig(brandId, platform),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['brand-publish-configs', brandId] })
-      message.success('配置已删除')
+      toast.ok('配置已删除')
     },
-    onError: () => message.error('删除失败'),
+    onError: () => toast.fail('删除失败'),
   })
 
   // 绑定账号
@@ -85,11 +85,11 @@ export default function PublishConfigTab({ brandId }: Props) {
       businessApi.bindAccountToBrand(brandId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['brand-publish-configs', brandId] })
-      message.success('账号绑定成功')
+      toast.ok('账号绑定成功')
       setBindModalVisible(false)
       bindForm.resetFields()
     },
-    onError: () => message.error('绑定失败'),
+    onError: () => toast.fail('绑定失败'),
   })
 
   // 打开编辑弹窗

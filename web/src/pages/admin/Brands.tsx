@@ -3,7 +3,7 @@ import { DeleteOutlined, AppstoreOutlined, TagOutlined, EnvironmentOutlined, Bul
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Brand } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -23,9 +23,9 @@ export default function AdminBrands() {
   const handleDelete = async (b: Brand) => {
     try {
       await businessApi.adminDeleteBrand(b.id) // admin 旁路（全局）
-      message.success(`品牌「${b.name}」已删除（含关键词/内容）`)
+      toast.ok(`品牌「${b.name}」已删除`, 'admin-brand')
       queryClient.invalidateQueries({ queryKey: ['admin-brands'] })
-    } catch { message.error('删除失败') }
+    } catch { toast.fail('删除失败') }
   }
 
   const columns = [

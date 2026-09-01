@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Alert, Button, Input, Space, Typography } from 'antd'
 import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 const { Text } = Typography
 
@@ -50,7 +50,7 @@ export default function EditModule() {
             disabled={!videoUrl.trim()}
             onClick={() => {
               draft.patch({ editedVideoUrl: videoUrl.trim() })
-              message.success('成片已确认')
+              toast.ok('成片已确认', 'edit-confirm')
               navigate('/m/compose/cover')
             }}
           >

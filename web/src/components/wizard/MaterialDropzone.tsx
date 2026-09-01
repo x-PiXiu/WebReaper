@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Upload } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 type Props = {
   accept: string
@@ -46,7 +46,7 @@ export function MaterialDropzone({
         beforeUpload={(file) => {
           const maxMb = 500
           if (file.size > maxMb * 1024 * 1024) {
-            message.error(`文件不能超过 ${maxMb}MB`)
+            toast.fail(`文件不能超过 ${maxMb}MB`)
             return Upload.LIST_IGNORE
           }
           return true

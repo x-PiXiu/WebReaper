@@ -117,7 +117,10 @@ function ThemedApp({ children }: { children: React.ReactNode }) {
   return (
     <ConfigProvider locale={zhCN} theme={config} modal={modalDefaults}>
       {/* AntdApp + 桥接：业务/拦截器用 utils/antdApp，避免静态 message/Modal 警告 */}
-      <AntdApp>
+      <AntdApp
+        message={{ maxCount: 2, duration: 2.5, top: 56 }}
+        notification={{ maxCount: 3, placement: 'topRight', duration: 4.5 }}
+      >
         <AntdAppApiBridge />
         {children}
       </AntdApp>

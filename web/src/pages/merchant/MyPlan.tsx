@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { Plan } from '../../types/api'
 import QueryBoundary from '../../components/QueryBoundary'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text, Title } = Typography
 
@@ -76,7 +76,7 @@ export default function MyPlan() {
 
     settlingRef.current = true
     const run = async () => {
-      message.loading({ content: '正在确认支付结果…', key: 'pay-return', duration: 0 })
+      toast.loading('正在确认支付结果…', 'pay-return')
       const id = orderId || fromSession
       let ok = false
       if (id) ok = await settlePaidOrder(id)
@@ -85,9 +85,9 @@ export default function MyPlan() {
       refreshBilling()
       sessionStorage.removeItem(PENDING_ORDER_KEY)
       if (ok || tradeOK) {
-        message.success({ content: '支付已确认，套餐额度已更新', key: 'pay-return' })
+        toast.ok('支付已确认，套餐额度已更新', 'pay-return')
       } else {
-        message.info({ content: '若已付款，额度将在确认后自动开通；也可在订单列表手动确认', key: 'pay-return', duration: 5 })
+        toast.info('若已付款，额度将自动开通；也可在订单列表手动确认', 'pay-return', 5)
       }
       // 清掉回跳参数，避免刷新重复 confirm
       if (fromQuery || searchParams.has('trade_status')) {
@@ -104,24 +104,24 @@ export default function MyPlan() {
     onSuccess: (res) => {
       const payURL = res.payment_url || ''
       if (!payURL) {
-        message.success('订单已创建（线下模式，等待管理员开通）')
+        toast.ok('订单已创建，等待管理员开通', 'pay-order')
         refreshBilling()
         setBuyModal(null)
         return
       }
       const isMockPay = payURL.includes('mock-pay') || /\/billing\/pay\?/.test(payURL)
       if (isMockPay) {
-        message.loading({ content: '演示支付处理中…', key: 'pay', duration: 1 })
+        toast.loading('演示支付处理中…', 'pay')
         setTimeout(() => {
           businessApi.confirmOrder(res.order.id).then(() => {
-            message.success({ content: '支付成功，套餐已开通', key: 'pay' })
+            toast.ok('支付成功，套餐已开通', 'pay')
             refreshBilling()
-          }).catch(() => message.error({ content: '支付确认未完成，请稍后在订单列表重试', key: 'pay', duration: 4 }))
+          }).catch(() => toast.fail('支付确认未完成，请稍后在订单列表重试', 'pay', 4))
         }, 800)
       } else {
         sessionStorage.setItem(PENDING_ORDER_KEY, res.order.id)
         window.open(payURL, '_blank', 'noopener,noreferrer')
-        message.info({ content: '已打开支付页——完成支付后回到本页，将自动确认开通', key: 'pay', duration: 6 })
+        toast.info('已打开支付页，完成后回到本页即可确认', 'pay', 6)
         refreshBilling()
       }
       setBuyModal(null)
@@ -132,7 +132,7 @@ export default function MyPlan() {
   const confirmMut = useMutation({
     mutationFn: (orderId: string) => businessApi.confirmOrder(orderId),
     onSuccess: () => {
-      message.success('订单已确认开通')
+      toast.ok('订单已确认开通', 'pay-confirm')
       sessionStorage.removeItem(PENDING_ORDER_KEY)
       refreshBilling()
     },

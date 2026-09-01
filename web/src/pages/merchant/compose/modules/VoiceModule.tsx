@@ -20,7 +20,8 @@ import { businessApi } from '../../../../api/business'
 import { GenerateAssetModal } from '../../../../components/assets/GenerateAssetModal'
 import { GENERATION_TASKS_KEY, useGenerationTasks } from '../../../../hooks/useGenerationTasks'
 import type { GenerationVoice } from '../../../../types/api'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
+import { PageBackLink } from '../../../../components/PageBackLink'
 import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
 
 type Scope = 'all' | 'mine' | 'recommend'
@@ -178,7 +179,7 @@ export default function VoiceModule() {
     setDeleting(true)
     try {
       await Promise.all(taskIds.map((id) => businessApi.deleteGenerationTask(id)))
-      message.success(`已删除 ${taskIds.length} 个音色`)
+      toast.ok(`已删除 ${taskIds.length} 个音色`)
       setSelected([])
       refetch()
     } catch { /* 拦截器 */ } finally {
@@ -188,7 +189,7 @@ export default function VoiceModule() {
 
   const togglePlay = (card: VoiceCard) => {
     if (!card.sampleUrl) {
-      message.info(card.mine ? '克隆音色暂无试听样例' : '该音色暂无试听')
+      toast.info(card.mine ? '克隆音色暂无试听样例' : '该音色暂无试听')
       return
     }
     if (playingRef.current === card.id && previewAudio) {
@@ -209,7 +210,7 @@ export default function VoiceModule() {
     previewAudio.play().catch(() => {
       playingRef.current = ''
       setPlayingId('')
-      message.warning('试听播放失败')
+      toast.warn('试听播放失败')
     })
   }
 
@@ -219,7 +220,8 @@ export default function VoiceModule() {
     <div className="vc-lib">
       <header className="vc-lib-head">
         <div className="vc-lib-titles">
-          <h1 className="vc-lib-title">音色库</h1>
+          <PageBackLink to="/m/compose" label="工作台" />
+          <h1 className="vc-lib-title" style={{ marginTop: 10 }}>音色库</h1>
           <p className="vc-lib-lead">AI 情感音色，真人般自然流畅</p>
         </div>
 

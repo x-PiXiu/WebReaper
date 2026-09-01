@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { notification, Badge, Card, Space, Typography, Button, Progress } from 'antd'
+import { Badge, Card, Space, Typography, Button, Progress } from 'antd'
 import { BellOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useGenerationTasks } from '../hooks/useGenerationTasks'
+import { notification } from '../utils/antdApp'
 import type { GenerationTask } from '../types/api'
 
 const { Text } = Typography
@@ -15,43 +16,58 @@ const TASK_STATE_LABELS: Record<string, string> = {
   cancelled: '已取消',
 }
 
+function taskTitle(task: GenerationTask) {
+  const type = task.sub_type || task.type || '内容'
+  return String(type)
+}
+
 export default function TaskNotification() {
   const [notifiedTasks, setNotifiedTasks] = useState<Set<string>>(new Set())
   const { tasks } = useGenerationTasks()
 
   useEffect(() => {
-    tasks.forEach(task => {
+    tasks.forEach((task) => {
       const isTerminal = ['success', 'failed', 'cancelled'].includes(task.state)
       const alreadyNotified = notifiedTasks.has(task.id)
 
       if (isTerminal && !alreadyNotified) {
         const isSuccess = task.state === 'success'
         notification.open({
-          message: isSuccess ? '生成完成' : '生成失败',
+          message: isSuccess ? '生成完成' : task.state === 'cancelled' ? '生成已取消' : '生成未成功',
           description: (
             <Space direction="vertical" size={4}>
-              <Text>{TASK_STATE_LABELS[task.state]}</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>任务ID: {task.id}</Text>
-              {task.err_msg && <Text type="danger" style={{ fontSize: 12 }}>{task.err_msg}</Text>}
+              <Text>{taskTitle(task)} · {TASK_STATE_LABELS[task.state]}</Text>
+              {task.err_msg && (
+                <Text type="danger" style={{ fontSize: 12 }}>
+                  {task.err_msg.length > 80 ? `${task.err_msg.slice(0, 80)}…` : task.err_msg}
+                </Text>
+              )}
+              {isSuccess && (
+                <Button type="link" size="small" style={{ padding: 0, height: 'auto' }} onClick={() => { window.location.href = '/m/works' }}>
+                  去作品库查看
+                </Button>
+              )}
             </Space>
           ),
           icon: isSuccess
-            ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-            : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
-          duration: 5,
+            ? <CheckCircleOutlined style={{ color: 'var(--wr-success)' }} />
+            : <CloseCircleOutlined style={{ color: 'var(--wr-danger)' }} />,
+          duration: isSuccess ? 4.5 : 6,
+          key: `gen-${task.id}`,
         })
-        setNotifiedTasks(prev => new Set(prev).add(task.id))
+        setNotifiedTasks((prev) => new Set(prev).add(task.id))
       }
     })
   }, [tasks, notifiedTasks])
 
-  const pendingCount = tasks.filter(t => ['created', 'queueing', 'processing'].includes(t.state)).length
+  const pendingCount = tasks.filter((t) => ['created', 'queueing', 'processing'].includes(t.state)).length
 
   return (
     <Badge count={pendingCount} size="small">
       <Button
         type="text"
         icon={<BellOutlined />}
+        aria-label="生成任务"
         onClick={() => { window.location.href = '/m/compose/tools?tab=media' }}
       />
     </Badge>
@@ -69,8 +85,8 @@ export function TaskStatusCard({ task }: { task: GenerationTask }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             {isProcessing && <LoadingOutlined spin />}
-            {isSuccess && <CheckCircleOutlined style={{ color: '#52c41a' }} />}
-            {isFailed && <CloseCircleOutlined style={{ color: '#ff4d4f' }} />}
+            {isSuccess && <CheckCircleOutlined style={{ color: 'var(--wr-success)' }} />}
+            {isFailed && <CloseCircleOutlined style={{ color: 'var(--wr-danger)' }} />}
             <Text strong>{TASK_STATE_LABELS[task.state]}</Text>
           </Space>
           <Text type="secondary" style={{ fontSize: 12 }}>{task.sub_type}</Text>
@@ -119,7 +135,7 @@ export function TaskList() {
 
   return (
     <div>
-      {tasks.map(task => <TaskStatusCard key={task.id} task={task} />)}
+      {tasks.map((task) => <TaskStatusCard key={task.id} task={task} />)}
     </div>
   )
 }

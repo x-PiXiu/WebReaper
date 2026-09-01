@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Input, Popconfirm, Popover, Segmented, Select, Space, Tag, Typography } from 'antd'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
+import { distributionPathFromLipSync } from '../../../utils/distributionPath'
 import {
   EditOutlined, UploadOutlined, VideoCameraOutlined, UserOutlined,
   RocketOutlined, CheckCircleOutlined, SoundOutlined, ExportOutlined, ClockCircleOutlined,
@@ -240,20 +241,20 @@ export default function LipSyncWizard() {
       setRewriteText('')
       setScript(r.raw_text)
       setScriptVersion('clean')
-      message.success(`提取完成，共 ${lines.length} 句——请在下方逐句确认文案`)
+      toast.ok(`提取完成，共 ${lines.length} 句，请在下方确认`, 'lipsync-extract')
     } catch (e: any) {
       const raw = e?.response?.data?.msg || e?.message || '提取失败'
       setError(friendlyGenerationError(raw))
       // 链接解析类失败：引导切到上传，避免用户反复试链接
       if (/详情解析|分享链|unexpected end of JSON|Cookie|风控/i.test(raw)) {
-        message.info('链接提取暂不可用，可改用下方「上传视频」')
+        toast.info('链接提取暂不可用，可改用下方「上传视频」', 'lipsync-extract')
       }
     } finally { setExtracting(false) }
   }
 
   /** 显式 AI 润色（23 号计划 §3.1②：点按钮 → 输入一句话需求 → 双版本二选一） */
   const doRewrite = async (req: string) => {
-    if (!script.trim()) { message.warning('请先输入文案'); return }
+    if (!script.trim()) { toast.warn('请先输入文案', 'lipsync-script'); return }
     setRewriting(true)
     setRewritePopOpen(false)
     try {
@@ -267,7 +268,7 @@ export default function LipSyncWizard() {
       setRewriteText(rw.rewrite || rw.clean)
       setScript(rw.rewrite || rw.clean)
       setScriptVersion('rewrite')
-      message.success('已润色——可在「原文 / AI 改写版」间切换应用')
+      toast.ok('润色完成，可切换「原文 / AI 改写」', 'lipsync-rewrite')
     } catch { /* 拦截器已提示 */ } finally {
       setRewriting(false)
       setRewriteReq('')
@@ -293,19 +294,19 @@ export default function LipSyncWizard() {
   }
 
   const produce = async (retryFrom?: 'tts' | 'ref' | 'lipsync') => {
-    if (!script.trim()) { message.warning('文案为空'); return }
+    if (!script.trim()) { toast.warn('请先填写文案', 'lipsync-produce'); return }
     const bid = brandId || draft.brandId
-    if (!bid) { message.warning('请先选择人设/品牌'); return }
+    if (!bid) { toast.warn('请先选择人设', 'lipsync-produce'); return }
     if (presence === 'avatar' && !subjectServerId && !selectedSubject?.portraitUrl) {
-      message.warning('请选择数字分身')
+      toast.warn('请选择数字分身', 'lipsync-produce')
       return
     }
     if (presence === 'real' && !realVideoUrl) {
-      message.warning('请上传出镜视频')
+      toast.warn('请上传出镜视频', 'lipsync-produce')
       return
     }
     if (audioSource === 'upload' && !uploadedAudioUrl) {
-      message.warning('请先上传已录音频，或改选 TTS 配音')
+      toast.warn('请先上传音频，或改选 TTS 配音', 'lipsync-produce')
       return
     }
     setProducing(true); setError(''); setFailedStage('')
@@ -343,13 +344,13 @@ export default function LipSyncWizard() {
       setRefTaskId(result.refTaskId || '')
       setLipsyncTaskId(result.lipsyncTaskId)
       setResultUrl(result.resultUrl)
-      message.success('成片完成')
+      toast.ok('成片已完成', 'lipsync-done')
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
       goStep(3)
     } catch (e: any) {
       if (cancelRequested.current) {
         // 用户主动取消：不算失败——已完成阶段的产物保留，可断点重试
-        message.info('已取消生成——已完成阶段的产物已保留，可重新生成或从断点重试')
+        toast.info('已取消，已完成阶段可继续重试', 'lipsync-cancel')
       } else {
         setError(friendlyGenerationError(e?.response?.data?.msg || e?.message || '成片失败'))
         setFailedStage(pipelineStage)
@@ -452,14 +453,13 @@ export default function LipSyncWizard() {
   }
 
   const goPublish = () => {
-    const q = new URLSearchParams()
-    if (brandId) q.set('brandId', brandId)
-    if (resultUrl) q.set('mediaUrls', resultUrl)
-    q.set('contentType', 'video')
-    if (script.trim()) q.set('content', script.trim().slice(0, 8000))
-    const pubTitle = (draft.selectedTitle || topic || '').trim()
-    if (pubTitle) q.set('title', pubTitle)
-    navigate(`/m/distribution?${q.toString()}`)
+    navigate(distributionPathFromLipSync({
+      brandId: brandId || undefined,
+      mediaUrl: resultUrl || undefined,
+      coverUrl: draft.coverUrl || undefined,
+      title: (draft.selectedTitle || topic || '').trim() || undefined,
+      content: script.trim() || undefined,
+    }))
   }
 
   const handleNext = () => {
@@ -501,7 +501,7 @@ export default function LipSyncWizard() {
           ) : undefined}
         />
       )}
-      <CapabilityBanner required={['lip_sync', 'tts', 'reference2video']} />
+      <CapabilityBanner required={['lip_sync', 'tts']} />
     </>
   )
 
@@ -584,12 +584,12 @@ export default function LipSyncWizard() {
                   onSearch={() => {
                     if (!shareUrl.trim()) return
                     if (isKuaishouUrl(shareUrl)) {
-                      message.info('快手暂不支持链接提取，请下载视频后用上传方式')
+                      toast.info('快手暂不支持链接提取，请下载后上传', 'lipsync-ks')
                       return
                     }
                     const link = extractShareUrl(shareUrl)
                     if (!link) {
-                      message.warning('未识别到抖音/B站链接。请粘贴完整分享口令，或改用上传视频')
+                      toast.warn('未识别到有效链接，请粘贴完整口令或改用上传', 'lipsync-link')
                       return
                     }
                     if (link !== shareUrl.trim()) setShareUrl(link)
@@ -617,10 +617,10 @@ export default function LipSyncWizard() {
                   onUpload={async (file) => {
                     const sizeCheck = checkMaterialFileSize(file)
                     if (!sizeCheck.ok) {
-                      message.error(sizeCheck.error)
+                      toast.fail(sizeCheck.error || '文件过大', 'lipsync-size')
                       return
                     }
-                    if (sizeCheck.warning) message.warning(sizeCheck.warning)
+                    if (sizeCheck.warning) toast.warn(sizeCheck.warning, 'lipsync-size')
                     const r = await businessApi.uploadAsset(file)
                     await doExtract({ asset_url: r.url })
                   }}
@@ -811,16 +811,16 @@ export default function LipSyncWizard() {
                       onUpload={async (file) => {
                         const sizeCheck = checkMaterialFileSize(file)
                         if (!sizeCheck.ok) {
-                          message.error(sizeCheck.error)
+                          toast.fail(sizeCheck.error || '文件过大', 'lipsync-size')
                           return
                         }
-                        if (sizeCheck.warning) message.warning(sizeCheck.warning)
+                        if (sizeCheck.warning) toast.warn(sizeCheck.warning, 'lipsync-size')
                         const dur = await readVideoDuration(file)
                         const r = await businessApi.uploadAsset(file)
                         setRealVideoUrl(r.url)
                         setRealVideoName(file.name)
                         setRealVideoSec(dur)
-                        message.success(dur > 0 ? `已上传（${Math.round(dur)} 秒）` : '出镜视频已上传')
+                        toast.ok(dur > 0 ? `出镜视频已上传（${Math.round(dur)} 秒）` : '出镜视频已上传', 'lipsync-video')
                       }}
                     />
                     {realVideoSec > 0 && (
@@ -870,7 +870,7 @@ export default function LipSyncWizard() {
                   className={`wz-source-card${audioSource === 'direct' ? ' is-active' : ''}${presence === 'real' ? ' is-disabled' : ''}`}
                   onClick={() => {
                     if (presence === 'real') {
-                      message.info('文本直生仅数字分身可用')
+                      toast.info('文本直生仅数字分身可用', 'lipsync-direct')
                       return
                     }
                     setAudioSource('direct')
@@ -913,14 +913,14 @@ export default function LipSyncWizard() {
                       loading={uploadingAudio}
                       onUpload={async (file) => {
                         const check = checkMaterialFileSize(file)
-                        if (check?.error) { message.warning(check.error); return }
+                        if (check?.error) { toast.warn(check.error, 'lipsync-audio'); return }
                         setUploadingAudio(true)
                         try {
                           const r = await businessApi.uploadAsset(file)
                           setUploadedAudioUrl(r.url)
-                          message.success('音频已上传')
+                          toast.ok('音频已上传', 'lipsync-audio')
                         } catch (e: any) {
-                          message.error(e?.response?.data?.msg || '上传失败，请重试')
+                          toast.fail(e?.response?.data?.msg || '上传失败，请重试', 'lipsync-audio')
                         } finally {
                           setUploadingAudio(false)
                         }
@@ -1042,7 +1042,7 @@ export default function LipSyncWizard() {
                   icon={<VideoCameraAddOutlined />}
                   onClick={() => {
                     if (!lipsyncTaskId) {
-                      message.warning('成片任务尚未就绪')
+                      toast.warn('成片还没准备好，请稍候', 'lipsync-broll')
                       return
                     }
                     navigate(`/m/works/${encodeURIComponent(`g-${lipsyncTaskId}`)}`)

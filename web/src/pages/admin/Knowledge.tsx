@@ -4,7 +4,7 @@ import { SaveOutlined, ReloadOutlined, DeleteOutlined, DatabaseOutlined, LinkOut
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { IndustryCrawlConfig, KnowledgeMaterialView } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -105,10 +105,10 @@ export default function Knowledge() {
         milvus_port: v.milvus_port || '',
         milvus_collection: v.milvus_collection || '',
       })
-      message.success(r.note || '向量配置已保存，30 秒内生效（无需重启）')
+      toast.ok(r.note || '向量配置已保存', 'admin-know')
       queryClient.invalidateQueries({ queryKey: ['knowledge-emb-config'] })
     } catch (e) {
-      message.error('保存失败：' + ((e as Error)?.message || '请检查配置格式'))
+      toast.fail('保存失败：' + ((e as Error)?.message || '请检查格式'), 'admin-save')
     } finally {
       setSavingEmb(false)
     }
@@ -128,11 +128,11 @@ export default function Knowledge() {
       if (v.crawl_interval) {
         await businessApi.updateKnowledgeCrawlInterval(v.crawl_interval)
       }
-      message.success('行业采集配置已保存，下一轮采集任务生效')
+      toast.ok('行业采集配置已保存', 'admin-know-crawl')
       queryClient.invalidateQueries({ queryKey: ['knowledge-crawl-config'] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-crawl-interval'] })
     } catch (e) {
-      message.error('保存失败：' + ((e as Error)?.message || '请检查配置格式'))
+      toast.fail('保存失败：' + ((e as Error)?.message || '请检查格式'), 'admin-save')
     } finally {
       setSavingCrawl(false)
     }
@@ -144,9 +144,9 @@ export default function Knowledge() {
     try {
       const r = await businessApi.reindexKnowledgeMaterials({ only_missing: onlyMissing })
       setReindexResult({ processed: r.processed, updated: r.updated, failed: r.failed })
-      message.success(`向量重建完成：处理 ${r.processed} 条，更新 ${r.updated} 条${r.failed ? `，失败 ${r.failed} 条` : ''}`)
+      toast.ok(`重建完成：处理 ${r.processed} / 更新 ${r.updated}${r.failed ? ` / 失败 ${r.failed}` : ''}`, 'admin-know-reindex')
     } catch (e) {
-      message.error('重建失败：' + ((e as Error)?.message || ''))
+      toast.fail('重建失败：' + ((e as Error)?.message || ''))
     } finally {
       setReindexing(false)
     }
@@ -156,11 +156,11 @@ export default function Knowledge() {
   const handleDelete = async (id: string) => {
     try {
       await businessApi.deleteKnowledgeMaterial(id)
-      message.success('素材已删除（含向量）')
+      toast.ok('素材已删除', 'admin-know-del')
       queryClient.invalidateQueries({ queryKey: ['knowledge-materials'] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-stats'] })
     } catch (e) {
-      message.error('删除失败：' + ((e as Error)?.message || ''))
+      toast.fail('删除失败：' + ((e as Error)?.message || ''))
     }
   }
 

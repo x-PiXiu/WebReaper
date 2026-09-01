@@ -4,7 +4,8 @@ import { ReloadOutlined, SettingOutlined, ThunderboltOutlined } from '@ant-desig
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { CrawlerConfig } from '../../types/api'
-import { message, modal } from '../../utils/antdApp'
+import { modal } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -27,21 +28,21 @@ export default function CrawlerConfigs() {
     mutationFn: ({ platform, data }: { platform: string; data: Partial<CrawlerConfig> }) =>
       businessApi.adminUpdateCrawlerConfig(platform, data),
     onSuccess: () => {
-      message.success('配置更新成功')
+      toast.ok('配置已更新', 'admin-cfg')
       setEditingConfig(null)
       form.resetFields()
       queryClient.invalidateQueries({ queryKey: ['admin-crawler-configs'] })
     },
-    onError: () => message.error('更新失败'),
+    onError: () => toast.fail('更新失败'),
   })
 
   // 测试连接
   const testMutation = useMutation({
     mutationFn: (platform: string) => businessApi.adminTestCrawlerConnection(platform),
     onSuccess: (data) => {
-      message.success(`连接测试: ${data.alive ? '成功' : '失败'}`)
+      toast.ok(data.alive ? '连接正常' : '连接失败', 'admin-crawl-ping')
     },
-    onError: () => message.error('连接测试失败'),
+    onError: () => toast.fail('连接测试失败'),
   })
 
   // 手动触发采集
@@ -49,10 +50,10 @@ export default function CrawlerConfigs() {
     mutationFn: ({ platform, brandId, keywords }: { platform: string; brandId: string; keywords: string[] }) =>
       businessApi.adminTriggerCrawl(platform, { brand_id: brandId, keywords }),
     onSuccess: (data) => {
-      message.success(`采集完成: 找到 ${data.videos_found} 个视频，新增 ${data.videos_new} 个`)
+      toast.ok(`采集完成：找到 ${data.videos_found}，新增 ${data.videos_new}`, 'admin-crawl-run')
       queryClient.invalidateQueries({ queryKey: ['admin-crawler-configs'] })
     },
-    onError: () => message.error('采集失败'),
+    onError: () => toast.fail('采集失败'),
   })
 
   // 表格列定义

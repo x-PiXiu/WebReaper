@@ -4,7 +4,7 @@ import { CloudUploadOutlined, ReloadOutlined, KeyOutlined, SafetyCertificateOutl
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { IndexingSubmitLog } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -49,10 +49,10 @@ export default function Indexing() {
         baidu_site: v.baidu_site || '',
         baidu_token: v.baidu_token || '',
       })
-      message.success('收录配置已保存，30 秒内生效（无需重启）')
+      toast.ok('收录配置已保存', 'admin-idx')
       queryClient.invalidateQueries({ queryKey: ['indexing-config'] })
     } catch (e) {
-      message.error('保存失败：' + ((e as Error)?.message || '请检查配置格式'))
+      toast.fail('保存失败：' + ((e as Error)?.message || '请检查格式'), 'admin-save')
     } finally {
       setSaving(false)
     }
@@ -64,10 +64,10 @@ export default function Indexing() {
     try {
       const r = await businessApi.generateIndexingKey()
       form.setFieldValue('index_now_key', r.index_now_key)
-      message.success('密钥已自动生成，key 文件已托管（无需手动放置）')
+      toast.ok('密钥已生成并托管', 'admin-idx-key')
       queryClient.invalidateQueries({ queryKey: ['indexing-config'] })
     } catch (e) {
-      message.error('生成失败：' + ((e as Error)?.message || ''))
+      toast.fail('生成失败：' + ((e as Error)?.message || ''))
     } finally {
       setGeneratingKey(false)
     }
@@ -79,12 +79,12 @@ export default function Indexing() {
       const r = await businessApi.verifyIndexingKey()
       setVerifyResult(r)
       if (r.content_match) {
-        message.success('验证通过：key 文件可公开访问且内容一致')
+        toast.ok('验证通过：密钥文件可访问', 'admin-idx-verify')
       } else {
-        message.warning('验证未通过：' + (r.error || `状态码 ${r.status_code}`))
+        toast.warn('验证未通过：' + (r.error || `状态码 ${r.status_code}`))
       }
     } catch (e) {
-      message.error('验证失败：' + ((e as Error)?.message || ''))
+      toast.fail('验证失败：' + ((e as Error)?.message || ''))
     }
   }
 
@@ -93,10 +93,10 @@ export default function Indexing() {
     setResubmitting(true)
     try {
       const r = await businessApi.reSubmitAllIndexing()
-      message.success(`补提交完成：${r.submitted} 个 URL 已推送（失败 ${r.failed}）`)
+      toast.ok(`已推送 ${r.submitted} 个 URL${r.failed ? `（失败 ${r.failed}）` : ''}`, 'admin-idx-push')
       queryClient.invalidateQueries({ queryKey: ['indexing-logs'] })
     } catch (e) {
-      message.error('补提交失败：' + ((e as Error)?.message || '可能未启用任何渠道'))
+      toast.fail('补提交失败：' + ((e as Error)?.message || '请先启用渠道'), 'admin-idx-push')
     } finally {
       setResubmitting(false)
     }

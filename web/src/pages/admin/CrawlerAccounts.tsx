@@ -4,7 +4,8 @@ import { PlusOutlined, DeleteOutlined, ReloadOutlined, QrcodeOutlined } from '@a
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { CrawlerAccount } from '../../types/api'
-import { message, modal } from '../../utils/antdApp'
+import { modal } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -49,10 +50,10 @@ export default function CrawlerAccounts() {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => businessApi.adminDeleteCrawlerAccount(id),
     onSuccess: () => {
-      message.success('账号已删除')
+      toast.ok('账号已删除')
       queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
     },
-    onError: () => message.error('删除失败'),
+    onError: () => toast.fail('删除失败'),
   })
 
   // 健康检查
@@ -62,25 +63,25 @@ export default function CrawlerAccounts() {
     onSuccess: (data) => {
       // 后端按账号 ID 解密其 cookie 检测——失败时带 reason（解密失败/跳登录页/连接失败等）
       if (data.healthy) {
-        message.success('健康检查完成: 健康')
+        toast.ok('账号健康', 'admin-crawl-health')
       } else {
-        message.error(`健康检查异常: ${data.reason || '未知原因'}`)
+        toast.fail(`健康检查异常：${data.reason || '未知原因'}`, 'admin-crawl-health')
       }
       queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
     },
-    onError: () => message.error('健康检查失败'),
+    onError: () => toast.fail('健康检查失败'),
   })
 
   // 手动添加账号
   const createMutation = useMutation({
     mutationFn: (data: Partial<CrawlerAccount>) => businessApi.adminCreateCrawlerAccount(data),
     onSuccess: () => {
-      message.success('账号添加成功')
+      toast.ok('账号添加成功')
       setIsManualModalOpen(false)
       manualForm.resetFields()
       queryClient.invalidateQueries({ queryKey: ['admin-crawler-accounts'] })
     },
-    onError: () => message.error('添加失败'),
+    onError: () => toast.fail('添加失败'),
   })
 
   // ---- 扫码登录流程 ----
@@ -93,7 +94,7 @@ export default function CrawlerAccounts() {
       setQrStatus('pending')
       setQrImage(null)
     } catch {
-      message.error('启动扫码登录失败')
+      toast.fail('启动扫码登录失败')
     }
   }, [qrPlatform])
 
@@ -109,7 +110,7 @@ export default function CrawlerAccounts() {
         }
         if (resp.status === 'success') {
           setQrStatus('success')
-          message.success(`扫码登录成功: ${resp.account_name}`)
+          toast.ok(`扫码成功：${resp.account_name || '账号已绑定'}`, 'admin-crawl-qr')
           setIsQRModalOpen(false)
           setQrSessionId(null)
 

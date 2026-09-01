@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
 import type { Brand, StoreLocation } from '../../../types/api'
 import QueryBoundary from '../../../components/QueryBoundary'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 
 const { Text } = Typography
 
@@ -59,7 +59,7 @@ export default function StoreTab({ brand }: { brand: Brand }) {
     mutationFn: (v: { name?: string; address: string; phone?: string; hours?: string; price_level?: string }) =>
       businessApi.createStoreLocation(brand.id, v),
     onSuccess: () => {
-      message.success('门店已创建（自动地图定位）')
+      toast.ok('门店已创建（自动地图定位）')
       setModalOpen(false)
       form.resetFields()
       invalidate()
@@ -70,7 +70,7 @@ export default function StoreTab({ brand }: { brand: Brand }) {
     mutationFn: (v: { id: string; data: { name?: string; address: string; phone?: string; hours?: string; price_level?: string } }) =>
       businessApi.updateStoreLocation(brand.id, v.id, v.data),
     onSuccess: () => {
-      message.success('门店已更新（地址变更已重新定位）')
+      toast.ok('门店已更新（地址变更已重新定位）')
       setModalOpen(false)
       form.resetFields()
       invalidate()
@@ -80,7 +80,7 @@ export default function StoreTab({ brand }: { brand: Brand }) {
   const deleteMut = useMutation({
     mutationFn: (storeId: string) => businessApi.deleteStoreLocation(brand.id, storeId),
     onSuccess: () => {
-      message.success('门店已删除')
+      toast.ok('门店已删除')
       invalidate()
     },
   })
@@ -88,7 +88,7 @@ export default function StoreTab({ brand }: { brand: Brand }) {
   const reGeoMut = useMutation({
     mutationFn: (storeId: string) => businessApi.reGeocodeStoreLocation(brand.id, storeId),
     onSuccess: (loc: StoreLocation) => {
-      message.success(loc.geo_status === 'ok' ? '定位成功' : '定位失败（可修改地址后重试）')
+      toast.ok(loc.geo_status === 'ok' ? '定位成功' : '定位失败（可修改地址后重试）')
       invalidate()
     },
   })

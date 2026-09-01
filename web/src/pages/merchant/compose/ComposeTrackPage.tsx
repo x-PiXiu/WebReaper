@@ -16,7 +16,7 @@ import { VideoAssetsStep } from './steps/VideoAssetsStep'
 import { VideoProduceStep } from './steps/VideoProduceStep'
 import { GraphicAssetsStep } from './steps/GraphicAssetsStep'
 import { GraphicProduceStep } from './steps/GraphicProduceStep'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 
 type Props = { track: ComposeTrack }
 
@@ -83,7 +83,7 @@ export default function ComposeTrackPage({ track }: Props) {
   const onNext = () => {
     const v = validateComposeStep(draft, track, stepIndex)
     if (!v.ok) {
-      message.warning(v.hint || '请先完成当前步骤')
+      toast.warn(v.hint || '请先完成当前步骤')
       return
     }
     if (stepIndex >= steps.length - 1) {
@@ -95,13 +95,13 @@ export default function ComposeTrackPage({ track }: Props) {
 
   const onStepChange = (i: number) => {
     if (i > 0 && !hasScript) {
-      message.warning(track === 'video' ? '请先写好口播文案' : '请先写好图文文案')
+      toast.warn(track === 'video' ? '请先写好口播文案' : '请先写好图文文案')
       return
     }
     if (i > stepIndex) {
       const v = validateComposeStep(draft, track, stepIndex)
       if (!v.ok) {
-        message.warning(v.hint || '请先完成当前步骤')
+        toast.warn(v.hint || '请先完成当前步骤')
         return
       }
     }

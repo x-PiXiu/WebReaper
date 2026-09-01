@@ -30,7 +30,8 @@ import { CREATIVE_CDN } from '../../../config/creativeCdn'
 import { GENERATION_TASKS_KEY, useGenerationTasks } from '../../../hooks/useGenerationTasks'
 import { MEDIA_ASSETS_QUERY_KEY, useMediaAssets } from '../../../hooks/useMediaAssets'
 import type { MediaAsset } from '../../../types/api'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
+import { PageBackLink } from '../../../components/PageBackLink'
 import {
   inferMediaKind,
   isImageMedia,
@@ -203,13 +204,13 @@ export default function AssetLibrary() {
     if (selected.length === 0) return
     const deletable = selected.filter((id) => !id.startsWith('gen-task:') && !id.startsWith('sys-'))
     if (deletable.length === 0) {
-      message.info('选中项来自生成任务或系统素材，无法在此删除')
+      toast.info('选中项含系统素材，无法删除', 'asset-del')
       return
     }
     setDeleting(true)
     try {
       await Promise.all(deletable.map((id) => businessApi.deleteAsset(id)))
-      message.success(`已删除 ${deletable.length} 个素材`)
+      toast.ok(`已删除 ${deletable.length} 个素材`)
       setSelected([])
       queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY })
     } catch { /* 拦截器 */ } finally {
@@ -223,7 +224,7 @@ export default function AssetLibrary() {
       for (const file of files) {
         await businessApi.uploadAsset(file)
       }
-      message.success(`已上传 ${files.length} 个素材`)
+      toast.ok(`已上传 ${files.length} 个素材`)
       queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY })
       setSource('mine')
     } catch { /* 拦截器 */ } finally {
@@ -235,8 +236,9 @@ export default function AssetLibrary() {
     <div className="sb-lib">
       <header className="sb-lib-head">
         <div className="sb-lib-titles">
-          <h1 className="sb-lib-title">分镜素材</h1>
-          <p className="sb-lib-lead">上传并管理您的分镜素材，支持图片和视频</p>
+          <PageBackLink to="/m/compose" label="工作台" />
+          <h1 className="sb-lib-title" style={{ marginTop: 10 }}>分镜素材</h1>
+          <p className="sb-lib-lead">上传并管理图片 / 视频素材，口播插入画面时可选用</p>
         </div>
 
         <div className="sb-lib-info-row">
@@ -383,7 +385,7 @@ export default function AssetLibrary() {
         <div className="sb-lib-empty">
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={source === 'system' ? '暂无系统素材' : '暂无数据'}
+            description={source === 'system' ? '暂无系统素材' : '还没有素材，先上传或生成一批'}
           >
             {source === 'mine' && (
               <Upload
@@ -412,7 +414,7 @@ export default function AssetLibrary() {
             const displayName = a.name || a.url.split('/').pop()?.split('?')[0] || '素材'
             const openPreview = () => {
               if (isSystem) {
-                message.info('系统素材仅供参考，请上传或生成自有素材用于商业创作')
+                toast.info('系统素材仅供参考，请上传自有素材用于创作', 'asset-sys')
                 return
               }
               setPreviewAsset(a)

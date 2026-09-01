@@ -19,12 +19,12 @@ import {
 import { businessApi } from '../../../../api/business'
 import { CreateSubjectModal } from '../../../../components/compose/CreateSubjectModal'
 import { SubjectPreviewModal } from '../../../../components/compose/SubjectPreviewModal'
+import { PageBackLink } from '../../../../components/PageBackLink'
 import { useSubjectList } from '../../../../hooks/useSubjectList'
 import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
 import type { ViduSubject } from '../../../../utils/subjectTask'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 import { CREATIVE_CDN } from '../../../../config/creativeCdn'
-import OralJourneyNav from '../../../../components/compose/OralJourneyNav'
 
 type LibCard = {
   id: string
@@ -178,7 +178,7 @@ export default function AvatarModule() {
     setDeleting(true)
     try {
       await Promise.all(selected.map((id) => businessApi.deleteGenerationTask(id)))
-      message.success(`已删除 ${selected.length} 个数字人`)
+      toast.ok(`已删除 ${selected.length} 个数字人`, 'avatar-del')
       setSelected([])
       refetch()
     } catch { /* 拦截器 */ } finally {
@@ -195,7 +195,7 @@ export default function AvatarModule() {
       navigate(`/m/compose/lipsync?subject=${encodeURIComponent(card.serverId)}`)
       return
     }
-    message.info('数字人仍在创建中')
+    toast.info('数字人还在创建中，请稍候', 'avatar-wait')
   }
 
   const renderCard = (card: LibCard, opts: { official?: boolean }) => {
@@ -268,10 +268,14 @@ export default function AvatarModule() {
 
   return (
     <div className="dh-lib">
-      <OralJourneyNav />
       <header className="dh-lib-head">
         <div className="dh-lib-titles">
-          <h1 className="dh-lib-title">分身管理</h1>
+          {searchParams.get('from') === 'wizard' ? (
+            <PageBackLink to="/m/compose/lipsync" label="口播向导" />
+          ) : (
+            <PageBackLink to="/m/compose" label="工作台" />
+          )}
+          <h1 className="dh-lib-title" style={{ marginTop: 10 }}>分身管理</h1>
           <p className="dh-lib-lead">官方主体即选即用；定制个人分身，跨视频人物形象一致</p>
         </div>
 
@@ -300,7 +304,7 @@ export default function AvatarModule() {
         <div className="dh-lib-section-head">
           <h2 className="dh-lib-section-title">官方主体</h2>
           <Tag color="orange">接入中</Tag>
-          <span className="dh-lib-section-note">官方主体库即将开放（等服务端端点），当前展示样例</span>
+          <span className="dh-lib-section-note">官方库即将开放，当前为样例预览</span>
         </div>
         <ul className="dh-lib-grid" role="list">
           {OFFICIAL_SHOWCASE.map((card) => renderCard(card, { official: true }))}

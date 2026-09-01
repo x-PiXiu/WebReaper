@@ -13,7 +13,7 @@ import { useComposeTaskPoll } from '../../../../hooks/useComposeTaskPoll'
 import { GenerationTaskStatusBar } from '../../../../components/compose/GenerationTaskStatusBar'
 import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
 import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 const { Text } = Typography
 
@@ -38,7 +38,7 @@ export default function CoverModule() {
   const genImage = async () => {
     const bid = brandId || draft.brandId
     if (!bid) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设', 'cover-brand')
       return
     }
     setBusy(true)
@@ -57,7 +57,7 @@ export default function CoverModule() {
         track: isGraphic ? 'graphic' : 'video',
         lastUpdatedAt: new Date().toISOString(),
       })
-      message.success('封面图任务已提交，完成后自动填入并预览')
+      toast.ok('封面任务已提交，完成后自动填入', 'cover-gen')
     } catch (e) {
       catchGenerationError(e)
     } finally {

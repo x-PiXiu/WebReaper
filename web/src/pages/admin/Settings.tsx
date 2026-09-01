@@ -2,7 +2,7 @@ import { Typography, Switch, Space, Alert, Tag, Segmented, Button } from 'antd'
 import { RadarChartOutlined, EyeOutlined, SwapOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -25,16 +25,16 @@ export default function AdminSettings() {
   const toggleMutation = useMutation({
     mutationFn: (enabled: boolean) => businessApi.setAutoMonitor(enabled),
     onSuccess: () => {
-      message.success('自动盯盘已' + (autoMonitor?.auto_monitor_enabled ? '关闭' : '开启') + '（调度器即时生效）')
+      toast.ok('自动盯盘已' + (autoMonitor?.auto_monitor_enabled ? '关闭' : '开启'), 'admin-monitor')
       queryClient.invalidateQueries({ queryKey: ['settings-auto-monitor'] })
     },
-    onError: () => message.error('设置失败'),
+    onError: () => toast.fail('设置失败'),
   })
 
   const toggleBrowser = useMutation({
     mutationFn: (headed: boolean) => businessApi.setBrowserHeaded(headed),
     onSuccess: () => {
-      message.success('浏览器可见性已切换（下次 RPA 操作即时生效）')
+      toast.ok('浏览器可见性已切换', 'admin-rpa')
       queryClient.invalidateQueries({ queryKey: ['settings-browser-headed'] })
     },
   })
@@ -47,10 +47,10 @@ export default function AdminSettings() {
   const setTransport = useMutation({
     mutationFn: ({ platform, kind }: { platform: string; kind: string }) => businessApi.setPublishTransport(platform, kind),
     onSuccess: (_d, v) => {
-      message.success(v.kind ? `${v.platform} 已强制走 ${v.kind.toUpperCase()} 通道` : `${v.platform} 已恢复自动降级`)
+      toast.ok(v.kind ? `${v.platform} 已强制走 ${v.kind.toUpperCase()}` : `${v.platform} 已恢复自动选择`, 'admin-channel')
       refetchTransports()
     },
-    onError: () => message.error('切换失败'),
+    onError: () => toast.fail('切换失败'),
   })
 
   return (

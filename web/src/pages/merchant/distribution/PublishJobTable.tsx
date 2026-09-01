@@ -1,20 +1,30 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Typography, Table, Tag, Space, Button, Empty } from 'antd'
-import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@ant-design/icons'
+import { ExportOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LoadingOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import { businessApi } from '../../../api/business'
+import { PlatformBadge } from '../../../components/PlatformBadge'
 import WorkDetailDrawer, { type WorkDetailData } from '../../../components/WorkDetailDrawer'
 import type { PublishJob } from '../../../types/api'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 
 const { Text } = Typography
 
-export const PLATFORM_NAMES: Record<string, string> = { zhihu: '知乎', xiaohongshu: '小红书' }
+export const PLATFORM_NAMES: Record<string, string> = {
+  zhihu: '知乎',
+  xiaohongshu: '小红书',
+  douyin: '抖音',
+  kuaishou: '快手',
+  bilibili: 'B站',
+  weixin: '视频号',
+}
 
 // 发布状态 → 显示（页面自动发布状态面板与发布记录表共用）
 export function statusConfig(status: string) {
   switch (status) {
     case 'published': return { color: 'var(--wr-success)', label: '已发布', icon: <CheckCircleOutlined /> }
     case 'running': return { color: 'var(--wr-primary)', label: '自动发布中', icon: <LoadingOutlined /> }
+    case 'processing': return { color: 'var(--wr-primary)', label: '自动发布中', icon: <LoadingOutlined /> }
     case 'pending': return { color: 'var(--wr-warning)', label: '待确认', icon: <ClockCircleOutlined /> }
     case 'scheduled': return { color: 'var(--wr-primary)', label: '已排期', icon: <ClockCircleOutlined /> }
     case 'failed': return { color: 'var(--wr-danger)', label: '失败', icon: <CloseCircleOutlined /> }
@@ -28,8 +38,12 @@ const TRANSPORT_META: Record<string, { label: string; color: string }> = {
   api: { label: '官方接口', color: 'green' },
 }
 
+function isVideoJob(r: PublishJob) {
+  if (r.content_type === 'video') return true
+  return (r.media_urls || []).some((u) => /\.(mp4|mov|webm)(\?|$)/i.test(u))
+}
+
 // 发布记录表格（社媒分发页③区）：列表 + 跳转/复测提及率/标记已发布。
-// 复测与标记的副作用（成功提示/缓存失效）自包含，父组件只传数据与刷新回调。
 export default function PublishJobTable({
   jobs,
   onRefresh,
@@ -37,6 +51,7 @@ export default function PublishJobTable({
   jobs: PublishJob[]
   onRefresh: () => void
 }) {
+  const navigate = useNavigate()
   const [detailWork, setDetailWork] = useState<WorkDetailData | null>(null)
   const [reMonitorPending, setReMonitorPending] = useState<string | null>(null)
   const handleMarkPublished = async (jobId: string) => {
@@ -52,7 +67,11 @@ export default function PublishJobTable({
       const job = await businessApi.reMonitorJob(jobId)
       const diff = (job.post_mention_rate || 0) - (job.pre_mention_rate || 0)
       const sign = diff > 0 ? '+' : ''
-      message.info(`复测完成：表现 ${((job.pre_mention_rate || 0) * 100).toFixed(1)}% → ${((job.post_mention_rate || 0) * 100).toFixed(1)}%（${sign}${(diff * 100).toFixed(1)}%）`)
+      const diffPct = (diff * 100).toFixed(1)
+      toast.info(
+        `复测完成：${((job.pre_mention_rate || 0) * 100).toFixed(1)}% → ${((job.post_mention_rate || 0) * 100).toFixed(1)}%（${sign}${diffPct}%）`,
+        're-monitor',
+      )
       onRefresh()
     } catch { /* 拦截器已提示 */ }
     finally {
@@ -63,15 +82,24 @@ export default function PublishJobTable({
   const columns = [
     {
       title: '标题', dataIndex: 'title', key: 'title',
-      render: (t: string) => <Text strong style={{ fontSize: 13 }}>{t || '-'}</Text>,
+      render: (t: string, r: PublishJob) => (
+        <Space size={6}>
+          {isVideoJob(r) && <VideoCameraOutlined style={{ color: 'var(--wr-text-muted)' }} />}
+          <Text strong style={{ fontSize: 13 }}>{t || '-'}</Text>
+        </Space>
+      ),
     },
     {
-      title: '平台', dataIndex: 'platform', key: 'platform', width: 90,
-      render: (p: string) => <Tag>{PLATFORM_NAMES[p] || p}</Tag>,
+      title: '平台', dataIndex: 'platform', key: 'platform', width: 110,
+      render: (p: string) => <PlatformBadge platform={p} size={14} />,
     },
     {
       title: '模式', dataIndex: 'mode', key: 'mode', width: 90,
-      render: (m: string) => <Text type="secondary" style={{ fontSize: 12 }}>{m === 'semi-auto' ? '半自动' : m}</Text>,
+      render: (m: string) => (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {m === 'semi-auto' ? '半自动' : m === 'auto' ? '全自动' : m}
+        </Text>
+      ),
     },
     {
       title: '通道', dataIndex: 'transport', key: 'transport', width: 90,
@@ -93,7 +121,7 @@ export default function PublishJobTable({
             </Space>
             {s === 'scheduled' && r.scheduled_at && (
               <Text type="secondary" style={{ fontSize: 11 }}>
-                📅 定时 {new Date(r.scheduled_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                定时 {new Date(r.scheduled_at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
               </Text>
             )}
           </Space>
@@ -116,9 +144,9 @@ export default function PublishJobTable({
       },
     },
     {
-      title: '操作', key: 'action', width: 200,
+      title: '操作', key: 'action', width: 240,
       render: (_: unknown, r: PublishJob) => (
-        <Space>
+        <Space wrap size={0}>
           {r.external_url && (
             <Button size="small" type="link" icon={<ExportOutlined />} href={r.external_url} target="_blank">跳转</Button>
           )}
@@ -126,6 +154,9 @@ export default function PublishJobTable({
             jobId: r.id, title: r.title, platform: r.platform, content_type: r.content_type,
             external_url: r.external_url, published_at: r.published_at, status: r.status,
           })}>详情</Button>
+          {isVideoJob(r) && (
+            <Button size="small" type="link" onClick={() => navigate('/m/works')}>作品库</Button>
+          )}
           {r.status === 'published' && (
             <Button size="small" type="link" loading={reMonitorPending === r.id} onClick={() => handleReMonitor(r.id)}>复测表现</Button>
           )}
@@ -138,12 +169,19 @@ export default function PublishJobTable({
   ]
 
   if (jobs.length === 0) {
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无发布记录" style={{ padding: 40 }} />
+    return (
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description="暂无发布记录"
+        style={{ padding: 40 }}
+      >
+        <Button type="primary" onClick={() => navigate('/m/works')}>去作品库选成片</Button>
+      </Empty>
+    )
   }
   return (
     <>
       <Table dataSource={jobs} columns={columns} rowKey="id" pagination={{ pageSize: 10 }} size="small" />
-      {/* 作品详情 Drawer（与作品数据页共用组件——互动数据回读上线后自动展示趋势） */}
       <WorkDetailDrawer open={!!detailWork} onClose={() => setDetailWork(null)} work={detailWork} />
     </>
   )

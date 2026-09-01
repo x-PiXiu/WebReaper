@@ -3,7 +3,8 @@ import { Card, Table, Tag, Typography, Button, Modal, Form, Input, InputNumber, 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { AgentConfig, LLMConfig, ToolView } from '../../types/api'
-import { message, modal } from '../../utils/antdApp'
+import { modal } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -58,7 +59,7 @@ export default function AgentConfigs() {
           system_prompt: values.system_prompt,
           llm_config_name: values.llm_config_name || '',
         })
-        message.success(`Agent ${editingAgent} 已更新`)
+        toast.ok(`Agent ${editingAgent} 已更新`)
       } else {
         await businessApi.createAgentConfig({
           name: values.name,
@@ -67,7 +68,7 @@ export default function AgentConfigs() {
           llm_config_name: values.llm_config_name || '',
           max_iterations: 10,
         })
-        message.success(`Agent ${values.name} 创建成功`)
+        toast.ok(`Agent ${values.name} 创建成功`)
       }
       setAgentModalOpen(false)
       agentForm.resetFields()
@@ -85,7 +86,7 @@ export default function AgentConfigs() {
       onOk: async () => {
         try {
           await businessApi.deleteAgentConfig(name)
-          message.success(`已删除 ${name}`)
+          toast.ok(`已删除 ${name}`)
           invalidateAll()
         } catch {}
       },
@@ -126,10 +127,10 @@ export default function AgentConfigs() {
           model: values.model,
           cost_per_mtok: values.cost_per_mtok,
         })
-        message.success(`LLM 配置 ${editingLLM} 已更新`)
+        toast.ok(`LLM 配置 ${editingLLM} 已更新`)
       } else {
         await businessApi.createLLMConfig(values)
-        message.success(`LLM 配置 ${values.name} 创建成功`)
+        toast.ok(`LLM 配置 ${values.name} 创建成功`)
       }
       setLlmModalOpen(false)
       llmForm.resetFields()
@@ -147,7 +148,7 @@ export default function AgentConfigs() {
       onOk: async () => {
         try {
           await businessApi.deleteLLMConfig(name)
-          message.success(`已删除 ${name}`)
+          toast.ok(`已删除 ${name}`)
           invalidateAll()
         } catch {}
       },
@@ -406,7 +407,7 @@ function ToolsSection() {
   const handleToggle = async (name: string, enabled: boolean) => {
     try {
       await businessApi.toggleTool(name, enabled)
-      message.success(`${enabled ? '启用' : '禁用'}工具：${name}`)
+      toast.ok(`${enabled ? '启用' : '禁用'}工具：${name}`)
       queryClient.invalidateQueries({ queryKey: ['tools'] })
     } catch {
       // axios 拦截器已提示

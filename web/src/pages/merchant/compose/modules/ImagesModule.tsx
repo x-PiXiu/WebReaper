@@ -11,7 +11,7 @@ import { catchGenerationError } from '../../../../utils/generationErrors'
 import { useComposeTaskPoll } from '../../../../hooks/useComposeTaskPoll'
 import { GenerationTaskStatusBar } from '../../../../components/compose/GenerationTaskStatusBar'
 import { TaskStatusBar } from '../../../../components/compose/TaskStatusBar'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 const { Text } = Typography
 
@@ -38,7 +38,7 @@ export default function ImagesModule() {
   const gen = async () => {
     const bid = brandId || draft.brandId
     if (!bid) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设', 'images-brand')
       return
     }
     setBusy(true)
@@ -55,7 +55,7 @@ export default function ImagesModule() {
         track: 'graphic',
         lastUpdatedAt: new Date().toISOString(),
       })
-      message.success('配图任务已提交，完成后自动加入并预览')
+      toast.ok('配图任务已提交，完成后自动加入', 'images-gen')
     } catch (e) {
       catchGenerationError(e)
     } finally {
@@ -68,7 +68,7 @@ export default function ImagesModule() {
     try {
       const asset = await businessApi.uploadAsset(file)
       draft.patch({ imageUrls: [...list, asset.url], track: 'graphic' })
-      message.success('已加入配图')
+      toast.ok('已加入配图', 'images-upload')
     } catch (e) {
       catchGenerationError(e)
     } finally {

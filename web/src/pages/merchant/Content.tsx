@@ -10,7 +10,7 @@ import { useBrandContext } from '../../hooks/useBrands'
 import PublishToSiteButton from '../../components/PublishToSiteButton'
 import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
 import type { Brand, Keyword, OptimizedContent } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -124,7 +124,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
   const handleOptimize = async () => {
     const kw = seedKeyword()
     if (!selectedBrand || !originalText.trim() || !kw) {
-      message.warning('请选择品牌并填写选题或关键词，再贴入原始内容')
+      toast.warn('请选择品牌并填写选题或关键词，再贴入原始内容')
       return
     }
     setOptimizing(true)
@@ -138,7 +138,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
         format: format || undefined,
       })
       setResult(res)
-      message.success('优化完成')
+      toast.ok('优化完成')
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
     } catch {
     } finally {
@@ -149,7 +149,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
   // 从零生成内容（非流式：走结构化 JSON 输出，标题/正文零解析成本）
   const handleGenerate = async () => {
     if (!selectedBrand) {
-      message.warning('请选择品牌')
+      toast.warn('请选择品牌')
       return
     }
     setGenerating(true)
@@ -169,10 +169,10 @@ export default function Content({ embedded }: { embedded?: boolean }) {
       setResult(res)
       const modeLabel = topic ? `（围绕“${topic.slice(0, 10)}”）` : ''
       const scoreLabel = res.score?.total ? `，AI 推荐度 ${res.score.total.toFixed(0)}` : ''
-      message.success(`内容生成成功${modeLabel}${scoreLabel}${useDiagnose ? '（已按诊断建议优化）' : ''}`)
+      toast.ok(`内容已生成${modeLabel}${scoreLabel}${useDiagnose ? '（已按诊断优化）' : ''}`, 'content-gen')
       const dups = (res as OptimizedContent & { duplicate_warnings?: string[] }).duplicate_warnings
       if (dups?.length) {
-        message.warning(dups[0], 6)
+        toast.warn(dups[0], 6)
       }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
     } catch { /* 拦截器已提示 */ } finally {
@@ -190,12 +190,12 @@ export default function Content({ embedded }: { embedded?: boolean }) {
       if (status === 'published') {
         const warnings = res?.publish_warnings || []
         if (warnings.length > 0) {
-          message.warning(`「${c.title || c.id}」${warnings[0]}`, 7)
+          toast.warn(`「${c.title || c.id}」${warnings[0]}`, 7)
         } else {
-          message.success(`「${c.title || c.id}」已发布到公开站（已通知搜索引擎收录，预计 1-2 周生效，届时可复测提及率）`, 5)
+          toast.ok(`「${c.title || '内容'}」已发布到公开站`, 'content-pub', 4)
         }
       } else {
-        message.success('已下线')
+        toast.ok('已下线')
       }
       queryClient.invalidateQueries({ queryKey: ['geo-contents', selectedBrand] })
       if (result?.id === c.id) setResult({ ...result, status })
@@ -207,7 +207,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
   // AI 生成原始素材（填入编辑区，用户可编辑后再优化）
   const handleGenerateDraft = async () => {
     if (!selectedBrand) {
-      message.warning('请先选择品牌')
+      toast.warn('请先选择品牌')
       return
     }
     setDrafting(true)
@@ -221,7 +221,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
         format: format || undefined,
       })
       setOriginalText(res.optimized_text || '')
-      message.success('素材已生成，你可以编辑后点击优化')
+      toast.ok('素材已生成，你可以编辑后点击优化')
     } catch { /* 拦截器已提示 */ } finally {
       setDrafting(false)
     }
@@ -726,7 +726,7 @@ export default function Content({ embedded }: { embedded?: boolean }) {
                                 setResubmitting(c.id)
                                 try {
                                   await businessApi.resubmitIndex(selectedBrand!, c.id)
-                                  message.success('已重新提交收录通知（搜索引擎抓取约需 1-2 周）')
+                                  toast.ok('已重新提交收录通知', 'content-index')
                                   queryClient.invalidateQueries({ queryKey: ['geo-contents'] })
                                 } catch { /* 拦截器已提示 */ } finally { setResubmitting(null) }
                               }}>

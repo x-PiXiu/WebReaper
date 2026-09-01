@@ -8,7 +8,7 @@ import { subjectServerId } from '../../utils/subjectTask'
 import { useBrandContext } from '../../hooks/useBrands'
 import { GENERATION_TASKS_KEY } from '../../hooks/useGenerationTasks'
 import { MODAL_W } from '../../ui/modalFit'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 import VoicePicker from '../VoicePicker'
 
 const { Text } = Typography
@@ -23,7 +23,7 @@ function checkVideoDuration(file: File): Promise<void> {
     v.onloadedmetadata = () => {
       URL.revokeObjectURL(url)
       if (v.duration > 5.5) {
-        message.error('主体视频不能超过 5 秒')
+        toast.fail('主体视频请控制在 5 秒以内', 'subject-dur')
         reject(new Error('视频超过 5 秒'))
       } else {
         resolve()
@@ -72,15 +72,15 @@ export function CreateSubjectModal({
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      message.warning('请输入数字人名称')
+      toast.warn('请输入数字人名称', 'subject-create')
       return
     }
     if (!brandId) {
-      message.warning('请先在顶栏或人设页选择品牌/人设')
+      toast.warn('请先选择人设', 'subject-create')
       return
     }
     if (imageAssets.length === 0 && !videoAsset) {
-      message.warning('请至少上传 1 张形象照或 1 个主体视频')
+      toast.warn('请至少上传 1 张形象照或 1 段主体视频', 'subject-create')
       return
     }
     setCreating(true)
@@ -95,7 +95,7 @@ export function CreateSubjectModal({
         sceneImageUrl: sceneImage?.url,
         sceneDescription: sceneDesc || undefined,
       }))
-      message.success(`数字分身「${name.trim()}」已创建（任务 ${task.id}）——生成视频时可直接复用该形象`)
+      toast.ok(`「${name.trim()}」已开始创建，完成后可直接用于口播`, 'subject-create')
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
       resetForm()
       onCreated(subjectServerId(task) || undefined)

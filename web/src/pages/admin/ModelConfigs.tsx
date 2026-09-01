@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationSpec } from '../../types/api'
 import QueryBoundary from '../../components/QueryBoundary'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -40,10 +40,10 @@ export default function AdminModelConfigs() {
     mutationFn: ({ subType, model, provider }: { subType: string; model: string; provider?: string }) =>
       businessApi.adminSetDefaultModel(subType, model, provider),
     onSuccess: () => {
-      message.success('默认模型已更新')
+      toast.ok('默认模型已更新')
       queryClient.invalidateQueries({ queryKey: ['admin-generation-specs'] })
     },
-    onError: () => message.error('设置失败'),
+    onError: () => toast.fail('设置失败'),
   })
 
   // 切换启用状态
@@ -51,10 +51,10 @@ export default function AdminModelConfigs() {
     mutationFn: ({ subType, model, enabled }: { subType: string; model: string; enabled: boolean }) =>
       businessApi.adminSaveGenerationSpec(subType, model, { enabled }),
     onSuccess: () => {
-      message.success('状态已更新')
+      toast.ok('状态已更新')
       queryClient.invalidateQueries({ queryKey: ['admin-generation-specs'] })
     },
-    onError: () => message.error('更新失败'),
+    onError: () => toast.fail('更新失败'),
   })
 
   // 按厂商分组
