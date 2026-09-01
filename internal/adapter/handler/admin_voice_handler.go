@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -88,19 +89,42 @@ func (h *AdminVoiceHandler) HandleCreateFromVidu(c *gin.Context) {
 		return
 	}
 
-	// ② 下载 sample_url 音频作为克隆样本
-	audioData, dlErr := downloadAudio(source.SampleURL)
-	if dlErr != nil {
-		fail(c, fmt.Errorf("下载 Vidu 试听音频失败: %w", dlErr))
+	// ② 直接以 Vidu 官方试听音频（公网 S3 URL）为样本写入平台音色。
+	// 不再"下载→MiMo 重合成→转存本站"：样本音质最接近原声（04号 §2.3 本意），
+	// 且公网可达——Vidu audio-clone 仅收 audio_url（无 base64 字段，实测 data URL
+	// 返回 500），本地开发环境的注册链（ensureViduVoiceID）也能直接使用。
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = source.Name
+	}
+	language := strings.TrimSpace(req.Language)
+	if language == "" {
+		language = "平台精选"
+	}
+	voiceID := fmt.Sprintf("platform-%d", time.Now().UnixNano())
+	voice := entity.GenerationVoice{
+		VoiceID:   voiceID,
+		Language:  language,
+		Name:      name,
+		SampleURL: source.SampleURL, // Vidu 公网源（试听即原声）
+		Scope:     "platform",
+		Status:    "active",
+	}
+	if err := h.voiceRepo.Upsert(c.Request.Context(), voice); err != nil {
+		fail(c, fmt.Errorf("保存音色失败: %w", err))
 		return
 	}
-	if len(audioData) < 1024 {
-		fail(c, fmt.Errorf("Vidu 试听音频过短（%d 字节），不适合做克隆样本", len(audioData)))
-		return
+	// 31号 L4-②：创建后异步预热 Vidu 注册（公网样本——本地环境亦可成功）
+	if h.genUC != nil {
+		h.genUC.WarmUpVoiceRegistration(voiceID)
 	}
-
-	// ③ 用样本做克隆 → 生成平台音色
-	h.processVoice(c, audioData, req.Text, req.Name, req.Language)
+	success(c, gin.H{
+		"voice_id":    voiceID,
+		"name":        name,
+		"language":    language,
+		"sample_url":  source.SampleURL,
+		"source_vidu": source.VoiceID,
+	})
 }
 
 // HandleListViduVoices GET /api/admin/voices/vidu-sources
