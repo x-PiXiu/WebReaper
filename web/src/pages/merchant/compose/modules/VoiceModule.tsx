@@ -136,7 +136,7 @@ export default function VoiceModule() {
 
   const cards = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    let list: VoiceCard[] = []
+    let list: VoiceCard[] // 三分支必赋值——初始空数组从未被读到（no-useless-assignment）
     if (scope === 'mine') list = mineCards
     else if (scope === 'recommend') list = recommendCards.length ? recommendCards : officialCards
     else list = [...mineCards, ...officialCards]

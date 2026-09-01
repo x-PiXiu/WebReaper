@@ -37,7 +37,7 @@ export default function TitlesModule() {
         format: 'xiaohongshu',
       })
       const raw = res.optimized_text || res.title || ''
-      const lines = raw.split(/\n+/).map((l) => l.replace(/^[\d.、\-]+\s*/, '').trim()).filter(Boolean)
+      const lines = raw.split(/\n+/).map((l) => l.replace(/^[\d.、-]+\s*/, '').trim()).filter(Boolean)
       const titles = lines.filter((l) => !l.startsWith('#')).slice(0, 5)
       const topicLine = lines.find((l) => l.includes('#')) || ''
       const topics = topicLine.split(/\s+/).filter((t) => t.startsWith('#')).slice(0, 8)

@@ -103,6 +103,20 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 	// 工具租户注入：商户主 Agent 的工具（query_brands/publish_work…）从 ctx 取租户，
 	// 不信任 LLM 参数——多租户隔离的安全边界。
 	ctx = port.WithToolTenant(ctx, tenantID)
+	// 工具角色注入（32号 F1-6 接线）：admin 工具门卫在执行层校验此值——
+	// 商户即使构造请求指定 admin_* 工具名也无法越权（防线在工具自身）。
+	ctx = port.WithToolRole(ctx, middleware.CurrentRole(c))
+	// 请求层过滤（第一道）：非管理员剔除显式指定的 admin_* 工具名，
+	// 避免 LLM 收到无权工具的声明做无谓调用（执行层门卫仍是最终防线）。
+	if !isAdmin(c) && len(req.Tools) > 0 {
+		filtered := make([]string, 0, len(req.Tools))
+		for _, name := range req.Tools {
+			if !strings.HasPrefix(name, "admin_") {
+				filtered = append(filtered, name)
+			}
+		}
+		req.Tools = filtered
+	}
 
 	// 获取最后一条 user 消息（作为 Agent 任务输入）
 	lastUser := ""

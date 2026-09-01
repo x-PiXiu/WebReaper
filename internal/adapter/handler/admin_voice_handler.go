@@ -16,6 +16,7 @@ import (
 
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/port"
 )
 
@@ -24,10 +25,19 @@ type AdminVoiceHandler struct {
 	voiceRepo  port.VoiceLibrary
 	audioSynth port.AudioSynthesizer // 可选；nil 时不可创建音色
 	mediaStore port.MediaAssetStore  // 可选；nil 时试听音频不转存
+	genUC      *generation.GenerationUseCase // 可选；31号 L4-② 创建后异步预热 Vidu 注册
 }
 
 func NewAdminVoiceHandler(voices port.VoiceLibrary, synth port.AudioSynthesizer, store port.MediaAssetStore) *AdminVoiceHandler {
 	return &AdminVoiceHandler{voiceRepo: voices, audioSynth: synth, mediaStore: store}
+}
+
+// SetGenerationUC 注入生成用例（可选——平台音色创建后异步预热 Vidu 注册，
+// 首次口播命中窗口零开销；未注入则跳过，按需保障兜底）。
+func (h *AdminVoiceHandler) SetGenerationUC(uc *generation.GenerationUseCase) {
+	if uc != nil {
+		h.genUC = uc
+	}
 }
 
 // HandleCreateFromVidu POST /api/admin/voices/from-vidu
@@ -230,6 +240,11 @@ func (h *AdminVoiceHandler) processVoice(c *gin.Context, audioData []byte, text,
 	if err := h.voiceRepo.Upsert(c.Request.Context(), voice); err != nil {
 		fail(c, fmt.Errorf("保存音色失败: %w", err))
 		return
+	}
+	// 31号 L4-②：创建后异步预热 Vidu 注册（上传/URL/from-vidu 三路共用——
+	// 首次口播命中窗口零开销；失败静默由按需保障兜底）
+	if h.genUC != nil {
+		h.genUC.WarmUpVoiceRegistration(voiceID)
 	}
 
 	success(c, gin.H{

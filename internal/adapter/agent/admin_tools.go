@@ -22,9 +22,66 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/billing"
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/port"
 )
+
+// ---- 角色门卫（装饰器）----
+
+// AdminTool 给 admin 工具包一层角色门卫：非 admin 会话执行时直接拒绝。
+// 防线在工具执行层（ctx 注入角色）——不依赖调用方过滤：商户即使构造请求
+// 指定 admin_* 工具名，也只会在执行层收到"需要管理员权限"（无法越权）。
+func AdminTool(t port.CrawlerTool) port.CrawlerTool { return &adminGuarded{t} }
+
+type adminGuarded struct{ inner port.CrawlerTool }
+
+func (g *adminGuarded) Name() string                                        { return g.inner.Name() }
+func (g *adminGuarded) Description() string                                 { return g.inner.Description() }
+func (g *adminGuarded) ToolDeclaration() port.ToolDecl                      { return g.inner.ToolDeclaration() }
+func (g *adminGuarded) Execute(ctx context.Context, args string) (entity.DataItem, error) {
+	if port.ToolRoleFrom(ctx) != "admin" {
+		return entity.DataItem{}, fmt.Errorf("该工具需要管理员权限")
+	}
+	return g.inner.Execute(ctx, args)
+}
+
+// ---- admin_tenant_usage 租户用量查询（第 7 个工具）----
+
+// AdminTenantUsageTool 查某租户的套餐与用量概要（billing.GetMyUsage 同源数据）。
+type AdminTenantUsageTool struct {
+	billing   *billing.BillingUseCase
+	quotaGate port.QuotaStore
+}
+
+func NewAdminTenantUsageTool(b *billing.BillingUseCase, q port.QuotaStore) *AdminTenantUsageTool {
+	return &AdminTenantUsageTool{billing: b, quotaGate: q}
+}
+func (t *AdminTenantUsageTool) Name() string { return "admin_tenant_usage" }
+func (t *AdminTenantUsageTool) Description() string {
+	return "查询某租户的套餐与本月用量概要。管理员问「租户xxx用了多少」「某某的用量」时调用。参数 {\"tenant_id\":\"租户ID\"}"
+}
+func (t *AdminTenantUsageTool) ToolDeclaration() port.ToolDecl {
+	return port.ToolDecl{Name: t.Name(), Description: t.Description()}
+}
+func (t *AdminTenantUsageTool) Execute(ctx context.Context, argsJSON string) (entity.DataItem, error) {
+	if t.billing == nil {
+		return entity.DataItem{}, fmt.Errorf("计费服务未配置")
+	}
+	var args struct {
+		TenantID string `json:"tenant_id"`
+	}
+	_ = json.Unmarshal([]byte(argsJSON), &args)
+	if strings.TrimSpace(args.TenantID) == "" {
+		return entity.DataItem{}, fmt.Errorf("参数缺少 tenant_id")
+	}
+	sum, err := t.billing.GetMyUsage(ctx, args.TenantID, t.quotaGate)
+	if err != nil {
+		return entity.DataItem{}, fmt.Errorf("查询失败: %w", err)
+	}
+	b, _ := json.Marshal(sum)
+	return entity.DataItem{Content: string(b)}, nil
+}
 
 // ---- admin_system_health 系统健康总览 ----
 

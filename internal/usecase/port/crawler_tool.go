@@ -10,6 +10,20 @@ import (
 // toolTenantKey ctx 键（工具执行的租户注入——商户主 Agent 工具的租户隔离）。
 type toolTenantKey struct{}
 
+// toolRoleKey ctx 键（工具执行的角色注入——admin 工具的越权防线，32号 F1-6 接线引入）。
+type toolRoleKey struct{}
+
+// WithToolRole 把当前会话角色注入 ctx（chat handler 调用；admin 工具执行层校验）。
+func WithToolRole(ctx context.Context, role string) context.Context {
+	return context.WithValue(ctx, toolRoleKey{}, role)
+}
+
+// ToolRoleFrom 从 ctx 取工具执行角色（空=未注入，admin 工具应拒绝执行）。
+func ToolRoleFrom(ctx context.Context) string {
+	v, _ := ctx.Value(toolRoleKey{}).(string)
+	return v
+}
+
 // WithToolTenant 把当前商户租户注入 ctx（chat handler 调用；工具执行链全程透传）。
 // 工具不得信任 LLM 传来的租户参数——租户一律从 ctx 取（安全边界）。
 func WithToolTenant(ctx context.Context, tenantID string) context.Context {

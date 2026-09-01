@@ -171,6 +171,12 @@ func (uc *GenerationUseCase) warmUpViduRegistration(tenantID, voiceID string) {
 	}()
 }
 
+// WarmUpVoiceRegistration 平台音色创建后预热（31号 L4-② 的 admin 链路接线——
+// 上传/URL/from-vidu 三条创建路径共用；平台音色 tenantID 为空串）。
+func (uc *GenerationUseCase) WarmUpVoiceRegistration(voiceID string) {
+	uc.warmUpViduRegistration("", voiceID)
+}
+
 // viduRegWindow 注册缓存窗口（可配；默认 144h）。
 func (uc *GenerationUseCase) viduRegWindow(ctx context.Context) time.Duration {
 	raw := uc.settingString(ctx, entity.SettingKeyGenViduVoiceWindow, strconv.Itoa(defaultViduVoiceWindowHours))

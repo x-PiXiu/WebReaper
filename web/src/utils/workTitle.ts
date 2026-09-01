@@ -2,6 +2,7 @@
 export function cleanWorkTitle(title: string | undefined): string {
   if (!title) return '未命名作品'
   const cleaned = title
+    // eslint-disable-next-line no-control-regex -- 剔除控制字符正是本函数目的（乱码标题兜底）
     .replace(/[\u0000-\u001f\u007f\ufffd]/g, '')
     .replace(/^[\s#]+/, '')
     .trim()

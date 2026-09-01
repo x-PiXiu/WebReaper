@@ -346,6 +346,8 @@ func main() {
 	}
 	var geoMonitorUCRef *geo.MonitorUseCase
 	var geoContentUCRef *geo.ContentUseCase
+	var billingUCRef *billing.BillingUseCase   // 32号 F1-6：admin 租户用量工具跨作用域引用
+	var quotaGateRef port.QuotaStore           // 同上（GetMyUsage 需要配额门）
 	var knowledgeUCRef *knowledge.KnowledgeUseCase // 知识库采集用例（可选；任务注册用）
 	var geoDistillUCRef *geo.KeywordDistillUseCase
 	var geoNearbyUCRef *geo.NearbyUseCase     // X-01：附近同行配额注入用
@@ -678,6 +680,7 @@ func main() {
 		}
 		billingUC := billing.NewBillingUseCase(planRepo, subRepo, orderRepo)
 		billingUC.SetSettingRepo(settingRepo)
+		billingUCRef = billingUC // 32号 F1-6：admin 租户用量工具（跨作用域引用）
 		// 支付闭环原子化：订单置 paid + 订阅开通同一事务（消除"已付款未开通"中间态）
 		billingUC.SetPaymentClosureWriter(repository.NewGormPaymentClosureWriter(geoRepos.db))
 
@@ -709,6 +712,7 @@ func main() {
 		// P1-1：按引擎单价成本分析（llm_configs.cost_per_mtok——豆包 vs GPT 级差异化）
 		billingUC.SetLLMConfigRepo(llmConfigRepo)
 		quotaGate := quota.NewGate(planRepo, subRepo, usageRecorder)
+		quotaGateRef = quotaGate // 32号 F1-6：admin 租户用量工具（跨作用域引用）
 		router.SetQuotaGate(quotaGate) // ChatHandler 等无独立 usecase 的端点用
 		if geoContentUCRef != nil {
 			geoContentUCRef.SetQuotaGate(quotaGate)
@@ -1089,6 +1093,18 @@ func main() {
 		// 26 号计划：音色资产物化——voice_clone 终态 success 时写入 generation_voices(scope=clone)
 		genUC.SetVoiceRepo(voiceRepo)
 		log.Info("音色资产物化已启用（generation_voices scope=clone，终态自动快照）")
+		// Admin Tools 接线（32号 F1-6 收尾——admin chat 自然语言运维，7 工具全量注册）：
+		// 角色安全用 AdminTool 装饰器（执行层门卫读 ctx 注入的角色）——商户侧即使
+		// 构造请求指定 admin_* 工具名，也只会在执行层收到"需要管理员权限"，无法越权。
+		toolRegistry.Register(agent.AdminTool(agent.NewAdminSystemHealthTool(genUC, voiceRepo, subjectAssetRepo, viduProvider)))
+		toolRegistry.Register(agent.AdminTool(agent.NewAdminListFailedTasksTool(genUC)))
+		toolRegistry.Register(agent.AdminTool(agent.NewAdminCancelTaskTool(genUC)))
+		toolRegistry.Register(agent.AdminTool(agent.NewAdminListPlatformVoicesTool(voiceRepo)))
+		toolRegistry.Register(agent.AdminTool(agent.NewAdminListOfficialSubjectsTool(subjectAssetRepo)))
+		toolRegistry.Register(agent.AdminTool(agent.NewAdminViduCreditsTool(viduProvider)))
+		if billingUCRef != nil {
+			toolRegistry.Register(agent.AdminTool(agent.NewAdminTenantUsageTool(billingUCRef, quotaGateRef)))
+		}
 		// B-Roll 画面插入合成（22 号计划：本地 ffmpeg 编排——timeline 定位 + compose 任务）
 		// 装配点在 mediaStore 就绪后（产物上传依赖存储）。
 		{

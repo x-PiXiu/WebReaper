@@ -152,6 +152,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 		// 官方音色管理（白牌化——运营可管理平台音色；Vidu 音色仅作克隆参考源）
 		if r.generationVoices != nil {
 			avh := NewAdminVoiceHandler(r.generationVoices, r.adminVoiceSynth, r.mediaStore)
+			avh.SetGenerationUC(r.generationUC) // 31号 L4-②：平台音色创建后异步预热 Vidu 注册
 			adminGroup.POST("/voices", avh.HandleCreateVoice)
 			adminGroup.GET("/voices", avh.HandleListVoices)
 			adminGroup.PUT("/voices/:id", avh.HandleUpdateVoice)

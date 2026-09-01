@@ -13,6 +13,7 @@ export const INDUSTRY_OPTIONS = [
 export const CLEAN_TEXT_VALIDATOR = {
   validator: (_: unknown, v: string) => {
     const s = (v || '').trim()
+    // eslint-disable-next-line no-control-regex -- 控制字符检测是该校验的本意（乱码/粘贴控制符拦截）
     if (/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(s)) {
       return Promise.reject(new Error('包含非法字符（乱码/控制字符），请检查输入法或粘贴内容'))
     }
