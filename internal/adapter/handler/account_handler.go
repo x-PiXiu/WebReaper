@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 	"log"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -273,37 +271,11 @@ func (h *AccountHandler) HandleDeleteAccount(c *gin.Context) {
 	success(c, gin.H{"id": id})
 }
 
-// ---- 官方 OAuth 授权绑定（抖音开放平台 API 通道）----
-
-// HandleDouyinOAuthURL GET /api/v1/geo/accounts/douyin/oauth/url —— 生成抖音官方授权页地址。
-// 前端新窗口打开该地址（PC 端展示扫码二维码），授权后抖音回调服务端公开端点自动完成绑定。
-func (h *AccountHandler) HandleDouyinOAuthURL(c *gin.Context) {
-	tenantID := middleware.CurrentTenantID(c)
-	userID := middleware.CurrentUserID(c)
-	url, err := h.accountUC.BuildOAuthURL(tenantID, userID)
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	success(c, gin.H{"url": url})
-}
-
-// HandleDouyinOAuthCallback GET /api/v1/geo/accounts/douyin/oauth/callback —— 抖音授权回调（公开）。
-// 浏览器从抖音授权页重定向至此（无 JWT）——state 签名携带租户上下文，
-// 验签后换 token 落库，最后 302 跳回前端分发页并带结果参数。
-func (h *AccountHandler) HandleDouyinOAuthCallback(c *gin.Context) {
-	code := c.Query("code")
-	state := c.Query("state")
-	frontend := h.frontendBaseURL
-	accountID, name, err := h.accountUC.HandleOAuthCallback(c.Request.Context(), code, state)
-	if err != nil {
-		// 商户端路由挂在前缀 /m/ 下（App.tsx），重定向路径必须带 /m
-		c.Redirect(http.StatusFound, frontend+"/m/distribution?douyin_oauth=failed&reason="+url.QueryEscape(err.Error()))
-		return
-	}
-	log.Printf("[DouyinOAuth] 授权绑定成功：account=%s name=%s", accountID, name)
-	c.Redirect(http.StatusFound, frontend+"/m/distribution?douyin_oauth=success&name="+url.QueryEscape(name))
-}
+// ---- 抖音 OAuth 授权绑定（已删除 2026-09-01）----
+// 用户决策：所有发布操作均为 RPA 浏览器自动化（cookie 通道），OAuth token 无消费方，
+// 保留仅造成误导。删除内容：HandleDouyinOAuthURL / HandleDouyinOAuthCallback / 路由 /
+// 前端 douyinOauthUrl API 与回调提示。usecase 的 BuildOAuthURL/HandleOAuthCallback/
+// token 刷新等保留为未接线代码（无入口不可达），将来接入官方 API 发布时恢复路由即用。
 
 // ---- 发布管理端点 ----
 

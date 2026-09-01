@@ -82,8 +82,10 @@ func (r *GormWorkModerationRepository) Delete(ctx context.Context, workKey strin
 
 func (r *GormWorkModerationRepository) ListByTenant(ctx context.Context, tenantID string) ([]entity.WorkModeration, error) {
 	var pos []WorkModerationPO
+	// 含 flagged（机审待复核）——用户端产物隔离：违规内容管理员放行前显示"审核中"
 	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND action IN ?", tenantID, []string{entity.WorkActionHidden, entity.WorkActionDeleted}).
+		Where("tenant_id = ? AND action IN ?", tenantID,
+			[]string{entity.WorkActionHidden, entity.WorkActionDeleted, entity.WorkActionFlagged}).
 		Order("updated_at DESC").Limit(500).Find(&pos).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

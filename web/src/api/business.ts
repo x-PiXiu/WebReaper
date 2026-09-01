@@ -218,9 +218,8 @@ export const businessApi = {
   deleteAccount: (id: string) =>
     apiClient.delete<unknown, unknown>(`/api/v1/merchant/accounts/${id}`),
 
-  // 抖音官方 OAuth 授权（新窗口打开授权页扫码；回调由服务端处理并 302 跳回前端）
-  getDouyinOAuthURL: () =>
-    apiClient.get<unknown, { url: string }>('/api/v1/merchant/accounts/douyin/oauth/url'),
+  // 抖音 OAuth 授权（已删除 2026-09-01：发布全走 RPA cookie 通道，OAuth 无消费方；
+  // 抖音绑定统一扫码，见 qrLogin 系列）
 
   // 作品库三源聚合（我的作品页）
   listWorks: () =>

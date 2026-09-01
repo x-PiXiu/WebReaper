@@ -150,19 +150,14 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 		api.POST("/merchant/publish-plans/:planID/confirm", accountHandler.HandleConfirmPublish)
 		api.POST("/merchant/publish-plans/:planID/cancel", accountHandler.HandleCancelPublish)
 	}
-	// 抖音 OAuth 授权回调（公开——浏览器从抖音授权页重定向至此，无 JWT；
-	// 安全体在 state HMAC 签名：验签还原租户上下文，伪造/过期 state 一律拒绝）
-	if r.rootGroup != nil {
-		r.rootGroup.GET("/api/v1/merchant/accounts/douyin/oauth/callback", accountHandler.HandleDouyinOAuthCallback)
-	}
-	// 账号管理
+	// 账号管理（抖音绑定统一走扫码 RPA cookie 通道——OAuth 授权链已于 2026-09-01
+	// 按用户决策删除：所有发布操作均为 RPA 浏览器自动化，OAuth token 无消费方，
+	// 保留仅会造成误导；将来接入官方 API 发布时再恢复）
 	api.GET("/merchant/accounts", accountHandler.HandleListAccounts)
 	api.POST("/merchant/accounts/qr-login", accountHandler.HandleStartQRLogin)
 	api.GET("/merchant/accounts/qr-login/:sessionId", accountHandler.HandlePollQRLogin)
 	api.DELETE("/merchant/accounts/qr-login/:sessionId", accountHandler.HandleCancelQRLogin)
 	api.DELETE("/merchant/accounts/:id", accountHandler.HandleDeleteAccount)
-	// 官方 OAuth 授权绑定（抖音开放平台 API 通道；回调端点在 router.go 公开段注册）
-	api.GET("/merchant/accounts/douyin/oauth/url", accountHandler.HandleDouyinOAuthURL)
 	// 发布管理
 	api.GET("/merchant/publish/channels", accountHandler.HandleListChannels) // 平台能力清单（发布页能力驱动）
 	// 品牌知识库（商户上传品牌文档——获客智能体转型：知识库成为内容生成输入源）

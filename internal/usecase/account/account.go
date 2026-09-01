@@ -461,14 +461,26 @@ func (uc *PublishUseCase) moderatePublishText(ctx context.Context, in PublishInp
 
 // checkWorkModeration 发布前作品处置校验（32号 P1）。
 // 文章：content_id → c-{id}；多媒体：media_urls 反查成功成片任务 → g-{taskID}。
-// hidden/deleted 均拒绝（换入口也发不出去）；查不到处置记录=放行（不阻断主流程）。
+// hidden/deleted/flagged 均拒绝（换入口也发不出去）；查不到处置记录=放行（不阻断主流程）。
+// flagged（机审待复核）也拦发布——产物隔离：违规内容在管理员放行前不可扩散。
 func (uc *PublishUseCase) checkWorkModeration(ctx context.Context, in PublishInput) error {
 	if uc.modRepo == nil {
 		return nil
 	}
-	if in.ContentID != "" {
-		if m, err := uc.modRepo.FindByKey(ctx, "c-"+in.ContentID); err == nil && m.Active() {
+	blockReason := func(m entity.WorkModeration) error {
+		if m.Action == entity.WorkActionFlagged {
+			return fmt.Errorf("该作品正在内容审核中，暂无法发布（审核完成后自动恢复）")
+		}
+		if m.Active() {
 			return fmt.Errorf("该作品已被平台处置（%s），无法发布", m.Action)
+		}
+		return nil
+	}
+	if in.ContentID != "" {
+		if m, err := uc.modRepo.FindByKey(ctx, "c-"+in.ContentID); err == nil {
+			if e := blockReason(m); e != nil {
+				return e
+			}
 		}
 	}
 	if uc.taskRepo != nil {
@@ -480,8 +492,10 @@ func (uc *PublishUseCase) checkWorkModeration(ctx context.Context, in PublishInp
 			if err != nil || t.ID == "" {
 				continue // 非成片产物（直传素材）——无处置关联
 			}
-			if m, mErr := uc.modRepo.FindByKey(ctx, "g-"+t.ID); mErr == nil && m.Active() {
-				return fmt.Errorf("该作品已被平台处置（%s），无法发布", m.Action)
+			if m, mErr := uc.modRepo.FindByKey(ctx, "g-"+t.ID); mErr == nil {
+				if e := blockReason(m); e != nil {
+					return e
+				}
 			}
 		}
 	}

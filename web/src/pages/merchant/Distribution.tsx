@@ -103,28 +103,8 @@ export default function Distribution() {
     if (qBrandId) setCurrentBrand(qBrandId)
   }, [searchParams, setCurrentBrand])
 
-  // 抖音 OAuth 回调
-  useEffect(() => {
-    const oauthResult = searchParams.get('douyin_oauth')
-    if (!oauthResult) return
-    if (oauthResult === 'success') {
-      const name = searchParams.get('name') || ''
-      toast.ok(name ? `抖音账号「${name}」已绑定` : '抖音账号已绑定', 'douyin-oauth')
-    } else {
-      toast.fail(`抖音授权未完成：${searchParams.get('reason') || '请重试'}`, 'douyin-oauth')
-    }
-    queryClient.invalidateQueries({ queryKey: ['geo-accounts'] })
-    window.history.replaceState({}, '', window.location.pathname)
-  }, [searchParams, queryClient])
-
-  const bindDouyin = async () => {
-    try {
-      const { url } = await businessApi.getDouyinOAuthURL()
-      window.open(url, '_blank')
-    } catch {
-      openBindModal('douyin')
-    }
-  }
+  // 抖音 OAuth 回调与授权入口（已删除 2026-09-01：发布全走 RPA cookie 通道——
+  // 抖音绑定统一走扫码弹窗 openBindModal('douyin')）
 
   const healthyAccounts = accounts.filter((a) => a.health === 'active')
   const expiredAccounts = accounts.filter((a) => a.health === 'expired')
@@ -308,10 +288,9 @@ export default function Distribution() {
                                           <Button
                                             size="small"
                                             type="primary"
-                                            danger={!isOAuth}
-                                            onClick={() => (isOAuth && pf.key === 'douyin' ? bindDouyin() : openBindModal(pf.key))}
+                                            onClick={() => openBindModal(pf.key)}
                                           >
-                                            {isOAuth && pf.key === 'douyin' ? '重新授权' : '重新绑定'}
+                                            重新绑定
                                           </Button>
                                         )}
                                         <Popconfirm
@@ -329,20 +308,14 @@ export default function Distribution() {
                                   )
                                 })}
                                 {pf.key === 'douyin' ? (
-                                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                                    <Button type="dashed" block onClick={bindDouyin}>官方授权绑定更多</Button>
-                                    <Button type="text" block onClick={() => openBindModal('douyin')}>浏览器扫码绑定</Button>
-                                  </Space>
+                                  <Button type="dashed" block icon={<LinkOutlined />} onClick={() => openBindModal('douyin')}>
+                                    绑定更多抖音账号
+                                  </Button>
                                 ) : (
                                   <Button type="dashed" block icon={<LinkOutlined />} onClick={() => openBindModal(pf.key)}>
                                     绑定更多 {pf.name} 账号
                                   </Button>
                                 )}
-                              </Space>
-                            ) : pf.key === 'douyin' ? (
-                              <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                                <Button type="primary" block onClick={bindDouyin} disabled={accountsLoading}>官方授权绑定抖音</Button>
-                                <Button type="text" block onClick={() => openBindModal('douyin')} disabled={accountsLoading}>浏览器扫码绑定</Button>
                               </Space>
                             ) : (
                               <Button type="primary" block onClick={() => openBindModal(pf.key)} disabled={accountsLoading}>
@@ -424,10 +397,7 @@ export default function Distribution() {
                   channels={channels}
                   contents={contents}
                   initial={wizardInitial}
-                  onBind={(pf) => {
-                    if (pf === 'douyin') bindDouyin()
-                    else openBindModal(pf)
-                  }}
+                  onBind={(pf) => openBindModal(pf)}
                   onPublished={(results, mode) => {
                     queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
                     if (mode === 'auto') {

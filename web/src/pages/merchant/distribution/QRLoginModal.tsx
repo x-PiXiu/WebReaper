@@ -158,7 +158,15 @@ function QRStatusIndicator({ status, platform }: { status?: string; platform: st
   if (status === 'scanned') {
     return <Space><CheckCircleOutlined style={{ color: 'var(--wr-accent)' }} /><Text style={{ color: 'var(--wr-accent)' }}>已扫码，请在手机上确认</Text></Space>
   }
-  if (status === 'expired') return <Text type="warning">二维码已过期，请点击下方重新获取</Text>
+  if (status === 'expired') return (
+    <Space direction="vertical" size={4}>
+      <Text type="warning">登录未成功，二维码已过期</Text>
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        已扫码确认但未生效？可能是平台安全验证拦截（无头浏览器易触发）。
+        请重新获取再试；若反复失败，请联系管理员开启「可视化浏览器」模式后重试。
+      </Text>
+    </Space>
+  )
   if (status === 'cancelled') return <Text type="secondary">扫码已取消</Text>
   if (status === 'success') {
     return <Space><CheckCircleOutlined style={{ color: 'var(--wr-success)' }} /><Text style={{ color: 'var(--wr-success)' }}>登录成功，正在绑定…</Text></Space>

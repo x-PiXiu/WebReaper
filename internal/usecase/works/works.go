@@ -69,8 +69,9 @@ func (uc *WorksUseCase) SetModerationRepo(r port.WorkModerationRepository) {
 // ModerationEnabled 处置能力是否就绪（路由注册与前端能力探测用）。
 func (uc *WorksUseCase) ModerationEnabled() bool { return uc.modRepo != nil }
 
-// moderatedByKey 租户在效处置记录索引（hidden/deleted——申诉流后用户端改为
-// 标注态展示：条目保留 + 处置信息可见 + 申诉入口；发布拦截仍在服务端双端点兜底）。
+// moderatedByKey 租户在效处置记录索引（hidden/deleted/flagged——申诉流后用户端改为
+// 标注态展示：条目保留 + 处置信息可见 + 申诉入口；发布拦截仍在服务端双端点兜底。
+// flagged（机审待复核）也进索引——产物隔离：用户端显示"审核中"而非正常可见）。
 func (uc *WorksUseCase) moderatedByKey(ctx context.Context, tenantID string) map[string]entity.WorkModeration {
 	if uc.modRepo == nil {
 		return nil
@@ -81,7 +82,7 @@ func (uc *WorksUseCase) moderatedByKey(ctx context.Context, tenantID string) map
 	}
 	m := make(map[string]entity.WorkModeration, len(ms))
 	for _, v := range ms {
-		if v.Active() {
+		if v.Active() || v.Action == entity.WorkActionFlagged {
 			m[v.WorkKey] = v
 		}
 	}
