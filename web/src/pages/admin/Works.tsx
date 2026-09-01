@@ -1,10 +1,11 @@
 import { Typography, Table, Tag, Space, Button, Popconfirm, Modal, Input, Radio, Image, Tooltip } from 'antd'
-import { StopOutlined, UndoOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { StopOutlined, UndoOutlined, VideoCameraOutlined, EyeOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { AdminWorkItem, AdminWorkFlagged } from '../../types/api'
 import { toast } from '../../utils/feedback'
+import AdminWorkDetailDrawer from '../../components/AdminWorkDetailDrawer'
 
 const { Text } = Typography
 
@@ -31,6 +32,8 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
   const [reason, setReason] = useState('')
   const [action, setAction] = useState<'hidden' | 'deleted'>('hidden')
   const [acting, setActing] = useState(false)
+  // 32号 F2：详情抽屉（看内容——媒体/文案/处置记录）
+  const [detailKey, setDetailKey] = useState<string | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-works'],
@@ -203,10 +206,10 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
             render: (_, w: AdminWorkItem) => (
               <Space>
                 {w.cover_url || w.media_urls?.[0]
-                  ? <Image src={w.cover_url || w.media_urls?.[0]} width={64} height={40} style={{ objectFit: 'cover', borderRadius: 4 }} preview={false} fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
-                  : <div style={{ width: 64, height: 40, borderRadius: 4, background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><VideoCameraOutlined style={{ color: '#bbb' }} /></div>}
+                  ? <Image src={w.cover_url || w.media_urls?.[0]} width={64} height={40} style={{ objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }} preview={false} fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" onClick={() => setDetailKey(w.id)} />
+                  : <div style={{ width: 64, height: 40, borderRadius: 4, background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => setDetailKey(w.id)}><VideoCameraOutlined style={{ color: '#bbb' }} /></div>}
                 <div style={{ maxWidth: 220 }}>
-                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.title || '(未命名)'}</div>
+                  <a onClick={(e) => { e.preventDefault(); setDetailKey(w.id) }} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{w.title || '(未命名)'}</a>
                   <Text type="secondary" style={{ fontSize: 12 }}>{w.id}</Text>
                 </div>
               </Space>
@@ -225,9 +228,10 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
               : <Tag>正常</Tag>,
           },
           {
-            title: '操作', key: 'ops', width: 150,
+            title: '操作', key: 'ops', width: 200,
             render: (_, w: AdminWorkItem) => (
               <Space>
+                <Button size="small" icon={<EyeOutlined />} onClick={() => setDetailKey(w.id)}>详情</Button>
                 {!w.moderation_action && (
                   <Button size="small" danger icon={<StopOutlined />}
                     onClick={() => { setHideTarget(w); setAction('hidden'); setReason('') }}>
@@ -249,6 +253,8 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
           },
         ]}
       />
+
+      <AdminWorkDetailDrawer workKey={detailKey} onClose={() => setDetailKey(null)} />
 
       <Modal
         title={`处置作品：${hideTarget?.title || hideTarget?.id || ''}`}

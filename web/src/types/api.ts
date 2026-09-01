@@ -157,8 +157,25 @@ export interface AdminWorkItem {
   cover_url?: string
   created_at: string
   tenant_id: string
-  moderation_action?: string // hidden / deleted（空=未处置）
+  moderation_action?: string // hidden / deleted / flagged（空=未处置）
   moderation_reason?: string
+}
+
+/** 管理端作品详情（32号 F2：巡查流看内容） */
+export interface AdminWorkDetail extends AdminWorkItem {
+  sub_type: string
+  model?: string
+  provider?: string
+  text?: string             // 生成文案（机审判定对象）
+  voice_id?: string
+  error_msg?: string
+  finished_at?: string
+  moderation_source?: string  // admin / machine
+  moderation_operator?: string
+  moderated_at?: string
+  appeal_status?: string      // none / pending / accepted / rejected
+  appeal_text?: string
+  appealed_at?: string
 }
 
 export interface Brand {

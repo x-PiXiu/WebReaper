@@ -30,6 +30,21 @@ func (r *Router) HandleAdminWorksList(c *gin.Context) {
 	success(c, gin.H{"items": items, "total": len(items)})
 }
 
+// HandleAdminWorkDetail GET /admin/works/:key —— 作品详情（32号 F2：巡查流看内容——
+// 媒体本体/生成文案/处置与申诉完整记录；审核判定依据）。
+func (r *Router) HandleAdminWorkDetail(c *gin.Context) {
+	if r.worksUC == nil || !r.worksUC.ModerationEnabled() {
+		fail(c, pkg.ErrTaskNotExecutable)
+		return
+	}
+	d, err := r.worksUC.GetWorkDetailForAdmin(c.Request.Context(), strings.TrimSpace(c.Query("key")))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, d)
+}
+
 // HandleAdminWorkHide POST /admin/works/:key/hide —— 下架/逻辑删除（reason 必填）。
 // body: {kind?, tenant_id?, action?("hidden"|"deleted"，默认 hidden), reason}
 func (r *Router) HandleAdminWorkHide(c *gin.Context) {

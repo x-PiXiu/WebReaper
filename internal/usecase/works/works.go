@@ -494,6 +494,94 @@ func parseCreations(raw string) []struct{ URL, CoverURL string } {
 	return out
 }
 
+// AdminWorkDetail 管理端作品详情（32号 F2：巡查流"看内容"能力——审核判定需要
+// 看到媒体本体与生成文案，仅列表不够）。
+type AdminWorkDetail struct {
+	AdminWorkItem
+	SubType      string   `json:"sub_type"`              // 生成端点（lip_sync/tts/...）
+	Model        string   `json:"model,omitempty"`
+	Provider     string   `json:"provider,omitempty"`
+	Text         string   `json:"text,omitempty"`        // 生成文案（审核核心——违规判定对象）
+	DurationSec  int      `json:"duration_sec,omitempty"`
+	VoiceID      string   `json:"voice_id,omitempty"`    // 使用的音色
+	ErrorMsg     string   `json:"error_msg,omitempty"`   // 失败原因（成功作品为空）
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	// 处置与申诉完整记录
+	ModerationSource  string     `json:"moderation_source,omitempty"`  // admin / machine
+	ModerationOperator string    `json:"moderation_operator,omitempty"`
+	ModeratedAt       *time.Time `json:"moderated_at,omitempty"`
+	AppealStatus      string     `json:"appeal_status,omitempty"`
+	AppealText        string     `json:"appeal_text,omitempty"`
+	AppealedAt        *time.Time `json:"appealed_at,omitempty"`
+}
+
+// GetWorkDetailForAdmin 管理端作品详情：任务全量字段 + 处置/申诉完整记录。
+func (uc *WorksUseCase) GetWorkDetailForAdmin(ctx context.Context, workKey string) (*AdminWorkDetail, error) {
+	if uc.modRepo == nil {
+		return nil, fmt.Errorf("作品处置服务未配置")
+	}
+	if !strings.HasPrefix(workKey, "g-") {
+		return nil, fmt.Errorf("详情仅支持成片作品（g-{任务ID}）；文章类请走内容管理")
+	}
+	taskID := strings.TrimPrefix(workKey, "g-")
+	t, err := uc.taskRepo.FindByID(ctx, "", taskID) // 跨租户查（tenantID 空=admin 旁路）
+	if err != nil {
+		return nil, fmt.Errorf("作品不存在或已清理")
+	}
+	if t.State != entity.TaskStateSuccess || !isDeliverableTask(t) {
+		return nil, fmt.Errorf("该任务非成功成片")
+	}
+	var mod entity.WorkModeration
+	hasMod := false
+	if m, mErr := uc.modRepo.FindByKey(ctx, workKey); mErr == nil {
+		mod = m
+		hasMod = true
+	}
+	var params struct {
+		Text     string `json:"text"`
+		VoiceID  string `json:"voice_id"`
+		Duration int    `json:"duration"`
+	}
+	_ = json.Unmarshal([]byte(t.ParamsJSON), &params)
+	creations := parseCreations(t.CreationsJSON)
+	var urls []string
+	var cover string
+	for _, cr := range creations {
+		urls = append(urls, cr.URL)
+		if cover == "" {
+			cover = cr.CoverURL
+		}
+	}
+	kind := t.Type
+	if kind == entity.GenerationTypeDigitalHuman || kind == entity.GenerationTypeOther {
+		kind = entity.GenerationTypeVideo
+	}
+	d := &AdminWorkDetail{
+		AdminWorkItem: AdminWorkItem{
+			WorkItem: WorkItem{
+				ID: workKey, Kind: kind, Title: titleFromTask(t, kind),
+				BrandID: t.BrandID, Status: "ready",
+				MediaURLs: urls, CoverURL: cover, CreatedAt: t.CreatedAt,
+			},
+			TenantID: t.TenantID,
+		},
+		SubType: t.SubType, Model: t.Model, Provider: t.Provider,
+		Text: params.Text, VoiceID: params.VoiceID,
+		DurationSec: params.Duration, FinishedAt: t.FinishedAt,
+	}
+	if hasMod {
+		d.ModerationAction = mod.Action
+		d.ModerationReason = mod.Reason
+		d.ModerationSource = mod.Source
+		d.ModerationOperator = mod.Operator
+		d.ModeratedAt = &mod.UpdatedAt
+		d.AppealStatus = mod.AppealStatus
+		d.AppealText = mod.AppealText
+		d.AppealedAt = mod.AppealedAt
+	}
+	return d, nil
+}
+
 // materialSubTypes 素材库生成类端点——产物仅进素材库，不进「我的作品」。
 var materialSubTypes = map[string]bool{
 	"text2image": true, "tts": true, "text2audio": true, "sound_effect": true,
