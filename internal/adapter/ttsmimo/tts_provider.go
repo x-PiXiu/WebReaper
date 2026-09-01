@@ -37,8 +37,22 @@ func NewMiMoTTSProvider(apiKey, baseURL string) *MiMoTTSProvider {
 	return &MiMoTTSProvider{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		client:  &http.Client{Timeout: 30 * time.Second},
+		// 真机实测（2026-09-01）：MiMo voiceclone 合成耗时随文本长度线性增长
+		//（2049 字实测 166s）——固定 30s 必超。客户端用上限 240s，实际时限由
+		// Submit 按文本长度自适应的 ctx 控制（见 mimoDeadlineForText）。
+		client: &http.Client{Timeout: 240 * time.Second},
 	}
+}
+
+// mimoDeadlineForText 按文本长度自适应时限：30s 基线 + 每 20 字 2s，封顶 240s
+//（实测速率约 12 字/秒，留 2.5 倍余量）。
+func mimoDeadlineForText(text string) time.Duration {
+	n := len([]rune(text))
+	d := 30*time.Second + time.Duration(n/20)*2*time.Second
+	if d > 240*time.Second {
+		d = 240 * time.Second
+	}
+	return d
 }
 
 // Synthesize 标准TTS（预置音色）。

@@ -45,28 +45,33 @@ func (p *MiMoAsGenerationProvider) Submit(ctx context.Context, endpoint string, 
 
 	// 判断是TTS还是声音克隆
 	isVoiceClone := endpoint == "/ent/v2/audio-clone" || endpoint == "voice_clone"
-	
+
+	// 31号P2真机发现：合成耗时随文本线性增长（2049字实测166s）——
+	// 固定 30s 客户端超时对长文案必超。按文本长度自适应放宽 ctx 时限。
+	synthCtx, synthCancel := context.WithTimeout(ctx, mimoDeadlineForText(text))
+	defer synthCancel()
+
 	var audioData []byte
 	var err error
-	
+
 	if isVoiceClone {
 		// 声音克隆：需要 audio_url（参考音频）和 voice_id
 		audioURL, _ := body["audio_url"].(string)
 		if audioURL == "" {
 			return port.SubmitResult{}, fmt.Errorf("声音克隆需要 audio_url 参数")
 		}
-		
+
 		// 下载参考音频
 		sampleData, downloadErr := p.downloadAudio(ctx, audioURL)
 		if downloadErr != nil {
 			return port.SubmitResult{}, fmt.Errorf("下载参考音频失败: %w", downloadErr)
 		}
-		
+
 		// 转换为base64编码（小米MiMo API要求）
 		sampleBase64 := base64.StdEncoding.EncodeToString(sampleData)
-		
+
 		// 调用声音克隆
-		audioData, _, err = p.tts.SynthesizeClone(ctx, sampleBase64, text)
+		audioData, _, err = p.tts.SynthesizeClone(synthCtx, sampleBase64, text)
 	} else {
 		// 标准TTS
 		voiceID, _ := body["voice_setting_voice_id"].(string)
@@ -74,7 +79,7 @@ func (p *MiMoAsGenerationProvider) Submit(ctx context.Context, endpoint string, 
 		if err != nil {
 			return port.SubmitResult{}, err
 		}
-		audioData, _, err = p.tts.Synthesize(ctx, text, voiceID)
+		audioData, _, err = p.tts.Synthesize(synthCtx, text, voiceID)
 	}
 	
 	if err != nil {
