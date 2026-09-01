@@ -1,7 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Alert, Space, Tag, Typography } from 'antd'
 import { modulesForTrack, useComposeDraft } from '../../../store/composeDraft'
-import { PageBackLink } from '../../../components/PageBackLink'
 
 const { Text } = Typography
 
@@ -34,7 +33,6 @@ export function ComposeModuleHeader({
     <>
       <div className="ip-page-hero" style={{ marginBottom: 12 }}>
         <div>
-          <PageBackLink to="/m/compose" label="工作台" />
           <p className="ip-kicker" style={{ marginTop: 10 }}>
             <Link to={trackHome} style={{ color: 'inherit' }}>{trackLabel}</Link>
           </p>

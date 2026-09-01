@@ -12,8 +12,6 @@ import {
 import { ComposeFlowShell } from './ComposeFlowShell'
 import { ComposePreview } from './ComposePreview'
 import { ScriptStep } from './steps/ScriptStep'
-import { VideoAssetsStep } from './steps/VideoAssetsStep'
-import { VideoProduceStep } from './steps/VideoProduceStep'
 import { GraphicAssetsStep } from './steps/GraphicAssetsStep'
 import { GraphicProduceStep } from './steps/GraphicProduceStep'
 import { toast } from '../../../utils/feedback'
@@ -110,8 +108,6 @@ export default function ComposeTrackPage({ track }: Props) {
 
   let workspace: React.ReactNode = null
   if (step.key === 'script') workspace = <ScriptStep track={track} />
-  else if (track === 'video' && step.key === 'assets') workspace = <VideoAssetsStep />
-  else if (track === 'video' && step.key === 'produce') workspace = <VideoProduceStep />
   else if (track === 'graphic' && step.key === 'assets') workspace = <GraphicAssetsStep />
   else if (track === 'graphic' && step.key === 'produce') workspace = <GraphicProduceStep />
 

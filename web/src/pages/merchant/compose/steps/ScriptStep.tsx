@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Input, Space, Typography } from 'antd'
-import { ThunderboltOutlined, HighlightOutlined } from '@ant-design/icons'
+import { ThunderboltOutlined, HighlightOutlined, FileTextOutlined } from '@ant-design/icons'
 import { useComposeDraft, type ComposeTrack } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { useComposeWorkSync } from '../../../../hooks/useComposeWorkSync'
 import { businessApi } from '../../../../api/business'
 import { generateContentStream } from '../../../../api/contentStream'
 import { PauseScriptEditor } from '../../../../components/compose/PauseScriptEditor'
+import { CopyTemplateDrawer } from '../../../../components/compose/CopyTemplateDrawer'
+import { NoBrandGuide } from '../../../../components/NoBrandGuide'
+import type { CopyTemplate } from '../../../../data/copyTemplates'
 import { toast } from '../../../../utils/feedback'
 
 const { Text } = Typography
@@ -18,6 +21,7 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
   const { rememberContentId } = useComposeWorkSync()
   const [busy, setBusy] = useState(false)
   const [genHint, setGenHint] = useState('')
+  const [tplOpen, setTplOpen] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const isGraphic = track === 'graphic'
 
@@ -25,6 +29,13 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
   const format = isGraphic ? 'xiaohongshu' : 'script'
   const text = draft.script || draft.rewritten || draft.transcript || ''
   const setText = (v: string) => draft.patch({ script: v, rewritten: v, lastUpdatedAt: new Date().toISOString() })
+
+  const applyTemplate = (tpl: CopyTemplate) => {
+    // 向导内轨道固定，不随模板 track 切换（与旧文案工作室行为的唯一差异）
+    setText(tpl.body)
+    setTplOpen(false)
+    toast.ok(`已套用「${tpl.title}」`)
+  }
 
   const polish = async () => {
     if (!brandId) {
@@ -127,7 +138,7 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
         format: 'script',
       })
       const raw = res.optimized_text || ''
-      const lines = raw.split(/\n+/).map((l) => l.replace(/^\d+[\.\)、]\s*/, '').trim()).filter(Boolean)
+      const lines = raw.split(/\n+/).map((l) => l.replace(/^\d+[.、)]\s*/, '').trim()).filter(Boolean)
       const titles = lines.filter((l) => !l.startsWith('#')).slice(0, 5)
       const topics = lines.filter((l) => l.includes('#')).flatMap((l) => l.split(/[,，\s]+/)).filter((t) => t.startsWith('#')).slice(0, 8)
       draft.patch({
@@ -145,8 +156,12 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
 
   return (
     <div className="cf-panel">
+      <NoBrandGuide style={{ marginBottom: 12 }} />
       <div className="cf-editor-toolbar">
         <Space wrap size={8}>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => setTplOpen(true)}>
+            从模板起稿
+          </Button>
           <Button size="small" icon={<ThunderboltOutlined />} loading={busy} onClick={genByTheme}>
             按主题生成
           </Button>
@@ -213,6 +228,13 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
           ))}
         </div>
       )}
+
+      <CopyTemplateDrawer
+        open={tplOpen}
+        track={isGraphic ? 'graphic' : 'video'}
+        onClose={() => setTplOpen(false)}
+        onApply={applyTemplate}
+      />
     </div>
   )
 }

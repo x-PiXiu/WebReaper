@@ -172,7 +172,11 @@ export default function WorksAnalytics() {
           <div className="ip-panel">
             <Title level={5}>发布节奏（近 14 天）</Title>
             {summaryLoading ? null : trend.every((p) => p.发布数 === 0) ? (
-              <Empty description="还没有发布记录——去发布中心发出第一条作品" style={{ padding: '40px 0' }} />
+              <Empty description="还没有发布记录" style={{ padding: '40px 0' }}>
+                <Button type="primary" size="small" onClick={() => navigate('/m/distribution')}>
+                  去发布第一条作品
+                </Button>
+              </Empty>
             ) : (
               <LazyLine data={trend} xField="day" yField="发布数" smooth height={260} color={['#8b7cf6']} />
             )}
@@ -198,7 +202,11 @@ export default function WorksAnalytics() {
               <Button size="small" type="link" onClick={() => openAiDrawer('report')}>查看完整 AI 报告 →</Button>
             </div>
             {engines.length === 0 ? (
-              <Empty description="暂无监测数据——AI 效果需要先发起监测" style={{ padding: '32px 0' }} />
+              <Empty description="暂无监测数据——先测一测 AI 现在怎么评价你" style={{ padding: '32px 0' }}>
+                <Button type="primary" size="small" onClick={() => openAiDrawer('ask')}>
+                  测一测 AI 推不推荐你
+                </Button>
+              </Empty>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
                 {engines.slice(0, 6).map((e) => (
@@ -249,7 +257,15 @@ export default function WorksAnalytics() {
           loading={summaryLoading}
           pagination={false}
           dataSource={works}
-          locale={{ emptyText: '暂无已发布作品——去发布中心发出第一条' }}
+          locale={{
+            emptyText: (
+              <Empty description="暂无已发布作品" style={{ padding: '24px 0' }}>
+                <Button type="primary" size="small" onClick={() => navigate('/m/distribution')}>
+                  去发布中心
+                </Button>
+              </Empty>
+            ),
+          }}
           columns={[
             {
               title: '作品',

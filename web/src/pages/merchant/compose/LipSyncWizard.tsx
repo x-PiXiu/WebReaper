@@ -521,7 +521,7 @@ export default function LipSyncWizard() {
       {!brandId && (
         <Alert
           type="warning" showIcon className="wz-draft-banner"
-          message={<>请先在 <Link to="/m/brands">账号人设</Link> 选择品牌，生成内容将关联到该品牌</>}
+          message={<>请先在 <Link to="/m/brands">人设档案</Link> 创建并选择人设，AI 生成与发布都会关联到它</>}
         />
       )}
       <CapabilityBanner required={['lip_sync', 'reference2video']} />
