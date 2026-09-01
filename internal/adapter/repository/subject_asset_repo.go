@@ -19,7 +19,7 @@ type SubjectAssetPO struct {
 	Name           string `gorm:"size:128"`
 	ServerID       string `gorm:"size:128;uniqueIndex:uk_server"`
 	PortraitURL    string `gorm:"size:512"`
-	AvatarVideoURL string `gorm:"size:512"`
+	AvatarVideoURL string `gorm:"size:1024"` // 089：Vidu签名URL可达~900字符（512会Data too long）
 	VoiceID        string `gorm:"size:128"`
 	Tags           string `gorm:"size:512"`
 	SortOrder      int
