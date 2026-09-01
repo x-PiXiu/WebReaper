@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, Typography, Button, Input, Form, Table, Tag, Space, Popconfirm, Alert, Select, InputNumber, Row, Col, Tooltip } from 'antd'
+import { Card, Typography, Button, Input, Form, Table, Tag, Space, Popconfirm, Alert, Select, InputNumber, Row, Col, Tooltip, Statistic } from 'antd'
 import { SaveOutlined, ReloadOutlined, DeleteOutlined, DatabaseOutlined, LinkOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -203,6 +203,28 @@ export default function Knowledge({ embedded: _embedded = false }: { embedded?: 
         <h1>知识库</h1>
         <p>向量嵌入与向量库配置 · 行业采集 · 素材管理——生成内容时的参考资料来源</p>
       </div>
+
+      {/* ⓪ 运行总览（32号美化：关键指标一目了然——原埋在页尾） */}
+      <Card size="small">
+        <Row gutter={16}>
+          <Col span={8} style={{ textAlign: 'center' }}>
+            <Statistic title="入库素材总数" value={stats?.total_materials ?? '-'} suffix="篇" />
+          </Col>
+          <Col span={8} style={{ textAlign: 'center' }}>
+            <Statistic
+              title="自动采集间隔"
+              value={intervalCfg ? `${intervalCfg.interval_minutes}` : '-'}
+              suffix="分钟"
+            />
+          </Col>
+          <Col span={8} style={{ textAlign: 'center' }}>
+            <Statistic
+              title="向量重建结果"
+              value={reindexResult ? `${reindexResult.updated}/${reindexResult.processed}` : (reindexing ? '重建中…' : '-')}
+            />
+          </Col>
+        </Row>
+      </Card>
 
       {/* ① 向量嵌入/向量库配置 */}
       <Card

@@ -149,7 +149,7 @@ export default function App() {
           <Route path="/admin/subjects" element={<Navigate to="/admin/assets?tab=subjects" replace />} />
           <Route path="/admin/settings" element={<Navigate to="/admin/system" replace />} />
           <Route path="/admin/integrations" element={<Navigate to="/admin/system?tab=integrations" replace />} />
-          <Route path="/admin/agent-configs" element={<Navigate to="/admin/engine?tab=agents" replace />} />
+          <Route path="/admin/agent-configs" element={<Navigate to="/admin/engine" replace />} />
           <Route path="/admin/prompt-templates" element={<Navigate to="/admin/engine?tab=prompts" replace />} />
           <Route path="/admin/generation-templates" element={<Navigate to="/admin/engine?tab=templates" replace />} />
           <Route path="/admin/indexing" element={<Navigate to="/admin/engine?tab=indexing" replace />} />

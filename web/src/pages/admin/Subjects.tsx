@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Button, Image, Input, InputNumber, Modal, Popconfirm, Segmented,
+  Alert, Button, Descriptions, Drawer, Image, Input, InputNumber, Modal, Popconfirm, Segmented,
   Space, Switch, Table, Tag, Typography, Upload,
 } from 'antd'
 import { PlusOutlined, UserOutlined, EnvironmentOutlined } from '@ant-design/icons'
@@ -32,6 +32,8 @@ function AdminSubjects({ embedded = false }: { embedded?: boolean }) {
   const [editTags, setEditTags] = useState('')
   const [editSort, setEditSort] = useState(0)
   const [editActive, setEditActive] = useState(true)
+  // 详情抽屉（32号 F2：点击行查看完整资产——大图/形象视频/绑定音色/租户）
+  const [detail, setDetail] = useState<SubjectAsset | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-subjects', kind],
@@ -130,6 +132,7 @@ function AdminSubjects({ embedded = false }: { embedded?: boolean }) {
         loading={isLoading}
         dataSource={subjects}
         pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
+        onRow={(s) => ({ onClick: () => setDetail(s), style: { cursor: 'pointer' } })}
         columns={[
           {
             title: '主体', dataIndex: 'name', render: (_, s) => (
@@ -196,6 +199,34 @@ function AdminSubjects({ embedded = false }: { embedded?: boolean }) {
           },
         ]}
       />
+
+      {/* 详情抽屉（32号 F2：点击行查看完整资产） */}
+      <Drawer title={`主体详情 · ${detail?.name || ''}`} open={!!detail} onClose={() => setDetail(null)} width={480}>
+        {detail && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            {detail.avatar_video_url ? (
+              <video src={detail.avatar_video_url} controls style={{ width: '100%', borderRadius: 8 }} />
+            ) : detail.portrait_url ? (
+              <Image src={detail.portrait_url} style={{ width: '100%', borderRadius: 8 }} />
+            ) : <Text type="secondary">无形象视频/形象照</Text>}
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
+              <Descriptions.Item label="类型">
+                <Tag color={detail.kind === 'scene' ? 'cyan' : 'geekblue'}>{detail.kind === 'scene' ? '环境主体' : '人物分身'}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                <Tag color={detail.status === 'active' ? 'green' : 'default'}>{detail.status === 'active' ? '上架' : '下架'}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Server ID"><Text copyable style={{ fontSize: 12 }}>{detail.server_id}</Text></Descriptions.Item>
+              {detail.voice_id && <Descriptions.Item label="绑定音色"><Text copyable style={{ fontSize: 12 }}>{detail.voice_id}</Text></Descriptions.Item>}
+              {detail.tags && <Descriptions.Item label="标签">{detail.tags}</Descriptions.Item>}
+              {detail.sort_order !== undefined && <Descriptions.Item label="排序">{detail.sort_order}</Descriptions.Item>}
+              <Descriptions.Item label="来源任务"><Text copyable style={{ fontSize: 12 }}>{detail.source_task_id}</Text></Descriptions.Item>
+              <Descriptions.Item label="创建时间">{new Date(detail.created_at).toLocaleString('zh-CN', { hour12: false })}</Descriptions.Item>
+            </Descriptions>
+          </Space>
+        )}
+      </Drawer>
 
       <Modal
         open={createOpen}

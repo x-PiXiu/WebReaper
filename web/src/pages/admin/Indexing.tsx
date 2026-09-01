@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card, Typography, Button, Input, Form, Table, Tag, Space, Popconfirm, Alert, Row, Col } from 'antd'
+import { Card, Typography, Button, Input, Form, Table, Tag, Space, Popconfirm, Alert, Row, Col, Statistic } from 'antd'
 import { CloudUploadOutlined, ReloadOutlined, KeyOutlined, SafetyCertificateOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
@@ -131,6 +131,29 @@ export default function Indexing({ embedded: _embedded = false }: { embedded?: b
       <div className="wr-page-header">
         <h1>提交渠道</h1>
         <p>搜索引擎收录通知：密钥自动托管 · 渠道配置 · 提交审计 · 手动补提交</p>
+      </div>
+
+      {/* ⓪ 提交健康总览（32号美化：成功率与渠道分布一目了然——原日志埋在页尾） */}
+      <div className="wr-glass-card" style={{ padding: 20, marginBottom: 16 }}>
+        <Row gutter={16}>
+          <Col span={8} style={{ textAlign: 'center' }}>
+            <Statistic title="提交总数（近 50 次）" value={logs.length} />
+          </Col>
+          <Col span={8} style={{ textAlign: 'center' }}>
+            <Statistic
+              title="成功"
+              value={logs.filter((l) => l.status === 'success').length}
+              valueStyle={{ color: 'var(--wr-success, #52c41a)' }}
+            />
+          </Col>
+          <Col span={8} style={{ textAlign: 'center' }}>
+            <Statistic
+              title="失败"
+              value={logs.filter((l) => l.status !== 'success').length}
+              valueStyle={{ color: 'var(--wr-danger, #cf1322)' }}
+            />
+          </Col>
+        </Row>
       </div>
 
       {/* ① 密钥与验证 */}
