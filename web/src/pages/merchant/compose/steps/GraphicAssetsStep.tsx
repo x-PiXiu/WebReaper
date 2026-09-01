@@ -12,7 +12,7 @@ import { MediaResultCard } from '../../../../components/compose/MediaResultCard'
 import { ManualUrlField } from '../../../../components/compose/ManualUrlField'
 import { CapabilityBanner } from '../../../../components/wizard/CapabilityBanner'
 import { catchGenerationError } from '../../../../utils/generationErrors'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 type GraphicTab = 'images' | 'cover'
 
@@ -33,7 +33,7 @@ export function GraphicAssetsStep() {
   const gen = async () => {
     const bid = brandId || draft.brandId
     if (!bid) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设')
       return
     }
     setBusy(true)
@@ -50,7 +50,7 @@ export function GraphicAssetsStep() {
         track: 'graphic',
         lastUpdatedAt: new Date().toISOString(),
       })
-      message.success('配图任务已提交，完成后自动加入列表')
+      toast.ok('配图任务已提交')
     } catch (e) {
       catchGenerationError(e)
     } finally {
@@ -110,7 +110,7 @@ export function GraphicAssetsStep() {
                 try {
                   const asset = await businessApi.uploadAsset(file)
                   draft.patch({ imageUrls: [...list, asset.url], track: 'graphic', lastUpdatedAt: new Date().toISOString() })
-                  message.success('已加入配图')
+                  toast.ok('已加入配图')
                 } catch (e) {
                   catchGenerationError(e)
                 } finally {
@@ -185,7 +185,7 @@ export function GraphicAssetsStep() {
         title="选择配图"
         onPick={(url) => {
           draft.patch({ imageUrls: [...list, url], track: 'graphic', lastUpdatedAt: new Date().toISOString() })
-          message.success('已加入配图')
+          toast.ok('已加入配图')
         }}
       />
     </div>

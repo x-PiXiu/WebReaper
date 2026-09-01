@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Card, Typography, Button, Row, Col, Tag, Space, Table, Modal, Alert, Popconfirm, Tabs } from 'antd'
-import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, ExportOutlined, RightOutlined } from '@ant-design/icons'
+import { Card, Typography, Button, Row, Col, Tag, Space, Alert, Popconfirm, Tabs } from 'antd'
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, LinkOutlined, ExportOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import { useBrandContext } from '../../hooks/useBrands'
@@ -11,9 +11,9 @@ import PublishJobTable from './distribution/PublishJobTable'
 import PublishWizard from './distribution/PublishWizard'
 import { PublishResultPanel } from './distribution/PublishResultPanel'
 import type { WizardDraft } from './distribution/wizardModel'
-import type { Account, PublishJob } from '../../types/api'
-import { message } from '../../utils/antdApp'
-import OralJourneyNav from '../../components/compose/OralJourneyNav'
+import { emptyDraft, hasPrefilledMedia, resolveEntryStep } from './distribution/wizardModel'
+import type { PublishJob } from '../../types/api'
+import { toast, notifyResult } from '../../utils/feedback'
 
 const { Text, Paragraph } = Typography
 
@@ -48,8 +48,7 @@ export default function Distribution() {
   const [qrModalOpen, setQrModalOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('accounts')
   const [activePlatform, setActivePlatform] = useState('')
-  const [linkModalOpen, setLinkModalOpen] = useState(false)
-  const [publishLinks, setPublishLinks] = useState<PublishJob[]>([])
+  const [semiPublishJobs, setSemiPublishJobs] = useState<PublishJob[]>([])
   const [autoJobIds, setAutoJobIds] = useState<string[]>([])
 
   const { data: accounts = [], isLoading: accountsLoading } = useQuery({
@@ -87,7 +86,7 @@ export default function Distribution() {
         : qMediaUrls
           ? (qMediaUrls.match(/\.(jpg|jpeg|png|webp)(\?|$)/i) ? 'image' : 'video')
           : undefined
-    return {
+    const partial: Partial<WizardDraft> = {
       contentId: qContentId,
       brandId: qBrandId,
       title: qTitle,
@@ -95,8 +94,8 @@ export default function Distribution() {
       coverURL: qCoverUrl,
       mediaURLs: qMediaUrls ? qMediaUrls.split(',').filter(Boolean) : [],
       contentType: contentType as WizardDraft['contentType'] | undefined,
-      step: qMediaUrls ? 1 : qContentId || qContent ? 2 : 1,
     }
+    return { ...partial, step: resolveEntryStep(partial) }
   }, [searchParams])
 
   useEffect(() => {
@@ -109,9 +108,10 @@ export default function Distribution() {
     const oauthResult = searchParams.get('douyin_oauth')
     if (!oauthResult) return
     if (oauthResult === 'success') {
-      message.success(`抖音账号「${searchParams.get('name') || ''}」官方授权绑定成功`)
+      const name = searchParams.get('name') || ''
+      toast.ok(name ? `抖音账号「${name}」已绑定` : '抖音账号已绑定', 'douyin-oauth')
     } else {
-      message.error(`官方授权失败：${searchParams.get('reason') || '未知原因'}`)
+      toast.fail(`抖音授权未完成：${searchParams.get('reason') || '请重试'}`, 'douyin-oauth')
     }
     queryClient.invalidateQueries({ queryKey: ['geo-accounts'] })
     window.history.replaceState({}, '', window.location.pathname)
@@ -127,17 +127,18 @@ export default function Distribution() {
   }
 
   const healthyAccounts = accounts.filter((a) => a.health === 'active')
+  const expiredAccounts = accounts.filter((a) => a.health === 'expired')
+  const prefilledFromWorks = wizardInitial && hasPrefilledMedia(emptyDraft(wizardInitial))
   const tabTouched = useRef(false)
   useEffect(() => {
-    if (!accountsLoading && !tabTouched.current && healthyAccounts.length > 0) {
+    if (wizardInitial) {
       setActiveTab('publish')
+      return
     }
-  }, [accountsLoading, healthyAccounts.length])
-
-  // 带入口参数时直接进发布
-  useEffect(() => {
-    if (wizardInitial) setActiveTab('publish')
-  }, [wizardInitial])
+    if (!accountsLoading && !tabTouched.current) {
+      setActiveTab(healthyAccounts.length > 0 ? 'publish' : 'accounts')
+    }
+  }, [accountsLoading, healthyAccounts.length, wizardInitial])
 
   const { data: autoStatus } = useQuery({
     queryKey: ['auto-publish-status', autoJobIds],
@@ -150,7 +151,7 @@ export default function Distribution() {
     },
   })
 
-  // 全部完成时提示一次（不清 autoJobIds——保留在结果面板中展示）
+  // 全部完成：面板已展示明细；仅失败时用通知补一句，避免与结果面板重复刷 toast
   const notifiedRef = useRef(false)
   useEffect(() => {
     if (autoStatus && autoStatus.every((j) => j.status === 'published' || j.status === 'failed')) {
@@ -158,8 +159,14 @@ export default function Distribution() {
         notifiedRef.current = true
         const successCount = autoStatus.filter((j) => j.status === 'published').length
         const failCount = autoStatus.filter((j) => j.status === 'failed').length
-        if (successCount > 0) message.success(`${successCount} 篇内容自动发布成功`)
-        if (failCount > 0) message.error(`${failCount} 篇发布失败`)
+        if (failCount > 0) {
+          notifyResult({
+            type: 'warning',
+            title: `${successCount} 成功 · ${failCount} 失败`,
+            desc: '可在上方结果面板查看详情，或稍后重试失败项。',
+            key: 'auto-publish-done',
+          })
+        }
         queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
       }
     } else {
@@ -175,7 +182,7 @@ export default function Distribution() {
   const handleDeleteAccount = async (id: string) => {
     try {
       await businessApi.deleteAccount(id)
-      message.success('已解绑')
+      toast.ok('账号已解绑', 'unbind-acc')
       queryClient.invalidateQueries({ queryKey: ['geo-accounts'] })
     } catch { /* */ }
   }
@@ -183,92 +190,37 @@ export default function Distribution() {
   const handleMarkPublished = async (jobId: string) => {
     try {
       await businessApi.markPublished(jobId)
-      message.success('已标记为发布')
+      toast.ok('已标记为发布完成', 'mark-pub')
+      setSemiPublishJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, status: 'published' } : j)))
       queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })
     } catch { /* */ }
   }
 
-  const accountColumns = [
-    {
-      title: '平台', dataIndex: 'platform', key: 'platform', width: 110,
-      render: (p: string) => <PlatformBadge platform={p} size={14} />,
-    },
-    { title: '账号', dataIndex: 'display_name', key: 'name', render: (n: string) => <Text strong>{n || '-'}</Text> },
-    {
-      title: '登录方式', dataIndex: 'login_method', key: 'method', width: 100,
-      render: (m: string) => {
-        const labels: Record<string, string> = {
-          zhihu: '知乎App', wechat: '微信', qq: 'QQ', weibo: '微博',
-          xiaohongshu: '小红书', douyin: '抖音App', kuaishou: '快手App', bilibili: 'B站App', weixin: '微信扫码',
-        }
-        return <Tag>{labels[m] || m || '-'}</Tag>
-      },
-    },
-    {
-      title: '状态', dataIndex: 'health', key: 'health', width: 110,
-      render: (h: string) => {
-        const cfg = healthConfig(h)
-        return <Space><span style={{ color: cfg.color }}>{cfg.icon}</span><Text style={{ color: cfg.color }}>{cfg.label}</Text></Space>
-      },
-    },
-    {
-      title: '过期时间', dataIndex: 'expires_at', key: 'expires', width: 170,
-      render: (t: string) => {
-        if (!t) return <Text type="secondary">-</Text>
-        return <Text type={new Date(t) < new Date() ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>{new Date(t).toLocaleString()}</Text>
-      },
-    },
-    {
-      title: '操作', key: 'action', width: 80,
-      render: (_: unknown, r: Account) => (
-        <Popconfirm title="确定解绑此账号？" onConfirm={() => handleDeleteAccount(r.id)}>
-          <Button size="small" type="text" danger>解绑</Button>
-        </Popconfirm>
-      ),
-    },
-  ]
-
   return (
-    <div className="wr-page-content ip-page dist-page ch-creative" style={{ paddingTop: 4, position: 'relative' }}>
+    <div className="wr-page-content ip-page dist-page" style={{ paddingTop: 4, position: 'relative' }}>
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <OralJourneyNav />
-        <section className="ch-hero dist-hero">
-          <div className="ch-hero-copy">
-            <p className="ch-hero-kicker">账号发布</p>
-            <h1 className="ch-hero-title">把内容发到多平台。</h1>
-            <p className="ch-hero-lead">
-              绑定账号后按向导填写内容，支持半自动或全自动发布；Cookie 失效时可降级为手动发布。
+        <header className="dist-head">
+          <div className="dist-head-copy">
+            <h1>账号发布</h1>
+            <p>
+              {healthyAccounts.length > 0
+                ? `${healthyAccounts.length} 个健康账号可用`
+                : '尚未绑定账号，先在账号池扫码'}
+              {expiredAccounts.length > 0 && ` · ${expiredAccounts.length} 个已过期需重绑`}
             </p>
           </div>
-          <div className="ch-hero-cta">
+          <div className="dist-head-cta">
+            <Button onClick={() => navigate('/m/works')}>我的作品</Button>
             <Button
               type="primary"
-              size="large"
-              className="ch-hero-btn"
+              className="ip-btn-primary"
               icon={<ExportOutlined />}
               onClick={() => { tabTouched.current = true; setActiveTab('publish') }}
             >
               去发布
-              <RightOutlined />
             </Button>
-            <div className="ch-hero-tags">
-              <button type="button" className="ch-hero-tag" onClick={() => { tabTouched.current = true; setActiveTab('accounts') }}>
-                账号池
-              </button>
-              <button type="button" className="ch-hero-tag" onClick={() => navigate('/m/works')}>
-                我的作品
-              </button>
-              <button type="button" className="ch-hero-tag" onClick={() => navigate('/m/compose')}>
-                回首页
-              </button>
-            </div>
-            <p className="ch-hero-proof">
-              {healthyAccounts.length > 0
-                ? `${healthyAccounts.length} 个健康账号可用`
-                : '尚未绑定账号，先去账号池扫码'}
-            </p>
           </div>
-        </section>
+        </header>
 
         <Tabs
           className="dist-tabs"
@@ -280,6 +232,31 @@ export default function Distribution() {
               label: '账号池',
               children: (
                 <>
+                  {!accountsLoading && healthyAccounts.length === 0 && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="尚未绑定可用账号"
+                      description="请先在下方扫码绑定至少一个平台账号，再前往「发布」Tab。"
+                      action={
+                        <Button size="small" type="primary" onClick={() => { tabTouched.current = true; setActiveTab('publish') }}>
+                          仍去发布
+                        </Button>
+                      }
+                    />
+                  )}
+                  {!accountsLoading && expiredAccounts.length > 0 && (
+                    <Alert
+                      className="dist-expired-alert"
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message={`${expiredAccounts.length} 个账号登录已过期`}
+                      description="过期账号无法发布，请在对应平台卡片内点「重新绑定」或「重新授权」。"
+                    />
+                  )}
+
                   <div className="dist-hint">
                     <LinkOutlined className="dist-hint-icon" />
                     <div>
@@ -313,20 +290,38 @@ export default function Distribution() {
                                   const isOAuth = a.auth_type === 'oauth'
                                   return (
                                     <div key={a.id} className={`dist-account-row${isExpired ? ' is-expired' : ''}`}>
-                                      <Space>
+                                      <div className="dist-account-row-main">
                                         <span style={{ color: cfg.color }}>{cfg.icon}</span>
-                                        <Text style={{ color: isExpired ? 'var(--wr-text-muted)' : 'inherit' }}>{a.display_name}</Text>
-                                        {isOAuth && <Tag color="green" style={{ marginInlineEnd: 0 }}>官方通道</Tag>}
-                                      </Space>
-                                      <Space size={8}>
-                                        <Text style={{ fontSize: 12, color: cfg.color }}>{cfg.label}</Text>
-                                        {isExpired && !isOAuth && (
-                                          <Button size="small" type="primary" danger onClick={() => openBindModal(pf.key)}>重新绑定</Button>
+                                        <div>
+                                          <Text strong style={{ color: isExpired ? 'var(--wr-danger)' : 'inherit', display: 'block' }}>
+                                            {a.display_name || '未命名账号'}
+                                          </Text>
+                                          <Text type="secondary" style={{ fontSize: 11 }}>
+                                            {cfg.label}
+                                            {isOAuth ? ' · 官方通道' : ''}
+                                            {a.expires_at ? ` · ${new Date(a.expires_at).toLocaleDateString()}` : ''}
+                                          </Text>
+                                        </div>
+                                      </div>
+                                      <Space size={8} wrap>
+                                        {isExpired && (
+                                          <Button
+                                            size="small"
+                                            type="primary"
+                                            danger={!isOAuth}
+                                            onClick={() => (isOAuth && pf.key === 'douyin' ? bindDouyin() : openBindModal(pf.key))}
+                                          >
+                                            {isOAuth && pf.key === 'douyin' ? '重新授权' : '重新绑定'}
+                                          </Button>
                                         )}
-                                        {isExpired && isOAuth && pf.key === 'douyin' && (
-                                          <Button size="small" type="primary" onClick={bindDouyin}>重新授权</Button>
-                                        )}
-                                        <Popconfirm title="确定解绑？" onConfirm={() => handleDeleteAccount(a.id)}>
+                                        <Popconfirm
+                                          title="解绑此账号？"
+                                          description="解绑后需重新扫码才能发布到该账号。"
+                                          okText="解绑"
+                                          cancelText="取消"
+                                          okButtonProps={{ danger: true }}
+                                          onConfirm={() => handleDeleteAccount(a.id)}
+                                        >
                                           <Button size="small" type="text" danger>解绑</Button>
                                         </Popconfirm>
                                       </Space>
@@ -359,12 +354,6 @@ export default function Distribution() {
                       )
                     })}
                   </Row>
-
-                  {accounts.length > 0 && (
-                    <Card className="wr-glass-card" title="账号池状态">
-                      <Table dataSource={accounts} columns={accountColumns} rowKey="id" pagination={false} size="small" />
-                    </Card>
-                  )}
                 </>
               ),
             },
@@ -373,8 +362,37 @@ export default function Distribution() {
               label: '发布',
               children: (
                 <>
+                  {prefilledFromWorks && (
+                    <Alert
+                      className="dist-prefill-banner"
+                      type="success"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="已带入成片"
+                      description={
+                        wizardInitial?.title
+                          ? `「${wizardInitial.title}」— 选账号与平台参数即可发布`
+                          : '视频与标题已预填，向导将自动跳过素材步骤'
+                      }
+                    />
+                  )}
+                  {!accountsLoading && healthyAccounts.length === 0 && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="暂无健康账号"
+                      description="发布前建议先在「账号池」绑定账号；也可继续填写向导，稍后再绑。"
+                      action={
+                        <Button size="small" onClick={() => { tabTouched.current = true; setActiveTab('accounts') }}>
+                          去绑定
+                        </Button>
+                      }
+                    />
+                  )}
                   {autoJobIds.length > 0 && autoStatus && (
                     <PublishResultPanel
+                      mode="auto"
                       jobs={autoStatus.map((j) => ({
                         id: j.id,
                         platform: (j as Record<string, unknown>).platform as string | undefined,
@@ -383,6 +401,19 @@ export default function Distribution() {
                         external_url: (j as Record<string, unknown>).external_url as string | undefined,
                       }))}
                       onDismiss={() => setAutoJobIds([])}
+                    />
+                  )}
+                  {semiPublishJobs.length > 0 && (
+                    <PublishResultPanel
+                      mode="semi"
+                      jobs={semiPublishJobs.map((j) => ({
+                        id: j.id,
+                        platform: j.platform,
+                        status: j.status,
+                        external_url: j.external_url,
+                      }))}
+                      onMarkPublished={handleMarkPublished}
+                      onDismiss={() => setSemiPublishJobs([])}
                     />
                   )}
                   <PublishWizard
@@ -402,8 +433,7 @@ export default function Distribution() {
                     if (mode === 'auto') {
                       setAutoJobIds(results.map((j) => j.id))
                     } else {
-                      setPublishLinks(results)
-                      setLinkModalOpen(true)
+                      setSemiPublishJobs(results)
                     }
                   }}
                 />
@@ -441,7 +471,15 @@ export default function Distribution() {
                       })}
                     </div>
                   </Card>
-                  <Card className="wr-glass-card" title="发布记录">
+                  <Card
+                    className="wr-glass-card"
+                    title="发布记录"
+                    extra={
+                      <Button type="link" size="small" onClick={() => navigate('/m/works')}>
+                        回作品库
+                      </Button>
+                    }
+                  >
                     <PublishJobTable
                       jobs={jobs}
                       onRefresh={() => queryClient.invalidateQueries({ queryKey: ['geo-publish-jobs'] })}
@@ -455,44 +493,6 @@ export default function Distribution() {
       </div>
 
       <QRLoginModal open={qrModalOpen} platform={activePlatform} onClose={() => setQrModalOpen(false)} />
-
-      <Modal
-        title="发布链接已生成"
-        open={linkModalOpen}
-        onCancel={() => setLinkModalOpen(false)}
-        footer={<Button type="primary" onClick={() => setLinkModalOpen(false)}>完成</Button>}
-        width={520}
-      >
-        <Alert
-          type="success"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="内容已准备就绪"
-          description="点击下方链接前往各平台发布页完成发布，然后点「标记已发布」。"
-        />
-        {publishLinks.some((j) => j.platform === 'zhihu') && (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message="知乎需手动粘贴正文（平台限制），点击「前往发布」后请 Ctrl+V"
-          />
-        )}
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          {publishLinks.map((job) => (
-            <div key={job.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, background: 'var(--wr-bg-elevated)', borderRadius: 8 }}>
-              <Space>
-                <PlatformBadge platform={job.platform} size={14} />
-                <Text type="secondary" style={{ fontSize: 12 }}>待确认</Text>
-              </Space>
-              <Space>
-                <Button size="small" type="primary" icon={<ExportOutlined />} href={job.external_url} target="_blank">前往发布</Button>
-                <Button size="small" type="link" onClick={() => handleMarkPublished(job.id)}>已发布</Button>
-              </Space>
-            </div>
-          ))}
-        </Space>
-      </Modal>
     </div>
   )
 }

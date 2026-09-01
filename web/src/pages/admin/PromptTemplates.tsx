@@ -3,7 +3,7 @@ import { Typography, Card, Space, Tag, Modal, Input, Table, Button } from 'antd'
 import { ThunderboltOutlined, EditOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -42,11 +42,11 @@ export default function AdminPromptTemplates({ embedded = false }: { embedded?: 
     mutationFn: ({ key, content }: { key: string; content: string }) =>
       businessApi.adminUpdatePromptTemplate(key, content),
     onSuccess: () => {
-      message.success('提示词模板已保存（即时生效）')
+      toast.ok('提示词模板已保存', 'admin-prompt')
       setEditingKey(null)
       queryClient.invalidateQueries({ queryKey: ['admin-prompt-templates'] })
     },
-    onError: () => message.error('保存失败'),
+    onError: () => toast.fail('保存失败'),
   })
 
   const templateColumns = [

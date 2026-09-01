@@ -19,14 +19,14 @@ import {
 import { businessApi } from '../../../../api/business'
 import { CreateSubjectModal } from '../../../../components/compose/CreateSubjectModal'
 import { SubjectPreviewModal } from '../../../../components/compose/SubjectPreviewModal'
+import { PageBackLink } from '../../../../components/PageBackLink'
 import { useSubjectList } from '../../../../hooks/useSubjectList'
 import { useOfficialSubjects } from '../../../../hooks/useSubjectAssets'
 import { parseGenerationTaskParams, listSceneSubjects } from '../../../../utils/subjectTask'
 import type { ViduSubject } from '../../../../utils/subjectTask'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 import { CREATIVE_CDN } from '../../../../config/creativeCdn'
 import type { GenerationTask } from '../../../../types/api'
-import OralJourneyNav from '../../../../components/compose/OralJourneyNav'
 
 type LibCard = {
   id: string
@@ -172,7 +172,7 @@ export default function AvatarModule() {
     setDeleting(true)
     try {
       await Promise.all(selected.map((id) => businessApi.deleteGenerationTask(id)))
-      message.success(`已删除 ${selected.length} 项`)
+      toast.ok(`已删除 ${selected.length} 项`, 'avatar-del')
       setSelected([])
       refetch()
     } catch { /* 拦截器 */ } finally {
@@ -185,9 +185,9 @@ export default function AvatarModule() {
     setRetrying(s.taskId)
     try {
       await businessApi.retryAvatarVideo(s.taskId)
-      message.success('形象视频任务已提交——生成中')
+      toast.ok('形象视频任务已提交——生成中', 'avatar-retry')
       refetch()
-    } catch { /* 拦截器已提示 */ } finally {
+    } catch { /* 拦截器已提示 */     } finally {
       setRetrying('')
     }
   }
@@ -195,7 +195,7 @@ export default function AvatarModule() {
   const onPersonCardAction = (card: LibCard) => {
     const s = card.subject!
     if (!card.ready) {
-      message.info(s.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中')
+      toast.info(s.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中', 'avatar-wait')
       return
     }
     const avatarTask = avatarTaskById.get(s.avatarTaskId)
@@ -235,7 +235,7 @@ export default function AvatarModule() {
           onClick={() => {
             if (opts.official) return
             if (opts.scene) {
-              message.info('在口播向导第②步「出镜环境」中选择使用——与数字分身组合出镜')
+              toast.info('在口播向导第②步「出镜环境」中选择使用——与数字分身组合出镜', 'avatar-scene')
               return
             }
             onPersonCardAction(card)
@@ -297,10 +297,14 @@ export default function AvatarModule() {
 
   return (
     <div className="dh-lib">
-      <OralJourneyNav />
       <header className="dh-lib-head">
         <div className="dh-lib-titles">
-          <h1 className="dh-lib-title">数字资产管理</h1>
+          {searchParams.get('from') === 'wizard' ? (
+            <PageBackLink to="/m/compose/lipsync" label="口播向导" />
+          ) : (
+            <PageBackLink to="/m/compose" label="工作台" />
+          )}
+          <h1 className="dh-lib-title" style={{ marginTop: 10 }}>数字资产管理</h1>
           <p className="dh-lib-lead">数字分身即选即用；注册自己的店内环境，组合出镜——分身在你的店里口播</p>
         </div>
 

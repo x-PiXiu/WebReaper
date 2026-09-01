@@ -6,7 +6,7 @@ import { businessApi } from '../../api/business'
 import { scoreColor } from '../../utils/geo'
 import ContentPreviewDrawer from '../../components/ContentPreviewDrawer'
 import type { Brand, OptimizedContent } from '../../types/api'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -58,17 +58,17 @@ export default function AdminContents({ embedded = false }: { embedded?: boolean
     const next = c.status === 'published' ? 'draft' : 'published'
     try {
       await businessApi.adminSetContentStatus(c.id, next) // admin 旁路（全局上下架）
-      message.success(`已${next === 'published' ? '发布到公开站（AI 引擎可爬取）' : '下架'}`)
+      toast.ok(next === 'published' ? '已发布到公开站' : '已下架', 'admin-content')
       queryClient.invalidateQueries({ queryKey: ['admin-contents'] })
-    } catch { message.error('状态流转失败') }
+    } catch { toast.fail('状态更新失败', 'admin-content') }
   }
 
   const handleDelete = async (c: OptimizedContent) => {
     try {
       await businessApi.adminDeleteContent(c.id) // admin 旁路（全局删除）
-      message.success('内容已删除')
+      toast.ok('内容已删除')
       queryClient.invalidateQueries({ queryKey: ['admin-contents'] })
-    } catch { message.error('删除失败') }
+    } catch { toast.fail('删除失败') }
   }
 
   const columns = [

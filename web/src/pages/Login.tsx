@@ -4,7 +4,7 @@ import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../store/auth'
-import { message } from '../utils/antdApp'
+import { toast } from '../utils/feedback'
 import logoUrl from '../assets/logo-zhichen.jpg'
 
 type Mode = 'login' | 'register'
@@ -38,7 +38,7 @@ export default function Login() {
       if (remember) localStorage.setItem(REMEMBER_KEY, values.username)
       else localStorage.removeItem(REMEMBER_KEY)
       setAuth(res.token, res.username || values.username, res.role, res.tenant_id, !!res.must_change_password)
-      message.success('登录成功')
+      toast.ok('登录成功')
       // 回跳来源页（路由守卫记录的 from）——OAuth 回调等深链场景：登录后回到原页面而非首页。
       // 仅接受站内相对路径（防开放重定向）；无来源时走角色默认首页
       const from = (location.state as { from?: string } | null)?.from
@@ -55,7 +55,7 @@ export default function Login() {
     setLoading(true)
     try {
       await authApi.register(values)
-      message.success('注册成功，请登录')
+      toast.ok('注册成功，请登录')
       switchMode('login')
     } catch {
       // 业务/网络错误已由 apiClient 拦截器 toast

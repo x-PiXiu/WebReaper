@@ -4,7 +4,7 @@ import { RadarChartOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
-import { message } from '../utils/antdApp'
+import { toast } from '../utils/feedback'
 
 const { Text } = Typography
 
@@ -44,7 +44,7 @@ export default function AutoMonitorControl({ compact = false }: { compact?: bool
     mutationFn: ({ enabled, cfg }: { enabled: boolean; cfg?: any }) =>
       businessApi.setTenantAutoMonitor({ enabled, config: cfg }),
     onSuccess: () => {
-      message.success('自动盯盘设置已保存（按配置每日自动监测，趋势自动生长）')
+      toast.ok('自动盯盘已保存', 'auto-monitor')
       queryClient.invalidateQueries({ queryKey: ['tenant-auto-monitor'] })
     },
   })

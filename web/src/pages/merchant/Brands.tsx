@@ -16,7 +16,8 @@ import InspirationTab from './brands/InspirationTab'
 import PublishConfigTab from './brands/PublishConfigTab'
 import PublishHistoryTab from './brands/PublishHistoryTab'
 import type { Brand, CompetitorSuggestion } from '../../types/api'
-import { message, modal } from '../../utils/antdApp'
+import { modal } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -267,7 +268,7 @@ export default function Brands() {
   const handleDeleteBrand = async (id: string) => {
     try {
       await businessApi.deleteBrand(id)
-      message.success('已删除')
+      toast.ok('已删除')
       if (selectedBrand?.id === id) setSelectedBrand(null) // 自动选中效果会落到剩余品牌
       invalidate()
     } catch {}
@@ -288,7 +289,7 @@ export default function Brands() {
         core_selling: values.core_selling ? values.core_selling.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
         competitors: values.competitors ? values.competitors.split(/[,，、\n]/).map((s: string) => s.trim()).filter(Boolean) : [],
       })
-      message.success('人设信息已保存')
+      toast.ok('人设信息已保存')
       setSelectedBrand(updated)
       invalidate()
     } catch {} finally {
@@ -303,13 +304,13 @@ export default function Brands() {
     if (!name) return
     const existing = new Set(selectedBrand.competitors || [])
     if (existing.has(name)) {
-      message.warning('该竞品已存在')
+      toast.warn('该竞品已存在')
       return
     }
     try {
       const merged = [...(selectedBrand.competitors || []), name]
       const updated = await businessApi.updateBrand(selectedBrand.id, { competitors: merged })
-      message.success(`已添加「${name}」`)
+      toast.ok(`已添加「${name}」`)
       setManualCompInput('')
       setSelectedBrand(updated)
       editForm.setFieldsValue({ competitors: merged.join('、') })
@@ -337,14 +338,14 @@ export default function Brands() {
   // 采纳勾选的竞品（合并到品牌竞品列表，去重）
   const handleAdoptCompetitors = async () => {
     if (!selectedBrand || checkedComps.length === 0) {
-      message.warning('请至少勾选一个竞品')
+      toast.warn('请至少勾选一个竞品')
       return
     }
     const existing = new Set(selectedBrand.competitors || [])
     const merged = [...(selectedBrand.competitors || []), ...checkedComps.filter((c) => !existing.has(c))]
     try {
       const updated = await businessApi.updateBrand(selectedBrand.id, { competitors: merged })
-      message.success(`已采纳 ${checkedComps.length} 个竞品`)
+      toast.ok(`已采纳 ${checkedComps.length} 个竞品`)
       setSelectedBrand(updated)
       editForm.setFieldsValue({ competitors: merged.join('、') })
       setCompSuggestOpen(false)

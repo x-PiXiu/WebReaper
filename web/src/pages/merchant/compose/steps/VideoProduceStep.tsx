@@ -1,7 +1,7 @@
 import { Alert, Button, Input, Space } from 'antd'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 /** Step 3 发视频：确认成片并准备发布 */
 export function VideoProduceStep() {
@@ -35,7 +35,7 @@ export function VideoProduceStep() {
           onChange={(e) => draft.patch({ coverUrl: e.target.value })}
         />
         <Button
-          onClick={() => message.success('成片信息已核对，可点击右下角去发布')}
+          onClick={() => toast.ok('成片已核对，可去发布')}
         >
           核对成片信息
         </Button>

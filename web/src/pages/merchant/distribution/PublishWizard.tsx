@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Empty, Input, Select, Space, Spin, Switch, Tag, Tooltip, Typography } from 'antd'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 import {
   ArrowDownOutlined, ArrowUpOutlined, CheckCircleOutlined, LinkOutlined, CloudUploadOutlined,
 } from '@ant-design/icons'
@@ -13,7 +13,8 @@ import { scoreColor } from '../../../utils/geo'
 import type { Account, Brand, OptimizedContent, PublishChannelView, PublishJob } from '../../../types/api'
 import {
   BILIBILI_CATEGORIES, channelNeedsCategory, channelNeedsTags, channelShowsTags,
-  checkCompleteness, clearDraft, emptyDraft, loadDraft, localAdaptPreview, runeLen, saveDraft,
+  checkCompleteness, clearDraft, emptyDraft, hasPrefilledMedia, loadDraft, localAdaptPreview, runeLen, saveDraft,
+  nextWizardStep, prevWizardStep, resolveEntryStep,
   strictestTitleLimit, supportsAutoForm, buildPublishContent, effectiveConstraints,
   type PublishForm, type WizardDraft, type WizardStep,
 } from './wizardModel'
@@ -50,14 +51,20 @@ export default function PublishWizard(props: {
   const [draft, setDraft] = useState<WizardDraft>(() => {
     const saved = loadDraft()
     const urlStep = Number(searchParams.get('step'))
-    const step = (urlStep >= 1 && urlStep <= 5 ? urlStep : saved?.step || 1) as WizardStep
-    return emptyDraft({ ...saved, ...initial, step })
+    const urlStepValid = urlStep >= 1 && urlStep <= 5 ? (urlStep as WizardStep) : undefined
+    const merged = { ...saved, ...initial, step: urlStepValid ?? saved?.step }
+    return emptyDraft({ ...merged, step: resolveEntryStep(merged) })
   })
   const [publishing, setPublishing] = useState(false)
   const [savingDraft, setSavingDraft] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [coverPickerOpen, setCoverPickerOpen] = useState(false)
   const [draftHint, setDraftHint] = useState(false)
+  const [restoredDraft, setRestoredDraft] = useState(() => {
+    if (initial?.mediaURLs?.length || initial?.title || initial?.contentId) return false
+    const saved = loadDraft()
+    return !!(saved && (saved.title?.trim() || saved.mediaURLs?.length || saved.content?.trim() || saved.accountIDs?.length))
+  })
   const [serverDraftLoaded, setServerDraftLoaded] = useState(false)
   const [loadingCloudDraft, setLoadingCloudDraft] = useState(false)
 
@@ -121,15 +128,14 @@ export default function PublishWizard(props: {
   // URL / 入口预填覆盖（成片、作品库）
   useEffect(() => {
     if (!initial) return
+    setRestoredDraft(false)
     setDraft((prev) => {
-      const next = { ...prev, ...initial }
-      if (initial.mediaURLs?.length || initial.contentId || initial.title || initial.content) {
-        if (initial.mediaURLs?.length && !initial.accountIDs?.length) next.step = 1
-      }
+      const merged = { ...prev, ...initial }
+      const next = emptyDraft({ ...merged, step: resolveEntryStep(merged) })
       saveDraft(next)
       return next
     })
-  }, [initial?.contentId, initial?.mediaURLs?.join(','), initial?.contentType, initial?.content]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initial?.contentId, initial?.mediaURLs?.join(','), initial?.contentType, initial?.content, initial?.title]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: publishStats } = useQuery({
     queryKey: ['publish-stats', brandId],
@@ -186,6 +192,10 @@ export default function PublishWizard(props: {
     (a) => a.health === 'expired' && supportsForm(a.platform, draft.contentType),
   )
   const selectedAccounts = accounts.filter((a) => draft.accountIDs.includes(a.id))
+  const accountPlatforms = useMemo(
+    () => [...new Set(selectedAccounts.map((a) => a.platform))],
+    [selectedAccounts],
+  )
   const targetPlatforms = useMemo(() => {
     if (draft.autoSelect && draft.mode === 'auto') {
       return [...new Set(healthyAccounts.map((a) => a.platform))]
@@ -290,12 +300,12 @@ export default function PublishWizard(props: {
   const next = () => {
     const block = stepBlockers(draft.step)
     if (block) {
-      message.warning(block)
+      toast.warn(block, 'wizard-step')
       return
     }
-    patch({ step: Math.min(5, draft.step + 1) as WizardStep })
+    patch({ step: nextWizardStep(draft.step, draft, channels, accountPlatforms) })
   }
-  const prev = () => patch({ step: Math.max(1, draft.step - 1) as WizardStep })
+  const prev = () => patch({ step: prevWizardStep(draft.step, draft, channels, accountPlatforms) })
 
   const handleSaveDraft = async () => {
     saveDraft(draft)
@@ -305,12 +315,12 @@ export default function PublishWizard(props: {
       if (brandId) {
         try {
           await businessApi.savePublishDraft(brandId, JSON.stringify(draft))
-          message.success('草稿已保存（本机 + 云端）')
+          toast.ok('草稿已保存', 'pub-draft')
         } catch {
-          message.success('草稿已保存到本机')
+          toast.ok('草稿已存到本机', 'pub-draft')
         }
       } else {
-        message.success('草稿已保存到本机（选人设后可同步云端）')
+        toast.info('草稿已存到本机（选人设后可同步）', 'pub-draft')
       }
     } finally {
       setSavingDraft(false)
@@ -320,11 +330,12 @@ export default function PublishWizard(props: {
 
   const handleClear = async () => {
     clearDraft()
+    setRestoredDraft(false)
     if (brandId) {
       try { await businessApi.deletePublishDraft(brandId) } catch { /* */ }
     }
     setDraft(emptyDraft({ brandId, contentType: formOptions[0]?.value || 'article' }))
-    message.info('已清空发布草稿')
+    toast.info('已清空发布草稿', 'pub-draft')
   }
 
   const moveMedia = (index: number, dir: -1 | 1) => {
@@ -337,12 +348,15 @@ export default function PublishWizard(props: {
 
   const handlePublish = async () => {
     if (gaps.length > 0) {
-      message.warning(gaps[0].text)
+      toast.warn(gaps[0].text, 'wizard-gap')
       go(gaps[0].step)
       return
     }
     if (limitPlatforms.length > 0 && !draft.isScheduled) {
-      message.warning(`${limitPlatforms.map((p) => PLATFORM_META[p]?.name || p).join('、')} 今日已达上限，请改定时明日或换平台`)
+      toast.warn(
+        `${limitPlatforms.map((p) => PLATFORM_META[p]?.name || p).join('、')} 今日已达上限，请改用定时或换平台`,
+        'wizard-quota',
+      )
       return
     }
     setPublishing(true)
@@ -407,7 +421,7 @@ export default function PublishWizard(props: {
         else failCount += 1
       }
       if (results.length === 0) {
-        message.error('全部发布请求失败，请稍后重试')
+        toast.fail('发布未成功，请稍后重试', 'pub-submit')
         return
       }
       clearDraft()
@@ -415,12 +429,9 @@ export default function PublishWizard(props: {
         try { await businessApi.deletePublishDraft(brandId) } catch { /* */ }
       }
       onPublished(results, draft.mode)
+      // 结果已在页面内结果面板展示；仅部分失败时补一句轻提示
       if (failCount > 0) {
-        message.warning(`已创建 ${results.length} 个任务，另有 ${failCount} 个失败`)
-      } else if (draft.mode === 'semi-auto') {
-        message.success(`已生成 ${results.length} 个发布链接`)
-      } else {
-        message.success(`已启动 ${results.length} 个自动发布任务`)
+        toast.warn(`已提交 ${results.length} 个，另有 ${failCount} 个失败`, 'pub-submit')
       }
     } catch {
       /* 拦截器 */
@@ -435,6 +446,22 @@ export default function PublishWizard(props: {
         <div style={{ marginBottom: 12 }}>
           <Spin size="small" /> <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>正在同步云端草稿…</Text>
         </div>
+      )}
+      {restoredDraft && (
+        <Alert
+          type="info"
+          showIcon
+          closable
+          onClose={() => setRestoredDraft(false)}
+          style={{ marginBottom: 16 }}
+          message="已恢复上次未完成的发布草稿"
+          description="可继续填写，或点底部「清空」重新开始。"
+          action={
+            <Button size="small" onClick={() => { setRestoredDraft(false); void handleClear() }}>
+              清空重来
+            </Button>
+          }
+        />
       )}
       {/* 人设 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--wr-border)' }}>
@@ -451,6 +478,22 @@ export default function PublishWizard(props: {
 
       <PublishWizardSteps step={draft.step} onChange={go} />
 
+      {hasPrefilledMedia(draft) && (
+        <Alert
+          className="dist-prefill-banner"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="已从作品库带入成片"
+          description={`「${draft.title}」标题与视频已预填，可跳过文案与素材步骤`}
+          action={
+            <Button size="small" onClick={() => go(2)}>
+              查看/修改文案
+            </Button>
+          }
+        />
+      )}
+
       {/* —— ① 平台与形态 —— */}
       {draft.step === 1 && (
         <div>
@@ -462,8 +505,8 @@ export default function PublishWizard(props: {
           {channels.length === 0 && (
             <Alert
               type="error" showIcon style={{ marginBottom: 16 }}
-              message="平台能力加载失败"
-              description="无法确定各平台可用形态——请刷新重试。此前会降级放出全部形态（含已下线选项），选到提交才报 400。"
+              message="暂时无法加载平台能力"
+              description="请刷新页面重试。刷新前可先选好账号，稍后再确认可发形态。"
             />
           )}
           <div style={{ marginBottom: 20 }}>
@@ -534,7 +577,7 @@ export default function PublishWizard(props: {
                     key={a.id}
                     onClick={() => {
                       if (atLimit && !selected) {
-                        message.warning(`${meta?.name || a.platform} 今日已达上限，可选中后改用定时发布`)
+                        toast.warn(`${meta?.name || a.platform} 今日已达上限，可选中后改用定时发布`, 'acc-quota')
                       }
                       patch({
                         accountIDs: selected
@@ -681,7 +724,8 @@ export default function PublishWizard(props: {
               type="info"
               showIcon
               style={{ marginBottom: 12 }}
-              message={`封面：${draft.coverURL}`}
+              message="已选择封面"
+              description={<Text ellipsis type="secondary" style={{ fontSize: 12, maxWidth: '100%' }}>{draft.coverURL}</Text>}
               action={<Button size="small" onClick={() => patch({ coverURL: '' })}>清除</Button>}
             />
           )}
@@ -764,21 +808,40 @@ export default function PublishWizard(props: {
             />
           </div>
 
-          <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <Switch
-              checked={draft.mode === 'auto'}
-              disabled={!selectedCanAuto}
-              onChange={(v) => patch({ mode: v ? 'auto' : 'semi-auto' })}
-            />
-            <Text style={{ fontSize: 13 }}>
-              {selectedCanAuto
-                ? '全自动发布（浏览器代发，有风控风险）'
-                : '全自动不可用——当前账号×形态仅半自动'}
-            </Text>
-            {selectedCanAuto && (
-              <Tooltip title="该平台全自动模式处于验证阶段，首次使用建议先试发一条">
-                <Tag color="orange" style={{ margin: 0, cursor: 'help' }}>验证阶段</Tag>
-              </Tooltip>
+          <div style={{ marginBottom: 14 }}>
+            <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>发布方式</Text>
+            <div
+              className="dist-mode-cards"
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: 10 }}
+            >
+              <button
+                type="button"
+                className={`dist-mode-card${draft.mode === 'semi-auto' ? ' is-active' : ''}`}
+                onClick={() => patch({ mode: 'semi-auto' })}
+              >
+                <Text strong style={{ display: 'block', marginBottom: 4 }}>半自动</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  生成平台发布链接，你打开页面确认后发出。稳妥，适合首次与风控严的平台。
+                </Text>
+              </button>
+              <button
+                type="button"
+                className={`dist-mode-card${draft.mode === 'auto' ? ' is-active' : ''}${!selectedCanAuto ? ' is-disabled' : ''}`}
+                disabled={!selectedCanAuto}
+                onClick={() => selectedCanAuto && patch({ mode: 'auto' })}
+              >
+                <Text strong style={{ display: 'block', marginBottom: 4 }}>
+                  全自动{!selectedCanAuto ? '（当前不可用）' : ''}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {selectedCanAuto
+                    ? '浏览器代发，省事但有风控风险；建议先试发一条。'
+                    : '所选账号×形态暂不支持全自动，请用半自动。'}
+                </Text>
+              </button>
+            </div>
+            {selectedCanAuto && draft.mode === 'auto' && (
+              <Tag color="orange" style={{ marginBottom: 8 }}>建议先半自动试发一条</Tag>
             )}
           </div>
           {hasXhs && draft.mode === 'auto' && (

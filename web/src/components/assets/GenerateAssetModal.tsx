@@ -23,7 +23,7 @@ import { MODAL_W, modalBodyScroll } from '../../ui/modalFit'
 import { IMAGE_PROMPT_CHIPS, VIDEO_PROMPT_CHIPS } from '../../data/generatePromptChips'
 import type { GenerationTask, ModelCapability } from '../../types/api'
 import { resolveMediaUrl, taskCoverUrl, taskPrimaryUrl } from '../../utils/generationTask'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -161,7 +161,7 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
       const url = taskPrimaryUrl(task)
       if (url) setResultPreview({ url, cover: taskCoverUrl(task) || undefined })
       onGenerated()
-      message.success('生成完成，已写入素材库')
+      toast.ok('生成完成，已写入素材库')
     }
   }, [task, taskId, onGenerated])
 
@@ -183,27 +183,27 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
   const handleGenerate = async () => {
     let voiceCloneId: string | undefined
     if (type === 'voice') {
-      if (!audioFile) { message.warning('请上传参考音频'); return }
-      if (!text.trim()) { message.warning('请输入试听文本'); return }
+      if (!audioFile) { toast.warn('请上传参考音频'); return }
+      if (!text.trim()) { toast.warn('请输入试听文本'); return }
       voiceCloneId = (voiceName.trim() || `voice_${Date.now().toString(36)}`).replace(/[^a-zA-Z0-9_-]/g, '_')
       if (!/^[a-zA-Z]/.test(voiceCloneId) || voiceCloneId.length < 8) {
-        message.warning('音色 ID 需以英文字母开头，且至少 8 位')
+        toast.warn('音色 ID 需以英文字母开头，且至少 8 位')
         return
       }
     } else if (!text.trim()) {
-      message.warning(type === 'audio' ? '请输入要合成的文案' : '请输入描述')
+      toast.warn(type === 'audio' ? '请输入要合成的文案' : '请输入描述')
       return
     }
     if ((type === 'image' || type === 'video') && models.length === 0) {
-      message.warning('当前未开通对应生成能力，请联系管理员')
+      toast.warn('当前未开通该生成能力', 'gam-cap')
       return
     }
     if (type === 'image' && imageNeedsRef && refImages.length === 0) {
-      message.warning('当前模型需要至少 1 张参考图')
+      toast.warn('当前模型需要至少 1 张参考图')
       return
     }
     if (!brandId) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设/品牌')
       return
     }
 
@@ -269,13 +269,13 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
         if (url) setResultPreview({ url, cover: taskCoverUrl(result) || undefined })
         doneNotified.current = true
         onGenerated()
-        message.success('生成完成')
+        toast.ok('生成完成')
       } else {
-        message.success('任务已提交，右侧可查看进度')
+        toast.ok('任务已提交，可查看进度', 'gam-submit')
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : ''
-      if (msg && !msg.includes('配额')) message.error(msg)
+      if (msg && !msg.includes('配额')) toast.fail(msg)
     } finally {
       setGenerating(false)
     }
@@ -551,13 +551,13 @@ export function GenerateAssetModal({ open, type, myVoices = [], onClose, onGener
                       disabled={busy || refImages.length >= 7}
                       beforeUpload={async (file) => {
                         if (refImages.length >= 7) {
-                          message.warning('最多 7 张参考图')
+                          toast.warn('最多 7 张参考图')
                           return false
                         }
                         try {
                           const asset = await businessApi.uploadAsset(file)
                           setRefImages((prev) => [...prev, { id: asset.id, url: asset.url }].slice(0, 7))
-                          message.success('已添加')
+                          toast.ok('已添加')
                         } catch { /* 拦截器 */ }
                         return false
                       }}

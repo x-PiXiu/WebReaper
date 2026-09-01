@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Input, Tag, Typography } from 'antd'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 import {
   FileImageOutlined, VideoCameraOutlined, AudioOutlined,
   CheckCircleOutlined, ExportOutlined,
@@ -124,7 +124,7 @@ export default function QuickGenerate() {
   const uploadMutation = useMutation({
     mutationFn: (file: File) => businessApi.uploadAsset(file),
     onSuccess: (data) => {
-      message.success('素材已上传')
+      toast.ok('素材已上传')
       setSelectedMaterials(prev => [...prev, data.id])
       refetchAssets()
     },
@@ -144,13 +144,13 @@ export default function QuickGenerate() {
     },
     onSuccess: (task) => {
       setSubmitResult(task)
-      message.success('任务已提交')
+      toast.ok('任务已提交')
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err || '')
       if (/已停用|停用|disabled/i.test(msg)) {
-        message.warning('请联系管理员在后台启用文生视频能力，或先上传一张参考图使用图生视频')
+        toast.warn('文生视频暂未开通，可先上传参考图用图生视频', 'qg-cap')
       }
     },
   })
@@ -171,11 +171,11 @@ export default function QuickGenerate() {
       return
     }
     if (!text.trim()) {
-      message.warning('请填写描述')
+      toast.warn('请填写描述')
       return
     }
     if (missing.length > 0) {
-      message.warning(`还需上传：${missing.map(m => MATERIAL_LABELS[m] || m).join('、')}`)
+      toast.warn(`还需上传：${missing.map(m => MATERIAL_LABELS[m] || m).join('、')}`)
       return
     }
     submitMutation.mutate()

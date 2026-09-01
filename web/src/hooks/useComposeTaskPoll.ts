@@ -4,7 +4,7 @@ import { retryFailureMessage } from '../components/RetryHint'
 import { fetchGenerationTasks, GENERATION_TASKS_KEY } from './useGenerationTasks'
 import { useComposeDraft } from '../store/composeDraft'
 import { isTaskDone, isTaskSuccess, taskCoverUrl, taskPrimaryUrl } from '../utils/generationTask'
-import { message } from '../utils/antdApp'
+import { toast } from '../utils/feedback'
 
 const POLL_MS = 3000
 
@@ -50,7 +50,7 @@ export function useComposeTaskPoll() {
           if (!isTaskSuccess(task.state)) {
             if (!notified.current.has(`fail-${id}`)) {
               notified.current.add(`fail-${id}`)
-              message.error(retryFailureMessage(task, `${label}失败`))
+              toast.fail(retryFailureMessage(task, `${label}失败`))
             }
             return
           }
@@ -58,7 +58,7 @@ export function useComposeTaskPoll() {
           if (!url || notified.current.has(`ok-${id}`)) return
           notified.current.add(`ok-${id}`)
           onSuccess(url, taskCoverUrl(task))
-          message.success(`${label}已完成，已自动填入`)
+          toast.ok(`${label}已完成`, 'compose-poll')
           if (refreshWorks) worksDirty = true
         }
 
@@ -85,7 +85,7 @@ export function useComposeTaskPoll() {
           if (!isTaskSuccess(task.state)) {
             if (!notified.current.has(`fail-${id}`)) {
               notified.current.add(`fail-${id}`)
-              message.error(retryFailureMessage(task, '配图生成失败'))
+              toast.fail(retryFailureMessage(task, '配图生成失败'))
             }
             continue
           }
@@ -93,7 +93,7 @@ export function useComposeTaskPoll() {
           if (!url || notified.current.has(`ok-${id}`)) continue
           notified.current.add(`ok-${id}`)
           if (!newImageUrls.includes(url)) newImageUrls.push(url)
-          message.success('配图已生成并加入列表')
+          toast.ok('配图已加入列表', 'compose-poll-img')
         }
         if (finishedImageIds.length) {
           next.imageTaskIds = (imageTaskIds || []).filter((id) => !finishedImageIds.includes(id))

@@ -10,7 +10,8 @@ import { COPY_TEMPLATES, type CopyTemplate } from '../../../../data/copyTemplate
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
+import { PageBackLink } from '../../../../components/PageBackLink'
 
 const { TextArea } = Input
 
@@ -54,16 +55,16 @@ export default function CopyModule() {
     }
     setText(tpl.body)
     setActiveTpl(tpl.id)
-    message.success(`已套用「${tpl.title}」`)
+    toast.ok(`已套用「${tpl.title}」`, 'copy-tpl')
   }
 
   const runRewrite = async () => {
     if (!brandId) {
-      message.warning('请先选择人设档案')
+      toast.warn('请先选择人设', 'copy-brand')
       return
     }
     if (!text.trim()) {
-      message.warning('请先填写或粘贴文案')
+      toast.warn('请先填写或粘贴文案', 'copy-text')
       return
     }
     setBusy(true)
@@ -78,7 +79,7 @@ export default function CopyModule() {
       })
       const out = res.optimized_text || ''
       draft.patch({ rewritten: out, script: out, brandId })
-      message.success(isGraphic ? '已改写成差异化图文种草稿' : '已改写成差异化口播稿')
+      toast.ok(isGraphic ? '已改写成图文种草稿' : '已改写成口播稿', 'copy-rewrite')
     } catch {
       /* 拦截器 */
     } finally {
@@ -88,7 +89,7 @@ export default function CopyModule() {
 
   const runFromTopic = async () => {
     if (!brandId) {
-      message.warning('请先选择人设')
+      toast.warn('请先选择人设', 'copy-brand')
       return
     }
     setBusy(true)
@@ -109,7 +110,7 @@ export default function CopyModule() {
       })
       const out = res.optimized_text || ''
       draft.patch({ rewritten: out, script: out, brandId })
-      message.success(isGraphic ? '已生成图文种草稿' : '已生成差异化口播稿')
+      toast.ok(isGraphic ? '图文种草稿已生成' : '口播稿已生成', 'copy-gen')
     } catch {
       /* 拦截器 */
     } finally {
@@ -119,11 +120,11 @@ export default function CopyModule() {
 
   const saveAndNext = () => {
     if (!text.trim()) {
-      message.warning('文案不能为空')
+      toast.warn('请先填写文案', 'copy-text')
       return
     }
     draft.patch({ script: text, rewritten: text })
-    message.success('已保存到共享草稿')
+    toast.ok('已保存到草稿', 'copy-save')
     navigate('/m/compose/titles')
   }
 
@@ -131,7 +132,8 @@ export default function CopyModule() {
     <div className="cp-lib">
       <header className="cp-lib-head">
         <div className="cp-lib-titles">
-          <h1 className="cp-lib-title">文案工作室</h1>
+          <PageBackLink to="/m/compose" label="工作台" />
+          <h1 className="cp-lib-title" style={{ marginTop: 10 }}>文案工作室</h1>
           <p className="cp-lib-lead">模板起稿 · AI 差异化改写 · 口播与种草一站完成</p>
         </div>
 

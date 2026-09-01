@@ -16,7 +16,7 @@ import {
 } from '../utils/generationTask'
 import { VideoFrameCover } from './VideoFrameCover'
 import { ImageCover } from './ImageCover'
-import { message } from '../utils/antdApp'
+import { toast } from '../utils/feedback'
 
 const { Dragger } = Upload
 const { Text } = Typography
@@ -87,7 +87,7 @@ export default function AssetPicker(props: {
     setSelected(prev => {
       if (prev.some(x => x.url === asset.url)) return prev
       if (max && prev.length >= max) {
-        message.warning(`最多选择 ${max} 个`)
+        toast.warn(`最多选择 ${max} 个`)
         return prev
       }
       return [...prev, asset]
@@ -102,7 +102,7 @@ export default function AssetPicker(props: {
       setUploading(true)
       try {
         const asset = normalizeUploadedAsset(await businessApi.uploadAsset(file))
-        message.success('上传成功，已加入列表')
+        toast.ok('上传成功', 'asset-pick')
         queryClient.invalidateQueries({ queryKey: MEDIA_ASSETS_QUERY_KEY })
         appendAsset(asset)
       } catch {
@@ -124,7 +124,7 @@ export default function AssetPicker(props: {
         return prev.filter(x => x.id !== a.id && x.url !== a.url)
       }
       if (max && prev.length >= max) {
-        message.warning(`最多选择 ${max} 个`)
+        toast.warn(`最多选择 ${max} 个`)
         return prev
       }
       return [...prev, a]
@@ -133,7 +133,7 @@ export default function AssetPicker(props: {
 
   const confirm = () => {
     if (selected.length === 0) {
-      message.warning('请先选择素材')
+      toast.warn('请先选择素材')
       return
     }
     onSelect(selected)

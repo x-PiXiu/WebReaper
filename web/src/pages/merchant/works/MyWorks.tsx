@@ -1,20 +1,23 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Button, Input, Modal, Segmented, Space } from 'antd'
-import { EditOutlined, LikeOutlined, PlayCircleOutlined, PlusOutlined, SendOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
+import { Button, Input, Modal } from 'antd'
+import {
+  EditOutlined,
+  FileTextOutlined, PictureOutlined, PlayCircleOutlined, PlusOutlined,
+  RightOutlined, SendOutlined, SoundOutlined, VideoCameraOutlined, VideoCameraAddOutlined,
+} from '@ant-design/icons'
 import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
 import { businessApi } from '../../../api/business'
 import { brollLineage } from '../../../utils/publishableWorks'
 import { MediaPreviewModal } from '../../../components/MediaPreviewModal'
 import QueryBoundary from '../../../components/QueryBoundary'
 import { cleanWorkTitle } from '../../../utils/workTitle'
-import { message } from '../../../utils/antdApp'
-import OralJourneyNav from '../../../components/compose/OralJourneyNav'
+import { toast } from '../../../utils/feedback'
 import { VideoFrameCover } from '../../../components/VideoFrameCover'
 import { ImageCover } from '../../../components/ImageCover'
+import { distributionPathFromWork } from '../../../utils/distributionPath'
 import type { MediaAsset, WorkItem } from '../../../types/api'
-
 
 type Filter = 'all' | 'draft' | 'ready' | 'published'
 
@@ -22,34 +25,148 @@ const PLATFORM_LABEL: Record<string, string> = {
   douyin: '抖音', kuaishou: '快手', zhihu: '知乎', xiaohongshu: '小红书', bilibili: 'B站', wechat: '微信',
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  draft: { label: '草稿', color: 'default' },
-  generating: { label: '生成中', color: 'processing' },
-  ready: { label: '待发布', color: 'gold' },
-  published: { label: '已发布', color: 'green' },
+const STATUS_LABEL: Record<string, string> = {
+  draft: '草稿',
+  generating: '生成中',
+  ready: '待发布',
+  published: '已发布',
 }
 
-const KIND_CONFIG: Record<string, { label: string; emoji: string }> = {
-  article: { label: '文章', emoji: '📝' },
-  video: { label: '视频', emoji: '🎬' },
-  image: { label: '图片', emoji: '🖼️' },
-  audio: { label: '音频', emoji: '🎵' },
+const KIND_META: Record<string, { label: string; icon: React.ReactNode; tone: string }> = {
+  article: { label: '文章', icon: <FileTextOutlined />, tone: 'article' },
+  video: { label: '视频', icon: <VideoCameraOutlined />, tone: 'video' },
+  image: { label: '图片', icon: <PictureOutlined />, tone: 'image' },
+  audio: { label: '音频', icon: <SoundOutlined />, tone: 'audio' },
 }
 
-function distributionPath(w: WorkItem) {
-  const q = new URLSearchParams()
-  if (w.content_id) q.set('contentId', w.content_id)
-  if (w.media_urls?.length) q.set('mediaUrls', w.media_urls.join(','))
-  if (w.brand_id) q.set('brandId', w.brand_id)
-  q.set('contentType', w.kind === 'article' ? 'article' : w.kind === 'image' ? 'image' : 'video')
-  if (w.title) q.set('title', w.title)
-  const s = q.toString()
-  return s ? `/m/distribution?${s}` : '/m/distribution'
+type WorkCardProps = {
+  work: WorkItem
+  isCompose: boolean
+  isBrollSource: boolean
+  onOpen: () => void
+  onPreview: (asset: MediaAsset) => void
+  onPublish: () => void
+  onRename?: () => void
 }
+
+function WorkCard({ work, isCompose, isBrollSource, onOpen, onPreview, onPublish, onRename }: WorkCardProps) {
+  const title = cleanWorkTitle(work.title)
+  const kind = KIND_META[work.kind] || { label: work.kind, icon: <FileTextOutlined />, tone: 'article' }
+  const previewUrl = work.kind === 'video' || work.kind === 'image' ? work.media_urls?.[0] : undefined
+  const canBroll = work.kind === 'video' && work.id.startsWith('g-')
+  const statusLabel = STATUS_LABEL[work.status] || work.status
+  const dateStr = new Date(work.created_at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+
+  const handlePreview = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!previewUrl) return
+    onPreview({
+      id: work.id,
+      tenant_id: '',
+      brand_id: work.brand_id || '',
+      owner_type: 'creation',
+      type: work.kind,
+      name: work.title,
+      url: previewUrl,
+      mime: work.kind === 'image' ? 'image/jpeg' : 'video/mp4',
+      size_bytes: 0,
+      width: 0,
+      height: 0,
+      duration: 0,
+      created_at: work.created_at,
+    })
+  }
+
+  return (
+    <article
+      className={`mw-card mw-card--${work.status} mw-card--${kind.tone}`}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen() }}
+    >
+      <div className="mw-cover">
+        {work.kind === 'video' && previewUrl && (
+          <VideoFrameCover url={previewUrl} poster={work.cover_url} />
+        )}
+        {work.kind === 'image' && (work.cover_url || previewUrl) && (
+          <ImageCover url={work.cover_url || previewUrl!} />
+        )}
+        {!previewUrl && (
+          <div className="mw-cover-placeholder" aria-hidden>
+            <span className="mw-cover-placeholder-icon">{kind.icon}</span>
+          </div>
+        )}
+
+        <div className="mw-badge-row">
+          <span className={`mw-status mw-status--${work.status}`}>{statusLabel}</span>
+          <div className="mw-badge-row-right">
+            {isCompose && <span className="mw-chip mw-chip--broll">B-Roll</span>}
+            {isBrollSource && <span className="mw-chip mw-chip--broll-src">已插画面</span>}
+            <span className="mw-chip mw-chip--kind">{kind.label}</span>
+          </div>
+        </div>
+
+        {previewUrl && work.kind === 'video' && (
+          <span className="mw-cover-play" aria-hidden><PlayCircleOutlined /></span>
+        )}
+      </div>
+
+      <div className="mw-body">
+        <h3 className="mw-title" title={work.title}>{title}</h3>
+        <div className="mw-meta">
+          <time className="mw-time">{dateStr}</time>
+          {work.status === 'published' && work.platforms?.length ? (
+            <span className="mw-platforms">
+              {work.platforms.map((pf) => (
+                <i key={pf}>{PLATFORM_LABEL[pf] || pf}</i>
+              ))}
+            </span>
+          ) : null}
+          {work.views > 0 && (
+            <span className="mw-stat"><PlayCircleOutlined /> {work.views.toLocaleString()}</span>
+          )}
+        </div>
+
+        <div className="mw-foot" onClick={(e) => e.stopPropagation()}>
+          {canBroll && work.status !== 'published' && (
+            <button type="button" className="mw-action" onClick={onOpen}>
+              <VideoCameraAddOutlined /> 插入画面
+            </button>
+          )}
+          {work.status !== 'published' && (
+            <button type="button" className="mw-action mw-action--primary" onClick={onPublish}>
+              <SendOutlined /> 去发布
+            </button>
+          )}
+          {work.status === 'published' && previewUrl && (
+            <button type="button" className="mw-action" onClick={handlePreview}>
+              预览
+            </button>
+          )}
+          {onRename && (
+            <button type="button" className="mw-action mw-action--ghost" onClick={(e) => { e.stopPropagation(); onRename() }} title="重命名">
+              <EditOutlined /> 重命名
+            </button>
+          )}
+          <button type="button" className="mw-action mw-action--ghost" onClick={onOpen}>
+            详情 <RightOutlined />
+          </button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+const FILTER_OPTIONS: { value: Filter; label: string }[] = [
+  { value: 'all', label: '全部' },
+  { value: 'draft', label: '草稿' },
+  { value: 'ready', label: '待发布' },
+  { value: 'published', label: '已发布' },
+]
 
 /**
  * 我的作品：三源聚合的真实作品库（文章 + 多媒体产物 + 发布状态 + 互动数据）。
- * 视频成片点进作品详情（§8#4）；待发布直达发布中心。
  */
 export default function MyWorks() {
   const navigate = useNavigate()
@@ -67,7 +184,7 @@ export default function MyWorks() {
     setRenaming(true)
     try {
       await businessApi.renameGenerationTask(renameTarget.id.slice(2), renameValue.trim())
-      message.success('已重命名')
+      toast.ok('已重命名', 'works-rename')
       setRenameTarget(null)
       queryClient.invalidateQueries({ queryKey: ['merchant-works'] })
       queryClient.invalidateQueries({ queryKey: ['generation-tasks'] })
@@ -77,9 +194,14 @@ export default function MyWorks() {
   }
 
   const { works = [], tasks, isLoading, isError, refetch } = usePublishableWorks()
-
-  // B-Roll 血缘标记（§6.2）：compose 产物标"B-Roll"，被插过画面的源片标"已插画面"
   const { composeWorkIds, brollSourceWorkIds } = useMemo(() => brollLineage(works, tasks), [works, tasks])
+
+  const counts = useMemo(() => ({
+    all: works.length,
+    draft: works.filter((w) => w.status === 'draft').length,
+    ready: works.filter((w) => w.status === 'ready').length,
+    published: works.filter((w) => w.status === 'published').length,
+  }), [works])
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -93,30 +215,47 @@ export default function MyWorks() {
   const openDetail = (w: WorkItem) => navigate(`/m/works/${encodeURIComponent(w.id)}`)
 
   return (
-    <div className="wr-page-content ip-page">
-      <OralJourneyNav />
-      <div className="ip-page-hero">
-        <div>
-          <h1>我的作品</h1>
-          <p className="ip-lead">成片可插入画面后再发布；待发布可直达发布中心</p>
-        </div>
-        <Button type="primary" size="large" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => navigate('/m/compose')}>
-          去内容合成
-        </Button>
-      </div>
+    <div className="wr-page-content ip-page mw-page">
 
-      <div className="ip-toolbar">
-        <Segmented
-          value={filter}
-          onChange={(v) => setFilter(v as Filter)}
-          options={[
-            { value: 'all', label: `全部 ${works.length}` },
-            { value: 'draft', label: `草稿 ${works.filter((w) => w.status === 'draft').length}` },
-            { value: 'ready', label: `待发布 ${works.filter((w) => w.status === 'ready').length}` },
-            { value: 'published', label: `已发布 ${works.filter((w) => w.status === 'published').length}` },
-          ]}
+      <header className="mw-head">
+        <div className="mw-head-copy">
+          <h1>我的作品</h1>
+          <p>成片可插入画面后再发布，待发布可直达发布中心</p>
+        </div>
+        <Button
+          type="primary"
+          size="large"
+          className="ip-btn-primary mw-head-cta"
+          icon={<PlusOutlined />}
+          onClick={() => navigate('/m/compose')}
+        >
+          去创作
+        </Button>
+      </header>
+
+      <div className="mw-toolbar">
+        <div className="mw-filters" role="tablist" aria-label="作品筛选">
+          {FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="tab"
+              aria-selected={filter === opt.value}
+              className={`mw-filter${filter === opt.value ? ' is-active' : ''}`}
+              onClick={() => setFilter(opt.value)}
+            >
+              {opt.label}
+              <span className="mw-filter-count">{counts[opt.value]}</span>
+            </button>
+          ))}
+        </div>
+        <Input.Search
+          allowClear
+          className="mw-search"
+          placeholder="搜索标题"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
         />
-        <Input.Search allowClear placeholder="搜索作品标题" style={{ maxWidth: 240 }} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       <QueryBoundary
@@ -124,139 +263,29 @@ export default function MyWorks() {
         error={isError}
         onRetry={() => refetch()}
         empty={list.length === 0}
-        emptyText="还没有作品——去内容合成写第一篇文章或做第一个视频"
-        emptyExtra={<Button type="primary" onClick={() => navigate('/m/compose')}>去内容合成</Button>}
+        emptyText="还没有作品，先拍一条口播成片吧"
+        emptyExtra={
+          <Button type="primary" className="ip-btn-primary" icon={<PlusOutlined />} onClick={() => navigate('/m/compose/lipsync')}>
+            去拍口播
+          </Button>
+        }
       >
         <div className="mw-grid">
-          {list.map((w) => {
-            const st = STATUS_CONFIG[w.status] || { label: w.status, color: 'default' }
-            const kd = KIND_CONFIG[w.kind] || { label: w.kind, emoji: '' }
-            const title = cleanWorkTitle(w.title)
-            const previewUrl = w.kind === 'video' || w.kind === 'image' ? w.media_urls?.[0] : undefined
-            const canBroll = w.kind === 'video' && w.id.startsWith('g-')
-            const coverStyle = w.cover_url
-              ? { background: `linear-gradient(180deg, rgba(8,8,14,0.2), rgba(8,8,14,0.72)), url(${w.cover_url}) center/cover` }
-              : undefined
-            const previewBtn = previewUrl ? (
-              <Button size="small" onClick={(e) => {
-                e.stopPropagation()
-                setPreviewAsset({
-                  id: w.id,
-                  tenant_id: '',
-                  brand_id: w.brand_id || '',
-                  owner_type: 'creation',
-                  type: w.kind,
-                  name: w.title,
-                  url: previewUrl,
-                  mime: w.kind === 'image' ? 'image/jpeg' : 'video/mp4',
-                  size_bytes: 0,
-                  width: 0,
-                  height: 0,
-                  duration: 0,
-                  created_at: w.created_at,
-                })
-              }}>
-                预览
-              </Button>
-            ) : null
-            const publishBtn = w.status !== 'published' ? (
-              <Button type="primary" size="small" icon={<SendOutlined />} onClick={(e) => {
-                e.stopPropagation()
-                navigate(distributionPath(w))
-              }}>
-                去发布
-              </Button>
-            ) : null
-            const brollBtn = canBroll ? (
-              <Button size="small" icon={<VideoCameraAddOutlined />} onClick={(e) => {
-                e.stopPropagation()
-                openDetail(w)
-              }}>
-                插入画面
-              </Button>
-            ) : null
-            const detailBtn = (
-              <Button size="small" onClick={(e) => { e.stopPropagation(); openDetail(w) }}>
-                详情
-              </Button>
-            )
-            const renameBtn = w.id.startsWith('g-') ? (
-              <Button size="small" icon={<EditOutlined />} title="重命名" onClick={(e) => {
-                e.stopPropagation()
+          {list.map((w) => (
+            <WorkCard
+              key={w.id}
+              work={w}
+              isCompose={composeWorkIds.has(w.id)}
+              isBrollSource={brollSourceWorkIds.has(w.id)}
+              onOpen={() => openDetail(w)}
+              onPreview={setPreviewAsset}
+              onPublish={() => navigate(distributionPathFromWork(w))}
+              onRename={w.id.startsWith('g-') ? () => {
                 setRenameTarget({ id: w.id, title: w.title })
                 setRenameValue(cleanWorkTitle(w.title))
-              }} />
-            ) : null
-            const actions = (
-              <>
-                {publishBtn}
-                {brollBtn}
-                {detailBtn}
-                {renameBtn}
-                {previewBtn}
-              </>
-            )
-            return (
-              <div
-                key={w.id}
-                className={`mw-card mw-card--${w.status}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => openDetail(w)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openDetail(w) }}
-              >
-                <div className="mw-cover" style={w.cover_url || previewUrl ? undefined : coverStyle}>
-                  {w.kind === 'video' && w.media_urls?.[0] && (
-                    <VideoFrameCover url={w.media_urls[0]} poster={w.cover_url} />
-                  )}
-                  {w.kind === 'image' && (w.cover_url || w.media_urls?.[0]) && (
-                    <ImageCover url={w.cover_url || w.media_urls![0]} />
-                  )}
-                  {!previewUrl && (
-                    <span className="mw-cover-title">{title}</span>
-                  )}
-
-                  <span className={`mw-status mw-status--${w.status}`}>{st.label}</span>
-                  <span className="mw-kind">{kd.label}</span>
-                  {composeWorkIds.has(w.id) && (
-                    <span className="mw-kind mw-kind--broll" title="由 B-Roll 插入画面合成的成片">B-Roll</span>
-                  )}
-                  {brollSourceWorkIds.has(w.id) && (
-                    <span className="mw-kind mw-kind--broll-source" title="该成片已插入过画面（有 B-Roll 衍生版本）">已插画面</span>
-                  )}
-
-                  <div className="mw-hover" aria-hidden>
-                    <Space size={6} wrap style={{ justifyContent: 'center' }}>{actions}</Space>
-                  </div>
-                </div>
-
-                <div className="mw-body">
-                  <strong className="mw-title" title={w.title}>{title}</strong>
-                  <div className="mw-meta">
-                    {w.status === 'published' && w.platforms?.length ? (
-                      <span className="mw-platforms">
-                        {w.platforms.map((pf) => (
-                          <i key={pf}>{PLATFORM_LABEL[pf] || pf}</i>
-                        ))}
-                      </span>
-                    ) : (
-                      <span className="mw-time">{new Date(w.created_at).toLocaleDateString('zh-CN')}</span>
-                    )}
-                    {w.views > 0 && <span className="mw-stat"><PlayCircleOutlined /> {w.views.toLocaleString()}</span>}
-                    {w.likes > 0 && <span className="mw-stat"><LikeOutlined /> {w.likes.toLocaleString()}</span>}
-                  </div>
-                </div>
-
-                {/* 静态主操作：无 hover 设备/快速直达 */}
-                <div className="mw-actions-static" onClick={(e) => e.stopPropagation()}>
-                  {brollBtn}
-                  {publishBtn}
-                  {detailBtn}
-                  {w.status === 'published' && previewBtn}
-                </div>
-              </div>
-            )
-          })}
+              } : undefined}
+            />
+          ))}
         </div>
       </QueryBoundary>
 

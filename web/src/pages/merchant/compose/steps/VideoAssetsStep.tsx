@@ -22,7 +22,7 @@ import { CapabilityBanner } from '../../../../components/wizard/CapabilityBanner
 import { useSubjectList } from '../../../../hooks/useSubjectList'
 import { useGenerationTypes } from '../../../../hooks/useGenerationTypes'
 import { catchGenerationError } from '../../../../utils/generationErrors'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 type AssetTab = 'voice' | 'avatar' | 'cover'
 
@@ -55,16 +55,16 @@ export function VideoAssetsStep() {
 
   const runTts = async () => {
     if (!text.trim()) {
-      message.warning('需要口播文案')
+      toast.warn('请先填写口播文案')
       return
     }
     const bid = brandId || draft.brandId
     if (!bid) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设')
       return
     }
     if (!isEnabled('tts')) {
-      message.warning('语音合成未在后台启用')
+      toast.warn('语音合成暂未开通')
       return
     }
     setBusy(true)
@@ -76,7 +76,7 @@ export function VideoAssetsStep() {
         params: mergeSubmitParams(ttsModel ? { model: ttsModel } : undefined),
       })
       draft.patch({ voiceTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
-      message.success('配音任务已提交，完成后自动填入')
+      toast.ok('配音任务已提交')
     } catch (e) {
       catchGenerationError(e)
     } finally {
@@ -86,20 +86,20 @@ export function VideoAssetsStep() {
 
   const runSubjectAvatar = async () => {
     if (!text.trim()) {
-      message.warning('需要口播文案')
+      toast.warn('请先填写口播文案')
       return
     }
     const bid = brandId || draft.brandId
     if (!bid) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设')
       return
     }
     if (!subjectServerId) {
-      message.warning('请选择数字分身')
+      toast.warn('请选择数字分身')
       return
     }
     if (!isEnabled('reference2video')) {
-      message.warning('参考生视频未在后台启用')
+      toast.warn('参考生视频暂未开通')
       return
     }
     setBusy(true)
@@ -117,7 +117,7 @@ export function VideoAssetsStep() {
         audioMaterialId,
       }))
       draft.patch({ avatarTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
-      message.success('主体一致性口播已提交，完成后自动填入')
+      toast.ok('口播任务已提交')
     } catch (e) {
       catchGenerationError(e)
     } finally {
@@ -127,20 +127,20 @@ export function VideoAssetsStep() {
 
   const runAvatarLegacy = async () => {
     if (!text.trim()) {
-      message.warning('需要口播文案')
+      toast.warn('请先填写口播文案')
       return
     }
     const bid = brandId || draft.brandId
     if (!bid) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设')
       return
     }
     if (!avatarImage) {
-      message.warning('请先上传或选择人像图')
+      toast.warn('请先上传或选择人像图')
       return
     }
     if (!draft.voiceUrl) {
-      message.warning('降级路径需要配音——请先在「配音」Tab 生成')
+      toast.warn('请先在「配音」生成音频')
       setTab('voice')
       return
     }
@@ -155,7 +155,7 @@ export function VideoAssetsStep() {
         params: deliverableWorkParams(),
       })
       draft.patch({ avatarTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
-      message.success('口播任务已提交（图+音频，降级路径）')
+      toast.ok('口播任务已提交（图+音频）')
     } catch (e) {
       catchGenerationError(e)
     } finally {
@@ -166,7 +166,7 @@ export function VideoAssetsStep() {
   const genCover = async () => {
     const bid = brandId || draft.brandId
     if (!bid) {
-      message.warning('请先选择人设/品牌')
+      toast.warn('请先选择人设')
       return
     }
     const title = draft.selectedTitle || '短视频封面'
@@ -180,7 +180,7 @@ export function VideoAssetsStep() {
         params: mergeSubmitParams(),
       })
       draft.patch({ coverTaskId: res.id, track: 'video', lastUpdatedAt: new Date().toISOString() })
-      message.success('封面生成任务已提交，完成后自动填入')
+      toast.ok('封面任务已提交')
     } catch (e) {
       catchGenerationError(e)
     } finally {
@@ -329,7 +329,7 @@ export function VideoAssetsStep() {
                               try {
                                 const asset = await businessApi.uploadAsset(file)
                                 setAvatarImage(asset.url)
-                                message.success('形象已上传')
+                                toast.ok('形象已上传')
                               } catch (e) {
                                 catchGenerationError(e)
                               }

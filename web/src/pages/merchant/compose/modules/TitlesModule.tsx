@@ -6,7 +6,7 @@ import { ComposeModuleHeader } from '../ComposeModuleHeader'
 import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 const { Text } = Typography
 
@@ -21,11 +21,11 @@ export default function TitlesModule() {
 
   const generate = async () => {
     if (!brandId) {
-      message.warning('请先选择人设')
+      toast.warn('请先选择人设', 'titles-brand')
       return
     }
     if (!body.trim()) {
-      message.warning('请先准备文案')
+      toast.warn('请先准备文案', 'titles-text')
       return
     }
     setBusy(true)
@@ -48,7 +48,7 @@ export default function TitlesModule() {
         selectedTitle: titles[0] || res.title,
         brandId,
       })
-      message.success('标题与话题已生成')
+      toast.ok('标题与话题已生成', 'titles-gen')
     } catch {
       /* 拦截器 */
     } finally {

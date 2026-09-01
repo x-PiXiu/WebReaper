@@ -4,7 +4,8 @@ import { ThunderboltOutlined, EditOutlined, PlusOutlined, DeleteOutlined } from 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { GenerationTemplate } from '../../types/api'
-import { message, modal } from '../../utils/antdApp'
+import { modal } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -47,12 +48,12 @@ export default function AdminGenerationTemplates({ embedded = false }: { embedde
   const createMutation = useMutation({
     mutationFn: (data: Partial<GenerationTemplate>) => businessApi.adminCreateGenerationTemplate(data),
     onSuccess: () => {
-      message.success('模板创建成功')
+      toast.ok('模板已创建', 'admin-tpl')
       setIsCreateModalOpen(false)
       form.resetFields()
       queryClient.invalidateQueries({ queryKey: ['admin-generation-templates'] })
     },
-    onError: () => message.error('创建失败'),
+    onError: () => toast.fail('创建失败'),
   })
 
   // 更新模板
@@ -60,22 +61,22 @@ export default function AdminGenerationTemplates({ embedded = false }: { embedde
     mutationFn: ({ id, data }: { id: string; data: Partial<GenerationTemplate> }) =>
       businessApi.adminUpdateGenerationTemplate(id, data),
     onSuccess: () => {
-      message.success('模板更新成功')
+      toast.ok('模板已更新', 'admin-tpl')
       setEditingTemplate(null)
       form.resetFields()
       queryClient.invalidateQueries({ queryKey: ['admin-generation-templates'] })
     },
-    onError: () => message.error('更新失败'),
+    onError: () => toast.fail('更新失败'),
   })
 
   // 删除模板
   const deleteMutation = useMutation({
     mutationFn: (id: string) => businessApi.adminDeleteGenerationTemplate(id),
     onSuccess: () => {
-      message.success('模板删除成功')
+      toast.ok('模板已删除', 'admin-tpl')
       queryClient.invalidateQueries({ queryKey: ['admin-generation-templates'] })
     },
-    onError: () => message.error('删除失败'),
+    onError: () => toast.fail('删除失败'),
   })
 
   // 表格列定义

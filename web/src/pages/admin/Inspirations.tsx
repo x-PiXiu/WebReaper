@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
 import type { InspirationVideo } from '../../types/api'
 import QueryBoundary from '../../components/QueryBoundary'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text, Title } = Typography
 
@@ -44,15 +44,15 @@ export default function AdminInspirations({ embedded = false }: { embedded?: boo
   const updateMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: { is_pinned?: boolean; is_recommended?: boolean; admin_note?: string } }) =>
       businessApi.adminUpdateInspiration(id, patch),
-    onSuccess: () => { message.success('已更新'); invalidate() },
+    onSuccess: () => { toast.ok('已更新'); invalidate() },
   })
   const deleteMut = useMutation({
     mutationFn: (id: string) => businessApi.adminDeleteInspiration(id),
-    onSuccess: () => { message.success('已删除'); setSelected([]); invalidate() },
+    onSuccess: () => { toast.ok('已删除'); setSelected([]); invalidate() },
   })
   const batchMut = useMutation({
     mutationFn: (action: 'delete') => businessApi.adminBatchInspirations({ ids: selected, action }),
-    onSuccess: (r) => { message.success(`已处理 ${r.affected} 条`); setSelected([]); invalidate() },
+    onSuccess: (r) => { toast.ok(`已处理 ${r.affected} 条`); setSelected([]); invalidate() },
   })
 
   const items = data?.items || []

@@ -9,7 +9,7 @@ import { businessApi } from '../../api/business'
 import { waitGenerationTask } from '../../hooks/useLipSyncPipeline'
 import { useGenerationTasks, GENERATION_TASKS_KEY } from '../../hooks/useGenerationTasks'
 import AssetPicker from '../AssetPicker'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 import type { TaskTimeline } from '../../types/api'
 
 const { Text, Title } = Typography
@@ -93,6 +93,13 @@ export function BrollPanel({ source, variant = 'embedded', onClose, extraActions
     if (composeDone && composeUrl) setViewTab('composed')
   }, [composeDone, composeUrl])
 
+  // 片段变更后允许再次合成（不再锁死在上一轮成功态）
+  useEffect(() => {
+    if (!composeTaskId) return
+    setComposeTaskId('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅跟随 segments
+  }, [segments])
+
   const segmentCount = Object.keys(segments).length
 
   const saveLineText = async (index: number, text: string) => {
@@ -102,9 +109,9 @@ export function BrollPanel({ source, variant = 'embedded', onClose, extraActions
         lines_override: [{ index, text }],
       })
       setTimeline(next)
-      message.success('台词已修正（切换点不受影响）')
+      toast.ok('台词已修正', 'broll-line')
     } catch (e: any) {
-      message.error(e?.response?.data?.msg || '修正失败')
+      toast.fail(e?.response?.data?.msg || '修正失败，请重试', 'broll-line')
     }
   }
 
@@ -120,14 +127,14 @@ export function BrollPanel({ source, variant = 'embedded', onClose, extraActions
         })),
       })
       setComposeTaskId(t.id)
-      message.info('合成任务已提交')
+      toast.info('正在合成画面…', 'broll-compose')
       await waitGenerationTask(t.id, () => {
         queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
       })
       queryClient.invalidateQueries({ queryKey: ['merchant-works'] })
-      message.success('合成完成——新成片已入作品库（源片保留）')
+      toast.ok('合成完成，新成片已入作品库', 'broll-compose')
     } catch (e: any) {
-      message.error(e?.response?.data?.msg || e?.message || '合成失败，可重试')
+      toast.fail(e?.response?.data?.msg || e?.message || '合成失败，可重试', 'broll-compose')
     } finally {
       setComposing(false)
     }
@@ -317,20 +324,25 @@ export function BrollPanel({ source, variant = 'embedded', onClose, extraActions
 
           <div className="wr-broll-footer">
             {chainSource && (
-              <Button onClick={() => setChainSource(null)}>回到最初源片</Button>
+              <button type="button" className="wr-text-btn" onClick={() => setChainSource(null)}>
+                回到最初源片
+              </button>
             )}
             <div className="wr-broll-footer-right">
               {extraActions}
-              {onClose && (
-                <Button onClick={onClose}>{variant === 'page' ? '返回作品库' : '关闭'}</Button>
+              {onClose && variant !== 'page' && (
+                <button type="button" className="wr-text-btn" onClick={onClose}>关闭</button>
               )}
               <Button
                 type="primary"
-                disabled={segmentCount === 0 || !!composeDone}
+                className="ip-btn-primary"
+                disabled={segmentCount === 0}
                 loading={composing}
-                onClick={doCompose}
+                onClick={() => { void doCompose() }}
               >
-                合成成片{segmentCount > 0 ? `（${segmentCount} 句）` : ''}
+                {composeDone
+                  ? `重新合成（${segmentCount} 句）`
+                  : `合成成片${segmentCount > 0 ? `（${segmentCount} 句）` : ''}`}
               </Button>
             </div>
           </div>

@@ -7,7 +7,7 @@ import { useBrandContext } from '../../hooks/useBrands'
 import { useNavigate } from 'react-router-dom'
 import type { Brand } from '../../types/api'
 import QueryBoundary from '../../components/QueryBoundary'
-import { message } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
@@ -55,7 +55,7 @@ export default function Nearby({ embedded }: { embedded?: boolean }) {
     onSuccess: () => {
       queryClient.setQueryData(['geo-nearby', brandId, types], undefined)
       refetchRanking()
-      message.success('AI 榜已更新：AI 真实搜索了附近同行')
+      toast.ok('AI 榜已更新', 'nearby-rank')
     },
     onError: () => { /* 拦截器已提示 */ },
   })

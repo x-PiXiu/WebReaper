@@ -7,7 +7,6 @@ import { useComposeDraft } from '../../../store/composeDraft'
 import { useComposeTaskPoll } from '../../../hooks/useComposeTaskPoll'
 import { composeProgressLabel, composeResumeHint, hasComposeDraft, composeResumePath, composeResumeLabel } from '../../../utils/composeProgress'
 import MerchantOnboardingTour from '../../../components/onboarding/MerchantOnboardingTour'
-import OralJourneyNav from '../../../components/compose/OralJourneyNav'
 import { useMerchantOnboarding } from '../../../hooks/useMerchantOnboarding'
 import { useGenerationTypes } from '../../../hooks/useGenerationTypes'
 import { CREATIVE_CDN } from '../../../config/creativeCdn'
@@ -194,7 +193,6 @@ export default function ComposeHub() {
     <div className="wr-page-content ch-hub ch-creative ch-creative--pro ch-studio ip-page">
       <div className="ch-atmosphere" aria-hidden />
       <MerchantOnboardingTour open={tourOpen} onClose={skipTour} onFinish={finishTour} />
-      <OralJourneyNav />
 
       <section className="ch-hero">
         <div className="ch-hero-copy">

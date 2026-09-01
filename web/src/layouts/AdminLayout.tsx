@@ -3,7 +3,7 @@ import { Alert, Button, Form, Input, Modal } from 'antd'
 import { AppShell, type NavItem } from './MainLayout'
 import { useAuthStore } from '../store/auth'
 import { businessApi } from '../api/business'
-import { message } from '../utils/antdApp'
+import { toast } from '../utils/feedback'
 
 // 管理后台布局：菜单按功能域分组（AntD Menu 的 group 类型渲染）。
 //   - 平台管理：SaaS 运营（总览/商户/品牌/内容/计费）
@@ -54,7 +54,7 @@ export default function AdminLayout() {
       setMustChange(false)
       setPwOpen(false)
       form.resetFields()
-      message.success('密码已修改')
+      toast.ok('密码已修改')
     } catch { /* 拦截器已提示 */ } finally {
       setSaving(false)
     }

@@ -4,7 +4,7 @@ import { UploadOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined } from '
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../../api/business'
 import QueryBoundary from '../../../components/QueryBoundary'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -39,7 +39,7 @@ export default function KnowledgeTab({ brandId }: { brandId: string }) {
   const uploadMut = useMutation({
     mutationFn: (data: { title: string; content: string }) => businessApi.uploadBrandKnowledge(brandId, data),
     onSuccess: (res) => {
-      message.success(res.message || 'AI 已学习你的资料——写文章和做视频时会自动引用')
+      toast.ok(res.message || '资料已学习，写文章和视频时会自动引用', 'know-learn')
       setUploadOpen(false)
       setTitle('')
       setContent('')
@@ -52,7 +52,7 @@ export default function KnowledgeTab({ brandId }: { brandId: string }) {
   const deleteMut = useMutation({
     mutationFn: (materialId: string) => businessApi.deleteBrandKnowledge(brandId, materialId),
     onSuccess: () => {
-      message.success('已删除')
+      toast.ok('已删除')
       queryClient.invalidateQueries({ queryKey: ['brand-knowledge'] })
       queryClient.invalidateQueries({ queryKey: ['brand-knowledge-count'] })
     },
@@ -70,9 +70,9 @@ export default function KnowledgeTab({ brandId }: { brandId: string }) {
   }
 
   const handleUpload = () => {
-    if (!title.trim()) { message.warning('请填写标题'); return }
+    if (!title.trim()) { toast.warn('请填写标题'); return }
     if (!content.trim() || content.trim().length < 50) {
-      message.warning('内容太短（至少 50 字）——请粘贴有实质内容的品牌资料')
+      toast.warn('内容太短（至少 50 字）', 'know-len')
       return
     }
     uploadMut.mutate({ title: title.trim(), content: content.trim() })

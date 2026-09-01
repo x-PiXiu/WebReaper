@@ -2,7 +2,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Empty, Input, Modal, Segmented, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
-import { message } from '../../../utils/antdApp'
+import { toast } from '../../../utils/feedback'
 import {
   EditOutlined, FireOutlined, PlayCircleOutlined, VideoCameraOutlined,
 } from '@ant-design/icons'
@@ -93,7 +93,7 @@ export default function InspirationPlaza() {
     if (!remaking) return
     const topic = topicDraft.trim()
     if (topic.length < 4) {
-      message.warning('选题至少 4 个字')
+      toast.warn('选题至少 4 个字')
       return
     }
     const { item, mode } = remaking
@@ -112,7 +112,7 @@ export default function InspirationPlaza() {
       selectedTitle: item.title.slice(0, 40),
     })
     setRemaking(null)
-    message.success(mode === 'graphic' ? '已带入发图文' : '已带入发视频')
+    toast.ok(mode === 'graphic' ? '已带入发图文' : '已带入发视频')
     navigate(mode === 'graphic' ? '/m/compose/graphic' : '/m/compose/lipsync')
   }
 

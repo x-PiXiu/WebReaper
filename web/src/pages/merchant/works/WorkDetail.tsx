@@ -1,24 +1,33 @@
-import { useMemo } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useMemo, type ReactNode } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Empty, Spin, Typography } from 'antd'
-import { ArrowLeftOutlined, SendOutlined } from '@ant-design/icons'
+import { SendOutlined } from '@ant-design/icons'
 import { usePublishableWorks } from '../../../hooks/usePublishableWorks'
+import { brollLineage } from '../../../utils/publishableWorks'
 import { BrollPanel } from '../../../components/compose/BrollPanel'
-import OralJourneyNav from '../../../components/compose/OralJourneyNav'
+import { PageBackLink } from '../../../components/PageBackLink'
 import { cleanWorkTitle } from '../../../utils/workTitle'
-import type { WorkItem } from '../../../types/api'
+import { distributionPathFromWork } from '../../../utils/distributionPath'
 
-const { Text, Title } = Typography
+const { Text } = Typography
 
-function distributionPath(w: WorkItem) {
-  const q = new URLSearchParams()
-  if (w.content_id) q.set('contentId', w.content_id)
-  if (w.media_urls?.length) q.set('mediaUrls', w.media_urls.join(','))
-  if (w.brand_id) q.set('brandId', w.brand_id)
-  q.set('contentType', w.kind === 'article' ? 'article' : w.kind === 'image' ? 'image' : 'video')
-  if (w.title) q.set('title', w.title)
-  const s = q.toString()
-  return s ? `/m/distribution?${s}` : '/m/distribution'
+const STATUS_CHIP: Record<string, { label: string; tone: string }> = {
+  draft: { label: '草稿', tone: 'draft' },
+  generating: { label: '生成中', tone: 'processing' },
+  ready: { label: '待发布', tone: 'ready' },
+  published: { label: '已发布', tone: 'published' },
+}
+
+const KIND_LABEL: Record<string, string> = {
+  article: '文章', video: '视频', image: '图片', audio: '音频',
+}
+
+const PLATFORM_LABEL: Record<string, string> = {
+  douyin: '抖音', kuaishou: '快手', zhihu: '知乎', xiaohongshu: '小红书', bilibili: 'B站', wechat: '微信',
+}
+
+function WorkMetaChip({ tone, children }: { tone: string; children: ReactNode }) {
+  return <span className={`wr-chip wr-chip--${tone}`}>{children}</span>
 }
 
 /**
@@ -28,13 +37,16 @@ function distributionPath(w: WorkItem) {
 export default function WorkDetail() {
   const { workId = '' } = useParams<{ workId: string }>()
   const navigate = useNavigate()
-  const { works, isLoading } = usePublishableWorks()
+  const { works, tasks, isLoading } = usePublishableWorks()
 
   const work = useMemo(() => works.find((w) => w.id === workId), [works, workId])
+  const { composeWorkIds, brollSourceWorkIds } = useMemo(() => brollLineage(works, tasks), [works, tasks])
+
   const title = cleanWorkTitle(work?.title || '作品详情')
   const taskId = work?.id.startsWith('g-') ? work.id.slice(2) : ''
   const canBroll = work?.kind === 'video' && !!taskId
   const mediaUrl = work?.media_urls?.[0]
+  const status = work ? (STATUS_CHIP[work.status] || { label: work.status, tone: 'draft' }) : null
 
   if (isLoading && !work) {
     return (
@@ -47,32 +59,47 @@ export default function WorkDetail() {
   if (!work) {
     return (
       <div className="wr-page-content wd-page">
-        <OralJourneyNav />
-        <Empty description="未找到该作品">
-          <Button type="primary" onClick={() => navigate('/m/works')}>返回作品库</Button>
-        </Empty>
+        <PageBackLink to="/m/works" label="作品库" />
+        <Empty description="未找到该作品" />
       </div>
     )
   }
 
   return (
     <div className="wr-page-content wd-page">
-      <OralJourneyNav />
       <header className="wd-head">
         <div className="wd-head-main">
-          <Link to="/m/works" className="wd-back">
-            <ArrowLeftOutlined /> 作品库
-          </Link>
-          <Title level={3} className="wd-title">{title}</Title>
+          <PageBackLink to="/m/works" label="作品库" />
+
+          <h1 className="wd-title">{title}</h1>
+
+          <div className="wd-tags">
+            {status && <WorkMetaChip tone={status.tone}>{status.label}</WorkMetaChip>}
+            <WorkMetaChip tone="kind">{KIND_LABEL[work.kind] || work.kind}</WorkMetaChip>
+            {composeWorkIds.has(work.id) && <WorkMetaChip tone="broll">B-Roll</WorkMetaChip>}
+            {brollSourceWorkIds.has(work.id) && <WorkMetaChip tone="broll">已插画面</WorkMetaChip>}
+          </div>
+
           <Text type="secondary" className="wd-sub">
             {canBroll
-              ? '可按台词插入画面后再发布；源片与合成成片都会留在作品库'
+              ? '按台词插入画面后再发布；合成后新成片与源片都会保留在作品库'
               : '查看成片并去发布'}
           </Text>
+
+          {work.status === 'published' && work.platforms?.length ? (
+            <div className="wd-platforms">
+              {work.platforms.map((pf) => (
+                <WorkMetaChip key={pf} tone="platform">{PLATFORM_LABEL[pf] || pf}</WorkMetaChip>
+              ))}
+            </div>
+          ) : (
+            <time className="wd-date">{new Date(work.created_at).toLocaleDateString('zh-CN')}</time>
+          )}
         </div>
+
         <div className="wd-head-actions">
           {work.status !== 'published' && (
-            <Button type="primary" icon={<SendOutlined />} onClick={() => navigate(distributionPath(work))}>
+            <Button type="primary" size="large" className="ip-btn-primary" icon={<SendOutlined />} onClick={() => navigate(distributionPathFromWork(work))}>
               去发布
             </Button>
           )}
@@ -91,7 +118,7 @@ export default function WorkDetail() {
             onClose={() => navigate('/m/works')}
             extraActions={
               work.status !== 'published' ? (
-                <Button icon={<SendOutlined />} onClick={() => navigate(distributionPath(work))}>
+                <Button icon={<SendOutlined />} onClick={() => navigate(distributionPathFromWork(work))}>
                   去发布
                 </Button>
               ) : undefined
@@ -107,7 +134,13 @@ export default function WorkDetail() {
           ) : work.kind === 'audio' && mediaUrl ? (
             <audio src={mediaUrl} controls className="wd-simple-audio" />
           ) : (
-            <Empty description="该作品暂无可预览媒体；可直接去发布" />
+            <Empty description="该作品暂无可预览媒体；可直接去发布">
+              {work.status !== 'published' && (
+                <Button type="primary" icon={<SendOutlined />} onClick={() => navigate(distributionPathFromWork(work))}>
+                  去发布
+                </Button>
+              )}
+            </Empty>
           )}
         </div>
       )}

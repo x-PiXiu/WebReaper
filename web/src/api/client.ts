@@ -7,8 +7,18 @@ import type { ApiEnvelope } from '../types/api'
 
 function toastBizError(raw: string) {
   const path = typeof window !== 'undefined' ? window.location.pathname : ''
-  const isGen = path.includes('/compose') || path.includes('/creation') || path.includes('/assets') || path.includes('/quick')
-  antdMessage.error(isGen ? friendlyGenerationError(raw) : (raw || '请求失败'))
+  const isGen =
+    path.includes('/compose') ||
+    path.includes('/creation') ||
+    path.includes('/assets') ||
+    path.includes('/quick') ||
+    path.includes('/works') ||
+    path.includes('/distribution')
+  antdMessage.error({
+    content: isGen ? friendlyGenerationError(raw) : (raw || '操作失败，请稍后重试'),
+    key: 'wr-biz-error',
+    duration: 3.5,
+  })
 }
 
 // Axios 实例 + 拦截器。
@@ -52,10 +62,11 @@ function promptQuotaExceeded() {
   }, 5000)
   antdModal.confirm({
     title: '本月配额已用完',
-    content: '当前套餐的可用次数已用完——升级套餐可解锁更多监测/生成次数，或等待下月自动重置。',
+    content: '当前套餐次数已用完。升级套餐可继续监测/生成，或等下月自动重置。',
     okText: '去升级',
     cancelText: '知道了',
     centered: true,
+    okButtonProps: { className: 'ip-btn-primary' },
     onOk: () => {
       window.location.href = '/m/my-plan'
     },
@@ -90,7 +101,7 @@ apiClient.interceptors.response.use(
       // token 失效：清登录态 + 清数据缓存（旧租户数据绝不残留），跳登录页
       useAuthStore.getState().clearAuth()
       clearQueryCache()
-      antdMessage.error('登录已过期，请重新登录')
+      antdMessage.error({ content: '登录已过期，请重新登录', key: 'wr-auth', duration: 3 })
       // 用 location 跳转避免在拦截器里耦合 router
       window.location.href = '/login'
       return Promise.reject(new Error('未授权'))

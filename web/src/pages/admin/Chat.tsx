@@ -6,7 +6,7 @@ import LazyChatMarkdown from '../../components/markdown/LazyChatMarkdown'
 import { getToken, useAuthStore } from '../../store/auth'
 import { businessApi } from '../../api/business'
 import type { ChatMessage, AgentConfig, EngineOption, ToolView } from '../../types/api'
-import { message as antdMessage } from '../../utils/antdApp'
+import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -684,7 +684,7 @@ export default function Chat() {
                           onChange={async (checked) => {
                             try {
                               await businessApi.toggleTool(t.name, checked)
-                              antdMessage.success(`${checked ? '启用' : '禁用'}：${t.name}`)
+                              toast.ok(`${checked ? '已启用' : '已禁用'}：${t.name}`, 'admin-chat-tool')
                               queryClient.invalidateQueries({ queryKey: ['tools'] })
                             } catch {
                               // axios 拦截器已提示

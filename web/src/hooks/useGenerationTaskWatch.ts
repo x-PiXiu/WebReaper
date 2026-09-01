@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { retryFailureMessage } from '../components/RetryHint'
 import { isTaskDone, isTaskSuccess, taskPrimaryUrl } from '../utils/generationTask'
 import { GENERATION_TASKS_KEY, useGenerationTask } from './useGenerationTasks'
-import { message } from '../utils/antdApp'
+import { toast } from '../utils/feedback'
 
 type WatchOpts = {
   taskId?: string
@@ -40,7 +40,7 @@ export function useGenerationTaskWatch({
       const url = taskPrimaryUrl(task)
       if (url) {
         onSuccess?.(url)
-        if (notify) message.success(`${label}已完成`)
+        toast.ok(`${label}已完成`, 'gen-watch')
       }
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
       return
@@ -48,7 +48,7 @@ export function useGenerationTaskWatch({
 
     const msg = retryFailureMessage(task, `${label}失败`)
     onFailed?.(msg)
-    if (notify) message.error(msg)
+    if (notify) toast.fail(msg, 'gen-watch')
   }, [task, taskId, label, onSuccess, onFailed, notify, queryClient])
 
   const pending = !!(taskId && task && !isTaskDone(task.state))

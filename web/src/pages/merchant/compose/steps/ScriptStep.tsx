@@ -7,7 +7,7 @@ import { useComposeWorkSync } from '../../../../hooks/useComposeWorkSync'
 import { businessApi } from '../../../../api/business'
 import { generateContentStream } from '../../../../api/contentStream'
 import { PauseScriptEditor } from '../../../../components/compose/PauseScriptEditor'
-import { message } from '../../../../utils/antdApp'
+import { toast } from '../../../../utils/feedback'
 
 const { Text } = Typography
 
@@ -28,11 +28,11 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
 
   const polish = async () => {
     if (!brandId) {
-      message.warning('请先在顶栏选择人设档案')
+      toast.warn('请先选择人设')
       return
     }
     if (!text.trim()) {
-      message.warning('请先填写文案')
+      toast.warn('请先填写文案')
       return
     }
     setBusy(true)
@@ -47,7 +47,7 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
       const out = res.optimized_text || ''
       draft.patch({ rewritten: out, script: out, brandId, lastUpdatedAt: new Date().toISOString() })
       if (res.id) rememberContentId(res.id, res.title)
-      message.success('文案已润色')
+      toast.ok('文案已润色')
     } catch {
       /* */
     } finally {
@@ -57,7 +57,7 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
 
   const genByTheme = async () => {
     if (!brandId) {
-      message.warning('请先选择人设')
+      toast.warn('请先选择人设')
       return
     }
     abortRef.current?.abort()
@@ -102,10 +102,10 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
         lastUpdatedAt: new Date().toISOString(),
       })
       if (res.id) rememberContentId(res.id, res.title)
-      message.success('已按主题生成')
+      toast.ok('已按主题生成')
     } catch (e) {
       if ((e as Error).name === 'AbortError') return
-      message.error((e as Error).message || '生成失败，请稍后重试')
+      toast.fail((e as Error).message || '生成失败，请稍后重试')
     } finally {
       setBusy(false)
       setGenHint('')
@@ -115,7 +115,7 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
 
   const genTitles = async () => {
     if (!brandId || !text.trim()) {
-      message.warning('需要人设与文案后才能生成标题')
+      toast.warn('需要人设与文案后才能生成标题')
       return
     }
     setBusy(true)
@@ -135,7 +135,7 @@ export function ScriptStep({ track }: { track: ComposeTrack }) {
         topics: topics.length ? topics : draft.topics,
         selectedTitle: titles[0] || draft.selectedTitle,
       })
-      message.success('标题已生成')
+      toast.ok('标题已生成')
     } catch {
       /* */
     } finally {

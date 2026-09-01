@@ -274,3 +274,69 @@ export function checkCompleteness(
 
   return gaps
 }
+
+/** 口播成片/作品库入口：视频 + 标题 + 媒体已齐，可跳过素材步 */
+export function hasPrefilledMedia(draft: Pick<WizardDraft, 'contentType' | 'mediaURLs' | 'title'>) {
+  return draft.contentType === 'video' && draft.mediaURLs.length > 0 && !!draft.title.trim()
+}
+
+/** 入口步：预填成片从选账号开始；账号已选则跳到平台参数 */
+export function resolveEntryStep(partial: Partial<WizardDraft>): WizardStep {
+  const d = emptyDraft(partial)
+  if (hasPrefilledMedia(d)) {
+    if (d.accountIDs.length > 0) return 4
+    return 1
+  }
+  const s = partial.step
+  if (s && s >= 1 && s <= 5) return s
+  return 1
+}
+
+function stepSatisfied(
+  step: WizardStep,
+  draft: WizardDraft,
+  channels: PublishChannelView[],
+  accountPlatforms: string[],
+): boolean {
+  const gaps = checkCompleteness(draft, channels, {
+    accountPlatforms,
+    selectedCanAuto: false,
+  })
+  return !gaps.some((g) => g.step === step)
+}
+
+/** 下一步：成片预填时自动跳过已满足的「标题/素材」步 */
+export function nextWizardStep(
+  current: WizardStep,
+  draft: WizardDraft,
+  channels: PublishChannelView[],
+  accountPlatforms: string[],
+): WizardStep {
+  let next = Math.min(5, current + 1) as WizardStep
+  while (next > current && next < 5) {
+    if ((next === 2 || next === 3) && stepSatisfied(next, draft, channels, accountPlatforms)) {
+      next = (next + 1) as WizardStep
+      continue
+    }
+    break
+  }
+  return next
+}
+
+/** 上一步：对称跳过已满足步 */
+export function prevWizardStep(
+  current: WizardStep,
+  draft: WizardDraft,
+  channels: PublishChannelView[],
+  accountPlatforms: string[],
+): WizardStep {
+  let prev = Math.max(1, current - 1) as WizardStep
+  while (prev < current && prev > 1) {
+    if ((prev === 2 || prev === 3) && stepSatisfied(prev, draft, channels, accountPlatforms)) {
+      prev = (prev - 1) as WizardStep
+      continue
+    }
+    break
+  }
+  return prev
+}
