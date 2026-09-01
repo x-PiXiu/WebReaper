@@ -94,6 +94,15 @@ func (r *GormVoiceRepository) SetDefault(ctx context.Context, voiceID string) er
 	})
 }
 
+// FindByVoiceID 按音色 ID 精确查询单条（缺口C：样本合成通道定位样本音频）。
+func (r *GormVoiceRepository) FindByVoiceID(ctx context.Context, voiceID string) (entity.GenerationVoice, error) {
+	var po GenerationVoicePO
+	if err := r.db.WithContext(ctx).Where("voice_id = ?", voiceID).First(&po).Error; err != nil {
+		return entity.GenerationVoice{}, err
+	}
+	return poToVoice(po), nil
+}
+
 // Upsert 按 voice_id 主键幂等写入（26号计划——voice_clone 物化钩子调用）。
 func (r *GormVoiceRepository) Upsert(ctx context.Context, voice entity.GenerationVoice) error {
 	po := GenerationVoicePO{

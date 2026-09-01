@@ -204,3 +204,24 @@ func (r *GormGenerationTaskRepository) ListBySubType(ctx context.Context, tenant
 	}
 	return out, nil
 }
+
+// ListTransferPending 转存补偿（缺口A）：success 且产物有 url 无 stored_url 的任务。
+// creations_json LIKE '%"url"%' 粗筛 + Go 侧精确过滤（items 有 http URL 且无 stored_url）。
+func (r *GormGenerationTaskRepository) ListTransferPending(ctx context.Context, since time.Time, limit int) ([]entity.GenerationTask, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var pos []GenerationTaskPO
+	err := r.db.WithContext(ctx).
+		Where("state = ? AND finished_at >= ? AND creations_json LIKE ? AND creations_json NOT LIKE ?",
+			entity.TaskStateSuccess, since, `%"url"%`, `%"stored_url"%`).
+		Order("finished_at DESC").Limit(limit).Find(&pos).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.GenerationTask, 0, len(pos))
+	for _, p := range pos {
+		out = append(out, generationTaskFromPO(p))
+	}
+	return out, nil
+}

@@ -209,6 +209,13 @@ func (s *EndpointSelectorImpl) selectEndpoint(req entity.UnifiedGenerationReques
 	// BE-SUBJ-01：主体一致性路径——params.subjects 含已注册分身 server_id 时
 	// 优先 reference2video（同一分身跨视频脸部一致），而非每次图+音重生成数字人
 	if subjects, ok := req.Params["subjects"]; ok && subjects != nil {
+		// N1（2026-09-01）：reference2video 端点无外部音频字段，本分支此前最优先命中
+		// 会把音频素材静默丢弃。显式报错引导调用方走两步链
+		//（① 仅 subjects 生成视频 → ② 该视频+音频提交 lip_sync），
+		// 与前端 useLipSyncPipeline 分身+上传音频路径对齐——失败可见，不静默丢素材。
+		if stats.AudioCount > 0 {
+			return "", nil, fmt.Errorf("分身生成（subjects）不支持外部音频素材（reference2video 无音频字段，为避免静默丢弃已拒绝）——请分两步：先用 subjects 生成视频，再用该视频+音频提交 lip_sync")
+		}
 		params := entity.GenerationParams{
 			"prompt":   req.Text,
 			"subjects": subjects,

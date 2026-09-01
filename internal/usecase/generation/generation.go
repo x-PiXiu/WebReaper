@@ -565,16 +565,18 @@ func (uc *GenerationUseCase) materializeVoiceClone(ctx context.Context, task ent
 		return
 	}
 
-	// 取试听 URL
+	// 取试听 URL（缺口B防护：仅接受 http(s)——MiMo data: URI 内联可达几十万字符，
+	// 写入 VARCHAR(512) 的 sample_url 会 Data too long 静默失败；转存失败时留空待补偿任务回填）
 	sampleURL := ""
 	var creations []map[string]any
 	if json.Unmarshal([]byte(task.CreationsJSON), &creations) == nil && len(creations) > 0 {
-		sampleURL, _ = creations[0]["stored_url"].(string)
-		if sampleURL == "" {
-			sampleURL, _ = creations[0]["url"].(string)
-		}
-		if sampleURL == "" {
-			sampleURL, _ = creations[0]["demo_audio"].(string)
+		for _, key := range []string{"stored_url", "url", "demo_audio"} {
+			if v, _ := creations[0][key].(string); v != "" {
+				if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+					sampleURL = v
+					break
+				}
+			}
 		}
 	}
 
@@ -601,6 +603,72 @@ func (uc *GenerationUseCase) SetAssetStore(s port.MediaAssetStore) {
 	}
 }
 
+// RetryPendingTransfers 转存补偿（缺口A）：扫描 success 但产物无 stored_url 的任务，
+// 重试 DownloadAndStore（含 data: URI 解码——缺口B）。
+//
+// 触发场景：applyStatus 首次转存失败（网络抖动/私网不可达）仅记 WARN 不阻断终态；
+// 本方法在 Vidu 24h URL 失效窗口内重试，成功后回写 stored_url。
+// 附带：voice_clone 任务转存成功时同步回填 generation_voices.sample_url（物化时
+// 转存尚未完成导致 sample_url 为空的补偿）。
+//
+// 返回：本次成功转存的任务数。
+func (uc *GenerationUseCase) RetryPendingTransfers(ctx context.Context, since time.Time, limit int) (int, error) {
+	if uc.asset == nil || uc.repo == nil {
+		return 0, nil
+	}
+	tasks, err := uc.repo.ListTransferPending(ctx, since, limit)
+	if err != nil {
+		return 0, err
+	}
+	fixed := 0
+	for _, t := range tasks {
+		var creations []entity.CreationItem
+		if json.Unmarshal([]byte(t.CreationsJSON), &creations) != nil || len(creations) == 0 {
+			continue
+		}
+		changed := false
+		for i := range creations {
+			u := creations[i].URL
+			if u == "" || creations[i].StoredURL != "" {
+				continue
+			}
+			if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "data:") {
+				continue // 相对路径/异常形态——不救
+			}
+			stored, sErr := uc.asset.DownloadAndStore(ctx, t.TenantID, u, nil)
+			if sErr != nil {
+				continue // 仍失败——留给下轮（24h 窗口外自然放弃）
+			}
+			creations[i].StoredURL = stored
+			creations[i].StoredAt = time.Now().Format(time.RFC3339)
+			changed = true
+		}
+		if !changed {
+			continue
+		}
+		pj, _ := json.Marshal(creations)
+		t.CreationsJSON = string(pj)
+		t.UpdatedAt = time.Now()
+		if sErr := uc.repo.Save(ctx, t); sErr != nil {
+			continue
+		}
+		fixed++
+		// voice_clone 补偿：物化时转存未完成 → sample_url 为空；此处回填首个永久 URL
+		if t.SubType == "voice_clone" && uc.voiceRepo != nil {
+			var p map[string]any
+			if json.Unmarshal([]byte(t.ParamsJSON), &p) == nil {
+				if vid, _ := p["voice_id"].(string); vid != "" {
+					if v, vErr := uc.voiceRepo.FindByVoiceID(ctx, vid); vErr == nil && v.SampleURL == "" {
+						v.SampleURL = creations[0].StoredURL
+						_ = uc.voiceRepo.Upsert(ctx, v)
+					}
+				}
+			}
+		}
+	}
+	return fixed, nil
+}
+
 // SetSubjectAssetRepo 注入主体资产仓储（可选；26 号计划——终态物化钩子）。
 func (uc *GenerationUseCase) SetSubjectAssetRepo(r port.SubjectAssetRepository) {
 	uc.subjectAssetRepo = r
@@ -609,6 +677,49 @@ func (uc *GenerationUseCase) SetSubjectAssetRepo(r port.SubjectAssetRepository) 
 // SetVoiceRepo 注入音色仓储（可选；26 号计划——voice_clone 终态物化）。
 func (uc *GenerationUseCase) SetVoiceRepo(r port.VoiceLibrary) {
 	uc.voiceRepo = r
+}
+
+// maybeRewriteSampleSynthesis 缺口C：tts 改走"已存样本合成"（厂商隔离）。
+//
+// 触发条件（全部满足）：
+//   - subType == "tts"（lip_sync 文本模式的 voice_id 经 Vidu lip-sync 直用且每次使用
+//     即续期，无需改写）
+//   - voiceRepo 已注入且 voice_setting_voice_id 命中 generation_voices 行
+//   - 该行 scope ∈ {clone, platform} 且 sample_url 为永久 http(s)（转存产物）
+//   - 合成文本 ≤1000 字（Vidu audio-clone 试听文本上限；超长保持原 tts 流程——
+//     Vidu 注册制克隆音色可走 10000 字 TTS，platform 音色超长将收到上游可读错误）
+//
+// 改写结果：subType → voice_clone，params = {audio_url: sample_url, voice_id, text}。
+// 语义：两厂商的克隆端点均支持"样本+文本→音频"——MiMo 原生（audio.voice=样本）、
+// Vidu audio-clone（同 voice_id 幂等复注册 + demo_audio 即合成产物）。
+// 返回 true 表示已改写（调用方需重路由 provider）。
+func (uc *GenerationUseCase) maybeRewriteSampleSynthesis(ctx context.Context, in *SubmitInput) bool {
+	if in.SubType != "tts" || uc.voiceRepo == nil {
+		return false
+	}
+	voiceID, _ := in.Params["voice_setting_voice_id"].(string)
+	if voiceID == "" {
+		return false
+	}
+	v, err := uc.voiceRepo.FindByVoiceID(ctx, voiceID)
+	if err != nil || (v.Scope != "clone" && v.Scope != "platform") {
+		return false
+	}
+	if !strings.HasPrefix(v.SampleURL, "http://") && !strings.HasPrefix(v.SampleURL, "https://") {
+		return false // 无永久样本（转存未完成/失败）——保持原流程
+	}
+	text, _ := in.Params["text"].(string)
+	if text == "" || len([]rune(text)) > 1000 {
+		return false // 空文本或超样本合成上限——保持原流程
+	}
+
+	in.Params = entity.GenerationParams{
+		"audio_url": v.SampleURL, // 已存样本（本地/OSS 永久 URL）——不依赖厂商 voice_id
+		"voice_id":  voiceID,     // Vidu 通道同 ID 复注册（幂等 + 续期 7 天）
+		"text":      text,
+	}
+	in.SubType = "voice_clone"
+	return true
 }
 
 // SetQuotaGate 注入配额门（可选；generation 场景按次限额）。
@@ -669,6 +780,16 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if uc.quotaGate != nil {
 		if err := uc.quotaGate.Check(ctx, in.TenantID, "generation"); err != nil {
 			return entity.GenerationTask{}, err
+		}
+	}
+
+	// 缺口C（厂商隔离）：tts 使用克隆/平台音色时改走"已存样本合成"——
+	// 不依赖厂商 voice_id 生命周期（Vidu 7 天不用即删 / platform-* ID 各厂商均未注册），
+	// 附件收益：Vidu 通道复注册同 voice_id 自动续期 7 天窗口。
+	if uc.maybeRewriteSampleSynthesis(ctx, &in) {
+		provider, err = uc.getProvider(ctx, in.SubType) // subType 已变（tts→voice_clone），厂商重路由
+		if err != nil {
+			return entity.GenerationTask{}, fmt.Errorf("获取生成服务提供商失败: %w", err)
 		}
 	}
 

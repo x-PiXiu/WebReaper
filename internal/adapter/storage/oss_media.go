@@ -128,29 +128,36 @@ func (s *OSSMediaStore) Delete(ctx context.Context, tenantID, assetID string) er
 }
 
 // DownloadAndStore 下载外部 URL → 上传 OSS（Vidu 产物 24h URL 永久化）。
+// 缺口B修复：data: URI（MiMo 同步产物内联 base64）解码后直传 OSS，不走 HTTP。
 func (s *OSSMediaStore) DownloadAndStore(ctx context.Context, tenantID, sourceURL string, meta map[string]string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("下载失败: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("下载 HTTP %d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
-	if err != nil {
-		return "", err
-	}
-	// 扩展名推断（与 LocalMediaStore 一致）
-	ext := ".bin"
-	if meta != nil && meta["ext"] != "" {
-		ext = meta["ext"]
-	} else if ct := resp.Header.Get("Content-Type"); ct != "" {
-		ext = extFromContentType(ct)
+	var data []byte
+	var ext string
+	if d, e, ok := ParseDataURI(sourceURL); ok {
+		data, ext = d, dataURIExtOr(meta, e)
+	} else {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("下载失败: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("下载 HTTP %d", resp.StatusCode)
+		}
+		data, err = io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+		if err != nil {
+			return "", err
+		}
+		// 扩展名推断（与 LocalMediaStore 一致）
+		ext = ".bin"
+		if meta != nil && meta["ext"] != "" {
+			ext = meta["ext"]
+		} else if ct := resp.Header.Get("Content-Type"); ct != "" {
+			ext = extFromContentType(ct)
+		}
 	}
 	key := fmt.Sprintf("%s/creation/%s/%s/%s%s", ossProjectPrefix, tenantID, datePath(), shortID(), ext)
 	if err := s.bucket.PutObject(key, bytes.NewReader(data)); err != nil {

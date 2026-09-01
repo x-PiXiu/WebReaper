@@ -1052,6 +1052,9 @@ func main() {
 		// 注入端点选择器（统一提交API需要）
 		endpointSelector := generation.NewEndpointSelector(mediaStore, nil)
 		endpointSelector.SetSettingRepo(settingRepo) // 27 号：默认音色/分辨率/比例从 DB 读取
+		if voiceRepo != nil {
+			endpointSelector.SetVoiceRepo(voiceRepo) // 白牌化：默认音色从平台 scope=platform+is_default 读取
+		}
 		genUC.SetEndpointSelector(endpointSelector)
 		// 模板管理用例（管理后台可动态配置生成模板）
 		templateRepo := repository.NewGormTemplateRepository(geoRepos.db)
@@ -1142,6 +1145,8 @@ func main() {
 		genUC.SetConcurrency(5)
 		// 轮询驱动：20s 周期扫描未终态任务（回调到达后幂等跳过；双通道合并）
 		_ = taskScheduler.Register(scheduledtask.NewGenerationPollTask(genUC, log))
+		// 转存补偿（缺口A）：每小时重试 success 但产物无 stored_url 的任务（24h 窗口内）
+		_ = taskScheduler.Register(scheduledtask.NewTransferRetryTask(genUC, log))
 		// 任务清理（P3）：每日清理 30 天前终态任务 + 过期素材文件
 		_ = taskScheduler.Register(scheduledtask.NewGenerationCleanupTask(genUC, log))
 

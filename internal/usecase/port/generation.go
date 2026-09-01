@@ -144,6 +144,9 @@ type GenerationTaskRepository interface {
 	// ListBySubType 按端点类型过滤查询（个人分身列表等资产聚合场景）。
 	// state 非空时额外过滤状态；limit<=0 用默认值。
 	ListBySubType(ctx context.Context, tenantID, subType, state string, limit int) ([]entity.GenerationTask, error)
+	// ListTransferPending 转存补偿（缺口A）：success 且产物有 url 无 stored_url、
+	// finished_at 不早于 since（Vidu 24h URL 窗口内可救）的任务。按 finished_at 降序。
+	ListTransferPending(ctx context.Context, since time.Time, limit int) ([]entity.GenerationTask, error)
 }
 
 // GenerationSpecRepository 端点/模型规格仓储（DB 为唯一事实源——全局掌控）。
@@ -206,6 +209,8 @@ type VoiceLibrary interface {
 	GetDefault(ctx context.Context) (entity.GenerationVoice, error)
 	// SetDefault 设为平台默认音色（同一 scope=platform 内仅一条 default=true）。
 	SetDefault(ctx context.Context, voiceID string) error
+	// FindByVoiceID 按音色 ID 精确查询单条（缺口C：克隆/平台音色的样本合成通道定位样本音频）。
+	FindByVoiceID(ctx context.Context, voiceID string) (entity.GenerationVoice, error)
 }
 
 // TaskNotifier 生成任务终态通知（可选注入——站内信主动唤醒）。

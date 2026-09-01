@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -94,5 +95,45 @@ func TestReadLocal(t *testing.T) {
 	// 路径穿越 → 拒绝
 	if _, _, ok := s.ReadLocal(context.Background(), "http://localhost:8082/media/../secret"); ok {
 		t.Error("路径穿越应被拒绝")
+	}
+}
+
+// TestDownloadAndStoreDataURI 缺口B修复：data: URI（MiMo 内联 base64）直接落盘。
+func TestDownloadAndStoreDataURI(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewLocalMediaStore(dir, "http://localhost:8082")
+	if err != nil {
+		t.Fatalf("NewLocalMediaStore: %v", err)
+	}
+	uri := "data:audio/mp3;base64," + base64.StdEncoding.EncodeToString([]byte("fake-mimo-audio"))
+	stored, err := store.DownloadAndStore(context.Background(), "t1", uri, nil)
+	if err != nil {
+		t.Fatalf("DownloadAndStore data URI: %v", err)
+	}
+	if !strings.HasPrefix(stored, "http://localhost:8082/media/t1/") {
+		t.Errorf("stored URL 前缀异常: %s", stored)
+	}
+	if !strings.HasSuffix(stored, ".mp3") {
+		t.Errorf("扩展名应按 mime 推断为 .mp3: %s", stored)
+	}
+	// 文件落盘校验
+	rel := strings.TrimPrefix(stored, "http://localhost:8082/media/")
+	b, rErr := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	if rErr != nil || string(b) != "fake-mimo-audio" {
+		t.Errorf("落盘内容不符: err=%v content=%q", rErr, string(b))
+	}
+}
+
+// TestParseDataURI 非 data: 形态返回 ok=false（走原 HTTP 路径）。
+func TestParseDataURI(t *testing.T) {
+	if _, _, ok := ParseDataURI("https://example.com/a.mp3"); ok {
+		t.Error("http URL 不应命中 data URI 分支")
+	}
+	if _, _, ok := ParseDataURI("data:"); ok {
+		t.Error("缺 payload 的 data: 应解析失败")
+	}
+	d, ext, ok := ParseDataURI("data:image/png;base64,iVBORw0KGgo=")
+	if !ok || ext != ".png" || len(d) != 8 {
+		t.Errorf("png data URI 解析异常: ok=%v ext=%s len=%d", ok, ext, len(d))
 	}
 }

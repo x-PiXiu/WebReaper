@@ -149,6 +149,9 @@ func (r *fakeRepo) Delete(context.Context, string, string) error                
 func (r *fakeRepo) ListBySubType(context.Context, string, string, string, int) ([]entity.GenerationTask, error) {
 	return nil, nil
 }
+func (r *fakeRepo) ListTransferPending(context.Context, time.Time, int) ([]entity.GenerationTask, error) {
+	return nil, nil
+}
 
 func TestSubmitSyncEndpointImmediateSuccess(t *testing.T) {
 	uc := NewGenerationUseCase(map[string]port.GenerationProvider{"fake": fakeProvider{}}, fakeRegistry{}, &fakeRepo{})
