@@ -9,13 +9,13 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"crypto/sha256"
-	"log"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,13 +30,13 @@ import (
 
 // UseCase 视频文案提取用例。
 type UseCase struct {
-	resolver    port.VideoLinkResolver  // 可选；nil=不支持分享链
-	av          port.MediaAVTool        // 可选；nil/不可用=降级直传
-	transcriber port.SpeechTranscriber  // 必需（未配置时报可读错误）
-	ai          port.AIGenerator        // 改写双产出
+	resolver    port.VideoLinkResolver // 可选；nil=不支持分享链
+	av          port.MediaAVTool       // 可选；nil/不可用=降级直传
+	transcriber port.SpeechTranscriber // 必需（未配置时报可读错误）
+	ai          port.AIGenerator       // 改写双产出
 	client      *http.Client
-	cache       port.CacheStore         // 可选；提取结果缓存（同 URL 24h 内免重复 ASR 计费）
-	asyncTasks  sync.Map                // 轻量异步任务注册表（taskID → *AsyncTask）
+	cache       port.CacheStore // 可选；提取结果缓存（同 URL 24h 内免重复 ASR 计费）
+	asyncTasks  sync.Map        // 轻量异步任务注册表（taskID → *AsyncTask）
 }
 
 // SetCache 注入缓存（可选；nil=不缓存——每次全量提取）。
@@ -50,11 +50,11 @@ func (uc *UseCase) SetCache(c port.CacheStore) { uc.cache = c }
 
 // AsyncTask 异步提取任务视图。
 type AsyncTask struct {
-	ID        string        `json:"id"`
-	Status    string        `json:"status"` // pending / done / error
+	ID        string         `json:"id"`
+	Status    string         `json:"status"` // pending / done / error
 	Result    *ExtractResult `json:"result,omitempty"`
-	Err       string        `json:"error,omitempty"`
-	CreatedAt time.Time     `json:"created_at"`
+	Err       string         `json:"error,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 const asyncTaskTTL = 30 * time.Minute
@@ -118,22 +118,32 @@ func NewUseCase(resolver port.VideoLinkResolver, av port.MediaAVTool, transcribe
 
 // ExtractInput 提取输入（三选一：直链 / 分享链 / 平台视频 ID）。
 type ExtractInput struct {
-	TenantID  string
-	VideoURL  string // 直接可下载的视频直链（优先）
-	ShareURL  string // 分享链/网页链（resolver 解析）
-	Title     string // 已知标题（灵感广场来源带出，可空）
+	TenantID string
+	VideoURL string // 直接可下载的视频直链（优先）
+	ShareURL string // 分享链/网页链（resolver 解析）
+	Title    string // 已知标题（灵感广场来源带出，可空）
 }
 
 // ExtractResult 提取产物。
 type ExtractResult struct {
 	RawText string // 说话内容原文（按句分行，换行符连接——编辑友好）
 	Title   string
-	Method  string // subtitle / asr / asr / asr-direct（ffmpeg 缺席直传）
+	Method  string   // subtitle / asr / asr / asr-direct（ffmpeg 缺席直传）
 	Lines   []string // 按句切分的行（口播逐句单位——服务端规范化，多消费方共享）
 }
 
-// splitSentences 按句末标点（。！？!?；;…）切分为行；超长句（>80 字）按逗号/顿号
-// 二次切分为 ≤40 字的读句（口播稿的自然单位——一行一句便于确认与编辑）。
+// 读句目标长度（rune 数）：口播稿的自然单位——一行一句（10~24 字）便于确认、
+// 编辑与 B-Roll 插入点对齐。ASR（mimo）真实输出标点稀疏（一段 22s 语音仅句末 1 个
+// 句号、其余全逗号），旧逻辑"只按句末标点 + >80 字才二次切"导致 45/71 字巨行——
+// 修复：二级按逗号/顿号贪心聚合为 ≤readSentenceMaxRunes 的读句（标点保留在行尾）。
+const readSentenceMaxRunes = 24
+
+// splitSentences 台词切分为"读句"行：
+//
+//	① 一级：按句末标点（。！？!?；;…）切分
+//	② 二级：行超过 readSentenceMaxRunes 时，按逗号/顿号贪心聚合——每个子句尝试并入
+//	   当前行，放不下则开新行（子句边界天然是语音停顿点，B-Roll 静音窗口更易对齐）；
+//	   无任何逗号且超长的极端串按时长感兜底硬切
 func splitSentences(text string) []string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -153,27 +163,61 @@ func splitSentences(text string) []string {
 	if t := strings.TrimSpace(cur.String()); t != "" {
 		primary = append(primary, t) // 尾句（可能无句末标点）
 	}
-	// 超长句二次切分（按逗号/顿号，目标 ≤40 字/行）
+
 	var out []string
 	for _, l := range primary {
-		runes := []rune(l)
-		if len(runes) <= 80 {
+		if len([]rune(l)) <= readSentenceMaxRunes {
 			out = append(out, l)
 			continue
 		}
+		// 按逗号/顿号（含西文逗号）拆子句
+		var clauses []string
 		var seg strings.Builder
-		for _, r := range runes {
+		for _, r := range l {
 			seg.WriteRune(r)
-			if strings.ContainsRune("，、,--", r) && len([]rune(seg.String())) >= 40 {
-				if t := strings.TrimSpace(seg.String()); t != "" {
-					out = append(out, t)
-				}
+			if strings.ContainsRune("，、,", r) {
+				clauses = append(clauses, seg.String())
 				seg.Reset()
 			}
 		}
-		if t := strings.TrimSpace(seg.String()); t != "" {
-			out = append(out, t)
+		if t := seg.String(); strings.TrimSpace(t) != "" {
+			clauses = append(clauses, t)
 		}
+		if len(clauses) <= 1 {
+			// 无逗号的超长串：硬切为 ≤readSentenceMaxRunes 段（ASR 极少出现，兜底）
+			runes := []rune(l)
+			for i := 0; i < len(runes); i += readSentenceMaxRunes {
+				end := i + readSentenceMaxRunes
+				if end > len(runes) {
+					end = len(runes)
+				}
+				if t := strings.TrimSpace(string(runes[i:end])); t != "" {
+					out = append(out, t)
+				}
+			}
+			continue
+		}
+		// 贪心聚合子句 → ≤readSentenceMaxRunes 的读句
+		var line strings.Builder
+		flush := func() {
+			if t := strings.TrimSpace(line.String()); t != "" {
+				out = append(out, t)
+			}
+			line.Reset()
+		}
+		for _, c := range clauses {
+			cl := len([]rune(c))
+			curLen := len([]rune(line.String()))
+			if curLen > 0 && curLen+cl > readSentenceMaxRunes {
+				flush()
+			}
+			line.WriteString(c)
+			// 单子句自身超长（罕见）：切完这行
+			if len([]rune(line.String())) >= readSentenceMaxRunes && cl >= readSentenceMaxRunes {
+				flush()
+			}
+		}
+		flush()
 	}
 	return out
 }
@@ -573,8 +617,8 @@ type ScriptResult struct {
 }
 
 // RewriteScript 原文 → 双产出（一次 LLM 调用）。topic 为用户的一句话意图
-//（品牌/产品上下文由调用方拼入——向导持品牌知识库）；rawText 为 ASR/字幕原文。
-func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic string) (*ScriptResult, error) {
+// （品牌/产品上下文由调用方拼入——向导持品牌知识库）；rawText 为 ASR/字幕原文。
+func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic, requirement string) (*ScriptResult, error) {
 	if uc.ai == nil {
 		return nil, fmt.Errorf("AI 服务未配置")
 	}
@@ -590,6 +634,9 @@ func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic string) (*S
 		"rewrite：改写版——借鉴原文的结构（开头钩子→内容→行动号召），内容围绕给定主题重写，口语化适合口播，长度与原文相当（±20%）。\n" +
 		"严格输出 JSON：{\"clean\":\"...\",\"rewrite\":\"...\"}"
 	user := fmt.Sprintf("主题：%s\n\n参考视频转录原文：\n%s", topic, rawText)
+	if req := strings.TrimSpace(requirement); req != "" {
+		user += fmt.Sprintf("\n\n润色要求：%s（只作用于 rewrite 版；clean 版仍为最小干预清洗）", req)
+	}
 	out, err := uc.ai.ChatStream(ctx, "", "default", []port.ChatMessage{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
@@ -608,6 +655,10 @@ func (uc *UseCase) RewriteScript(ctx context.Context, rawText, topic string) (*S
 	if res.Rewrite == "" {
 		res.Rewrite = res.Clean
 	}
+	// 23 号 §3.1：润色结果同样逐句显示（保持一行一句形态）。实测 LLM 会把多行
+	// 输入压成单段（clean/rewrite 换行数=0）——对双产物重跑读句切分，形态由本层保证。
+	res.Clean = strings.Join(splitSentences(res.Clean), "\n")
+	res.Rewrite = strings.Join(splitSentences(res.Rewrite), "\n")
 	return res, nil
 }
 

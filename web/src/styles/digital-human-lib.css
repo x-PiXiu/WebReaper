@@ -42,6 +42,46 @@
   line-height: 1.6;
 }
 
+/* 子 Tab 切换（官方资产 / 我的环境 / 我的分身） */
+.dh-lib-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--dh-line);
+  box-shadow: 0 4px 14px rgba(40, 36, 80, 0.04);
+}
+
+.dh-lib-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #5c5c6a;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.dh-lib-tab:hover {
+  color: var(--dh-purple);
+  background: var(--dh-purple-soft);
+}
+
+.dh-lib-tab.is-active {
+  color: #fff;
+  background: var(--dh-purple);
+  box-shadow: 0 8px 18px rgba(124, 92, 252, 0.28);
+}
+
+[data-theme='dark'] .dh-lib-tabs {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 /* 分区结构（23 号计划 §2.3：上官方主体区 + 下我的分身区） */
 .dh-lib-section {
   margin-bottom: 30px;
@@ -62,6 +102,16 @@
   letter-spacing: -0.01em;
   color: var(--dh-ink);
 }
+
+/* 分身三态徽标配色（25 号阶段二） */
+.dh-lib-card-tag[data-tone='success'] { background: rgba(34, 197, 94, 0.16); color: #15803d; }
+.dh-lib-card-tag[data-tone='processing'] { background: rgba(59, 130, 246, 0.14); color: #1d4ed8; }
+.dh-lib-card-tag[data-tone='warning'] { background: rgba(245, 158, 11, 0.16); color: #b45309; }
+.dh-lib-card-tag[data-tone='danger'] { background: rgba(239, 68, 68, 0.14); color: #b91c1c; }
+[data-theme='dark'] .dh-lib-card-tag[data-tone='success'] { color: #4ade80; }
+[data-theme='dark'] .dh-lib-card-tag[data-tone='processing'] { color: #60a5fa; }
+[data-theme='dark'] .dh-lib-card-tag[data-tone='warning'] { color: #fbbf24; }
+[data-theme='dark'] .dh-lib-card-tag[data-tone='danger'] { color: #f87171; }
 
 .dh-lib-section-note {
   font-size: 12.5px;

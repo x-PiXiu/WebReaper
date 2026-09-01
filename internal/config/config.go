@@ -344,7 +344,7 @@ func Load() Config {
 		},
 		JWT: JWTConfig{
 			Secret:     os.Getenv("JWT_SECRET"),
-			Expiration: getenvInt("JWT_EXPIRATION", 3600),
+			Expiration: getenvInt("JWT_EXPIRATION", 86400), // 默认24小时
 		},
 		Publish: PublishConfig{
 			CookieSecret:  os.Getenv("PUBLISH_COOKIE_SECRET"),

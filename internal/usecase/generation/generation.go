@@ -10,15 +10,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"regexp"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"webreaper/internal/domain/entity"
@@ -33,7 +34,7 @@ var subTypeToCapID = map[string]string{
 	"start_end2video": "video",
 	"reference2video": "video",
 	"multiframe":      "video",
-	"digital_human":   "digital-human",
+	"digital_human":   "digital-human", // 已废弃（2026-08-31），保留映射兼容旧任务查询
 	"lip_sync":        "video",
 	"subject":         "video",
 	"text2image":      "image",
@@ -51,12 +52,12 @@ var subTypeToCapID = map[string]string{
 //   - getProvider()：根据 subType 动态选择 provider
 type GenerationUseCase struct {
 	providers map[string]port.GenerationProvider // 多厂商 provider
-	resolver  port.CapabilityResolver           // 能力路由解析器（可选；nil=使用默认provider）
+	resolver  port.CapabilityResolver            // 能力路由解析器（可选；nil=使用默认provider）
 	registry  port.EndpointRegistry
 	repo      port.GenerationTaskRepository
 	asset     port.MediaAssetStore // 可选；nil=不转存（产物仅保留 24h URL）
-	quotaGate port.QuotaStore     // 可选；generation 场景配额
-	usageRec  port.UsageRecorder  // 可选；generation 场景计量
+	quotaGate port.QuotaStore      // 可选；generation 场景配额
+	usageRec  port.UsageRecorder   // 可选；generation 场景计量
 	// submitSem 并发节流（P3）：限制同时提交到上游的请求数，防瞬时高峰触发
 	// Vidu QuotaExceeded/429。nil=不节流（向后兼容）。容量由 SetConcurrency 配置。
 	submitSem chan struct{}
@@ -67,6 +68,9 @@ type GenerationUseCase struct {
 	notifier port.TaskNotifier
 	// settingRepo 系统设置（可选；傻瓜式默认值通道——watermark/off_peak 等管理后台全局默认）
 	settingRepo port.SystemSettingRepository
+	// 官方主体缓存（25 号阶段一——subject_library.go；键=next_page_token）
+	officialSubjectMu    sync.Mutex
+	officialSubjectCache map[string]officialSubjectCacheEntry
 	// templateRepo 生成模板（可选；傻瓜式默认值通道——模板 default_params 填充未显式指定的参数）
 	templateRepo port.TemplateRepository
 	// callbackURL 公网回调地址（可选；空=纯轮询。注入到支持回调的端点请求体——
@@ -80,10 +84,105 @@ type GenerationUseCase struct {
 	defaultProvider string
 	// urlResolver 素材 URL 可达性解析（可选；nil=不转换——SRP：URL 判断+格式转换移至 Adapter 层）
 	urlResolver port.MaterialURLResolver
+	// subjectAssetRepo 主体资产仓储（可选；26 号计划——终态物化钩子写入）。
+	subjectAssetRepo port.SubjectAssetRepository
+	// voiceRepo 音色仓储（可选；26 号计划——voice_clone 终态物化写入）。
+	voiceRepo port.VoiceLibrary
+	// placeholderTranslator 占位符翻译器（28号计划——统一处理 @素材/@主体 引用）。
+	placeholderTranslator *PlaceholderTranslator
+}
+
+// GenerationOption 函数式选项（27 号优化——替代 14 个 Setter，构造时一次性注入）。
+type GenerationOption func(*GenerationUseCase)
+
+// WithCapabilityResolver 注入能力路由解析器。
+func WithCapabilityResolver(r port.CapabilityResolver) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.resolver = r }
+}
+
+// WithNonceStore 注入回调 nonce 防重放存储。
+func WithNonceStore(s port.CallbackNonceStore) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.nonceStore = s }
+}
+
+// WithTaskNotifier 注入终态通知器。
+func WithTaskNotifier(n port.TaskNotifier) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.notifier = n }
+}
+
+// WithCallbackURL 注入公网回调地址。
+func WithCallbackURL(u string) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.callbackURL = u }
+}
+
+// WithComposer 注入 B-Roll 合成编排。
+func WithComposer(c port.Composer) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.composer = c }
+}
+
+// WithEndpointSelector 注入端点选择器。
+func WithEndpointSelector(s port.EndpointSelector) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.endpointSelector = s }
+}
+
+// WithAssetStore 注入媒体资产存储。
+func WithAssetStore(s port.MediaAssetStore) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.asset = s }
+}
+
+// WithSubjectAssetRepo 注入主体资产仓储（26 号计划）。
+func WithSubjectAssetRepo(r port.SubjectAssetRepository) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.subjectAssetRepo = r }
+}
+
+// WithVoiceRepo 注入音色仓储（26 号计划——voice_clone 物化）。
+func WithVoiceRepo(r port.VoiceLibrary) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.voiceRepo = r }
+}
+
+// WithQuotaGate 注入配额门禁。
+func WithQuotaGate(g port.QuotaStore) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.quotaGate = g }
+}
+
+// WithUsageRecorder 注入用量记录器。
+func WithUsageRecorder(r port.UsageRecorder) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.usageRec = r }
+}
+
+// WithConcurrency 设置并发节流上限。
+func WithConcurrency(n int) GenerationOption {
+	return func(uc *GenerationUseCase) {
+		if n > 0 {
+			uc.submitSem = make(chan struct{}, n)
+		}
+	}
+}
+
+// WithSettingRepo 注入系统设置仓储。
+func WithSettingRepo(sr port.SystemSettingRepository) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.settingRepo = sr }
+}
+
+// WithTemplateRepo 注入生成模板仓储。
+func WithTemplateRepo(tr port.TemplateRepository) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.templateRepo = tr }
+}
+
+// WithURLResolver 注入素材 URL 解析器。
+func WithURLResolver(r port.MaterialURLResolver) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.urlResolver = r }
+}
+
+// WithPlaceholderTranslator 注入占位符翻译器（28号计划）。
+func WithPlaceholderTranslator(t *PlaceholderTranslator) GenerationOption {
+	return func(uc *GenerationUseCase) { uc.placeholderTranslator = t }
 }
 
 // NewGenerationUseCase 创建统一生成用例（支持多厂商）。
-func NewGenerationUseCase(providers map[string]port.GenerationProvider, registry port.EndpointRegistry, repo port.GenerationTaskRepository) *GenerationUseCase {
+//
+// 可选依赖通过 Option 注入（推荐）或 SetXxx 方法注入（向后兼容）。
+func NewGenerationUseCase(providers map[string]port.GenerationProvider, registry port.EndpointRegistry, repo port.GenerationTaskRepository, opts ...GenerationOption) *GenerationUseCase {
 	// 确定默认厂商（第一个非nil的provider）
 	defaultProvider := ""
 	for name, p := range providers {
@@ -93,13 +192,18 @@ func NewGenerationUseCase(providers map[string]port.GenerationProvider, registry
 		}
 	}
 
-	return &GenerationUseCase{
+	uc := &GenerationUseCase{
 		providers:       providers,
 		registry:        registry,
 		repo:            repo,
 		nonceStore:      newMemoryNonceStore(),
 		defaultProvider: defaultProvider,
 	}
+	// 应用选项
+	for _, opt := range opts {
+		opt(uc)
+	}
+	return uc
 }
 
 // SetCapabilityResolver 注入能力路由解析器（可选；nil=使用默认provider）。
@@ -154,7 +258,9 @@ type memoryNonceStore struct {
 	nonces map[string]time.Time
 }
 
-func newMemoryNonceStore() *memoryNonceStore { return &memoryNonceStore{nonces: map[string]time.Time{}} }
+func newMemoryNonceStore() *memoryNonceStore {
+	return &memoryNonceStore{nonces: map[string]time.Time{}}
+}
 
 func (s *memoryNonceStore) Seen(_ context.Context, nonce string) bool {
 	now := time.Now()
@@ -267,8 +373,8 @@ func (uc *GenerationUseCase) getDefaultModel(ctx context.Context, subType string
 
 // inlineMediaKeys 请求体中承载媒体 URL 的字段（数组与单值两种形态）。
 var inlineMediaKeys = [2][]string{
-	{"images", "videos"},                        // 数组字段
-	{"image", "start_image", "audio_url"},       // 单值字段
+	{"images", "videos"},                  // 数组字段
+	{"image", "start_image", "audio_url"}, // 单值字段
 }
 
 // inlineLocalMedia 本站托管素材 → base64 data URI 内联（body 级——ParamsJSON/
@@ -313,11 +419,307 @@ func (uc *GenerationUseCase) notifyTerminal(ctx context.Context, task entity.Gen
 	uc.notifier.NotifyTaskTerminal(ctx, task)
 }
 
+// maybeMaterializeAsset 终态物化钩子（26 号计划——任务终态 success 时快照到独立资产表）。
+//
+// 规则：
+//   - sub_type=subject && state=success → upsert subject_assets（server_id 唯一键幂等）
+//   - sub_type=reference2video && params.avatar_video=true && state=success → 回填
+//     对应 subject_assets.avatar_video_url（按 subjects[0].server_id 定位）
+//   - sub_type=voice_clone && state=success → upsert generation_voices(scope=clone)
+//
+// 失败/取消不物化——留在任务中心可重试，资产列表天然干净。
+// fire-and-forget：物化失败仅日志，不影响状态机。
+func (uc *GenerationUseCase) maybeMaterializeAsset(ctx context.Context, task entity.GenerationTask) {
+	if task.State != entity.TaskStateSuccess {
+		return
+	}
+
+	switch task.SubType {
+	case "subject":
+		if uc.subjectAssetRepo != nil {
+			uc.materializeSubject(ctx, task)
+		}
+	case "reference2video":
+		if uc.subjectAssetRepo != nil {
+			uc.maybeBackfillAvatarVideo(ctx, task)
+		}
+	case "voice_clone":
+		if uc.voiceRepo != nil {
+			uc.materializeVoiceClone(ctx, task)
+		}
+	}
+}
+
+// materializeSubject 将成功的主体任务物化到 subject_assets 表。
+func (uc *GenerationUseCase) materializeSubject(ctx context.Context, task entity.GenerationTask) {
+	var p map[string]any
+	if err := json.Unmarshal([]byte(task.ParamsJSON), &p); err != nil {
+		return
+	}
+
+	serverID := task.ProviderTaskID
+	if serverID == "" {
+		serverID = firstCreationID(task.CreationsJSON)
+	}
+	if serverID == "" {
+		return // 无 server_id 不可物化
+	}
+
+	name, _ := p["name"].(string)
+	if name == "" {
+		name = "未命名分身"
+	}
+	voiceID, _ := p["voice_id"].(string)
+	kind := entity.SubjectKindPerson
+	if k, _ := p["kind"].(string); k == "scene" {
+		kind = entity.SubjectKindScene
+	}
+
+	// 封面图：images[0] 或 creations 中的 cover_url
+	var portraitURL string
+	if imgs, ok := p["images"].([]any); ok && len(imgs) > 0 {
+		portraitURL, _ = imgs[0].(string)
+	}
+	if portraitURL == "" {
+		var creations []map[string]any
+		if json.Unmarshal([]byte(task.CreationsJSON), &creations) == nil && len(creations) > 0 {
+			portraitURL, _ = creations[0]["cover_url"].(string)
+		}
+	}
+
+	asset := entity.SubjectAsset{
+		ID:           task.ID,
+		TenantID:     task.TenantID,
+		Scope:        entity.SubjectScopePersonal,
+		Kind:         kind,
+		Name:         name,
+		ServerID:     serverID,
+		PortraitURL:  portraitURL,
+		VoiceID:      voiceID,
+		SourceTaskID: task.ID,
+		Status:       entity.SubjectStatusActive,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	if err := uc.subjectAssetRepo.Upsert(ctx, asset); err != nil {
+		log.Printf("[materialize] 主体 %s 物化失败（不影响任务状态）: %v", task.ID, err)
+	}
+}
+
+// maybeBackfillAvatarVideo 链式形象视频成功后回填 subject_assets.avatar_video_url。
+func (uc *GenerationUseCase) maybeBackfillAvatarVideo(ctx context.Context, task entity.GenerationTask) {
+	var p map[string]any
+	if err := json.Unmarshal([]byte(task.ParamsJSON), &p); err != nil {
+		return
+	}
+	// 仅处理链式形象视频（params.avatar_video=true）
+	isAvatar, _ := p["avatar_video"].(bool)
+	if !isAvatar {
+		return
+	}
+
+	// 从 subjects[0].server_id 定位主体资产
+	subjects, ok := p["subjects"].([]any)
+	if !ok || len(subjects) == 0 {
+		return
+	}
+	subj, ok := subjects[0].(map[string]any)
+	if !ok {
+		return
+	}
+	serverID, _ := subj["server_id"].(string)
+	if serverID == "" {
+		return
+	}
+
+	// 取形象视频产物 URL
+	videoURL := ""
+	var creations []map[string]any
+	if json.Unmarshal([]byte(task.CreationsJSON), &creations) == nil && len(creations) > 0 {
+		videoURL, _ = creations[0]["stored_url"].(string)
+		if videoURL == "" {
+			videoURL, _ = creations[0]["url"].(string)
+		}
+	}
+	if videoURL == "" {
+		return
+	}
+
+	if err := uc.subjectAssetRepo.UpdateAvatarVideoURL(ctx, serverID, videoURL); err != nil {
+		log.Printf("[materialize] 形象视频回填失败（server_id=%s）: %v", serverID, err)
+	}
+}
+
+// materializeVoiceClone 将成功的声音克隆任务物化到 generation_voices 表（scope=clone）。
+//
+// voice_id 来源：params.voice_id（提交时生成的唯一 ID）。
+// sample_url 来源：creations[0].url（克隆产物的试听 URL）。
+func (uc *GenerationUseCase) materializeVoiceClone(ctx context.Context, task entity.GenerationTask) {
+	var p map[string]any
+	if err := json.Unmarshal([]byte(task.ParamsJSON), &p); err != nil {
+		return
+	}
+	voiceID, _ := p["voice_id"].(string)
+	if voiceID == "" {
+		return
+	}
+
+	// 取试听 URL（缺口B防护：仅接受 http(s)——MiMo data: URI 内联可达几十万字符，
+	// 写入 VARCHAR(512) 的 sample_url 会 Data too long 静默失败；转存失败时留空待补偿任务回填）
+	sampleURL := ""
+	var creations []map[string]any
+	if json.Unmarshal([]byte(task.CreationsJSON), &creations) == nil && len(creations) > 0 {
+		for _, key := range []string{"stored_url", "url", "demo_audio"} {
+			if v, _ := creations[0][key].(string); v != "" {
+				if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+					sampleURL = v
+					break
+				}
+			}
+		}
+	}
+
+	voice := entity.GenerationVoice{
+		VoiceID:      voiceID,
+		Language:     "克隆音色",
+		Name:         fmt.Sprintf("克隆-%s", voiceID[:min(8, len(voiceID))]),
+		SampleURL:    sampleURL,
+		Scope:        "clone",
+		TenantID:     task.TenantID,
+		SourceTaskID: task.ID,
+		Status:       "active",
+	}
+
+	if err := uc.voiceRepo.Upsert(ctx, voice); err != nil {
+		log.Printf("[materialize] 音色 %s 物化失败（不影响任务状态）: %v", voiceID, err)
+	}
+}
+
 // SetAssetStore 注入媒体资产存储（可选；nil=产物不转存）。
 func (uc *GenerationUseCase) SetAssetStore(s port.MediaAssetStore) {
 	if s != nil {
 		uc.asset = s
 	}
+}
+
+// RetryPendingTransfers 转存补偿（缺口A）：扫描 success 但产物无 stored_url 的任务，
+// 重试 DownloadAndStore（含 data: URI 解码——缺口B）。
+//
+// 触发场景：applyStatus 首次转存失败（网络抖动/私网不可达）仅记 WARN 不阻断终态；
+// 本方法在 Vidu 24h URL 失效窗口内重试，成功后回写 stored_url。
+// 附带：voice_clone 任务转存成功时同步回填 generation_voices.sample_url（物化时
+// 转存尚未完成导致 sample_url 为空的补偿）。
+//
+// 返回：本次成功转存的任务数。
+func (uc *GenerationUseCase) RetryPendingTransfers(ctx context.Context, since time.Time, limit int) (int, error) {
+	if uc.asset == nil || uc.repo == nil {
+		return 0, nil
+	}
+	tasks, err := uc.repo.ListTransferPending(ctx, since, limit)
+	if err != nil {
+		return 0, err
+	}
+	fixed := 0
+	for _, t := range tasks {
+		var creations []entity.CreationItem
+		if json.Unmarshal([]byte(t.CreationsJSON), &creations) != nil || len(creations) == 0 {
+			continue
+		}
+		changed := false
+		for i := range creations {
+			u := creations[i].URL
+			if u == "" || creations[i].StoredURL != "" {
+				continue
+			}
+			if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "data:") {
+				continue // 相对路径/异常形态——不救
+			}
+			stored, sErr := uc.asset.DownloadAndStore(ctx, t.TenantID, u, nil)
+			if sErr != nil {
+				continue // 仍失败——留给下轮（24h 窗口外自然放弃）
+			}
+			creations[i].StoredURL = stored
+			creations[i].StoredAt = time.Now().Format(time.RFC3339)
+			changed = true
+		}
+		if !changed {
+			continue
+		}
+		pj, _ := json.Marshal(creations)
+		t.CreationsJSON = string(pj)
+		t.UpdatedAt = time.Now()
+		if sErr := uc.repo.Save(ctx, t); sErr != nil {
+			continue
+		}
+		fixed++
+		// voice_clone 补偿：物化时转存未完成 → sample_url 为空；此处回填首个永久 URL
+		if t.SubType == "voice_clone" && uc.voiceRepo != nil {
+			var p map[string]any
+			if json.Unmarshal([]byte(t.ParamsJSON), &p) == nil {
+				if vid, _ := p["voice_id"].(string); vid != "" {
+					if v, vErr := uc.voiceRepo.FindByVoiceID(ctx, vid); vErr == nil && v.SampleURL == "" {
+						v.SampleURL = creations[0].StoredURL
+						_ = uc.voiceRepo.Upsert(ctx, v)
+					}
+				}
+			}
+		}
+	}
+	return fixed, nil
+}
+
+// SetSubjectAssetRepo 注入主体资产仓储（可选；26 号计划——终态物化钩子）。
+func (uc *GenerationUseCase) SetSubjectAssetRepo(r port.SubjectAssetRepository) {
+	uc.subjectAssetRepo = r
+}
+
+// SetVoiceRepo 注入音色仓储（可选；26 号计划——voice_clone 终态物化）。
+func (uc *GenerationUseCase) SetVoiceRepo(r port.VoiceLibrary) {
+	uc.voiceRepo = r
+}
+
+// maybeRewriteSampleSynthesis 缺口C：tts 改走"已存样本合成"（厂商隔离）。
+//
+// 触发条件（全部满足）：
+//   - subType == "tts"（lip_sync 文本模式的 voice_id 经 Vidu lip-sync 直用且每次使用
+//     即续期，无需改写）
+//   - voiceRepo 已注入且 voice_setting_voice_id 命中 generation_voices 行
+//   - 该行 scope ∈ {clone, platform} 且 sample_url 为永久 http(s)（转存产物）
+//   - 合成文本 ≤1000 字（Vidu audio-clone 试听文本上限；超长保持原 tts 流程——
+//     Vidu 注册制克隆音色可走 10000 字 TTS，platform 音色超长将收到上游可读错误）
+//
+// 改写结果：subType → voice_clone，params = {audio_url: sample_url, voice_id, text}。
+// 语义：两厂商的克隆端点均支持"样本+文本→音频"——MiMo 原生（audio.voice=样本）、
+// Vidu audio-clone（同 voice_id 幂等复注册 + demo_audio 即合成产物）。
+// 返回 true 表示已改写（调用方需重路由 provider）。
+func (uc *GenerationUseCase) maybeRewriteSampleSynthesis(ctx context.Context, in *SubmitInput) bool {
+	if in.SubType != "tts" || uc.voiceRepo == nil {
+		return false
+	}
+	voiceID, _ := in.Params["voice_setting_voice_id"].(string)
+	if voiceID == "" {
+		return false
+	}
+	v, err := uc.voiceRepo.FindByVoiceID(ctx, voiceID)
+	if err != nil || (v.Scope != "clone" && v.Scope != "platform") {
+		return false
+	}
+	if !strings.HasPrefix(v.SampleURL, "http://") && !strings.HasPrefix(v.SampleURL, "https://") {
+		return false // 无永久样本（转存未完成/失败）——保持原流程
+	}
+	text, _ := in.Params["text"].(string)
+	if text == "" || len([]rune(text)) > 1000 {
+		return false // 空文本或超样本合成上限——保持原流程
+	}
+
+	in.Params = entity.GenerationParams{
+		"audio_url": v.SampleURL, // 已存样本（本地/OSS 永久 URL）——不依赖厂商 voice_id
+		"voice_id":  voiceID,     // Vidu 通道同 ID 复注册（幂等 + 续期 7 天）
+		"text":      text,
+	}
+	in.SubType = "voice_clone"
+	return true
 }
 
 // SetQuotaGate 注入配额门（可选；generation 场景按次限额）。
@@ -344,13 +746,13 @@ func (uc *GenerationUseCase) SetConcurrency(n int) {
 
 // SubmitInput 提交生成任务的输入（API 契约由 handler 转换）。
 type SubmitInput struct {
-	TenantID string
-	BrandID  string
-	SubType  string
-	Model    string
-	Params   entity.GenerationParams
-	Refs     []entity.PromptRef // @引用素材（服务端翻译层按端点格式映射）
-	OffPeak  bool
+	TenantID  string
+	BrandID   string
+	SubType   string
+	Model     string
+	Params    entity.GenerationParams
+	Refs      []entity.PromptRef // @引用素材（服务端翻译层按端点格式映射）
+	OffPeak   bool
 	Watermark bool
 }
 
@@ -378,6 +780,16 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if uc.quotaGate != nil {
 		if err := uc.quotaGate.Check(ctx, in.TenantID, "generation"); err != nil {
 			return entity.GenerationTask{}, err
+		}
+	}
+
+	// 缺口C（厂商隔离）：tts 使用克隆/平台音色时改走"已存样本合成"——
+	// 不依赖厂商 voice_id 生命周期（Vidu 7 天不用即删 / platform-* ID 各厂商均未注册），
+	// 附件收益：Vidu 通道复注册同 voice_id 自动续期 7 天窗口。
+	if uc.maybeRewriteSampleSynthesis(ctx, &in) {
+		provider, err = uc.getProvider(ctx, in.SubType) // subType 已变（tts→voice_clone），厂商重路由
+		if err != nil {
+			return entity.GenerationTask{}, fmt.Errorf("获取生成服务提供商失败: %w", err)
 		}
 	}
 
@@ -409,10 +821,21 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if err != nil {
 		return entity.GenerationTask{}, err
 	}
-	// 提示词翻译层：@引用（图片/音频/视频）→ 该端点需要的参数格式
-	params, err := translateRefs(in.SubType, cap, in.Params, in.Refs)
-	if err != nil {
-		return entity.GenerationTask{}, err
+	// 提示词翻译层：@引用（图片/音频/视频/主体）→ 该端点需要的参数格式
+	// 28号计划：使用 PlaceholderTranslator 统一处理素材引用和主体引用
+	params := in.Params
+	if uc.placeholderTranslator != nil {
+		provider, _ := uc.getProvider(ctx, in.SubType)
+		params, err = uc.placeholderTranslator.Translate(ctx, provider.Name(), in.SubType, in.Params, in.Refs, in.TenantID)
+		if err != nil {
+			return entity.GenerationTask{}, err
+		}
+	} else {
+		// 降级：使用原有 translateRefs（仅处理素材引用）
+		params, err = translateRefs(in.SubType, cap, in.Params, in.Refs)
+		if err != nil {
+			return entity.GenerationTask{}, err
+		}
 	}
 	if err := adapter.Validate(ctx, cap, params); err != nil {
 		return entity.GenerationTask{}, err
@@ -430,19 +853,19 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 
 	now := time.Now()
 	task := entity.GenerationTask{
-		ID:        fmt.Sprintf("gen-%d", now.UnixNano()),
-		TenantID:  in.TenantID,
-		BrandID:   in.BrandID,
-		Type:      adapter.Category(),
-		SubType:   in.SubType,
-		Model:     model,
-		Provider:  provider.Name(),  // 使用动态选择的 provider
-		State:     entity.TaskStateCreated,
+		ID:         fmt.Sprintf("gen-%d", now.UnixNano()),
+		TenantID:   in.TenantID,
+		BrandID:    in.BrandID,
+		Type:       adapter.Category(),
+		SubType:    in.SubType,
+		Model:      model,
+		Provider:   provider.Name(), // 使用动态选择的 provider
+		State:      entity.TaskStateCreated,
 		ParamsHash: hash,
-		OffPeak:   in.OffPeak,
-		Watermark: in.Watermark,
-		CreatedAt: now,
-		UpdatedAt: now,
+		OffPeak:    in.OffPeak,
+		Watermark:  in.Watermark,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	paramsJSON, _ := json.Marshal(params)
 	task.ParamsJSON = string(paramsJSON)
@@ -489,11 +912,11 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 		return task, fmt.Errorf("提交失败: %w", err)
 	}
 	task.ProviderTaskID = res.TaskID
-	task.Credits = res.Credits
+	task.Credits = uc.resolveCredits(ctx, task.SubType, task.Model, res.Credits)
 	uc.applySubmitResult(ctx, &task, adapter, res)
 	_ = uc.repo.Save(ctx, task)
 	// 计量（F3：generation 场景按次计费的数据地基——失败仅忽略，不影响主流程）
-	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, res.Credits)
+	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, task.Credits)
 	return task, nil
 }
 
@@ -512,6 +935,7 @@ func (uc *GenerationUseCase) applySubmitResult(ctx context.Context, task *entity
 		creationsJSON, _ := json.Marshal([]entity.CreationItem{{ID: res.TaskID}})
 		task.CreationsJSON = string(creationsJSON)
 		uc.notifyTerminal(ctx, *task)
+		uc.maybeMaterializeAsset(ctx, *task) // 26 号：终态物化
 		return
 	}
 	switch res.State {
@@ -528,6 +952,23 @@ func (uc *GenerationUseCase) applySubmitResult(ctx context.Context, task *entity
 	}
 }
 
+// resolveCredits 解析实际消耗积分（27 号：模型差异化计费）。
+//
+// 优先级：generation_specs.cost_credits > 服务商返回值。
+// 管理后台配置 cost_credits>0 时覆盖服务商返回值（固定成本模型）；
+// cost_credits=0（默认）时使用服务商返回值（按量计费模型）。
+func (uc *GenerationUseCase) resolveCredits(ctx context.Context, subType, model string, providerCredits int) int {
+	if uc.registry == nil {
+		return providerCredits
+	}
+	for _, s := range uc.registry.AllSpecs(ctx) {
+		if s.SubType == subType && s.Model == model && s.CostCredits > 0 {
+			return s.CostCredits
+		}
+	}
+	return providerCredits
+}
+
 // recordUsage 记一次生成用量（usages 表——成本分析/配额核对的唯一数据源；
 // 此前 usageRec 字段注入了也从不被调用，属于死代码，本方法补齐调用链）。
 func (uc *GenerationUseCase) recordUsage(ctx context.Context, tenantID, providerName, model string, credits int) {
@@ -535,10 +976,10 @@ func (uc *GenerationUseCase) recordUsage(ctx context.Context, tenantID, provider
 		return
 	}
 	_ = uc.usageRec.RecordUsage(ctx, entity.UsageRecord{
-		TenantID:    tenantID,
-		Scene:       "generation",
-		LLMConfigName: providerName,  // 使用传入的 provider 名称
-		Model:       model,
+		TenantID:      tenantID,
+		Scene:         "generation",
+		LLMConfigName: providerName, // 使用传入的 provider 名称
+		Model:         model,
 		// Vidu 无 token 概念：LLMCalls=1 按次计数；credits 记入 CompletionTokens
 		// 供成本分析按积分核算（字段语义在 usages 侧按 scene 解释）
 		CompletionTokens: credits,
@@ -702,14 +1143,14 @@ func (uc *GenerationUseCase) retrySubmit(ctx context.Context, task *entity.Gener
 		return false
 	}
 	task.ProviderTaskID = res.TaskID
-	task.Credits = res.Credits
+	task.Credits = uc.resolveCredits(ctx, task.SubType, task.Model, res.Credits)
 	task.State = entity.TaskStateQueueing
 	task.ErrCode = ""
 	task.ErrMsg = ""
 	task.FinishedAt = nil
 	uc.applySubmitResult(ctx, task, adapter, res)
 	_ = uc.repo.Save(ctx, *task)
-	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, res.Credits)
+	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, task.Credits)
 	return true
 }
 
@@ -762,12 +1203,48 @@ func (uc *GenerationUseCase) List(ctx context.Context, tenantID string, limit in
 	return uc.repo.List(ctx, tenantID, limit)
 }
 
+// ListActiveAll 列出全部租户的未终态任务（管理后台健康总览/Admin Tools 用——
+// 跨租户监控排队积压与处理中任务数）。
+func (uc *GenerationUseCase) ListActiveAll(ctx context.Context, limit int) ([]entity.GenerationTask, error) {
+	return uc.repo.ListActive(ctx, limit)
+}
+
+// ListRecentFailed 列出全部租户最近的失败任务（管理后台诊断用）。
+func (uc *GenerationUseCase) ListRecentFailed(ctx context.Context, limit int) ([]entity.GenerationTask, error) {
+	return uc.repo.ListFailed(ctx, limit)
+}
+
 // Types 可用端点类型（前端表单驱动）。
 func (uc *GenerationUseCase) Types() []string { return uc.registry.Types() }
 
 // Models 某端点可用模型。
 func (uc *GenerationUseCase) Models(ctx context.Context, subType string) ([]string, error) {
 	return uc.registry.Models(ctx, subType)
+}
+
+// RenameTask 用户修改生成任务的自定义标题（作品/素材重命名——用户自命名需求）。
+// 写入 params.custom_title，读路径（works/素材库）优先展示此值。
+func (uc *GenerationUseCase) RenameTask(ctx context.Context, tenantID, taskID, title string) error {
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("标题不能为空")
+	}
+	if len([]rune(title)) > 64 {
+		return fmt.Errorf("标题不能超过 64 字")
+	}
+	task, err := uc.repo.FindByID(ctx, tenantID, taskID)
+	if err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+	var params map[string]any
+	_ = json.Unmarshal([]byte(task.ParamsJSON), &params)
+	if params == nil {
+		params = map[string]any{}
+	}
+	params["custom_title"] = strings.TrimSpace(title)
+	pj, _ := json.Marshal(params)
+	task.ParamsJSON = string(pj)
+	task.UpdatedAt = time.Now()
+	return uc.repo.Save(ctx, task)
 }
 
 // Capabilities 某端点全部模型的能力向量（前端表单渲染：时长/分辨率/图片槽位/主体…）。
@@ -820,7 +1297,7 @@ func (uc *GenerationUseCase) CleanupOldTasks(ctx context.Context, retainDays int
 var urlPattern = regexp.MustCompile(`https?://[^\s"\\,}\]]+`)
 
 // referencedMediaURLs 收集仍可能被引用的媒体 URL：活跃任务全部 + 近期任务
-//（保留窗口内的终态任务未删，其产物 URL 仍会出现在前端/分发中心）。
+// （保留窗口内的终态任务未删，其产物 URL 仍会出现在前端/分发中心）。
 func (uc *GenerationUseCase) referencedMediaURLs(ctx context.Context) map[string]bool {
 	exclude := map[string]bool{}
 	active, _ := uc.repo.ListActive(ctx, 200)
@@ -859,17 +1336,17 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 			creationsJSON, _ = json.Marshal(st.Creations)
 			task.CreationsJSON = string(creationsJSON)
 		}
-		case entity.TaskStateFailed:
-			task.State = entity.TaskStateFailed
-			task.ErrCode = st.ErrCode
-			// 动态选择 provider 翻译错误
-			provider, pErr := uc.getProvider(ctx, task.SubType)
-			if pErr == nil {
-				task.ErrMsg = provider.TranslateError(st.ErrCode)
-			}
-			if task.ErrMsg == "" {
-				task.ErrMsg = "生成失败"
-			}
+	case entity.TaskStateFailed:
+		task.State = entity.TaskStateFailed
+		task.ErrCode = st.ErrCode
+		// 动态选择 provider 翻译错误
+		provider, pErr := uc.getProvider(ctx, task.SubType)
+		if pErr == nil {
+			task.ErrMsg = provider.TranslateError(st.ErrCode)
+		}
+		if task.ErrMsg == "" {
+			task.ErrMsg = "生成失败"
+		}
 		task.FinishedAt = nowPtr(time.Now())
 	default: // created/queueing/processing
 		task.State = st.State
@@ -881,6 +1358,7 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 	// 终态转换恰好一次（PollDue/HandleCallback 均有 IsTerminal 幂等护栏）——
 	// 在此通知不会重复；异步任务的完成感知差距（不留在页面就不知道结果）由此闭合
 	uc.notifyTerminal(ctx, *task)
+	uc.maybeMaterializeAsset(ctx, *task) // 26 号：终态物化
 	return nil
 }
 
@@ -890,9 +1368,9 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 type RetryClass int
 
 const (
-	RetryAuto    RetryClass = iota // 自动重试（限流/内部错误）
-	RetryManual                   // 人工重试（积分/风控——提示后前端"重新生成"）
-	RetryTerminal                 // 不可重试（素材问题）
+	RetryAuto     RetryClass = iota // 自动重试（限流/内部错误）
+	RetryManual                     // 人工重试（积分/风控——提示后前端"重新生成"）
+	RetryTerminal                   // 不可重试（素材问题）
 )
 
 // ClassifyError 失败分类（TooManyRequests 自动退避；风控/积分人工；素材问题终态）。
@@ -977,6 +1455,16 @@ type UnifiedSubmitInput struct {
 	// SubType 显式端点覆盖（空=selector 按素材自动选择）。当前支持 "subject"：
 	// 数字分身主体注册（Vidu /ent/v2/subjects 同步端点——name+形象照+音色）。
 	SubType string
+	// BrollSegments B-Roll 配置（29号计划——单阶段优化）。
+	// 携带时，系统自动在视频生成后执行 B-Roll 合成。
+	// 不携带时，行为不变（纯口播视频）。
+	BrollSegments []BrollSegment
+}
+
+// BrollSegment B-Roll 片段配置（29号计划）。
+type BrollSegment struct {
+	SentenceIndex int    `json:"sentence_index"` // 插入到第几句（从0开始）
+	MediaURL      string `json:"media_url"`      // 片段URL（图片或视频）
 }
 
 // submitSubject 数字分身主体注册（/ent/v2/subjects 同步端点）。
@@ -994,11 +1482,12 @@ func (uc *GenerationUseCase) submitSubject(ctx context.Context, in UnifiedSubmit
 	}
 	params := entity.GenerationParams{"name": in.Text}
 
-	// ① 优先从 Params 直传（前端 buildSubjectRegisterPayload 已写 images/videos URL）
-	if imgs, ok := in.Params["images"].([]string); ok && len(imgs) > 0 {
+	// ① 优先从 Params 直传（前端 buildSubjectRegisterPayload 已写 images/videos URL）。
+	// HTTP JSON 反序列化后数组是 []any（直连 API 调用方），前端 TS 是 []string——两种形态都接
+	if imgs := stringSliceOf(in.Params["images"]); len(imgs) > 0 {
 		params["images"] = imgs
 	}
-	if vids, ok := in.Params["videos"].([]string); ok && len(vids) > 0 {
+	if vids := stringSliceOf(in.Params["videos"]); len(vids) > 0 {
 		params["videos"] = vids
 	}
 
@@ -1051,11 +1540,44 @@ func (uc *GenerationUseCase) submitSubject(ctx context.Context, in UnifiedSubmit
 		params["voice_id"] = v
 	}
 
-	return uc.Submit(ctx, SubmitInput{
+	// ④ 资产分类与场景参数（25 号 §6.5/§2.1③）：kind=person|scene（环境主体）；
+	// scene_image/scene_description 供链式形象视频 D1 注入
+	for _, k := range []string{"kind", "scene_image", "scene_description"} {
+		if v, ok := in.Params[k].(string); ok && v != "" {
+			params[k] = v
+		}
+	}
+
+	task, err := uc.Submit(ctx, SubmitInput{
 		TenantID: in.TenantID, BrandID: in.BrandID,
 		SubType: "subject", Model: "", Params: params,
 		Watermark: in.Watermark, OffPeak: in.OffPeak,
 	})
+	if err != nil {
+		return task, err
+	}
+	// 注册成功 → 链式 10s 形象视频（25 号阶段二；失败不影响主体，D4）
+	if task.State == entity.TaskStateSuccess {
+		uc.maybeChainAvatarVideo(ctx, task)
+	}
+	return task, nil
+}
+
+// stringSliceOf 兼容 []string 与 []any（JSON 反序列化形态）的字符串数组提取。
+func stringSliceOf(v any) []string {
+	switch arr := v.(type) {
+	case []string:
+		return arr
+	case []any:
+		out := make([]string, 0, len(arr))
+		for _, it := range arr {
+			if s, ok := it.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // containsStrAny 列表包含（URL 直传素材匹配用）。
@@ -1188,8 +1710,8 @@ func (uc *GenerationUseCase) localizePrivateMaterials(ctx context.Context, param
 
 // inlineURLResolver 内置 URL 解析器（兼容模式，后续迁移完成后移除）。
 type inlineURLResolver struct {
-	asset     port.MediaAssetStore
-	maxBytes  int
+	asset    port.MediaAssetStore
+	maxBytes int
 }
 
 func (r *inlineURLResolver) Resolve(ctx context.Context, rawURL string) (string, bool, error) {
@@ -1288,6 +1810,18 @@ func (uc *GenerationUseCase) generationBoolDefault(ctx context.Context, key stri
 	return st.Value == "1" || st.Value == "true"
 }
 
+// settingString 从 system_settings 读取字符串值（未配置回落 fallback）。
+func (uc *GenerationUseCase) settingString(ctx context.Context, key, fallback string) string {
+	if uc.settingRepo == nil {
+		return fallback
+	}
+	st, err := uc.settingRepo.Get(ctx, key)
+	if err != nil || st.Value == "" {
+		return fallback
+	}
+	return st.Value
+}
+
 // UnifiedSubmit 统一提交（傻瓜式：客户端不需要选择端点/模型）。
 //
 // 流程：
@@ -1346,14 +1880,91 @@ func (uc *GenerationUseCase) UnifiedSubmit(ctx context.Context, in UnifiedSubmit
 
 	// 3. 调用原有的Submit方法
 	// BE-GEN-06：透传 Refs——translateRefs 按端点×能力向量翻译 @引用
-	return uc.Submit(ctx, SubmitInput{
-		TenantID: in.TenantID,
-		BrandID:  in.BrandID,
-		SubType:  selectResult.SubType,
-		Model:    "", // 空=自动选择
-		Params:   selectResult.Params,
-		Refs:     in.Refs,
+	task, err := uc.Submit(ctx, SubmitInput{
+		TenantID:  in.TenantID,
+		BrandID:   in.BrandID,
+		SubType:   selectResult.SubType,
+		Model:     "", // 空=自动选择
+		Params:    selectResult.Params,
+		Refs:      in.Refs,
 		Watermark: in.Watermark,
 		OffPeak:   in.OffPeak,
 	})
+	if err != nil {
+		return task, err
+	}
+
+	// 4. 29号计划：如果携带了 B-Roll 配置，创建链式任务
+	// ⚠️ 必须用独立 ctx：请求 ctx 在 HTTP handler 返回后即取消，早期版本传 ctx
+	// 导致 goroutine 首次查询就 context canceled——链式从未真正执行。
+	if len(in.BrollSegments) > 0 && uc.composer != nil {
+		go func(src entity.GenerationTask, segs []BrollSegment) {
+			cctx, cancel := context.WithTimeout(context.Background(), 16*time.Minute)
+			defer cancel()
+			uc.chainBrollAfterGeneration(cctx, src, segs)
+		}(task, in.BrollSegments)
+	}
+
+	return task, nil
+}
+
+// chainBrollAfterGeneration 视频生成完成后自动执行 B-Roll 合成（29号计划——单阶段优化）。
+//
+// 流程：
+//   ① 等待视频生成完成（轮询）
+//   ② 自动定位时间轴
+//   ③ 自动提交 compose
+func (uc *GenerationUseCase) chainBrollAfterGeneration(ctx context.Context, sourceTask entity.GenerationTask, segments []BrollSegment) {
+	// ① 等待视频生成完成（轮询，最多等15分钟——Vidu q3 实测偶发 10 分钟+才出片，
+	// 早期 10min deadline 会把慢任务跳过导致链式合成丢失）
+	deadline := time.Now().Add(15 * time.Minute)
+	for time.Now().Before(deadline) {
+		task, err := uc.repo.FindByID(ctx, sourceTask.TenantID, sourceTask.ID)
+		if err != nil {
+			log.Printf("[broll] 查询源任务失败: %v", err)
+			return
+		}
+		if entity.IsTerminal(task.State) {
+			if task.State != entity.TaskStateSuccess {
+				log.Printf("[broll] 源视频生成失败，跳过B-Roll合成: %s", sourceTask.ID)
+				return
+			}
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	if time.Now().After(deadline) {
+		log.Printf("[broll] 等待源视频超时: %s", sourceTask.ID)
+		return
+	}
+
+	// ② 自动定位时间轴
+	_, _, err := uc.composer.LocateTimeline(ctx, sourceTask.TenantID, sourceTask.ID, false, nil)
+	if err != nil {
+		log.Printf("[broll] 时间轴定位失败: %v", err)
+		return
+	}
+
+	// ③ 转换片段配置
+	composeSegments := make([]port.ComposeSegment, len(segments))
+	for i, s := range segments {
+		composeSegments[i] = port.ComposeSegment{
+			SentenceIndex: s.SentenceIndex,
+			MediaURL:      s.MediaURL,
+		}
+	}
+
+	// ④ 提交compose
+	_, err = uc.composer.SubmitCompose(ctx, port.ComposeInput{
+		TenantID:     sourceTask.TenantID,
+		BrandID:      sourceTask.BrandID,
+		SourceTaskID: sourceTask.ID,
+		Segments:     composeSegments,
+	})
+	if err != nil {
+		log.Printf("[broll] B-Roll合成失败: %v", err)
+		return
+	}
+
+	log.Printf("[broll] B-Roll合成已提交: %s", sourceTask.ID)
 }

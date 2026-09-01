@@ -51,7 +51,7 @@ func (uc *UseCase) SubmitCompose(ctx context.Context, in port.ComposeInput) (por
 		return port.ComposeResult{}, fmt.Errorf("源成片尚未定位台词时间轴——请先调用 POST timeline 定位")
 	}
 
-	// §5.3 校验：句号有效 + 窗口互不重叠 + 时间窗换算
+	// §5.3 校验：句号有效 + 同句重复检测（29 号：重叠检测已移除——重叠时后续片段优先）
 	var resolved []resolvedSeg
 	for _, s := range in.Segments {
 		if s.SentenceIndex < 0 || s.SentenceIndex >= len(meta.Lines) {
@@ -70,14 +70,11 @@ func (uc *UseCase) SubmitCompose(ctx context.Context, in port.ComposeInput) (por
 			url:  s.MediaURL,
 		})
 	}
+	// 29号改进：保留重复检测，移除重叠检测（重叠时后续片段优先）
 	for i := 0; i < len(resolved); i++ {
 		for j := i + 1; j < len(resolved); j++ {
 			if resolved[i].idx == resolved[j].idx {
 				return port.ComposeResult{}, fmt.Errorf("第 %d 句重复配置片段", resolved[i].idx)
-			}
-			a, b := resolved[i], resolved[j]
-			if a.spec.StartMs < meta.Lines[b.idx].EndMs && meta.Lines[b.idx].StartMs < a.spec.EndMs {
-				return port.ComposeResult{}, fmt.Errorf("第 %d 句与第 %d 句的窗口重叠", a.idx, b.idx)
 			}
 		}
 	}
@@ -86,20 +83,20 @@ func (uc *UseCase) SubmitCompose(ctx context.Context, in port.ComposeInput) (por
 	now := time.Now()
 	params := map[string]any{
 		"source_task_id": in.SourceTaskID,
-		"segments":        in.Segments,
-		"script":          taskScript(src), // 台词随链继承（链式再 compose 直接可用）
+		"segments":       in.Segments,
+		"script":         taskScript(src), // 台词随链继承（链式再 compose 直接可用）
 	}
 	paramsJSON, _ := json.Marshal(params)
 	task := entity.GenerationTask{
-		ID:          fmt.Sprintf("comp-%d", now.UnixNano()),
-		TenantID:    in.TenantID,
-		BrandID:     in.BrandID,
-		Type:        entity.GenerationTypeOther,
-		SubType:     "compose",
-		Model:       "local-ffmpeg",
-		Provider:    "local",
-		State:       entity.TaskStateQueueing,
-		ParamsJSON:  string(paramsJSON),
+		ID:           fmt.Sprintf("comp-%d", now.UnixNano()),
+		TenantID:     in.TenantID,
+		BrandID:      in.BrandID,
+		Type:         entity.GenerationTypeOther,
+		SubType:      "compose",
+		Model:        "local-ffmpeg",
+		Provider:     "local",
+		State:        entity.TaskStateQueueing,
+		ParamsJSON:   string(paramsJSON),
 		TimelineJSON: src.TimelineJSON, // 链式继承（§10.1④：禁止重检测）
 	}
 	if err := uc.tasks.Save(ctx, task); err != nil {
@@ -148,7 +145,7 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 	setState(entity.TaskStateProcessing, "")
 
 	// ② 安全下载全部媒体（SSRF 校验 + 500MB 上限——§10.1①）
-	mainPath, cleanupMain, err := safeDownloadMedia(ctx, mainURL)
+	mainPath, cleanupMain, err := uc.ucSafeDownload(ctx, mainURL)
 	if err != nil {
 		setState(entity.TaskStateFailed, fmt.Sprintf("源成片下载失败: %v", err))
 		return
@@ -157,7 +154,7 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 
 	segPaths := make([]string, len(segs))
 	for i, s := range segs {
-		p, cleanup, dErr := safeDownloadMedia(ctx, s.url)
+		p, cleanup, dErr := uc.ucSafeDownload(ctx, s.url)
 		if dErr != nil {
 			setState(entity.TaskStateFailed, fmt.Sprintf("片段下载失败（第 %d 句）: %v", s.idx, dErr))
 			return
@@ -183,7 +180,7 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 		if isImagePath(segPath) {
 			dur := float64(r.spec.EndMs-r.spec.StartMs) / 1000
 			loopPath := segPath + ".loop.mp4"
-			if lerr := uc.av.(imageLooper).LoopImageToVideo(ctx, segPath, dur, loopPath); lerr != nil {
+			if lerr := uc.av.(imageLooper).StaticImageToVideo(ctx, segPath, dur, loopPath); lerr != nil {
 				setState(entity.TaskStateFailed, fmt.Sprintf("图片转视频失败（第 %d 句）: %v", r.idx, lerr))
 				return
 			}
@@ -218,14 +215,34 @@ func (uc *UseCase) execute(taskID, tenantID, mainURL string, segs []resolvedSeg)
 	log.Printf("[videocompose] 合成完成 %s → %s", taskID, outURL)
 }
 
-// imageLooper LoopImageToVideo 的窄接口（port.MediaAVTool 主体外的 adapter 附加能力）。
+// imageLooper StaticImageToVideo 的窄接口（port.MediaAVTool 主体外的 adapter 附加能力）。
 type imageLooper interface {
-	LoopImageToVideo(ctx context.Context, imgPath string, durSec float64, outPath string) error
+	StaticImageToVideo(ctx context.Context, imgPath string, durSec float64, outPath string) error
 }
 
 // CreationUploader 产物上传窄接口（main 装配注入 mediaStore 适配器）。
 type CreationUploader interface {
 	Upload(ctx context.Context, tenantID, localPath, kind string) (url string, err error)
+}
+
+// ucSafeDownload 本站优先下载：本站托管 URL（stored_url/上传素材，localhost:8082/media/...）
+// 走 assets.ReadLocal 直读本地文件（SSRF 防护拒绝环回地址，自下载必被拒）；
+// 非本站或直读失败回落 safeDownloadMedia（SSRF 校验 + HTTP）。
+func (uc *UseCase) ucSafeDownload(ctx context.Context, rawURL string) (path string, cleanup func(), err error) {
+	if uc.assets != nil {
+		if data, _, ok := uc.assets.ReadLocal(ctx, rawURL); ok && len(data) > 0 {
+			ext := pathExtDefault(rawURL, ".mp4")
+			f, ferr := os.CreateTemp("", "broll-local-*"+ext)
+			if ferr == nil {
+				if _, werr := f.Write(data); werr == nil {
+					f.Close()
+					return f.Name(), func() { os.Remove(f.Name()) }, nil
+				}
+				f.Close()
+			}
+		}
+	}
+	return safeDownloadMedia(ctx, rawURL)
 }
 
 // safeDownloadMedia SSRF 防护下载（§10.1①——与 videotranscript.safeDownload 同级校验）。
@@ -286,20 +303,24 @@ func safeDownloadMedia(ctx context.Context, rawURL string) (path string, cleanup
 	return f.Name(), cleanup, nil
 }
 
-// safeDownloadTaskMedia 成片获取（timeline 定位用——复用 SSRF 下载）。
+// safeDownloadTaskMedia 成片获取（timeline 定位用——本站 stored_url 优先直读，回落 SSRF 下载）。
 func (uc *UseCase) safeDownloadTaskMedia(ctx context.Context, task entity.GenerationTask) (string, func(), error) {
 	u := taskCreationURL(task)
 	if u == "" {
 		return "", func() {}, fmt.Errorf("任务无成片产物")
 	}
-	return safeDownloadMedia(ctx, u)
+	return uc.ucSafeDownload(ctx, u)
 }
 
-// taskCreationURL 任务产物 URL（CreationsJSON 首个 url）。
+// taskCreationURL 任务产物 URL：优先 stored_url（本地转存产物——绕开 Vidu S3 签名
+// 直链的网络抖动，实测定位时下载 S3 偶发 EOF 导致链式合成失败），回落 url（24h 临时）。
 func taskCreationURL(t entity.GenerationTask) string {
 	var cs []map[string]any
 	if err := json.Unmarshal([]byte(t.CreationsJSON), &cs); err != nil || len(cs) == 0 {
 		return ""
+	}
+	if u, ok := cs[0]["stored_url"].(string); ok && u != "" {
+		return u
 	}
 	if u, ok := cs[0]["url"].(string); ok {
 		return u

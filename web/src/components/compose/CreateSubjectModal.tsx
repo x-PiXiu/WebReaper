@@ -41,16 +41,22 @@ type Props = {
   /** 创建成功回调；带新分身 server_id（可能为空——注册响应缺失时由列表刷新兜底） */
   onCreated: (serverId?: string) => void
   title?: string
+  /** 25 号 §6.5：person=人物分身（默认）/ scene=环境主体（组合出镜资产） */
+  kind?: 'person' | 'scene'
 }
 
-/** 创建数字分身主体（23 号计划 §2.1：形象照 + 名称 + 可选场景图/场景描述 + 可选音色绑定） */
+/** 创建主体（23 号 §2.1：人物分身——形象照+名称+可选场景图/场景描述+音色；
+ * 25 号 §6.5：环境主体——店内/产品照片 2-3 张，与分身组合出镜） */
 export function CreateSubjectModal({
   open,
   voices,
   onClose,
   onCreated,
-  title = '定制数字人',
+  title,
+  kind = 'person',
 }: Props) {
+  const isScene = kind === 'scene'
+  const modalTitle = title || (isScene ? '添加出镜环境' : '定制数字人')
   const [name, setName] = useState('')
   const [imageAssets, setImageAssets] = useState<Array<{ id: string; url: string }>>([])
   const [videoAsset, setVideoAsset] = useState<{ id: string; url: string } | null>(null)
@@ -72,7 +78,7 @@ export function CreateSubjectModal({
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      toast.warn('请输入数字人名称', 'subject-create')
+      toast.warn(isScene ? '请输入环境名称' : '请输入数字人名称', 'subject-create')
       return
     }
     if (!brandId) {
@@ -80,7 +86,10 @@ export function CreateSubjectModal({
       return
     }
     if (imageAssets.length === 0 && !videoAsset) {
-      toast.warn('请至少上传 1 张形象照或 1 段主体视频', 'subject-create')
+      toast.warn(
+        isScene ? '请上传 2-3 张环境照片（店内/产品/门头）' : '请至少上传 1 张形象照或 1 段主体视频',
+        'subject-create',
+      )
       return
     }
     setCreating(true)
@@ -90,12 +99,18 @@ export function CreateSubjectModal({
         name: name.trim(),
         imageMaterialIds: imageAssets.map((a) => a.id),
         imageUrls: imageAssets.map((a) => a.url),
-        videoUrl: videoAsset?.url,
-        voice_id: voiceId || undefined,
-        sceneImageUrl: sceneImage?.url,
-        sceneDescription: sceneDesc || undefined,
+        videoUrl: isScene ? undefined : videoAsset?.url,
+        voice_id: isScene ? undefined : (voiceId || undefined),
+        sceneImageUrl: isScene ? undefined : sceneImage?.url,
+        sceneDescription: isScene ? undefined : (sceneDesc || undefined),
+        kind,
       }))
-      toast.ok(`「${name.trim()}」已开始创建，完成后可直接用于口播`, 'subject-create')
+      toast.ok(
+        isScene
+          ? `环境「${name.trim()}」已添加——口播时可在「出镜环境」中选择`
+          : `数字分身「${name.trim()}」已开始创建，形象视频生成中`,
+        'subject-create',
+      )
       queryClient.invalidateQueries({ queryKey: GENERATION_TASKS_KEY })
       resetForm()
       onCreated(subjectServerId(task) || undefined)
@@ -108,8 +123,8 @@ export function CreateSubjectModal({
   return (
     <Modal
       open={open}
-      title={title}
-      okText="创建"
+      title={modalTitle}
+      okText={isScene ? '添加' : '创建'}
       cancelText="取消"
       onOk={handleCreate}
       onCancel={() => { resetForm(); onClose() }}
@@ -118,16 +133,18 @@ export function CreateSubjectModal({
     >
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          上传 1-3 张形象照或 1 个 5 秒内的主体视频——创建后即可用于口播成片，跨视频人物形象一致
+          {isScene
+            ? '拍 2-3 张自己店内/产品/门头的照片注册为环境——口播时与数字分身组合出镜（分身在你的店里讲解），跨视频环境一致'
+            : '上传 1-3 张形象照或 1 个 5 秒内的主体视频——创建后即可用于口播成片，跨视频人物形象一致；形象视频自动生成供预览'}
         </Text>
         <Input
-          placeholder="数字人名称（如：张师傅、李老板）"
+          placeholder={isScene ? '环境名称（如：店内大堂、后厨、产品展台）' : '数字人名称（如：张师傅、李老板）'}
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={64}
         />
         <div>
-          <Text strong style={{ fontSize: 13 }}>形象照（1-3 张）</Text>
+          <Text strong style={{ fontSize: 13 }}>{isScene ? '环境照片（2-3 张）' : '形象照（1-3 张）'}</Text>
           <Upload
             listType="picture-card"
             maxCount={3}
@@ -155,6 +172,7 @@ export function CreateSubjectModal({
             )}
           </Upload>
         </div>
+        {!isScene && (
         <div>
           <Text strong style={{ fontSize: 13 }}>主体视频（可选，1 个 ≤5 秒）</Text>
           <Upload
@@ -173,6 +191,8 @@ export function CreateSubjectModal({
             <Button icon={<VideoCameraOutlined />}>{videoAsset ? '重新上传' : '上传视频（mp4/avi/mov）'}</Button>
           </Upload>
         </div>
+        )}
+        {!isScene && (
         <div>
           <Text strong style={{ fontSize: 13 }}>场景图（可选，1 张）</Text>
           <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
@@ -210,6 +230,8 @@ export function CreateSubjectModal({
             message="场景图必须露出主角脸部；不可有分镜/多画面内容"
           />
         </div>
+        )}
+        {!isScene && (
         <div>
           <Text strong style={{ fontSize: 13 }}>场景描述（可选，一句话）</Text>
           <TextArea
@@ -222,6 +244,8 @@ export function CreateSubjectModal({
             style={{ marginTop: 4 }}
           />
         </div>
+        )}
+        {!isScene && (
         <div>
           <Text strong style={{ fontSize: 13 }}>绑定音色（可选）</Text>
           <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
@@ -236,6 +260,7 @@ export function CreateSubjectModal({
             （复刻音色 7 天内在语音合成中调用一次即永久保留）
           </Text>
         </div>
+        )}
       </Space>
     </Modal>
   )

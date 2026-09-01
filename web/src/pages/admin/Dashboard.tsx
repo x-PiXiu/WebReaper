@@ -1,5 +1,5 @@
-import { Row, Col, Typography, Card, Tag, Space, Empty, Progress } from 'antd'
-import { DollarOutlined, CrownOutlined, RiseOutlined, AppstoreOutlined, FileTextOutlined, GlobalOutlined, TrophyOutlined, SmileOutlined, LinkOutlined } from '@ant-design/icons'
+import { Row, Col, Typography, Card, Tag, Space, Empty, Progress, Spin, Button } from 'antd'
+import { DollarOutlined, CrownOutlined, RiseOutlined, AppstoreOutlined, FileTextOutlined, GlobalOutlined, TrophyOutlined, SmileOutlined, LinkOutlined, HeartOutlined, ThunderboltOutlined, VideoCameraOutlined, SoundOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -112,6 +112,14 @@ export default function Dashboard() {
     [contents],
   )
 
+  // 系统健康总览（Admin Tools 配套——任务/积分/资产/服务商状态）
+  const { data: health, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
+    queryKey: ['admin-system-health'],
+    queryFn: () => businessApi.adminSystemHealth(),
+    staleTime: 30_000,
+    retry: 1,
+  })
+
   const statusDist = useMemo(() => {
     const map = new Map<string, number>()
     contents.forEach((c: { status?: string }) => {
@@ -140,6 +148,41 @@ export default function Dashboard() {
       </div>
 
       <QueryBoundary loading={statsLoading} error={statsError} onRetry={() => refetchStats()}>
+
+      {/* 系统健康总览（Admin Tools——一眼看到系统各维度状态） */}
+      <div style={{
+        marginBottom: 20, padding: '16px 20px', background: 'var(--wr-card-bg)',
+        border: '1px solid var(--wr-border)', borderRadius: 16,
+        display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center',
+      }}>
+        <Space size={4}>
+          <HeartOutlined style={{ fontSize: 18, color: 'var(--wr-primary)' }} />
+          <Text strong style={{ fontSize: 14 }}>系统健康</Text>
+          <Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>
+            {health?.timestamp ? new Date(health.timestamp).toLocaleTimeString('zh-CN') : '...'}
+          </Text>
+        </Space>
+        {healthLoading ? <Spin size="small" /> : health ? (
+          <>
+            <Tag icon={<ThunderboltOutlined />} color={(health.tasks?.active ?? 0) > 10 ? 'orange' : 'blue'}>
+              活跃任务 {health.tasks?.active ?? '-'}（排队 {health.tasks?.queueing ?? 0}）
+            </Tag>
+            <Tag color={(health.tasks?.failed ?? 0) > 5 ? 'red' : (health.tasks?.failed ?? 0) > 0 ? 'orange' : 'green'}>
+              失败 {health.tasks?.failed ?? 0}
+            </Tag>
+            <Tag color={health.vidu?.status === 'ok' ? (health.vidu?.credits < 100 ? 'orange' : 'green') : 'red'}>
+              Vidu 积分 {health.vidu?.credits ?? '-'}
+            </Tag>
+            <Tag icon={<SoundOutlined />} color="purple">音色 {health.voices?.platform ?? 0}</Tag>
+            <Tag icon={<VideoCameraOutlined />} color="geekblue">主体 {health.subjects?.official ?? 0}</Tag>
+          </>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>健康数据不可用</Text>
+        )}
+        <Button size="small" type="text" onClick={() => refetchHealth()} style={{ marginLeft: 'auto' }}>
+          刷新
+        </Button>
+      </div>
 
       {/* 核心运营指标（SaaS 三件套：MRR / 活跃订阅 / 当月收入）*/}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>

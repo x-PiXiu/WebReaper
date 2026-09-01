@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { submitGenerationTaskCompat, submitUnified } from './generationSubmit'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding, TaskTimeline } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, GenerationVoice, SubjectAsset, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding, TaskTimeline } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -429,13 +429,27 @@ export const businessApi = {
 
   cancelGenerationTask: (id: string) =>
     apiClient.post<unknown, { cancelled: string }>(`/api/v1/generation/tasks/${id}/cancel`),
+  // 分身形象视频重试/补建（25 号阶段二 D4——幂等，未终态链式任务直接返回）
+  retryAvatarVideo: (taskId: string) =>
+    apiClient.post<unknown, GenerationTask>(`/api/v1/generation/tasks/${taskId}/avatar-video`),
 
   deleteGenerationTask: (id: string) =>
     apiClient.delete<unknown, { deleted: string }>(`/api/v1/generation/tasks/${id}`),
+  // 用户改名（作品/素材自定义标题——写 params.custom_title，读路径优先展示）
+  renameGenerationTask: (id: string, title: string) =>
+    apiClient.patch<unknown, { renamed: string; title: string }>(`/api/v1/generation/tasks/${id}/title`, { title }),
 
   // 官方音色库
   listGenerationVoices: (params?: { language?: string; q?: string }) =>
     apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/generation/voices', { params }),
+
+  // 个人主体资产列表（26号计划——从subject_assets表读取，失败任务天然不出现）
+  listSubjectAssets: (params?: { kind?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, { assets: SubjectAsset[]; total: number }>('/api/v1/subjects/mine', { params }),
+
+  // 官方主体列表（从subject_assets表读取scope=official）
+  listOfficialSubjects: (params?: { kind?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, { subjects: SubjectAsset[]; total: number }>('/api/v1/subjects', { params: { ownership: 'official', ...params } }),
 
   // ---- 模板管理 ----
 
@@ -465,8 +479,68 @@ export const businessApi = {
     apiClient.get<unknown, { status?: string; task_id?: string; raw_text?: string; raw_text_lines?: string[]; title?: string; method?: string }>(`/api/v1/generation/transcript/extract/tasks/${id}`),
 
   // 原文 → 双产出（clean=用原文按钮 / rewrite=默认填入）
-  rewriteScript: (data: { raw_text: string; topic?: string }) =>
+  rewriteScript: (data: { raw_text: string; topic?: string; requirement?: string }) =>
     apiClient.post<unknown, { clean: string; rewrite: string }>('/api/v1/generation/transcript/rewrite', data),
+
+  // ---- 管理后台·官方主体（27号/25号二′b——运营管理 official 主体，创建走 Vidu 注册+链式形象视频）----
+  adminListSubjects: (params?: { kind?: string; limit?: number; offset?: number }) =>
+    apiClient.get<unknown, { subjects: SubjectAsset[]; total: number }>('/api/v1/admin/subjects', { params }),
+  adminCreateSubject: (data: {
+    name: string
+    images: string[]
+    voice_id?: string
+    kind?: 'person' | 'scene'
+    tags?: string
+    sort_order?: number
+  }) => apiClient.post<unknown, { id: string; server_id: string; name: string }>('/api/v1/admin/subjects', data),
+  adminUpdateSubject: (id: string, data: { name?: string; tags?: string; sort_order?: number; status?: string }) =>
+    apiClient.put<unknown, unknown>(`/api/v1/admin/subjects/${encodeURIComponent(id)}`, data),
+  adminDeleteSubject: (id: string) =>
+    apiClient.delete<unknown, unknown>(`/api/v1/admin/subjects/${encodeURIComponent(id)}`),
+
+  // ---- 管理后台·官方音色（白牌化——运营管理 platform 音色；Vidu 仅作克隆参考源）----
+  adminListVoices: (params?: { scope?: string }) =>
+    apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/admin/voices', { params }),
+  // Vidu 上游音色参考源（仅管理端——白牌化不暴露给用户）
+  adminListViduVoices: () =>
+    apiClient.get<unknown, { voices: GenerationVoice[] }>('/api/v1/admin/voices/vidu-sources'),
+  // 从 Vidu 音色克隆平台音色（选 Vidu voice_id + 介绍文本 → TTS → 克隆 → 发布）
+  adminCreateVoiceFromVidu: (data: { vidu_voice_id: string; text?: string; name?: string; language?: string }) =>
+    apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices/from-vidu', data),
+  // 设为平台默认音色（scope=platform 内仅一条 is_default）
+  adminSetDefaultVoice: (voiceId: string) =>
+    apiClient.put<unknown, unknown>(`/api/v1/admin/voices/${encodeURIComponent(voiceId)}/default`),
+  // ---- 管理后台·系统健康总览 + 生成任务监控 ----
+  adminSystemHealth: () =>
+    apiClient.get<unknown, {
+      timestamp: string
+      tasks?: { active: number; queueing: number; failed: number }
+      vidu?: { credits: number; status: string }
+      voices?: { platform: number; vidu_refs: number }
+      subjects?: { official: number }
+      settings?: Record<string, string>
+    }>('/api/v1/admin/system/health'),
+  adminListAllTasks: (params?: { state?: string; limit?: number }) =>
+    apiClient.get<unknown, { tasks: Array<{
+      id: string; tenant_id: string; sub_type: string; state: string
+      model: string; err_msg?: string; created_at: string
+    }>; total: number }>('/api/v1/admin/tasks', { params }),
+  adminCancelTask: (taskId: string) =>
+    apiClient.post<unknown, { cancelled: string }>(`/api/v1/admin/tasks/${encodeURIComponent(taskId)}/cancel`),
+  adminGetGenSettings: () =>
+    apiClient.get<unknown, Record<string, string>>('/api/v1/admin/settings/gen'),
+  adminSetGenSetting: (key: string, value: string) =>
+    apiClient.put<unknown, unknown>(`/api/v1/admin/settings/gen/${encodeURIComponent(key)}`, { value }),
+  adminCreateVoice: (form: FormData) =>
+    apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  adminCreateVoiceByUrl: (data: { audio_url: string; text: string; name?: string; language?: string }) =>
+    apiClient.post<unknown, GenerationVoice>('/api/v1/admin/voices', data),
+  adminUpdateVoice: (voiceId: string, data: { name?: string; language?: string; status?: string }) =>
+    apiClient.put<unknown, GenerationVoice>(`/api/v1/admin/voices/${encodeURIComponent(voiceId)}`, data),
+  adminDeleteVoice: (voiceId: string) =>
+    apiClient.delete<unknown, unknown>(`/api/v1/admin/voices/${encodeURIComponent(voiceId)}`),
 
   // ---- 口播 B-Roll（22/23 号计划：成片后按句插入画面）----
   // 台词时间轴：首次点「插入画面」时 POST 定位（静音检测，秒级）；支持重跑或仅修正文字（lines_override 不改切换点）
@@ -475,9 +549,9 @@ export const businessApi = {
   // 读取已定位时间轴（未定位时服务端 404）
   getTaskTimeline: (taskId: string) =>
     apiClient.get<unknown, TaskTimeline>(`/api/v1/generation/tasks/${taskId}/timeline`),
-  // 提交插入合成（type=compose，统一提交体系；只传句号，时间窗由后端换算，防客户端错位）
+  // 提交插入合成（sub_type=compose 走统一提交分发；source_task_id/segments 须在 params 内；只传句号，时间窗由后端换算）
   submitCompose: (data: { source_task_id: string; segments: { sentence_index: number; media_url: string }[] }) =>
-    apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', { type: 'compose', ...data }),
+    apiClient.post<unknown, GenerationTask>('/api/v1/generation/submit', { sub_type: 'compose', params: data }),
 
   // 素材库（上传/列表/删除——本地托管，P2 换 OSS 前端零改动）
   uploadAsset: (file: File) => {

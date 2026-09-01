@@ -173,13 +173,13 @@ func (r *Router) registerAccountRoutes(api *gin.RouterGroup) {
 	}
 	api.POST("/merchant/publish", accountHandler.HandlePublish)
 	api.POST("/merchant/publish/adapt-preview", accountHandler.HandlePreviewAdapt) // 向导阶段⑤：多平台真实适配预览（路径对齐前端 business.ts 调用）
-	api.GET("/merchant/publish/draft", accountHandler.HandleGetPublishDraft) // 向导云草稿（多端同步；无 Redis 前端降级 localStorage）
+	api.GET("/merchant/publish/draft", accountHandler.HandleGetPublishDraft)       // 向导云草稿（多端同步；无 Redis 前端降级 localStorage）
 	api.PUT("/merchant/publish/draft", accountHandler.HandleSavePublishDraft)
 	api.DELETE("/merchant/publish/draft", accountHandler.HandleDeletePublishDraft)
 	api.GET("/merchant/publish-jobs", accountHandler.HandleListPublishJobs)
-	api.GET("/merchant/works/analytics-summary", accountHandler.HandleAnalyticsSummary) // 作品数据页聚合
+	api.GET("/merchant/works/analytics-summary", accountHandler.HandleAnalyticsSummary)            // 作品数据页聚合
 	api.POST("/merchant/publish-jobs/:id/refresh-metrics", accountHandler.HandleRefreshJobMetrics) // 手动回读互动数据
-	api.GET("/merchant/publish-jobs/:id/metrics", accountHandler.HandleGetJobMetrics) // 指标时间序列（详情趋势）
+	api.GET("/merchant/publish-jobs/:id/metrics", accountHandler.HandleGetJobMetrics)              // 指标时间序列（详情趋势）
 	api.POST("/merchant/publish-jobs/:id/published", accountHandler.HandleMarkPublished)
 	api.GET("/merchant/publish-jobs/:id/status", accountHandler.HandleGetJobStatus)
 	api.POST("/merchant/publish-jobs/:id/re-monitor", accountHandler.HandleReMonitor) // 发布效果复测（收录周期后验证提及率爬升）
@@ -196,6 +196,9 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	if r.generationVoices != nil {
 		gh.SetVoiceLibrary(r.generationVoices)
 	}
+	if r.subjectAssetRepo != nil {
+		gh.SetSubjectAssetRepo(r.subjectAssetRepo)
+	}
 	// 统一提交API（傻瓜式：客户端不需要选择端点/模型）
 	// 注意：原有 POST /generation/tasks 已删除，只保留统一提交API
 	api.POST("/generation/submit", gh.HandleUnifiedSubmit)
@@ -203,8 +206,18 @@ func (r *Router) registerGenerationRoutes(api *gin.RouterGroup) {
 	api.GET("/generation/tasks", gh.HandleList)
 	api.GET("/generation/types", gh.HandleTypes)
 	api.POST("/generation/tasks/:id/cancel", gh.HandleCancel)
+	// 用户改名（作品/素材自定义标题——写 params.custom_title）
+	api.PATCH("/generation/tasks/:id/title", gh.HandleRenameTask)
+	// 分身形象视频重试/补建（25 号阶段二——链式创建失败或配置关闭后补建）
+	api.POST("/generation/tasks/:id/avatar-video", gh.HandleRetryAvatarVideo)
 	api.DELETE("/generation/tasks/:id", gh.HandleDelete)
 	api.GET("/generation/voices", gh.HandleVoices)
+	// 主体库代理（25 号阶段一 + 27 号优化：官方主体 + 个人分身）
+	api.GET("/subjects", gh.HandleListSubjects)
+	// 个人主体资产列表（26 号计划——从 subject_assets 表读取，失败任务天然不出现）
+	if r.subjectAssetRepo != nil {
+		api.GET("/subjects/mine", gh.HandleListSubjectAssets)
+	}
 	// B-Roll 台词时间轴（22 计划 §5.4①②——composer 未注入不注册）
 	if r.composerUC != nil {
 		th := NewTimelineHandler(r.composerUC)

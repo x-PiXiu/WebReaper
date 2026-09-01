@@ -2,6 +2,8 @@ package repository
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"time"
 
 	"gorm.io/datatypes"
@@ -177,5 +179,87 @@ func messageFromPO(p MessagePO) entity.Message {
 		ID: p.ID, ConversationID: p.ConversationID, Role: p.Role,
 		Content: p.Content, ToolCallsJSON: p.ToolCallsJSON, CreatedAt: p.CreatedAt,
 	}
+}
+
+// ---- 泛型映射工具（27号优化——减少手写映射代码）----
+
+// MapFields 自动映射同名字段（src → dst）。
+//
+// 规则：
+//   - 字段名完全匹配时自动赋值
+//   - 支持 `map:"-"` tag 跳过字段
+//   - 支持 `map:"other_name"` tag 重命名
+//   - 类型必须兼容（相同底层类型或可赋值）
+//
+// 返回实际映射的字段数。
+func MapFields(dst, src any) int {
+	dstVal := reflect.ValueOf(dst).Elem()
+	srcVal := reflect.ValueOf(src)
+	if srcVal.Kind() == reflect.Ptr {
+		srcVal = srcVal.Elem()
+	}
+
+	mapped := 0
+	for i := 0; i < srcVal.NumField(); i++ {
+		srcField := srcVal.Type().Field(i)
+		srcValue := srcVal.Field(i)
+
+		// 检查 map tag
+		tag := srcField.Tag.Get("map")
+		if tag == "-" {
+			continue
+		}
+
+		// 确定目标字段名
+		dstFieldName := srcField.Name
+		if tag != "" {
+			dstFieldName = tag
+		}
+
+		// 查找目标字段
+		dstField := dstVal.FieldByName(dstFieldName)
+		if !dstField.IsValid() || !dstField.CanSet() {
+			continue
+		}
+
+		// 类型兼容性检查
+		if srcValue.Type().AssignableTo(dstField.Type()) {
+			dstField.Set(srcValue)
+			mapped++
+		}
+	}
+	return mapped
+}
+
+// StructToMap 将 struct 转换为 map[string]any（用于 JSON 序列化/调试）。
+func StructToMap(v any) map[string]any {
+	result := make(map[string]any)
+	val := reflect.ValueOf(v)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return result
+	}
+
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Type().Field(i)
+		value := val.Field(i)
+
+		tag := field.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+
+		key := field.Name
+		if tag != "" {
+			key = strings.Split(tag, ",")[0]
+		}
+
+		if value.CanInterface() {
+			result[key] = value.Interface()
+		}
+	}
+	return result
 }
 

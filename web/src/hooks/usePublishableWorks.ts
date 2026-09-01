@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { businessApi } from '../api/business'
-import { filterPublishableWorks, appendComposeWorks } from '../utils/publishableWorks'
+import { filterPublishableWorks } from '../utils/publishableWorks'
 import { GENERATION_TASKS_KEY } from './useGenerationTasks'
 
 /** 我的作品：过滤掉素材库 AI 产物，仅保留文章与可发布成片 */
@@ -24,10 +24,7 @@ export function usePublishableWorks(options?: { enabled?: boolean; staleTime?: n
   })
 
   const works = useMemo(
-    () => appendComposeWorks(
-      filterPublishableWorks(worksQuery.data ?? [], tasksQuery.data ?? []),
-      tasksQuery.data ?? [],
-    ),
+    () => filterPublishableWorks(worksQuery.data ?? [], tasksQuery.data ?? []),
     [worksQuery.data, tasksQuery.data],
   )
 

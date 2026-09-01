@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,10 +24,10 @@ import (
 // 无需重启。已在途的 mock 任务（task_id 以 "mock-" 开头）无论当前 Key 状态，
 // Poll/Cancel 始终路由回 mock——防止 Key 切换后 mock 任务去真实 API 查 404 空转。
 type SwitchingProvider struct {
-	real  port.GenerationProvider
-	mock  port.GenerationProvider
+	real port.GenerationProvider
+	mock port.GenerationProvider
 	// resolve 当前生效 Key 与启用状态（DB 厂商配置优先，环境变量兜底——由 main 装配）
-	resolve func() (key string, enabled bool)
+	resolve  func() (key string, enabled bool)
 	mu       sync.Mutex
 	keyCache string
 	enabled  bool
@@ -40,6 +41,17 @@ func NewSwitchingProvider(real, mock port.GenerationProvider, resolve func() (st
 	// 初始化缓存（避免首次调用与并发下重复 resolve）
 	sp.refresh()
 	return sp
+}
+
+// ListSubjects 列出主体（委派当前生效 provider；25 号阶段一）。
+// mock（演示模式）不实现 SubjectLister——返回明确错误，前端官方区显示"暂未开放"。
+func (p *SwitchingProvider) ListSubjects(ctx context.Context, ownership, pageToken string, count int) (port.SubjectListResult, error) {
+	cur := p.current()
+	lister, ok := cur.(port.SubjectLister)
+	if !ok {
+		return port.SubjectListResult{}, fmt.Errorf("当前生成厂商（%s）不支持主体库查询——演示模式下官方主体暂未开放", cur.Name())
+	}
+	return lister.ListSubjects(ctx, ownership, pageToken, count)
 }
 
 func (p *SwitchingProvider) refresh() {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -17,8 +18,9 @@ import (
 
 // GenerationHandler 统一生成任务 API。
 type GenerationHandler struct {
-	uc     *generation.GenerationUseCase
-	voices port.VoiceLibrary // 可选；nil=音色端点不注册
+	uc               *generation.GenerationUseCase
+	voices           port.VoiceLibrary           // 可选；nil=音色端点不注册
+	subjectAssetRepo port.SubjectAssetRepository // 可选；26 号计划——资产读路径
 }
 
 // NewGenerationHandler 创建生成任务 handler。
@@ -31,14 +33,21 @@ func (h *GenerationHandler) SetVoiceLibrary(v port.VoiceLibrary) {
 	h.voices = v
 }
 
-// HandleVoices GET /api/v1/generation/voices?language=&q= —— 官方音色库
-//（TTS voice_setting_voice_id / 主体与数字人 voice_id 的取值来源）。
+// SetSubjectAssetRepo 注入主体资产仓储（可选——26 号计划读路径）。
+func (h *GenerationHandler) SetSubjectAssetRepo(r port.SubjectAssetRepository) {
+	h.subjectAssetRepo = r
+}
+
+// HandleVoices GET /api/v1/generation/voices —— 用户端音色列表（白牌化）
+// 只返回 scope=platform（管理后台创建）+ 本租户 scope=clone（用户克隆）。
+// 上游 Vidu 音色（scope=vidu）不暴露——白牌化原则（用户确认 2026-09-01）。
 func (h *GenerationHandler) HandleVoices(c *gin.Context) {
 	if h.voices == nil {
 		fail(c, fmt.Errorf("音色库未配置"))
 		return
 	}
-	list, err := h.voices.List(c.Request.Context(), c.Query("language"), c.Query("q"))
+	tenantID := middleware.CurrentTenantID(c)
+	list, err := h.voices.ListForUser(c.Request.Context(), tenantID)
 	if err != nil {
 		fail(c, err)
 		return
@@ -70,19 +79,20 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 	}
 
 	var req struct {
-		BrandID     string              `json:"brand_id"`
-		Text        string              `json:"text"`
-		Materials   []string            `json:"materials"`
-		Template    string              `json:"template"`
-		Type        string              `json:"type"` // 生成类型：video/image/audio/voice
-		Duration    int                 `json:"duration"`
-		Quality     string              `json:"quality"`
-		AspectRatio string              `json:"aspect_ratio"` // 画面比例（9:16 等——竖版封面/配图必需，此前全链丢弃致恒 16:9）
-		Params      map[string]any      `json:"params"`       // 高级参数透传（seed/style/voice_setting_* 等白名单合并）
-		Refs        []entity.PromptRef  `json:"refs"`         // BE-GEN-06：@引用素材（translateRefs 按端点翻译）
-		Watermark   bool                `json:"watermark"`    // 带水印（傻瓜式客户端不传——管理后台默认值通道）
-		OffPeak     bool                `json:"off_peak"`     // 错峰生成（更便宜但更慢；同上）
-		SubType     string              `json:"sub_type"`     // 显式端点覆盖（subject 创建主体等——空=自动选择）
+		BrandID       string                    `json:"brand_id"`
+		Text          string                    `json:"text"`
+		Materials     []string                  `json:"materials"`
+		Template      string                    `json:"template"`
+		Type          string                    `json:"type"` // 生成类型：video/image/audio/voice
+		Duration      int                       `json:"duration"`
+		Quality       string                    `json:"quality"`
+		AspectRatio   string                    `json:"aspect_ratio"`   // 画面比例（9:16 等——竖版封面/配图必需，此前全链丢弃致恒 16:9）
+		Params        map[string]any            `json:"params"`         // 高级参数透传（seed/style/voice_setting_* 等白名单合并）
+		Refs          []entity.PromptRef        `json:"refs"`           // BE-GEN-06：@引用素材（translateRefs 按端点翻译）
+		Watermark     bool                      `json:"watermark"`      // 带水印（傻瓜式客户端不传——管理后台默认值通道）
+		OffPeak       bool                      `json:"off_peak"`       // 错峰生成（更便宜但更慢；同上）
+		SubType       string                    `json:"sub_type"`       // 显式端点覆盖（subject 创建主体等——空=自动选择）
+		BrollSegments []generation.BrollSegment `json:"broll_segments"` // 29号计划：B-Roll配置
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fail(c, err)
@@ -90,20 +100,21 @@ func (h *GenerationHandler) HandleUnifiedSubmit(c *gin.Context) {
 	}
 
 	task, err := h.uc.UnifiedSubmit(c.Request.Context(), generation.UnifiedSubmitInput{
-		TenantID:    middleware.CurrentTenantID(c),
-		BrandID:     req.BrandID,
-		Text:        req.Text,
-		Materials:   req.Materials,
-		Template:    req.Template,
-		Type:        req.Type,
-		Duration:    req.Duration,
-		Quality:     req.Quality,
-		AspectRatio: req.AspectRatio,
-		Params:      req.Params,
-		Refs:        req.Refs, // BE-GEN-06：透传 @引用
-		Watermark:   req.Watermark,
-		OffPeak:     req.OffPeak,
-		SubType:     req.SubType,
+		TenantID:      middleware.CurrentTenantID(c),
+		BrandID:       req.BrandID,
+		Text:          req.Text,
+		Materials:     req.Materials,
+		Template:      req.Template,
+		Type:          req.Type,
+		Duration:      req.Duration,
+		Quality:       req.Quality,
+		AspectRatio:   req.AspectRatio,
+		Params:        req.Params,
+		Refs:          req.Refs, // BE-GEN-06：透传 @引用
+		Watermark:     req.Watermark,
+		OffPeak:       req.OffPeak,
+		SubType:       req.SubType,
+		BrollSegments: req.BrollSegments, // 29号计划：B-Roll配置
 	})
 	if err != nil {
 		// 参数校验类错误 400；配额 402 由 fail 统一映射
@@ -145,6 +156,27 @@ func (h *GenerationHandler) HandleList(c *gin.Context) {
 	success(c, gin.H{"tasks": out})
 }
 
+// HandleRenameTask PATCH /api/v1/generation/tasks/:id/title
+// 用户修改作品/素材的自定义标题（写 params.custom_title，读路径优先展示）。
+func (h *GenerationHandler) HandleRenameTask(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	var req struct {
+		Title string `json:"title" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, fmt.Errorf("标题不能为空"))
+		return
+	}
+	if err := h.uc.RenameTask(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"), req.Title); err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"renamed": c.Param("id"), "title": req.Title})
+}
+
 // HandleTypes GET /api/v1/generation/types —— 端点类型 + 模型能力向量（前端表单驱动）。
 func (h *GenerationHandler) HandleTypes(c *gin.Context) {
 	if h.uc == nil {
@@ -184,7 +216,7 @@ func (h *GenerationHandler) HandleCancel(c *gin.Context) {
 }
 
 // HandleDelete DELETE /api/v1/generation/tasks/:id —— 删除本地产任务记录
-//（资产库"删除数字人"；非终态先尽力取消上游。Vidu 无删主体 API，仅移除本地展示）。
+// （资产库"删除数字人"；非终态先尽力取消上游。Vidu 无删主体 API，仅移除本地展示）。
 func (h *GenerationHandler) HandleDelete(c *gin.Context) {
 	if h.uc == nil {
 		fail(c, fmt.Errorf("生成服务未配置"))
@@ -299,10 +331,10 @@ func generationTaskToView(t entity.GenerationTask) gin.H {
 		"provider": t.Provider, "provider_task_id": t.ProviderTaskID,
 		"state": t.State, "err_code": t.ErrCode, "err_msg": t.ErrMsg,
 		"retry_hint": retryHintFromErrCode(t.ErrCode),
-		"params": t.ParamsJSON, "creations": creations,
+		"params":     t.ParamsJSON, "creations": creations,
 		"credits": t.Credits, "off_peak": t.OffPeak, "watermark": t.Watermark,
 		"retry_count": t.RetryCount,
-		"created_at": t.CreatedAt, "finished_at": t.FinishedAt,
+		"created_at":  t.CreatedAt, "finished_at": t.FinishedAt,
 	}
 }
 
@@ -323,4 +355,100 @@ func validateRefsOwnership(tenantID string, refs []entity.PromptRef) error {
 		}
 	}
 	return nil
+}
+
+// HandleRetryAvatarVideo POST /api/v1/generation/tasks/:id/avatar-video
+// 重试/补建分身形象视频（25 号阶段二 D4——幂等：未终态链式任务直接返回）。
+func (h *GenerationHandler) HandleRetryAvatarVideo(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	task, err := h.uc.RetryAvatarVideo(c.Request.Context(), middleware.CurrentTenantID(c), c.Param("id"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, generationTaskToView(task))
+}
+
+// HandleListSubjects GET /api/v1/subjects?ownership=system|official|private&page_token=&count=
+// 主体库代理（25 号阶段一 + 27 号优化）：
+//   - ownership=system：官方主体缓存代理（前端读本地端点，不直连 Vidu）
+//   - ownership=official：管理后台创建的官方主体（从 subject_assets 表读取 scope=official）
+//   - ownership=private：个人分身列表（本地 generation_tasks 聚合已注册成功的主体）
+//   - ownership 空/不传：默认 system（向后兼容）
+func (h *GenerationHandler) HandleListSubjects(c *gin.Context) {
+	if h.uc == nil {
+		fail(c, fmt.Errorf("生成服务未配置"))
+		return
+	}
+	ownership := c.DefaultQuery("ownership", "system")
+	count := 20
+	if v, err := strconv.Atoi(c.Query("count")); err == nil && v > 0 {
+		count = v
+	}
+	if count > 100 {
+		count = 100
+	}
+
+	switch ownership {
+	case "system":
+		res, err := h.uc.ListOfficialSubjects(c.Request.Context(), c.Query("page_token"), count)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		success(c, res)
+	case "official":
+		// 管理后台创建的官方主体（从 subject_assets 表读取 scope=official）
+		if h.subjectAssetRepo == nil {
+			fail(c, fmt.Errorf("主体资产服务未配置"))
+			return
+		}
+		assets, total, err := h.subjectAssetRepo.ListByTenant(
+			c.Request.Context(), middleware.CurrentTenantID(c),
+			entity.SubjectScopeOfficial, "", count, 0,
+		)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		success(c, gin.H{"subjects": assets, "total": total})
+	case "private":
+		res, err := h.uc.ListPersonalSubjects(c.Request.Context(), middleware.CurrentTenantID(c), count)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		success(c, res)
+	default:
+		fail(c, fmt.Errorf("不支持的 ownership 值: %s（可选 system / official / private）", ownership))
+	}
+}
+
+// HandleListSubjectAssets GET /api/v1/subjects/mine?kind=&limit=&offset=
+// 个人主体资产列表（26 号计划——从 subject_assets 表读取，失败任务天然不出现）。
+func (h *GenerationHandler) HandleListSubjectAssets(c *gin.Context) {
+	if h.subjectAssetRepo == nil {
+		fail(c, fmt.Errorf("主体资产服务未配置"))
+		return
+	}
+	tenantID := middleware.CurrentTenantID(c)
+	kind := c.Query("kind") // person / scene / 空=全部
+	limit := 20
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 {
+		limit = v
+	}
+	offset := 0
+	if v, err := strconv.Atoi(c.Query("offset")); err == nil && v >= 0 {
+		offset = v
+	}
+
+	assets, total, err := h.subjectAssetRepo.ListByTenant(c.Request.Context(), tenantID, entity.SubjectScopePersonal, kind, limit, offset)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"assets": assets, "total": total})
 }

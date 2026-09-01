@@ -9,9 +9,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 
 const Login = lazy(() => import('./pages/Login'))
 const NotFound = lazy(() => import('./pages/NotFound'))
-const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
 const Chat = lazy(() => import('./pages/merchant/Chat'))
-const AgentConfigs = lazy(() => import('./pages/admin/AgentConfigs'))
 const Brands = lazy(() => import('./pages/merchant/Brands'))
 const Distribution = lazy(() => import('./pages/merchant/Distribution'))
 const Checkup = lazy(() => import('./pages/merchant/checkup/Checkup'))
@@ -36,20 +34,16 @@ const WorkDetail = lazy(() => import('./pages/merchant/works/WorkDetail'))
 const WorksAnalytics = lazy(() => import('./pages/merchant/analytics/WorksAnalytics'))
 const MyPlan = lazy(() => import('./pages/merchant/MyPlan'))
 const Notifications = lazy(() => import('./pages/merchant/Notifications'))
-const AdminUsers = lazy(() => import('./pages/admin/Users'))
-const Indexing = lazy(() => import('./pages/admin/Indexing'))
-const Knowledge = lazy(() => import('./pages/admin/Knowledge'))
-const AdminBrands = lazy(() => import('./pages/admin/Brands'))
-const AdminContents = lazy(() => import('./pages/admin/Contents'))
-const AdminSettings = lazy(() => import('./pages/admin/Settings'))
+// 管理后台复合页（重组——减少菜单项，Tab 承载子功能；原子页面由复合页 lazy import）
+const Dashboard = lazy(() => import('./pages/admin/Dashboard'))
+const TenantManagement = lazy(() => import('./pages/admin/TenantManagement'))
+const PlatformAssets = lazy(() => import('./pages/admin/PlatformAssets'))
+const ContentEngine = lazy(() => import('./pages/admin/ContentEngine'))
+const SystemConfig = lazy(() => import('./pages/admin/SystemConfig'))
+const CrawlerManagement = lazy(() => import('./pages/admin/CrawlerManagement'))
 const AdminBilling = lazy(() => import('./pages/admin/Billing'))
+const AdminChat = lazy(() => import('./pages/admin/Chat'))
 const Integrations = lazy(() => import('./pages/admin/Integrations'))
-const AdminPromptTemplates = lazy(() => import('./pages/admin/PromptTemplates'))
-const CrawlerAccounts = lazy(() => import('./pages/admin/CrawlerAccounts'))
-const CrawlerConfigs = lazy(() => import('./pages/admin/CrawlerConfigs'))
-const CrawlerTasks = lazy(() => import('./pages/admin/CrawlerTasks'))
-const AdminInspirations = lazy(() => import('./pages/admin/Inspirations'))
-const AdminGenerationTemplates = lazy(() => import('./pages/admin/GenerationTemplates'))
 
 function PageFallback() {
   return (
@@ -138,26 +132,35 @@ export default function App() {
 
         <Route element={<ProtectedRoute role="admin"><AdminLayout /></ProtectedRoute>}>
           <Route path="/admin" element={<LazyPage><Dashboard /></LazyPage>} />
-          <Route path="/admin/users" element={<LazyPage><AdminUsers /></LazyPage>} />
-          <Route path="/admin/brands" element={<LazyPage><AdminBrands /></LazyPage>} />
-          <Route path="/admin/contents" element={<LazyPage><AdminContents /></LazyPage>} />
-          <Route path="/admin/settings" element={<LazyPage><AdminSettings /></LazyPage>} />
-          <Route path="/admin/agent-configs" element={<LazyPage><AgentConfigs /></LazyPage>} />
-          <Route path="/admin/indexing" element={<LazyPage><Indexing /></LazyPage>} />
-          <Route path="/admin/knowledge" element={<LazyPage><Knowledge /></LazyPage>} />
-          <Route path="/admin/generation-specs" element={<Navigate to="/admin/integrations" replace />} />
-          <Route path="/admin/providers" element={<Navigate to="/admin/integrations" replace />} />
-          <Route path="/admin/model-configs" element={<Navigate to="/admin/integrations" replace />} />
-          <Route path="/admin/integrations" element={<LazyPage><Integrations /></LazyPage>} />
-          <Route path="/admin/integrations/:id" element={<LazyPage><Integrations /></LazyPage>} />
-          <Route path="/admin/prompt-templates" element={<LazyPage><AdminPromptTemplates /></LazyPage>} />
+          {/* 复合页（新菜单结构） */}
+          <Route path="/admin/tenants" element={<LazyPage><TenantManagement /></LazyPage>} />
+          <Route path="/admin/assets" element={<LazyPage><PlatformAssets /></LazyPage>} />
+          <Route path="/admin/engine" element={<LazyPage><ContentEngine /></LazyPage>} />
+          <Route path="/admin/system" element={<LazyPage><SystemConfig /></LazyPage>} />
+          <Route path="/admin/crawler" element={<LazyPage><CrawlerManagement /></LazyPage>} />
           <Route path="/admin/billing" element={<LazyPage><AdminBilling /></LazyPage>} />
-          <Route path="/admin/chat" element={<LazyPage><Chat /></LazyPage>} />
-          <Route path="/admin/crawler-accounts" element={<LazyPage><CrawlerAccounts /></LazyPage>} />
-          <Route path="/admin/crawler-configs" element={<LazyPage><CrawlerConfigs /></LazyPage>} />
-          <Route path="/admin/crawler-tasks" element={<LazyPage><CrawlerTasks /></LazyPage>} />
-          <Route path="/admin/inspirations" element={<LazyPage><AdminInspirations /></LazyPage>} />
-          <Route path="/admin/generation-templates" element={<LazyPage><AdminGenerationTemplates /></LazyPage>} />
+          <Route path="/admin/chat" element={<LazyPage><AdminChat /></LazyPage>} />
+          <Route path="/admin/integrations/:id" element={<LazyPage><Integrations /></LazyPage>} />
+          {/* 旧路由重定向到复合页 */}
+          <Route path="/admin/users" element={<Navigate to="/admin/tenants" replace />} />
+          <Route path="/admin/brands" element={<Navigate to="/admin/tenants?tab=brands" replace />} />
+          <Route path="/admin/contents" element={<Navigate to="/admin/tenants?tab=contents" replace />} />
+          <Route path="/admin/voices" element={<Navigate to="/admin/assets?tab=voices" replace />} />
+          <Route path="/admin/subjects" element={<Navigate to="/admin/assets?tab=subjects" replace />} />
+          <Route path="/admin/settings" element={<Navigate to="/admin/system" replace />} />
+          <Route path="/admin/integrations" element={<Navigate to="/admin/system?tab=integrations" replace />} />
+          <Route path="/admin/agent-configs" element={<Navigate to="/admin/engine?tab=agents" replace />} />
+          <Route path="/admin/prompt-templates" element={<Navigate to="/admin/engine?tab=prompts" replace />} />
+          <Route path="/admin/generation-templates" element={<Navigate to="/admin/engine?tab=templates" replace />} />
+          <Route path="/admin/indexing" element={<Navigate to="/admin/engine?tab=indexing" replace />} />
+          <Route path="/admin/knowledge" element={<Navigate to="/admin/engine?tab=knowledge" replace />} />
+          <Route path="/admin/crawler-accounts" element={<Navigate to="/admin/crawler?tab=accounts" replace />} />
+          <Route path="/admin/crawler-configs" element={<Navigate to="/admin/crawler?tab=configs" replace />} />
+          <Route path="/admin/crawler-tasks" element={<Navigate to="/admin/crawler?tab=tasks" replace />} />
+          <Route path="/admin/inspirations" element={<Navigate to="/admin/crawler?tab=inspirations" replace />} />
+          <Route path="/admin/generation-specs" element={<Navigate to="/admin/system?tab=integrations" replace />} />
+          <Route path="/admin/providers" element={<Navigate to="/admin/system?tab=integrations" replace />} />
+          <Route path="/admin/model-configs" element={<Navigate to="/admin/system?tab=integrations" replace />} />
         </Route>
 
         <Route path="/" element={<RootRedirect />} />

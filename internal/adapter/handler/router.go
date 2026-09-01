@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/agent"
+	authadapter "webreaper/internal/adapter/auth"
 	"webreaper/internal/adapter/handler/middleware"
 	"webreaper/internal/usecase/account"
 	"webreaper/internal/usecase/agentconfig"
@@ -16,9 +16,8 @@ import (
 	"webreaper/internal/usecase/conversation"
 	"webreaper/internal/usecase/generation"
 	"webreaper/internal/usecase/geo"
-	"webreaper/internal/usecase/inspiration"
-	"webreaper/internal/usecase/works"
 	"webreaper/internal/usecase/indexing"
+	"webreaper/internal/usecase/inspiration"
 	"webreaper/internal/usecase/knowledge"
 	"webreaper/internal/usecase/llmconfig"
 	"webreaper/internal/usecase/notification"
@@ -28,6 +27,7 @@ import (
 	"webreaper/internal/usecase/structured"
 	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/videotranscript"
+	"webreaper/internal/usecase/works"
 )
 
 // Router 组装所有 HTTP 路由。
@@ -38,10 +38,11 @@ import (
 //   - Agent 执行依赖 port.AgentSyncRunner 接口（非具体 TrpcAgentRunner），可替换。
 //
 // 文件组织（按域拆分，避免单文件巨型路由）：
-//   router.go        —— Router 结构 + 依赖注入（SetXxx）+ Engine 骨架（公开/认证/中间件）
-//   router_core.go   —— AI 对话/工具/通知/统计/Agent/LLM 配置/会话
-//   router_geo.go    —— GEO 业务（品牌/关键词/监测/内容/门店/附近同行）+ 账号发布 + 结构化
-//   router_admin.go  —— 管理端（admin 角色域）+ 商户端计费
+//
+//	router.go        —— Router 结构 + 依赖注入（SetXxx）+ Engine 骨架（公开/认证/中间件）
+//	router_core.go   —— AI 对话/工具/通知/统计/Agent/LLM 配置/会话
+//	router_geo.go    —— GEO 业务（品牌/关键词/监测/内容/门店/附近同行）+ 账号发布 + 结构化
+//	router_admin.go  —— 管理端（admin 角色域）+ 商户端计费
 type Router struct {
 	authRegister   *auth.RegisterUseCase
 	authLogin      *auth.LoginUseCase
@@ -91,25 +92,28 @@ type Router struct {
 	generationProvider port.GenerationProvider
 	generationRegistry port.EndpointRegistry // 规格管理（管理后台矩阵）
 	generationSpecRepo port.GenerationSpecRepository
-	integrationRepo    integrationRepo // 能力路由新表（vendor + capability）
-	generationVoices   port.VoiceLibrary      // 官方音色库（TTS/主体音色选择用；可选）
-	providerConfigUC   *providerconfig.UseCase // 厂商配置（管理后台）
-	mediaStore         port.MediaAssetStore    // 素材托管/转存（可选）
-	transcriptUC       *videotranscript.UseCase // 视频文案提取（可选；08 计划 D4）
-	composerUC         port.Composer // B-Roll 合成编排（可选；22 计划——未注入则端点不注册）
-	mediaDir           string                  // 本地媒体静态目录（可选；非空时 /media 托管）
-	apiPrefix          string                  // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
-	rootGroup          *gin.RouterGroup        // Engine() 装配时记录——延迟注册的公开路由用（OAuth 回调等）
-	accountFrontendURL string                  // 账号域 OAuth 回调后 302 跳回的前端地址
-	worksUC            *works.WorksUseCase     // 作品库聚合（可选；未注入则端点不注册）
-	pendingPublish     *agent.PendingPublishStore // 发布计划暂存（主 Agent 硬确认；可选）
-	transportRegistry  *port.TransportRegistry    // 通道轴注册表（管理后台切换端点用；可选）
+	integrationRepo    integrationRepo              // 能力路由新表（vendor + capability）
+	generationVoices   port.VoiceLibrary            // 官方音色库（TTS/主体音色选择用；可选）
+	adminVoiceSynth    port.AudioSynthesizer        // 管理后台官方音色创建用（MiMo 同步合成；nil=创建不可用）
+	providerConfigUC   *providerconfig.UseCase      // 厂商配置（管理后台）
+	mediaStore         port.MediaAssetStore         // 素材托管/转存（可选）
+	transcriptUC       *videotranscript.UseCase     // 视频文案提取（可选；08 计划 D4）
+	composerUC         port.Composer                // B-Roll 合成编排（可选；22 计划——未注入则端点不注册）
+	mediaDir           string                       // 本地媒体静态目录（可选；非空时 /media 托管）
+	apiPrefix          string                       // 路由统一前缀（nginx 分流用，如 /webreaper；空=无前缀）
+	rootGroup          *gin.RouterGroup             // Engine() 装配时记录——延迟注册的公开路由用（OAuth 回调等）
+	accountFrontendURL string                       // 账号域 OAuth 回调后 302 跳回的前端地址
+	worksUC            *works.WorksUseCase          // 作品库聚合（可选；未注入则端点不注册）
+	pendingPublish     *agent.PendingPublishStore   // 发布计划暂存（主 Agent 硬确认；可选）
+	transportRegistry  *port.TransportRegistry      // 通道轴注册表（管理后台切换端点用；可选）
 	settingRepo        port.SystemSettingRepository // 系统设置仓储（通道 override 持久化用；可选）
-	contentAdapters    port.ContentAdapterRegistry // 内容适配器注册表（向导适配预览；可选）
-	draftCache         DraftCache                 // 向导云草稿存储（Redis；可选）
-	healthCheck        func() error            // 健康检查函数（DB ping 等；nil=只返回 ok）
+	contentAdapters    port.ContentAdapterRegistry  // 内容适配器注册表（向导适配预览；可选）
+	draftCache         DraftCache                   // 向导云草稿存储（Redis；可选）
+	healthCheck        func() error                 // 健康检查函数（DB ping 等；nil=只返回 ok）
 	// 提示词模板仓库（admin 管理内容生成/优化提示词）——通过 SetPromptTemplates 注入，可选
 	promptTemplateRepo port.PromptTemplateRepository
+	// 主体资产仓储（26 号计划——资产读路径；可选）
+	subjectAssetRepo port.SubjectAssetRepository
 	// 经济系统（套餐/订阅/订单/计费）——通过 SetBilling 注入，可选
 	billingUC *billing.BillingUseCase
 	// 配额检查门（注入到 ChatHandler 等无独立 usecase 的端点）——通过 SetQuotaGate 注入，可选
@@ -117,14 +121,14 @@ type Router struct {
 	// 模板管理用例（管理后台可动态配置生成模板）——通过 SetTemplate 注入，可选
 	templateUC *generation.TemplateUseCase
 	// 灵感广场用例（热门视频采集+展示）——通过 SetInspiration 注入，可选
-	inspirationUC       *inspiration.UseCase
+	inspirationUC        *inspiration.UseCase
 	inspirationVideoRepo port.InspirationVideoRepository
 	brandRepo            port.BrandRepository // 用于灵感数据租户隔离校验
 	// 爬虫管理用例（管理后台爬虫配置/账号管理）——通过 SetCrawlerAdmin 注入，可选
-	crawlerConfigRepo   port.CrawlerConfigRepository
-	crawlerAccountRepo  port.CrawlerAccountRepository
-	crawlerTaskLogRepo  port.CrawlerTaskLogRepository
-	crawlerVault        port.CookieVault // cookie 加解密（账号健康检测解密/手动添加加密）
+	crawlerConfigRepo  port.CrawlerConfigRepository
+	crawlerAccountRepo port.CrawlerAccountRepository
+	crawlerTaskLogRepo port.CrawlerTaskLogRepository
+	crawlerVault       port.CookieVault // cookie 加解密（账号健康检测解密/手动添加加密）
 	// 品牌发布配置——通过 SetPublishConfig 注入，可选
 	publishConfigRepo  port.BrandPublishConfigRepository
 	publishBindingRepo port.AccountBrandBindingRepository
@@ -277,6 +281,16 @@ func (r *Router) SetTemplate(uc *generation.TemplateUseCase) {
 // SetGenerationVoices 注入官方音色库（可选——未注入则 /generation/voices 不返回数据）。
 func (r *Router) SetGenerationVoices(v port.VoiceLibrary) {
 	r.generationVoices = v
+}
+
+// SetAdminVoiceSynth 注入同步音频合成（官方音色创建链路：样本+文本→试听音频）。
+func (r *Router) SetAdminVoiceSynth(s port.AudioSynthesizer) {
+	r.adminVoiceSynth = s
+}
+
+// SetSubjectAssetRepo 注入主体资产仓储（可选——26 号计划读路径；未注入则 /subjects/mine 不注册）。
+func (r *Router) SetSubjectAssetRepo(repo port.SubjectAssetRepository) {
+	r.subjectAssetRepo = repo
 }
 
 // SetComposer 注入 B-Roll 合成编排（可选——未注入则 timeline/compose 端点不注册）。

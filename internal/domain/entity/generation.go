@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -26,6 +27,72 @@ const (
 // IsTerminal 终态判断（终态后回调/轮询重复到达直接忽略——双通道幂等）。
 func IsTerminal(state string) bool {
 	return state == TaskStateSuccess || state == TaskStateFailed || state == TaskStateCancelled
+}
+
+// validTransitions 合法状态转换表（27 号：实体层贫血治理——状态规则下沉到 entity）。
+// key=当前状态，value=可转换到的目标状态集合。
+var validTransitions = map[string]map[string]bool{
+	TaskStateCreated:    {TaskStateQueueing: true},
+	TaskStateQueueing:   {TaskStateProcessing: true, TaskStateSuccess: true, TaskStateFailed: true, TaskStateCancelled: true},
+	TaskStateProcessing: {TaskStateSuccess: true, TaskStateFailed: true, TaskStateCancelled: true},
+	// 终态不可转换
+	TaskStateSuccess:   {},
+	TaskStateFailed:    {},
+	TaskStateCancelled: {},
+}
+
+// IsTerminalM 方法版终态判断。
+func (t GenerationTask) IsTerminalM() bool { return IsTerminal(t.State) }
+
+// CanTransitionTo 检查是否可转换到目标状态。
+func (t GenerationTask) CanTransitionTo(target string) bool {
+	targets, ok := validTransitions[t.State]
+	if !ok {
+		return false
+	}
+	return targets[target]
+}
+
+// TransitionTo 执行状态转换（27 号：状态规则下沉——usecase 不再直接赋值 State）。
+//
+// 合法转换：created→queueing, queueing→processing/success/failed/cancelled,
+// processing→success/failed/cancelled。终态不可转换。
+// 成功/失败/取消自动设置 FinishedAt。
+// 返回 error 而非 panic——调用方可选择忽略（向后兼容）或处理。
+func (t *GenerationTask) TransitionTo(target string, errMsg string) error {
+	if !t.CanTransitionTo(target) {
+		return fmt.Errorf("非法状态转换: %s → %s", t.State, target)
+	}
+	t.State = target
+	t.UpdatedAt = time.Now()
+	if IsTerminal(target) {
+		now := time.Now()
+		t.FinishedAt = &now
+	}
+	if target == TaskStateFailed && errMsg != "" {
+		t.ErrMsg = errMsg
+	}
+	return nil
+}
+
+// MarkSuccess 标记成功（含产物 JSON 和积分）。
+func (t *GenerationTask) MarkSuccess(creationsJSON string, credits int) error {
+	if err := t.TransitionTo(TaskStateSuccess, ""); err != nil {
+		return err
+	}
+	t.CreationsJSON = creationsJSON
+	t.Credits = credits
+	return nil
+}
+
+// MarkFailed 标记失败。
+func (t *GenerationTask) MarkFailed(errMsg string) error {
+	return t.TransitionTo(TaskStateFailed, errMsg)
+}
+
+// MarkCancelled 标记取消。
+func (t *GenerationTask) MarkCancelled() error {
+	return t.TransitionTo(TaskStateCancelled, "")
 }
 
 // GenerationTask 统一生成任务（Vidu 全量接入的核心资产）。
@@ -105,6 +172,7 @@ type ModelCapability struct {
 //   - Provider 字段区分不同厂商（vidu/kling/...）
 //   - IsDefault 字段标记每个端点的默认模型
 //   - 管理后台可以为每个厂商的每个端点配置默认模型
+//   - CostCredits 字段标记每次调用消耗积分（27 号：模型差异化计费）
 type GenerationSpec struct {
 	SubType          string `json:"sub_type"`           // 端点类型（text2video/…）
 	Model            string `json:"model"`              // 模型名
@@ -114,6 +182,7 @@ type GenerationSpec struct {
 	IsDefault        bool   `json:"is_default"`         // 是否为默认模型
 	SortOrder        int    `json:"sort_order"`         // 排序
 	CapabilitiesJSON string `json:"capabilities_json"`  // 能力向量 JSON（管理后台可编辑）
+	CostCredits      int    `json:"cost_credits"`       // 每次调用消耗积分（0=使用服务商返回值；>0=覆盖）
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
@@ -194,11 +263,20 @@ func InferTypeFromMime(mime string) string {
 // GenerationVoice 官方音色（Vidu 语音合成音色表——静态参考数据）。
 // 启动 seed 进 generation_voices 表，客户端查询/筛选（TTS 的
 // voice_setting_voice_id、主体的 voice_id、数字人 voice_id 均可引用）。
+//
+// 白牌化：scope=vidu 仅管理端可见（克隆参考源）；scope=platform 为管理后台创建
+// 的平台音色（用户端可见）；scope=clone 为用户克隆（仅本租户可见）。
 type GenerationVoice struct {
-	VoiceID   string `json:"voice_id"`   // 音色 ID（提交参数的取值）
-	Language  string `json:"language"`   // 语言（中文 (普通话)/英文/日文…分组用）
-	Name      string `json:"name"`       // 音色名称（展示用）
-	SampleURL string `json:"sample_url"` // 试听示例音频 URL
+	VoiceID      string `json:"voice_id"`                  // 音色 ID（提交参数的取值）
+	Language     string `json:"language"`                  // 语言（中文 (普通话)/英文/日文…分组用）
+	Name         string `json:"name"`                      // 音色名称（展示用）
+	SampleURL    string `json:"sample_url"`                // 试听示例音频 URL
+	Recommend    bool   `json:"recommend"`                 // 精选推荐（口播常用音色——服务端标记，替代前端截断）
+	Scope        string `json:"scope,omitempty"`           // vidu(官方seed) / platform(官方复刻) / clone(用户克隆)
+	TenantID     string `json:"tenant_id,omitempty"`       // clone行归属；官方行空
+	SourceTaskID string `json:"source_task_id,omitempty"`  // 溯源任务ID
+	Status       string `json:"status,omitempty"`          // active / disabled
+	IsDefault    bool   `json:"is_default"`                // 平台默认音色（scope=platform 内仅一条 true；用户不选时后端 fallback）
 }
 
 // PromptRef 提示词 @引用（客户端从素材库选择，提交给服务端统一翻译）。

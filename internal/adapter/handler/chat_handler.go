@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 
@@ -11,17 +12,33 @@ import (
 	"webreaper/internal/usecase/port"
 )
 
+// isAdmin 判断当前请求是否为管理员角色（从 JWT claims 读取）。
+func isAdmin(c *gin.Context) bool {
+	return middleware.CurrentRole(c) == "admin"
+}
+
 // ChatHandler 是 AI 流式聊天的 HTTP 适配器。
 //
 // 输出 AI SDK 兼容的 SSE 流（UI Message Stream 格式），
 // 让前端 useChat hook 能直接消费。
 type ChatHandler struct {
 	ai        port.AIGenerator
-	quotaGate port.QuotaStore // 配额检查门（可选；nil=不检查）
+	quotaGate port.QuotaStore // 配额检查门（可选；nil=不检查配额）
+	// adminHealthFn 管理员会话的系统提示词增强（可选；nil=不注入）。
+	// 返回实时系统健康摘要文本——admin chat 问"系统怎么样"时 LLM 有数据可直接回答。
+	adminHealthFn func() string
 }
 
 func NewChatHandler(ai port.AIGenerator) *ChatHandler {
 	return &ChatHandler{ai: ai}
+}
+
+// SetAdminHealthProvider 注入管理员健康摘要函数（admin chat 系统提示词增强）。
+// 函数应返回系统当前状态摘要（任务/积分/资产），每次 admin 会话调用时实时获取。
+func (h *ChatHandler) SetAdminHealthProvider(fn func() string) {
+	if fn != nil {
+		h.adminHealthFn = fn
+	}
 }
 
 // SetQuotaGate 注入配额检查门（可选；未注入时不检查配额——向后兼容）。
@@ -93,10 +110,20 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 		if msg.Role == "user" { lastUser = msg.Content }
 	}
 
+	// 管理员会话：注入实时系统健康摘要（admin chat 问"系统怎么样"时 LLM 有数据直接回答）
+	systemMessage := req.SystemMessage
+	if h.adminHealthFn != nil && isAdmin(c) {
+		healthSummary := h.adminHealthFn()
+		if healthSummary != "" {
+			adminContext := fmt.Sprintf("\n\n[实时系统状态]\n%s\n\n你是智宸AI平台管理助手，可基于上述实时数据回答系统状态问题。", healthSummary)
+			systemMessage = systemMessage + adminContext
+		}
+	}
+
 	// 分流：use_tools=true 或指定了工具名 → RunWithTools（ReAct + 工具调用事件）；否则 → ChatStream（纯对话）
 	if (req.UseTools || len(req.Tools) > 0) && lastUser != "" {
 		// 带工具模式：通过 SSE 推送所有事件类型
-		runErr := h.ai.RunWithTools(ctx, req.ConversationID, req.LLMConfigName, lastUser, req.SystemMessage, req.Tools, func(evt port.ToolEvent) {
+		runErr := h.ai.RunWithTools(ctx, req.ConversationID, req.LLMConfigName, lastUser, systemMessage, req.Tools, func(evt port.ToolEvent) {
 			// 把 ToolEvent 直接序列化为 SSE 推送
 			writeSSE(c.Writer, evt)
 			if flusher != nil { flusher.Flush() }
@@ -110,8 +137,8 @@ func (h *ChatHandler) HandleStream(c *gin.Context) {
 
 	// 纯对话模式（无工具）
 	messages := req.Messages
-	if req.SystemMessage != "" {
-		systemMsg := port.ChatMessage{Role: "system", Content: req.SystemMessage}
+	if systemMessage != "" {
+		systemMsg := port.ChatMessage{Role: "system", Content: systemMessage}
 		messages = append([]port.ChatMessage{systemMsg}, req.Messages...)
 	}
 

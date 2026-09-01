@@ -59,6 +59,8 @@ describe('parseSubjectFromTask', () => {
     expect(s.hasVideo).toBe(true)
     expect(s.videoUrl).toBe('https://cdn/v.mp4')
     expect(s.voiceId).toBe('voice-1')
+    expect(s.kind).toBe('person')
+    expect(s.avatarTaskId).toBe('')
   })
 
   it('falls back to creation id for serverId', () => {

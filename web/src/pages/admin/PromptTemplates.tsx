@@ -28,7 +28,7 @@ const FORMAT_LABELS: Record<string, string> = {
 }
 
 // 提示词模板（GEO 内容引擎域）：内容生成/优化系统提示词 + 各格式输出指令——热更新即时生效。
-export default function AdminPromptTemplates() {
+export default function AdminPromptTemplates({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
@@ -83,7 +83,7 @@ export default function AdminPromptTemplates() {
   ]
 
   return (
-    <div className="wr-page-content">
+    <div className={embedded ? "" : "wr-page-content"}>
       <div className="wr-page-header">
         <h1>提示词模板</h1>
         <p>内容生成/优化的系统提示词 + 各格式输出指令——修改即时生效，无需重启服务</p>

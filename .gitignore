@@ -43,6 +43,12 @@ gui-test-screenshots/
 data/media/
 web/tsconfig.tsbuildinfo
 
+# 一次性补丁/临时脚本（会话过程产物，不入库）
+_p*.py
+_patch*.py
+_resolve*.py
+_fix*.py
+
 # 运行时数据目录（调试截图/媒体/会话产物，整体不入库）
 /data/
 webreaper
@@ -52,3 +58,4 @@ webreaper.exe~
 server.exe~
 pub_*.json
 realtest_tmp.mp4
+*.exe~

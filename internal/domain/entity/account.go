@@ -1,6 +1,9 @@
 package entity
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // 多平台发布账号域：围绕「平台账号（扫码绑定）→ cookie 复用 → 半自动发布」组织。
 //
@@ -121,6 +124,48 @@ func (a Account) IsValid() bool {
 // IsHealthy 账号是否可用于发布（健康状态为 active）。
 func (a Account) IsHealthy() bool {
 	return a.Health == AccountHealthActive
+}
+
+// ---- 账号健康状态转换（27 号：实体层贫血治理）----
+
+// validAccountHealthTransitions 合法健康状态转换表。
+var validAccountHealthTransitions = map[string]map[string]bool{
+	AccountHealthActive:  {AccountHealthExpired: true, AccountHealthBanned: true},
+	AccountHealthExpired: {AccountHealthActive: true, AccountHealthBanned: true},
+	AccountHealthBanned:  {}, // 封禁不可恢复（需人工干预）
+}
+
+// CanTransitionHealthTo 检查健康状态是否可转换。
+func (a Account) CanTransitionHealthTo(target string) bool {
+	targets, ok := validAccountHealthTransitions[a.Health]
+	if !ok {
+		return false
+	}
+	return targets[target]
+}
+
+// SetHealth 设置健康状态（返回 error 而非静默失败）。
+func (a *Account) SetHealth(target string) error {
+	if !a.CanTransitionHealthTo(target) {
+		return fmt.Errorf("账号健康状态不可从 %s 转为 %s", a.Health, target)
+	}
+	a.Health = target
+	return nil
+}
+
+// Revive 恢复账号（expired→active，OAuth 续期/重新扫码后调用）。
+func (a *Account) Revive() error {
+	return a.SetHealth(AccountHealthActive)
+}
+
+// Expire 标记过期（cookie/access_token 到期）。
+func (a *Account) Expire() error {
+	return a.SetHealth(AccountHealthExpired)
+}
+
+// Ban 封禁账号（不可恢复）。
+func (a *Account) Ban() error {
+	return a.SetHealth(AccountHealthBanned)
 }
 
 // PublishJob 是一次发布任务的记录。

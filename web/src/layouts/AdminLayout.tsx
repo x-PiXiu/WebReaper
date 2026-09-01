@@ -13,40 +13,26 @@ import { toast } from '../utils/feedback'
 // 提交渠道配置——叫「提交渠道」与商户端概念解耦，避免一词三义。
 const adminMenu: NavItem[] = [
   {
-    key: 'platform', label: '平台管理',
+    key: 'ops', label: '运营管理',
     children: [
       { key: '/admin', label: '平台总览' },
-      { key: '/admin/users', label: '商户管理' },
-      { key: '/admin/brands', label: '品牌管理' },
-      { key: '/admin/contents', label: '内容管理' },
+      { key: '/admin/tenants', label: '商户与品牌' },
+      { key: '/admin/assets', label: '平台资产' },
       { key: '/admin/billing', label: '计费管理' },
-    ],
-  },
-  {
-    key: 'system', label: '系统配置',
-    children: [
-      { key: '/admin/settings', label: '平台设置' },
-      { key: '/admin/integrations', label: '第三方集成' },
     ],
   },
   {
     key: 'engine', label: '内容引擎',
     children: [
+      { key: '/admin/engine', label: '引擎配置' },
       { key: '/admin/chat', label: 'AI 对话' },
-      { key: '/admin/agent-configs', label: 'Agent 配置' },
-      { key: '/admin/prompt-templates', label: '提示词模板' },
-      { key: '/admin/generation-templates', label: '生成模板' },
-      { key: '/admin/indexing', label: '提交渠道' },
-      { key: '/admin/knowledge', label: '知识库' },
     ],
   },
   {
-    key: 'crawler', label: '爬虫管理',
+    key: 'system', label: '系统配置',
     children: [
-      { key: '/admin/crawler-accounts', label: '平台方账号' },
-      { key: '/admin/crawler-configs', label: '爬虫配置' },
-      { key: '/admin/crawler-tasks', label: '任务监控' },
-      { key: '/admin/inspirations', label: '灵感运营' },
+      { key: '/admin/system', label: '系统设置' },
+      { key: '/admin/crawler', label: '爬虫管理' },
     ],
   },
 ]

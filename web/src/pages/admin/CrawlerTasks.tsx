@@ -20,7 +20,8 @@ const TRIGGER_LABELS: Record<string, string> = {
 }
 
 // 采集任务监控页面
-export default function CrawlerTasks() {
+export default function CrawlerTasks({ embedded: _embedded = false }: { embedded?: boolean }) {
+  void _embedded
   const [platform, setPlatform] = useState<string>('')
 
   // 查询任务列表

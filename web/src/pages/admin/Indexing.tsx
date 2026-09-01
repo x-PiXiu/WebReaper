@@ -20,7 +20,8 @@ const CHANNEL_NAMES: Record<string, string> = {
 // 与商户端概念解耦，避免一词三义。
 // IndexNow 协议要点（官方 FAQ）：密钥=网站所有权证明，由站长生成 GUID 并托管 {key}.txt——
 // 本平台代为生成并自动托管 key 文件（/public/indexnow-key.txt），管理员只需一键生成 + 验证。
-export default function Indexing() {
+export default function Indexing({ embedded: _embedded = false }: { embedded?: boolean }) {
+  void _embedded
   const queryClient = useQueryClient()
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
@@ -126,7 +127,7 @@ export default function Indexing() {
   ]
 
   return (
-    <div className="wr-page-content">
+    <div className={_embedded ? "" : "wr-page-content"}>
       <div className="wr-page-header">
         <h1>提交渠道</h1>
         <p>搜索引擎收录通知：密钥自动托管 · 渠道配置 · 提交审计 · 手动补提交</p>

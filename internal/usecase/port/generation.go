@@ -39,16 +39,16 @@ type GenerationProvider interface {
 
 // SubmitResult 提交结果（同步/异步统一承载）。
 type SubmitResult struct {
-	TaskID    string           // 服务商任务 ID（主体 API 等资源型端点为资源 id）
-	Credits   int              // 本次消耗积分
-	State     string           // 空=异步（进轮询）；entity.TaskStateSuccess/Failed=提交即终态
+	TaskID    string                // 服务商任务 ID（主体 API 等资源型端点为资源 id）
+	Credits   int                   // 本次消耗积分
+	State     string                // 空=异步（进轮询）；entity.TaskStateSuccess/Failed=提交即终态
 	Creations []entity.CreationItem // 终态时的产物（TTS file_url / 复刻 demo_audio）
 }
 
 // GenerationStatus 任务轮询结果。
 type GenerationStatus struct {
-	State     string               // entity.TaskState*
-	ErrCode   string               // 服务商原始错误码
+	State     string                // entity.TaskState*
+	ErrCode   string                // 服务商原始错误码
 	Creations []entity.CreationItem // 生成物（success 时有）
 }
 
@@ -85,7 +85,7 @@ type ModelAutoSelector interface {
 // SyncSubmitter 同步端点（可选能力——EndpointAdapter 类型断言获得）：
 // 提交响应即终态，没有 task_id 轮询语义。
 // 典型：Vidu 主体 API（POST /ent/v2/subjects）同步返回主体对象
-//（id=server_id），既无 task_id 也无 state——若按异步任务轮询
+// （id=server_id），既无 task_id 也无 state——若按异步任务轮询
 // /ent/v2/tasks/{id}/creations 必然 404，任务永远停在 queueing。
 // usecase 对此类端点：提交成功 → 直接终态 success，服务商资源 ID
 // 存 ProviderTaskID 且以 creations[0].id 暴露给前端引用。
@@ -98,7 +98,7 @@ type SyncSubmitter interface {
 // CallbackEndpoint 支持回调的异步端点（可选能力——EndpointAdapter 类型断言获得）。
 //
 // Vidu 约定：创建任务时传入 callback_url，任务状态变化时主动 POST 回调
-//（结构同查询任务 API 返回体；HMAC-SHA256 验签 + Date/nonce 防重放）。
+// （结构同查询任务 API 返回体；HMAC-SHA256 验签 + Date/nonce 防重放）。
 // 仅文档声明了 callback_url 参数的端点实现本接口（text2video/reference2video/
 // text2image/multiframe）——对其余端点注入未声明参数有被拒风险。
 // 未实现/未配置公网回调地址时自动退化为纯轮询（20s 周期，双通道幂等合并）。
@@ -141,6 +141,12 @@ type GenerationTaskRepository interface {
 	// Delete 删除单条任务（本地产记录删除——资产库"删除数字人"等场景；
 	// 上游取消/删除由用例层决定，仓储只做数据访问）。
 	Delete(ctx context.Context, tenantID, taskID string) error
+	// ListBySubType 按端点类型过滤查询（个人分身列表等资产聚合场景）。
+	// state 非空时额外过滤状态；limit<=0 用默认值。
+	ListBySubType(ctx context.Context, tenantID, subType, state string, limit int) ([]entity.GenerationTask, error)
+	// ListTransferPending 转存补偿（缺口A）：success 且产物有 url 无 stored_url、
+	// finished_at 不早于 since（Vidu 24h URL 窗口内可救）的任务。按 finished_at 降序。
+	ListTransferPending(ctx context.Context, since time.Time, limit int) ([]entity.GenerationTask, error)
 }
 
 // GenerationSpecRepository 端点/模型规格仓储（DB 为唯一事实源——全局掌控）。
@@ -184,18 +190,34 @@ type MediaAssetStore interface {
 
 // VoiceLibrary 官方音色库（只读查询——seed 进 DB 的静态参考数据）。
 // handler 直接依赖（同 MediaAssetStore 模式）：无任务语义，不需用例封装。
+//
+// 白牌化（用户确认 2026-09-01）：用户端只显示 scope=platform（管理后台创建）
+// 和 scope=clone 且属于本租户的克隆音色。scope=vidu（上游 302 条）仅管理端可见
+// ——作为克隆参考源，不暴露给用户。
 type VoiceLibrary interface {
-	// List 音色列表（language 为空=全部；keyword 模糊匹配 voice_id/名称）。
-	List(ctx context.Context, language, keyword string) ([]entity.GenerationVoice, error)
+	// ListForUser 用户端音色列表：scope=platform（active）+ 本租户 clone（active）。
+	// tenantID 必传——空则返回空列表（防御）。
+	ListForUser(ctx context.Context, tenantID string) ([]entity.GenerationVoice, error)
+	// ListForAdmin 管理端全量音色（含 vidu/platform/clone 所有 scope、含停用行）。
+	// scope 非空时仅返回该 scope（vidu=克隆参考源 / platform=平台音色管理）。
+	ListForAdmin(ctx context.Context, scope string) ([]entity.GenerationVoice, error)
 	// SeedIfEmpty 表空时写入种子数据（返回写入条数；已非空返回 0）。
 	SeedIfEmpty(ctx context.Context, voices []entity.GenerationVoice) (int, error)
+	// Upsert 按 voice_id 主键幂等写入（26号计划——voice_clone 物化钩子调用）。
+	Upsert(ctx context.Context, voice entity.GenerationVoice) error
+	// GetDefault 获取平台默认音色（scope=platform 且 is_default=true 的首条；无则空）。
+	GetDefault(ctx context.Context) (entity.GenerationVoice, error)
+	// SetDefault 设为平台默认音色（同一 scope=platform 内仅一条 default=true）。
+	SetDefault(ctx context.Context, voiceID string) error
+	// FindByVoiceID 按音色 ID 精确查询单条（缺口C：克隆/平台音色的样本合成通道定位样本音频）。
+	FindByVoiceID(ctx context.Context, voiceID string) (entity.GenerationVoice, error)
 }
 
 // TaskNotifier 生成任务终态通知（可选注入——站内信主动唤醒）。
 //
 // 差距修复：异步任务（视频/图片）在轮询周期内完成，商户不留在页面上就永远
 // 不知道结果；同步任务（主体/TTS）提交即终态但用户可能在后台运行。终态
-//（success/failed）转换恰好发生一次（IsTerminal 幂等护栏），在此处通知不会重复。
+// （success/failed）转换恰好发生一次（IsTerminal 幂等护栏），在此处通知不会重复。
 type TaskNotifier interface {
 	// NotifyTaskTerminal 任务进入终态时回调（同步执行，实现应快速失败不影响主流程）。
 	NotifyTaskTerminal(ctx context.Context, task entity.GenerationTask)
@@ -255,4 +277,29 @@ type ConfigurableProvider interface {
 // Redis 实现 SETNX+EX 原子判重）。 Seen 首次见到 nonce 返回 true（可处理）；重复/已过期返回 false。
 type CallbackNonceStore interface {
 	Seen(ctx context.Context, nonce string) bool
+}
+
+// ---- 主体库（25 号阶段一：官方主体即选即用）----
+
+// SubjectInfo 服务商主体（官方/个人）。官方主体不返回 style/description（Vidu 契约）。
+type SubjectInfo struct {
+	ServerID string   `json:"server_id"`          // 主体 id（reference2video subjects[].server_id 直用）
+	Name     string   `json:"name"`               // 主体名称
+	Images   []string `json:"images,omitempty"`   // 主体图片（images[0] 作封面）
+	Videos   []string `json:"videos,omitempty"`   // 主体视频
+	VoiceID  string   `json:"voice_id,omitempty"` // 绑定音色（B 路径文本直生可用）
+}
+
+// SubjectListResult 主体分页列表（Vidu GET /ent/v2/subjects 透传形态）。
+type SubjectListResult struct {
+	Subjects      []SubjectInfo `json:"subjects"`
+	NextPageToken string        `json:"next_page_token,omitempty"`
+	Count         int           `json:"count"`
+}
+
+// SubjectLister 列出服务商主体（可选能力——Vidu 实现；mock 不实现，
+// 演示模式下官方主体区返回"暂未开放"）。个人主体不查服务商（本地 subject 任务聚合）。
+type SubjectLister interface {
+	// ListSubjects ownership: "system"=官方主体 / "private"=个人（产品只用 system）。
+	ListSubjects(ctx context.Context, ownership, pageToken string, count int) (SubjectListResult, error)
 }

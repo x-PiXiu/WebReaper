@@ -26,7 +26,7 @@ const indexMeta: Record<string, { color: string; label: string }> = {
 // 内容统一管理（管理后台）：全平台优化内容一览。
 // 「区分开来」：按状态分区（全部/已发布/草稿/其他），每区独立统计与操作，
 // 已发布区展示公开页链接（公网资产），草稿区提示可发布。
-export default function AdminContents() {
+export default function AdminContents({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const [brandFilter, setBrandFilter] = useState<string>()
   const [activeTab, setActiveTab] = useState('all')
@@ -143,7 +143,7 @@ export default function AdminContents() {
   ]
 
   return (
-    <div className="wr-page-content">
+    <div className={embedded ? "" : "wr-page-content"}>
       <div className="wr-page-header">
         <h1>内容管理</h1>
         <p>全平台优化内容 · 按状态分区管理 · 上下架控制 · 公开页预览</p>

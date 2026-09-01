@@ -9,7 +9,7 @@ import { toast } from '../../utils/feedback'
 const { Text } = Typography
 
 // 商户管理（管理后台）：平台商户一览 + 创建 + 删除。
-export default function AdminUsers() {
+export default function AdminUsers({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -90,7 +90,7 @@ export default function AdminUsers() {
   ]
 
   return (
-    <div className="wr-page-content">
+    <div className={embedded ? "" : "wr-page-content"}>
       <div className="wr-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
           <h1>商户管理</h1>

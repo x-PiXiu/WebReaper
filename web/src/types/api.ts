@@ -417,6 +417,7 @@ export interface WorkItem {
   comments: number
   created_at: string
   published_at?: string
+  parent_task_id?: string // B-Roll 血缘：compose 产物的源片任务 ID
 }
 
 // ---- 作品数据页聚合（/m/analytics 数据源）----
@@ -614,12 +615,36 @@ export interface GenerationTask {
   finished_at: string | null
 }
 
-// 官方音色（Vidu 语音合成音色表——TTS/主体/数字人音色选择的取值来源）
+// 官方音色（白牌化——用户端仅显示 platform + 自己的 clone；Vidu 仅管理端参考源）
 export interface GenerationVoice {
   voice_id: string
   language: string
   name: string
   sample_url: string
+  recommend?: boolean // 精选推荐（服务端标记——077 迁移）
+  scope?: string // vidu(官方seed) / platform(官方复刻) / clone(用户克隆)
+  tenant_id?: string // clone行归属
+  status?: string // active / disabled
+  is_default?: boolean // 平台默认音色（scope=platform 内仅一条——083 迁移）
+}
+
+// 主体资产（26号计划——从generation_tasks物化到独立资产表）
+export interface SubjectAsset {
+  id: string
+  tenant_id: string
+  scope: string // personal / official
+  kind: string // person / scene
+  name: string
+  server_id: string // Vidu主体ID（reference2video的subjects[].server_id引用值）
+  portrait_url: string
+  avatar_video_url: string // 链式形象视频产物URL
+  voice_id: string
+  tags: string
+  sort_order: number
+  status: string // active / disabled
+  source_task_id: string
+  created_at: string
+  updated_at: string
 }
 
 // 第三方集成中心（08 计划 D7——能力路由模型）

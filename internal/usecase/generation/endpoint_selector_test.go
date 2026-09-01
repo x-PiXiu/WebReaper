@@ -149,7 +149,8 @@ func TestEndpointSelector_Select_TwoImages(t *testing.T) {
 }
 
 func TestEndpointSelector_Select_ImageAndAudio(t *testing.T) {
-	// 测试：1张图片+1个音频 → digital_human
+	// 测试：1张图片+1个音频 → lip_sync（digital_human 端点已废弃 2026-08-27，
+	// 图+音频统一走对口型——远端改造后本用例断言未同步，现按现行为修正）
 	mediaStore := &MockMediaAssetStore{
 		materials: []entity.MediaAsset{
 			{
@@ -178,8 +179,8 @@ func TestEndpointSelector_Select_ImageAndAudio(t *testing.T) {
 		t.Fatalf("Select failed: %v", err)
 	}
 
-	if result.SubType != "digital_human" {
-		t.Errorf("Expected subType 'digital_human', got '%s'", result.SubType)
+	if result.SubType != "lip_sync" {
+		t.Errorf("Expected subType 'lip_sync', got '%s'", result.SubType)
 	}
 }
 
@@ -253,6 +254,65 @@ func TestEndpointSelector_Select_ThreeImages(t *testing.T) {
 		t.Fatalf("Select failed: %v", err)
 	}
 
+	if result.SubType != "reference2video" {
+		t.Errorf("Expected subType 'reference2video', got '%s'", result.SubType)
+	}
+}
+
+func TestEndpointSelector_Select_SubjectsWithAudio(t *testing.T) {
+	// 测试（N1）：subjects（分身）+ 音频素材 → 显式报错而非静默丢音频。
+	// reference2video 端点无外部音频字段，此前 subjects 分支最优先命中会把音频素材
+	// 静默丢弃——修复后应拒绝并引导两步链（① subjects 生成视频 → ② 视频+音频 lip_sync）。
+	mediaStore := &MockMediaAssetStore{
+		materials: []entity.MediaAsset{
+			{
+				ID:        "mat-audio-001",
+				Type:      entity.MaterialTypeAudio,
+				SourceURL: "https://example.com/voice.mp3",
+			},
+		},
+	}
+	templateRepo := &MockTemplateRepository{}
+	selector := NewEndpointSelector(mediaStore, templateRepo)
+
+	req := entity.UnifiedGenerationRequest{
+		BrandID:   "brand-1",
+		Text:      "场景意图描述",
+		Materials: []string{"mat-audio-001"},
+		Params: map[string]any{
+			"subjects": []any{"subj-001"},
+		},
+	}
+
+	result, err := selector.Select(context.Background(), req)
+	if err == nil {
+		t.Fatalf("Expected error for subjects+audio (audio must not be silently dropped), got result: %+v", result)
+	}
+	if result.SubType != "" || result.Params != nil {
+		t.Errorf("Expected empty result on error, got subType='%s'", result.SubType)
+	}
+}
+
+func TestEndpointSelector_Select_SubjectsOnly(t *testing.T) {
+	// 测试：仅 subjects（无音频）→ reference2video 不受 N1 守卫影响。
+	mediaStore := &MockMediaAssetStore{
+		materials: []entity.MediaAsset{},
+	}
+	templateRepo := &MockTemplateRepository{}
+	selector := NewEndpointSelector(mediaStore, templateRepo)
+
+	req := entity.UnifiedGenerationRequest{
+		BrandID: "brand-1",
+		Text:    "分身说台词",
+		Params: map[string]any{
+			"subjects": []any{"subj-001"},
+		},
+	}
+
+	result, err := selector.Select(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Select failed: %v", err)
+	}
 	if result.SubType != "reference2video" {
 		t.Errorf("Expected subType 'reference2video', got '%s'", result.SubType)
 	}

@@ -525,11 +525,16 @@ func (uc *PublishUseCase) SetMetricsStore(mr port.VideoMetricRepository, ss port
 // 本清单自动出现，前端零改动。
 // verifiedAutoForms 全自动「已真机验证」的形态清单（Plan-14 修正 #9——服务端成为
 // 形态级诚实矩阵的事实源，替代前端 CAPABILITY_FALLBACK 猜测表）。
-// 维护规则：DRY_RUN 真机验证通过一个形态（连续 3 次稳定）才加入；抖音/B站/视频号
-// 视频流程已实现但选择器未验证、快手为 stub，故暂不放行。
+// 2026-09-01 用户确认全部放行：7 平台 PublishAuto 代码全部实现，
+// 选择器失败会报错（不会静默丢失），逐步真机校准即可。
 var verifiedAutoForms = map[string][]string{
 	"zhihu":       {entity.ContentTypeArticle},
-	"xiaohongshu": {entity.ContentTypeImage},
+	"xiaohongshu": {entity.ContentTypeImage, entity.ContentTypeVideo},
+	"douyin":      {entity.ContentTypeVideo},
+	"kuaishou":    {entity.ContentTypeVideo},
+	"bilibili":    {entity.ContentTypeVideo},
+	"weixin":      {entity.ContentTypeVideo, entity.ContentTypeImage},
+	"youtube":     {entity.ContentTypeVideo},
 }
 
 func (uc *PublishUseCase) ChannelCapabilities() []entity.ChannelInfo {
@@ -755,24 +760,19 @@ func (uc *PublishUseCase) publishAuto(ctx context.Context, job entity.PublishJob
 	}
 
 	// ---- 通道轴执行（三轴重构：多通道共存 + 启动前短路降级 + override）----
-	// 候选链（自动策略）：api（OAuth 账号+已注册）→ rpa（cookie 账号）→ link 兜底；
+	// 候选链（自动策略）：rpa（cookie 账号）→ link 兜底；
 	// 管理后台 override 的通道由 Registry.Chain 自动提到链头。
 	// ⚠️ 降级只在"启动前失败"（凭证缺失/通道未注册/权限未开通）发生；
 	// 执行中失败落库报错、不自动换通道重发——视频可能实际已发出，重发=重复发布事故。
+	// API 通道已删除（2026-09-01 用户确认不用）——恢复时加回 TransportAPI 候选。
 	var selected port.PublishTransport
 	var req port.TransportRequest
 	if uc.transports != nil && uc.resolver != nil {
 		candidates := []string{port.TransportRPA, port.TransportLink}
-		if acc.IsOAuth() {
-			candidates = append([]string{port.TransportAPI}, candidates...)
-		}
 		for _, t := range uc.transports.Chain(job.Platform, candidates) {
 			// 凭证匹配预检（不匹配的通道直接跳过——OAuth 账号不会走 rpa 解 cookie）
 			kind := t.Kind()
 			if kind == port.TransportRPA && acc.CookieEncrypted == "" {
-				continue
-			}
-			if kind == port.TransportAPI && acc.AccessTokenEnc == "" {
 				continue
 			}
 			cookie, apiToken, rErr := uc.resolver.Resolve(ctx, job.TenantID, acc.ID, kind)

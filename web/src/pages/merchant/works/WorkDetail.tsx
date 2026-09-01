@@ -40,7 +40,7 @@ export default function WorkDetail() {
   const { works, tasks, isLoading } = usePublishableWorks()
 
   const work = useMemo(() => works.find((w) => w.id === workId), [works, workId])
-  const { composeWorkIds, brollSourceWorkIds } = useMemo(() => brollLineage(tasks), [tasks])
+  const { composeWorkIds, brollSourceWorkIds } = useMemo(() => brollLineage(works, tasks), [works, tasks])
 
   const title = cleanWorkTitle(work?.title || '作品详情')
   const taskId = work?.id.startsWith('g-') ? work.id.slice(2) : ''

@@ -27,7 +27,7 @@ import (
 //   - 1张图片 → img2video
 //   - 2张图片 → start_end2video
 //   - 3-7张图片 → reference2video
-//   - 1张图片+音频 → digital_human
+//   - 1张图片+音频 → lip_sync（digital_human 已废弃）
 //   - 1张图片+文本 → img2video
 //   - 1个视频+音频 → lip_sync
 //   - 1个视频+文本 → lip_sync
@@ -35,15 +35,27 @@ import (
 type EndpointSelectorImpl struct {
 	mediaStore   port.MediaAssetStore
 	templateRepo port.TemplateRepository
+	settingRepo  port.SystemSettingRepository // 可选；nil 时使用硬编码默认值
+	voiceRepo    port.VoiceLibrary           // 可选；平台默认音色查询（白牌化）
 }
 
 var _ port.EndpointSelector = (*EndpointSelectorImpl)(nil)
+
+// SetVoiceRepo 注入音色库（平台默认音色查询——白牌化：默认音色不再硬编码 Vidu ID）。
+func (s *EndpointSelectorImpl) SetVoiceRepo(v port.VoiceLibrary) {
+	s.voiceRepo = v
+}
 
 func NewEndpointSelector(mediaStore port.MediaAssetStore, templateRepo port.TemplateRepository) *EndpointSelectorImpl {
 	return &EndpointSelectorImpl{
 		mediaStore:   mediaStore,
 		templateRepo: templateRepo,
 	}
+}
+
+// SetSettingRepo 注入系统设置仓储（可选——默认值从 DB 读取，未注入时回落硬编码）。
+func (s *EndpointSelectorImpl) SetSettingRepo(repo port.SystemSettingRepository) {
+	s.settingRepo = repo
 }
 
 // MaterialStats 素材统计。
@@ -197,6 +209,13 @@ func (s *EndpointSelectorImpl) selectEndpoint(req entity.UnifiedGenerationReques
 	// BE-SUBJ-01：主体一致性路径——params.subjects 含已注册分身 server_id 时
 	// 优先 reference2video（同一分身跨视频脸部一致），而非每次图+音重生成数字人
 	if subjects, ok := req.Params["subjects"]; ok && subjects != nil {
+		// N1（2026-09-01）：reference2video 端点无外部音频字段，本分支此前最优先命中
+		// 会把音频素材静默丢弃。显式报错引导调用方走两步链
+		//（① 仅 subjects 生成视频 → ② 该视频+音频提交 lip_sync），
+		// 与前端 useLipSyncPipeline 分身+上传音频路径对齐——失败可见，不静默丢素材。
+		if stats.AudioCount > 0 {
+			return "", nil, fmt.Errorf("分身生成（subjects）不支持外部音频素材（reference2video 无音频字段，为避免静默丢弃已拒绝）——请分两步：先用 subjects 生成视频，再用该视频+音频提交 lip_sync")
+		}
 		params := entity.GenerationParams{
 			"prompt":   req.Text,
 			"subjects": subjects,
@@ -223,11 +242,12 @@ func (s *EndpointSelectorImpl) selectEndpoint(req entity.UnifiedGenerationReques
 		return "lip_sync", params, nil
 	}
 
-	// 情况3: 单张图片+音频 → 数字人口播
+	// 情况3: 单张图片+音频 → 对口型（图片+音频，复用lip_sync端点）
+	// digital_human 已废弃（2026-08-31确认），统一走 lip_sync
 	if stats.ImageCount == 1 && stats.AudioCount > 0 {
-		params := s.buildDigitalHumanParams(req, stats)
-		params["__sub_type"] = "digital_human"
-		return "digital_human", params, nil
+		params := s.buildLipSyncParams(req, stats)
+		params["__sub_type"] = "lip_sync"
+		return "lip_sync", params, nil
 	}
 
 	// 情况4: 单张图片+文本 → 图生视频
@@ -408,12 +428,9 @@ func (s *EndpointSelectorImpl) buildLipSyncTextParams(req entity.UnifiedGenerati
 		"text":      convertPauseMarkers(req.Text), // 傻瓜式停顿：标点 → Vidu <#x#> 标记
 	}
 	// 用户显式指定 voice_id 时优先使用（高级参数白名单已包含 voice_id）；
-	// 否则使用 Vidu 默认中文女声（lip-sync 文本模式要求有效音色 ID，
-	// "default" 不在注册音色中会 400）。
+	// 默认音色由 applyDefaults() 统一从 system_settings 读取（27 号硬编码治理）。
 	if vid, ok := req.Params["voice_id"].(string); ok && vid != "" {
 		params["voice_id"] = vid
-	} else {
-		params["voice_id"] = "female-shaonv" // Vidu 首个中文女声
 	}
 	return params
 }
@@ -506,12 +523,9 @@ func (s *EndpointSelectorImpl) buildTTSParams(req entity.UnifiedGenerationReques
 		"text": req.Text,
 	}
 	// 用户显式指定音色时优先使用（高级参数白名单已包含 voice_setting_* 前缀族）；
-	// 否则使用 Vidu 默认中文女声（TTS 路由到 Vidu /ent/v2/audio-tts 时需要有效音色 ID，
-	// "default" 不在注册音色中会 400；路由到 MiMo 时由 MiMo provider 转为 mimo_default）。
+	// 默认音色由 applyDefaults() 统一从 system_settings 读取（27 号硬编码治理）。
 	if vid, ok := req.Params["voice_setting_voice_id"].(string); ok && vid != "" {
 		params["voice_setting_voice_id"] = vid
-	} else {
-		params["voice_setting_voice_id"] = "female-shaonv"
 	}
 	return params
 }
@@ -547,11 +561,13 @@ func mergeAdvancedParams(params entity.GenerationParams, user map[string]any) {
 	}
 }
 
-// applyDefaults 应用默认值。
+// applyDefaults 应用默认值（27 号优化：默认值优先从 system_settings 读取，未配置回落硬编码）。
 func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.GenerationParams, req entity.UnifiedGenerationRequest) entity.GenerationParams {
 	// 如果用户指定了时长，使用用户指定的
 	if req.Duration > 0 {
 		params["duration"] = req.Duration
+	} else if d := s.settingInt(ctx, entity.SettingKeyGenDefaultDuration, 0); d > 0 {
+		params["duration"] = d
 	}
 
 	// 根据端点类型决定是否添加分辨率和比例
@@ -562,22 +578,82 @@ func (s *EndpointSelectorImpl) applyDefaults(ctx context.Context, params entity.
 		if req.Quality != "" {
 			params["resolution"] = req.Quality
 		} else {
-			params["resolution"] = "1080p" // 默认1080p（所有Vidu模型均支持）
+			params["resolution"] = s.settingString(ctx, entity.SettingKeyGenDefaultResolution, "1080p")
 		}
 
 		// 如果用户指定了比例，使用用户指定的
 		if req.AspectRatio != "" {
 			params["aspect_ratio"] = req.AspectRatio
 		} else {
-			params["aspect_ratio"] = "16:9" // 默认16:9
+			params["aspect_ratio"] = s.settingString(ctx, entity.SettingKeyGenDefaultAspectRatio, "16:9")
 		}
 	}
+
+	// 默认音色（TTS/lip-sync 端点——27 号硬编码治理）
+	s.applyDefaultVoice(ctx, params, subType)
 
 	// 高级参数合并（最后执行——用户显式值覆盖以上默认）
 	mergeAdvancedParams(params, req.Params)
 
 	log.Printf("[EndpointSelector][DEBUG] 端点=%s 参数keys=%v 用户高级参数=%d个", subType, paramKeysSorted(params), len(req.Params))
 	return params
+}
+
+// applyDefaultVoice 为需要音色的端点应用默认音色（白牌化 2026-09-01）。
+// 优先级：① voiceRepo 中 scope=platform 且 is_default=true 的平台默认音色
+//        ② system_settings 的 gen_default_voice_id
+//        ③ 兜底 "mimo_default"（MiMo 预置——不暴露 Vidu 音色 ID 给用户端）
+// TTS 用 voice_setting_voice_id；lip-sync 用 voice_id。用户显式指定时不覆盖。
+func (s *EndpointSelectorImpl) applyDefaultVoice(ctx context.Context, params entity.GenerationParams, subType string) {
+	defaultVoice := s.resolveDefaultVoice(ctx)
+	switch subType {
+	case "tts":
+		if _, ok := params["voice_setting_voice_id"]; !ok {
+			params["voice_setting_voice_id"] = defaultVoice
+		}
+	case "lip_sync":
+		if _, ok := params["voice_id"]; !ok {
+			params["voice_id"] = defaultVoice
+		}
+	}
+}
+
+// resolveDefaultVoice 解析平台默认音色：平台 is_default > settings > 兜底。
+func (s *EndpointSelectorImpl) resolveDefaultVoice(ctx context.Context) string {
+	if s.voiceRepo != nil {
+		if v, err := s.voiceRepo.GetDefault(ctx); err == nil && v.VoiceID != "" {
+			return v.VoiceID
+		}
+	}
+	return s.settingString(ctx, entity.SettingKeyGenDefaultVoiceID, "mimo_default")
+}
+
+// settingString 从 system_settings 读取字符串值（未配置/读取失败回落 fallback）。
+func (s *EndpointSelectorImpl) settingString(ctx context.Context, key, fallback string) string {
+	if s.settingRepo == nil {
+		return fallback
+	}
+	setting, err := s.settingRepo.Get(ctx, key)
+	if err != nil || setting.Value == "" {
+		return fallback
+	}
+	return setting.Value
+}
+
+// settingInt 从 system_settings 读取整数值（未配置/读取失败/解析失败回落 fallback）。
+func (s *EndpointSelectorImpl) settingInt(ctx context.Context, key string, fallback int) int {
+	if s.settingRepo == nil {
+		return fallback
+	}
+	setting, err := s.settingRepo.Get(ctx, key)
+	if err != nil || setting.Value == "" {
+		return fallback
+	}
+	var v int
+	if _, err := fmt.Sscanf(setting.Value, "%d", &v); err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }
 
 // paramKeysSorted 日志用：参数 key 排序列表（值不打——脱敏）。

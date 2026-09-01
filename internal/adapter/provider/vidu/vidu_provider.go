@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,10 +34,10 @@ type ViduProvider struct {
 	// R2 修复多实例 Key 漂移：管理后台改 Key 只更新收到请求的那个实例的内存——
 	// 其他实例持旧 Key 直到重启。keySource 存在时 apiKeyNow 优先从 DB 读取
 	//（30s TTL 缓存），UpdateAPIKey 仅作为同实例即时生效的旁路。
-	keySource    func(ctx context.Context) (string, error)
-	keyCache     string        // 最近从 keySource 读到的 Key
-	keyCacheAt   time.Time     // 上次读取时间（TTL 内不重读）
-	keyCacheTTL  time.Duration // 默认 30s
+	keySource   func(ctx context.Context) (string, error)
+	keyCache    string        // 最近从 keySource 读到的 Key
+	keyCacheAt  time.Time     // 上次读取时间（TTL 内不重读）
+	keyCacheTTL time.Duration // 默认 30s
 }
 
 // NewViduProvider 创建 Vidu 协议层适配器。
@@ -257,6 +258,58 @@ func (p *ViduProvider) QueryCredits(ctx context.Context) (int, error) {
 	return parsed.Credits, nil
 }
 
+// ListSubjects 列出主体（GET /ent/v2/subjects——25 号阶段一官方主体）。
+// ownership: system=官方 / private=个人；count 上限 100；分页 next_page_token。
+func (p *ViduProvider) ListSubjects(ctx context.Context, ownership, pageToken string, count int) (port.SubjectListResult, error) {
+	q := url.Values{}
+	if ownership != "" {
+		q.Set("ownership", ownership)
+	}
+	if pageToken != "" {
+		q.Set("next_page_token", pageToken)
+	}
+	if count > 0 {
+		q.Set("count", strconv.Itoa(count))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		baseURL+"/ent/v2/subjects?"+q.Encode(), nil)
+	if err != nil {
+		return port.SubjectListResult{}, err
+	}
+	req.Header.Set("Authorization", "Token "+p.apiKeyNow())
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return port.SubjectListResult{}, fmt.Errorf("Vidu 查询主体失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return port.SubjectListResult{}, fmt.Errorf("Vidu 查询主体 HTTP %d: %s", resp.StatusCode, truncate(string(raw), 300))
+	}
+	var parsed struct {
+		Subjects []struct {
+			ID      string   `json:"id"`
+			Name    string   `json:"name"`
+			Images  []string `json:"images"`
+			Videos  []string `json:"videos"`
+			VoiceID string   `json:"voice_id"`
+		} `json:"subjects"`
+		NextPageToken string `json:"next_page_token"`
+		Count         int    `json:"count"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return port.SubjectListResult{}, fmt.Errorf("Vidu 查询主体响应解析失败: %w", err)
+	}
+	out := port.SubjectListResult{NextPageToken: parsed.NextPageToken, Count: parsed.Count}
+	for _, sub := range parsed.Subjects {
+		out.Subjects = append(out.Subjects, port.SubjectInfo{
+			ServerID: sub.ID, Name: sub.Name, Images: sub.Images,
+			Videos: sub.Videos, VoiceID: sub.VoiceID,
+		})
+	}
+	return out, nil
+}
+
 // VerifyCallback 回调验签（HMAC-SHA256 复合签名字符串；验签实现见 callback.go）。
 func (p *ViduProvider) VerifyCallback(ctx context.Context, header http.Header, body []byte, requestURI string) error {
 	return verifyCallbackSignature(p.apiKeyNow(), header, body, requestURI)
@@ -275,31 +328,31 @@ func (p *ViduProvider) TranslateError(code string) string {
 
 // errorTranslations 错误码翻译表（数据源：Docs/第三方/Vidu/任务管理/错误码.md）。
 var errorTranslations = map[string]string{
-	"CreditInsufficient":        "积分不足，请充值后重试",
-	"TaskPromptPolicyViolation": "提示词触发安全审核，请调整描述",
-	"AuditSubmitIllegal":        "输入未通过安全审核，请调整内容",
-	"CreationPolicyViolation":   "生成物触发风控，请调整描述",
-	"QuotaExceeded":             "生成服务并发已满，请稍后重试",
-	"TooManyRequests":           "请求过于频繁，请稍后重试",
-	"SystemThrottling":          "生成服务繁忙，请稍后重试",
-	"InternalServiceFailure":    "生成服务异常，请稍后重试或联系客服",
-	"ModelUnavailable":          "所选模型不可用，请更换模型",
-	"ImageCheckFaceFailed":      "图片人脸检测失败，请换一张清晰照片",
+	"CreditInsufficient":         "积分不足，请充值后重试",
+	"TaskPromptPolicyViolation":  "提示词触发安全审核，请调整描述",
+	"AuditSubmitIllegal":         "输入未通过安全审核，请调整内容",
+	"CreationPolicyViolation":    "生成物触发风控，请调整描述",
+	"QuotaExceeded":              "生成服务并发已满，请稍后重试",
+	"TooManyRequests":            "请求过于频繁，请稍后重试",
+	"SystemThrottling":           "生成服务繁忙，请稍后重试",
+	"InternalServiceFailure":     "生成服务异常，请稍后重试或联系客服",
+	"ModelUnavailable":           "所选模型不可用，请更换模型",
+	"ImageCheckFaceFailed":       "图片人脸检测失败，请换一张清晰照片",
 	"ImageCheckBodyJointsFailed": "图片人体检测失败，请换一张完整照片",
-	"ImageObjectsUndetected":    "图片人体或人脸有遮挡，请换一张清晰照片",
-	"MultiFaceDetected":         "检测到多张人脸，请上传单人照片",
-	"NoFaceDetected":            "检测不到人脸，请上传含清晰人像的照片",
-	"FaceDetectNotPass":         "人脸检测不通过，请换一张照片",
-	"VideoFormatInvalid":        "视频格式不支持（需 mp4/avi/mov）",
-	"ImageFormatInvalid":        "图片格式不支持（需 png/jpeg/jpg/webp）",
-	"ImageSizeInvalid":          "图片尺寸过大或过小",
-	"VideoDownloadFailure":      "视频素材下载失败，请检查链接有效性",
-	"ImageDownloadFailure":      "图片素材下载失败，请检查链接有效性",
-	"TaskNotFound":              "任务不存在或已过期",
-	"UserCancelled":             "任务已被取消",
-	"Unauthorized":              "API Key 无效或已过期",
-	"Forbidden":                 "无权访问该资源",
-	"BadRequest":                "请求参数不合法",
+	"ImageObjectsUndetected":     "图片人体或人脸有遮挡，请换一张清晰照片",
+	"MultiFaceDetected":          "检测到多张人脸，请上传单人照片",
+	"NoFaceDetected":             "检测不到人脸，请上传含清晰人像的照片",
+	"FaceDetectNotPass":          "人脸检测不通过，请换一张照片",
+	"VideoFormatInvalid":         "视频格式不支持（需 mp4/avi/mov）",
+	"ImageFormatInvalid":         "图片格式不支持（需 png/jpeg/jpg/webp）",
+	"ImageSizeInvalid":           "图片尺寸过大或过小",
+	"VideoDownloadFailure":       "视频素材下载失败，请检查链接有效性",
+	"ImageDownloadFailure":       "图片素材下载失败，请检查链接有效性",
+	"TaskNotFound":               "任务不存在或已过期",
+	"UserCancelled":              "任务已被取消",
+	"Unauthorized":               "API Key 无效或已过期",
+	"Forbidden":                  "无权访问该资源",
+	"BadRequest":                 "请求参数不合法",
 }
 
 func truncate(s string, n int) string {

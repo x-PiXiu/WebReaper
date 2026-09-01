@@ -172,45 +172,35 @@ func mimeFromExt(ext string) string {
 }
 
 // DownloadAndStore 下载外部 URL 到本地（转存：Vidu 产物 24h 过期 → 永久化）。
+// 缺口B修复：data: URI（MiMo 同步产物内联 base64）直接落盘，不走 HTTP。
 func (s *LocalMediaStore) DownloadAndStore(ctx context.Context, tenantID, sourceURL string, meta map[string]string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("下载失败: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("下载 HTTP %d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20)) // 256MB 上限
-	if err != nil {
-		return "", err
-	}
-	// 扩展名：优先 meta；否则按 Content-Type 推断
-	ext := ".bin"
-	if meta != nil && meta["ext"] != "" {
-		ext = meta["ext"]
-	} else if ct := resp.Header.Get("Content-Type"); ct != "" {
-		switch {
-		case strings.Contains(ct, "mp4"):
-			ext = ".mp4"
-		case strings.Contains(ct, "webm"):
-			ext = ".webm"
-		case strings.Contains(ct, "mp3"):
-			ext = ".mp3"
-		case strings.Contains(ct, "m4a"):
-			ext = ".m4a"
-		case strings.Contains(ct, "wav"):
-			ext = ".wav"
-		case strings.Contains(ct, "png"):
-			ext = ".png"
-		case strings.Contains(ct, "jpeg") || strings.Contains(ct, "jpg"):
-			ext = ".jpg"
-		case strings.Contains(ct, "webp"):
-			ext = ".webp"
+	var data []byte
+	var ext string
+	if d, e, ok := ParseDataURI(sourceURL); ok {
+		data, ext = d, dataURIExtOr(meta, e)
+	} else {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("下载失败: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("下载 HTTP %d", resp.StatusCode)
+		}
+		data, err = io.ReadAll(io.LimitReader(resp.Body, 256<<20)) // 256MB 上限
+		if err != nil {
+			return "", err
+		}
+		// 扩展名：优先 meta；否则按 Content-Type 推断
+		ext = ".bin"
+		if meta != nil && meta["ext"] != "" {
+			ext = meta["ext"]
+		} else if ct := resp.Header.Get("Content-Type"); ct != "" {
+			ext = extFromContentType(ct)
 		}
 	}
 	name := "c-" + shortID() + ext

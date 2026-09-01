@@ -21,10 +21,17 @@ import (
 
 // UseCase B-Roll 编排用例（实现 port.Composer）。
 type UseCase struct {
-	tasks       GenerationTaskRepo  // 任务读写（窄接口——只用需要的方法）
+	tasks       GenerationTaskRepo // 任务读写（窄接口——只用需要的方法）
 	av          port.MediaAVTool
 	transcriber port.SpeechTranscriber
-	store       CreationUploader // 产物上传（可选——main 装配注入）
+	store       CreationUploader     // 产物上传（可选——main 装配注入）
+	assets      port.MediaAssetStore // 本站素材直读（可选——本站 URL 免走 SSRF 拒绝的 HTTP 自下载）
+}
+
+// SetAssetStore 注入素材存储：stored_url/上传素材是本站地址（localhost:8082/media/...），
+// safeDownloadMedia 的 SSRF 防护会拒绝环回地址——本站 URL 改走 ReadLocal 本地文件直读。
+func (uc *UseCase) SetAssetStore(s port.MediaAssetStore) {
+	uc.assets = s
 }
 
 // GenerationTaskRepo 任务仓储窄接口（依赖倒置——videocompose 不感知完整仓储）。
@@ -53,8 +60,8 @@ func (uc *UseCase) uploadCreation(ctx context.Context, tenantID, path string) (s
 
 // timelineMeta timeline_json 的持久化结构（行 + 元信息）。
 type timelineMeta struct {
-	ScriptSource string             `json:"script_source"` // params | asr
-	AlignMode    string             `json:"align_mode"`    // direct | estimated
+	ScriptSource string              `json:"script_source"` // params | asr
+	AlignMode    string              `json:"align_mode"`    // direct | estimated
 	Lines        []port.TimelineLine `json:"lines"`
 }
 
@@ -244,7 +251,7 @@ func mergeSegments(segs []port.SpeechSegment, lines []string) []port.TimelineLin
 		}
 		end := segs[segIdx+want-1].EndMs
 		out = append(out, port.TimelineLine{Index: i, Text: l, StartMs: start, EndMs: end})
-			segIdx += want
+		segIdx += want
 	}
 	return out
 }

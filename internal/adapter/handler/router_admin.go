@@ -76,6 +76,18 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			}
 			// R3 运营指标（LLM 成功率/缓存命中率/配额拒绝/锁竞争——admin 专用）
 			adminGroup.GET("/debug/metrics", r.HandleDebugMetrics)
+			// 系统健康总览 + 生成任务监控（Admin Tools 配套）
+			if r.generationUC != nil {
+				ahh := NewAdminHealthHandler(r.generationUC, r.generationVoices, r.subjectAssetRepo, r.settingRepo, r.generationProvider)
+				adminGroup.GET("/system/health", ahh.HandleSystemHealth)
+				adminGroup.GET("/tasks", ahh.HandleListAllTasks)
+				adminGroup.POST("/tasks/:id/cancel", ahh.HandleAdminCancelTask)
+				// 生成域业务配置（gen_* 键值对——UI 化散落的环境变量）
+				if r.settingRepo != nil {
+					adminGroup.GET("/settings/gen", ahh.HandleGetGenSettings)
+					adminGroup.PUT("/settings/gen/:key", ahh.HandleSetGenSetting)
+				}
+			}
 			// 发布通道管理（三轴重构：双链路共存的手动切换入口）
 			if r.transportRegistry != nil {
 				ta := NewTransportAdminHandler(r.transportRegistry, r.settingRepo)
@@ -122,12 +134,32 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 		if r.generationRegistry != nil && r.generationSpecRepo != nil {
 			gh := NewGenerationAdminHandler(r.generationRegistry, r.generationSpecRepo)
 			adminGroup.GET("/generation/specs", gh.HandleListSpecs)
-			adminGroup.GET("/generation/modes", gh.HandleListModes)   // 模式开关（sub_type 批量启停）
+			adminGroup.GET("/generation/modes", gh.HandleListModes) // 模式开关（sub_type 批量启停）
 			adminGroup.PUT("/generation/modes/:subType", gh.HandleSetMode)
 			adminGroup.POST("/generation/modes/apply-recommended", gh.HandleApplyRecommendedModes) // 一键收敛到推荐档位
 			adminGroup.PUT("/generation/specs/:subType/:model", gh.HandleSaveSpec)
 			adminGroup.DELETE("/generation/specs/:subType/:model", gh.HandleDeleteSpec)
 			adminGroup.PUT("/generation/specs/:subType/:model/default", gh.HandleSetDefault) // 设置默认模型
+		}
+		// 官方主体管理（27 号优化——运营可管理官方主体/形象视频）
+		if r.subjectAssetRepo != nil && r.generationUC != nil {
+			ash := NewAdminSubjectHandler(r.generationUC, r.subjectAssetRepo, r.mediaStore)
+			adminGroup.POST("/subjects", ash.HandleCreateOfficialSubject)
+			adminGroup.GET("/subjects", ash.HandleListOfficialSubjects)
+			adminGroup.PUT("/subjects/:id", ash.HandleUpdateOfficialSubject)
+			adminGroup.DELETE("/subjects/:id", ash.HandleDeleteOfficialSubject)
+		}
+		// 官方音色管理（白牌化——运营可管理平台音色；Vidu 音色仅作克隆参考源）
+		if r.generationVoices != nil {
+			avh := NewAdminVoiceHandler(r.generationVoices, r.adminVoiceSynth, r.mediaStore)
+			adminGroup.POST("/voices", avh.HandleCreateVoice)
+			adminGroup.GET("/voices", avh.HandleListVoices)
+			adminGroup.PUT("/voices/:id", avh.HandleUpdateVoice)
+			adminGroup.DELETE("/voices/:id", avh.HandleDeleteVoice)
+			// 白牌化新增：从 Vidu 音色克隆 + Vidu 参考源列表 + 设为默认
+			adminGroup.POST("/voices/from-vidu", avh.HandleCreateFromVidu)
+			adminGroup.GET("/voices/vidu-sources", avh.HandleListViduVoices)
+			adminGroup.PUT("/voices/:id/default", avh.HandleSetDefaultVoice)
 		}
 		// 第三方集成中心（08 计划 D7——能力路由模型：统一视图/双分组/厂商详情/健康检查）
 		if r.providerConfigUC != nil {
@@ -141,7 +173,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 			adminGroup.PUT("/integrations/vendors/:id", ih.HandleSaveVendor)
 			adminGroup.GET("/integrations/capabilities", ih.HandleCapabilities)
 			adminGroup.PUT("/integrations/capabilities/:id/default", ih.HandleSetCapabilityDefault)
-			adminGroup.PUT("/integrations/capabilities/save", ih.HandleSaveCapability)    // id 在请求体（# 在 URL 中被截断）
+			adminGroup.PUT("/integrations/capabilities/save", ih.HandleSaveCapability)        // id 在请求体（# 在 URL 中被截断）
 			adminGroup.DELETE("/integrations/capabilities/delete", ih.HandleDeleteCapability) // 同上
 		}
 		// 厂商配置管理（按厂商设置 API Key——保存后对已装配厂商热生效）

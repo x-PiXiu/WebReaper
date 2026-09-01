@@ -8,7 +8,8 @@ import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
 
-export default function AgentConfigs() {
+export default function AgentConfigs({ embedded: _embedded = false }: { embedded?: boolean }) {
+  void _embedded
   const queryClient = useQueryClient()
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [llmModalOpen, setLlmModalOpen] = useState(false)

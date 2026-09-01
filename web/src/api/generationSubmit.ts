@@ -24,10 +24,12 @@ export type UnifiedSubmitPayload = {
   sub_type?: string
   watermark?: boolean
   off_peak?: boolean
+  /** B-Roll 配置（29号计划——单阶段优化，视频生成后自动插入） */
+  broll_segments?: Array<{ sentence_index: number; media_url: string }>
 }
 
 /** 主体引用（reference2video 一致性——BE-SUBJ-01） */
-export type SubjectRef = { name: string; server_id: string }
+export type SubjectRef = { name: string; server_id?: string; images?: string[]; voice_id?: string }
 
 /** 合并统一提交高级参数（model / seed / voice_setting_* 等——服务端 params 白名单合并） */
 export function mergeSubmitParams(
@@ -65,7 +67,7 @@ export type LegacyGenerationSubmit = {
 
 const VIDEO_SUBTYPES = new Set([
   'text2video', 'img2video', 'start_end2video', 'reference2video',
-  'multiframe', 'lip_sync', 'digital_human',
+  'multiframe', 'lip_sync',
 ])
 
 async function uploadAssetFile(file: File) {
@@ -215,9 +217,8 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
   else if (sub === 'tts' || sub === 'text2audio' || sub === 'sound_effect') type = 'audio'
   else if (sub === 'voice_clone') type = 'voice'
   else if (sub === 'digital_human') {
-    const hasAudioHint = !!(params.audio_url || refIds(data.refs, 'audio').length)
-    // 文档：1图+1音频 → digital_human（不传 type）；仅图+文 → type=video → img2video
-    type = hasAudioHint ? undefined : 'video'
+    // Vidu digital_human 端点已废弃（2026-08-27 确认）——不再提交，引导走口播主链
+    throw new Error('数字人直生已下线——请用「拍口播」向导（数字分身 + reference2video）')
   } else if (sub === 'lip_sync') {
     type = undefined
   } else if (VIDEO_SUBTYPES.has(sub)) {
@@ -253,6 +254,8 @@ export function buildSubjectRegisterPayload(input: {
   sceneImageUrl?: string
   /** 23 号计划 §2.1③：可选场景描述（一句话：主角在哪个场景做什么） */
   sceneDescription?: string
+  /** 25 号 §6.5：资产分类——person=人物分身（默认）/ scene=环境主体 */
+  kind?: 'person' | 'scene'
 }): UnifiedSubmitPayload {
   const name = (input.name || '').trim()
   if (!name) throw new Error('请输入主体名称')
@@ -269,6 +272,7 @@ export function buildSubjectRegisterPayload(input: {
   const sceneDesc = (input.sceneDescription || '').trim()
   if (input.sceneImageUrl) params.scene_image = input.sceneImageUrl
   if (sceneDesc) params.scene_description = sceneDesc
+  if (input.kind) params.kind = input.kind
   const materials = [...ids]
   if (!materials.length && urls.length) materials.push(...urls)
   if (!materials.length && video) materials.push(video)
@@ -291,16 +295,25 @@ export function buildSubjectReferencePayload(input: {
   name?: string
   text: string
   audioMaterialId?: string
+  /** 组合出镜（25 号 §6.5）：环境主体作为第二参考主体——分身在环境里口播 */
+  envSubject?: { serverId: string; name?: string }
+  /** 文本驱动时的音色（01 号"选音色默认已选中"——显式选择写入主体覆盖分身绑定值） */
+  voiceId?: string
 }): UnifiedSubmitPayload {
-  const subject: SubjectRef = {
+  const main: SubjectRef = {
     name: (input.name || '主体').trim() || '主体',
     server_id: input.server_id.trim(),
+  }
+  if (input.voiceId) main.voice_id = input.voiceId
+  const subjects: SubjectRef[] = [main]
+  if (input.envSubject?.serverId) {
+    subjects.push({ name: (input.envSubject.name || '环境').trim(), server_id: input.envSubject.serverId })
   }
   return {
     brand_id: input.brand_id,
     text: input.text.trim(),
     materials: input.audioMaterialId ? [input.audioMaterialId] : undefined,
-    params: deliverableWorkParams({ subjects: [subject] }),
+    params: deliverableWorkParams({ subjects }),
   }
 }
 
@@ -323,6 +336,7 @@ export async function submitUnified(payload: UnifiedSubmitPayload): Promise<Gene
     sub_type: payload.sub_type,
     watermark: payload.watermark,
     off_peak: payload.off_peak,
+    broll_segments: payload.broll_segments, // 29号计划：B-Roll配置
   })
 }
 

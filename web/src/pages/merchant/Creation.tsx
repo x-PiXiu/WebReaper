@@ -37,13 +37,12 @@ const SUBTYPE_META: Record<string, { category: string; label: string; desc: stri
   tts: { category: 'audio', label: '语音合成', desc: '文本合成语音（语速/音量/情绪可控）' },
   voice_clone: { category: 'audio', label: '声音克隆', desc: '引用音频复刻音色（voice_id 永久复用）' },
   lip_sync: { category: 'video', label: '对口型', desc: '出镜视频 + 音频/文本生成口型匹配成片' },
-  digital_human: { category: 'digital_human', label: '数字人', desc: '已不推荐：请用「拍口播」向导 + 数字分身（reference2video）' },
   subject: { category: 'other', label: '主体创建', desc: '注册数字分身形象，生成视频时可复用同一人物' },
 }
 
 /** 能力名不符或实际走 TTS——卡片隐藏，不向用户展示 */
 /** 名实不符或已废弃——不在模式卡片/下拉中展示 */
-const HIDDEN_SUBTYPES = new Set(['text2audio', 'sound_effect', 'digital_human'])
+const HIDDEN_SUBTYPES = new Set(['text2audio', 'sound_effect'])
 
 const CATEGORIES = [
   { key: 'video', label: '视频', icon: <VideoCameraOutlined /> },

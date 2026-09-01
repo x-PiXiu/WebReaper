@@ -35,14 +35,25 @@ export default function VoicePicker({
     staleTime: 24 * 60 * 60 * 1000, // 静态参考数据——当天内不重拉
   })
 
-  // 分组：我的音色（克隆产物，若有）→ 各语言官方音色
+  // 分组（白牌化 2026-09-01）：平台音色 → 我的克隆 → 按 recommend 标记精选
+  // 服务端 ListForUser 已过滤——只返回 scope=platform + 本租户 clone，不含 Vidu scope。
   const groups = useMemo(() => {
-    const byLang = new Map<string, GenerationVoice[]>()
+    const platform: GenerationVoice[] = []
+    const clone: GenerationVoice[] = []
+    const recommended: GenerationVoice[] = []
     for (const v of voices) {
-      if (!byLang.has(v.language)) byLang.set(v.language, [])
-      byLang.get(v.language)!.push(v)
+      if (v.scope === 'platform') {
+        if (v.recommend) recommended.push(v)
+        else platform.push(v)
+      } else if (v.scope === 'clone') {
+        clone.push(v)
+      }
     }
-    return byLang
+    const sorted = new Map<string, GenerationVoice[]>()
+    if (recommended.length > 0) sorted.set('★ 精选推荐', recommended)
+    if (platform.length > 0) sorted.set('🎤 平台音色', platform)
+    if (clone.length > 0) sorted.set('我的克隆音色', clone)
+    return sorted
   }, [voices])
 
   const togglePreview = (e: React.MouseEvent, v: GenerationVoice) => {
@@ -101,6 +112,7 @@ export default function VoicePicker({
               </span>
             )}
             {!v && <Tag style={{ margin: 0 }} title="克隆音色：7 天内在语音合成中调用一次即永久保留">克隆</Tag>}
+            {v?.scope === 'platform' && <Tag color="orange" style={{ margin: 0 }} title="管理后台创建的平台精选音色">平台</Tag>}
           </span>
         )
       }}

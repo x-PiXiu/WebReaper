@@ -35,6 +35,7 @@ type WorkItem struct {
 	Comments    int64     `json:"comments"`
 	CreatedAt   time.Time `json:"created_at"`
 	PublishedAt *time.Time `json:"published_at,omitempty"`
+	ParentTaskID string    `json:"parent_task_id,omitempty"` // B-Roll 血缘：compose 产物的源片任务 ID
 }
 
 // WorksUseCase 作品库聚合。
@@ -167,6 +168,15 @@ func (uc *WorksUseCase) ListWorks(ctx context.Context, tenantID string) ([]WorkI
 				CoverURL:  cover,
 				CreatedAt: t.CreatedAt,
 			}
+			// B-Roll 血缘：compose 产物携带源片任务 ID（前端"已插画面/B-Roll"标记与链式入口用）
+			if strings.EqualFold(strings.TrimSpace(t.SubType), "compose") {
+				var pp struct {
+					SourceTaskID string `json:"source_task_id"`
+				}
+				if json.Unmarshal([]byte(t.ParamsJSON), &pp) == nil && pp.SourceTaskID != "" {
+					it.ParentTaskID = pp.SourceTaskID
+				}
+			}
 			// 发布关联：任一产物 URL 出现在已发布 job 的 media_urls 里
 			var matched *entity.PublishJob
 			for _, u := range urls {
@@ -224,12 +234,19 @@ var materialSubTypes = map[string]bool{
 var deliverableSubTypes = map[string]bool{
 	"lip_sync": true, "reference2video": true, "digital_human": true,
 	"text2video": true, "img2video": true, "start_end2video": true,
+	"compose": true, // B-Roll 合成成片（22/23 号计划：源片保留，合成片进作品库）
 }
 
 // isDeliverableTask 判断 success 生成任务是否属于可发布成片（非素材库中间产物）。
 func isDeliverableTask(t entity.GenerationTask) bool {
 	var params map[string]any
 	_ = json.Unmarshal([]byte(t.ParamsJSON), &params)
+	// 链式形象视频（25 号阶段二）：分身预览中间产物，不进「我的作品」
+	if v, ok := params["avatar_video"]; ok {
+		if b, ok := v.(bool); ok && b {
+			return false
+		}
+	}
 	if v, ok := params["deliverable"]; ok {
 		if b, ok := v.(bool); ok && b {
 			return true
@@ -262,20 +279,49 @@ func titleFromTask(t entity.GenerationTask, kind string) string {
 		Text   string `json:"text"`
 	}
 	_ = json.Unmarshal([]byte(t.ParamsJSON), &params)
-	title := params.Prompt
+
+	// 优先级：用户自定义标题（custom_title——用户改名需求） > 台词首句 > prompt > 按类型兜底
+	// 自动标题加时间后缀（MM-DD HH:mm）区分同一天生成的多个作品
+	title := ""
+
+	// ① 用户自定义标题（RenameTask 写入）
+	var customTitle string
+	_ = json.Unmarshal([]byte(t.ParamsJSON), &struct {
+		CustomTitle *string `json:"custom_title"`
+	}{CustomTitle: &customTitle})
+	if customTitle != "" {
+		return customTitle
+	}
+
+	// ② 自动提取：script/text 首句
+	if s := strings.TrimSpace(params.Text); s != "" {
+		if idx := strings.IndexAny(s, "。！？\n"); idx > 0 {
+			title = s[:idx]
+		} else {
+			title = s
+		}
+	}
 	if title == "" {
-		title = params.Text
+		title = strings.TrimSpace(params.Prompt)
 	}
+	// 去掉 @引用标记和停顿标记（形象展示 prompt 的前缀噪音）
+	title = strings.TrimSpace(strings.Split(title, " ")[0])
+	if idx := strings.Index(title, "<#"); idx > 0 {
+		title = title[:idx]
+	}
+
 	runes := []rune(strings.TrimSpace(title))
-	if len(runes) > 30 {
-		return string(runes[:30]) + "…"
-	}
+	timeSuffix := t.CreatedAt.Format("01-02 15:04")
+
 	if len(runes) == 0 {
 		fallback := map[string]string{"video": "视频作品", "image": "图片作品", "audio": "音频作品"}
 		if name, ok := fallback[kind]; ok {
-			return name
+			return name + " " + timeSuffix
 		}
-		return "多媒体作品"
+		return "多媒体作品 " + timeSuffix
 	}
-	return string(runes)
+	if len(runes) > 15 {
+		return string(runes[:15]) + "… " + timeSuffix
+	}
+	return string(runes) + " " + timeSuffix
 }

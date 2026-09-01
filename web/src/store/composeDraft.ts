@@ -52,13 +52,13 @@ export type ComposeDraft = {
   wizardRealVideoUrl?: string  // 真人出镜视频 URL
   wizardSubjectId?: string     // 分身 server_id
   wizardIntent?: string        // 分身场景意图
-  wizardTtsTaskId?: string     // TTS 任务 ID
-  wizardRefTaskId?: string     // 参考生任务 ID
-  wizardLipsyncTaskId?: string // 对口型任务 ID
+  wizardVideoTaskId?: string   // 成片视频任务 ID（29 号单步：lip_sync / reference2video）
   wizardResultUrl?: string     // 成片 URL
-  wizardAudioSource?: 'tts' | 'direct' | 'upload' // 音频路径（23 号计划：A 配音/B 文本直生/C 上传录音）
+  wizardAudioSource?: 'text' | 'upload' // 音频模式（01 号业务线：text=文本驱动默认 / upload=上传音频）
   wizardSchema?: number      // 向导步骤 schema 版本（4=四步式；缺省视为旧 5 步，读取时迁移一次）
   wizardUploadedAudioUrl?: string                 // 路径 C：已录音频素材 URL
+  wizardEnvSubjectId?: string                     // 25 号 §6.5：出镜环境主体 server_id（空=棚拍）
+  wizardBrollSegments?: Array<{ sentence_index: number; media_url: string }> // 29 号单阶段：生成前 B-Roll 配置
 }
 
 type ComposeDraftState = ComposeDraft & {

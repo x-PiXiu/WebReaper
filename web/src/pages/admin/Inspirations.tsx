@@ -10,7 +10,7 @@ import { toast } from '../../utils/feedback'
 const { Text, Title } = Typography
 
 /** Admin 灵感运营：置顶 / 推荐 / 备注 / 删除 */
-export default function AdminInspirations() {
+export default function AdminInspirations({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient()
   const [platform, setPlatform] = useState<string>()
   const [keyword, setKeyword] = useState('')
@@ -63,7 +63,7 @@ export default function AdminInspirations() {
 
   return (
     <QueryBoundary loading={isLoading} error={isError} onRetry={() => refetch()}>
-    <div className="wr-page-content">
+    <div className={embedded ? "" : "wr-page-content"}>
       <div style={{ marginBottom: 16 }}>
         <Title level={4} style={{ margin: 0 }}>灵感运营</Title>
         <Text type="secondary">置顶、推荐与清理爬虫入库的灵感视频</Text>
