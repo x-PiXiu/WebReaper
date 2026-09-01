@@ -18,6 +18,7 @@ type WorkModerationPO struct {
 	TenantID  string `gorm:"size:64;not null;default:'';index"`
 	Action    string `gorm:"size:16;not null;default:hidden"`
 	Reason    string `gorm:"size:512;not null;default:''"`
+	Source    string `gorm:"size:16;not null;default:admin"`
 	Operator  string `gorm:"size:64;not null;default:''"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -37,7 +38,7 @@ func NewGormWorkModerationRepository(db *gorm.DB) *GormWorkModerationRepository 
 func poToModeration(p WorkModerationPO) entity.WorkModeration {
 	return entity.WorkModeration{
 		ID: p.ID, WorkKey: p.WorkKey, WorkKind: p.WorkKind, TenantID: p.TenantID,
-		Action: p.Action, Reason: p.Reason, Operator: p.Operator,
+		Action: p.Action, Reason: p.Reason, Source: p.Source, Operator: p.Operator,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 }
@@ -53,7 +54,7 @@ func (r *GormWorkModerationRepository) FindByKey(ctx context.Context, workKey st
 func (r *GormWorkModerationRepository) Upsert(ctx context.Context, m entity.WorkModeration) error {
 	po := WorkModerationPO{
 		ID: m.ID, WorkKey: m.WorkKey, WorkKind: m.WorkKind, TenantID: m.TenantID,
-		Action: m.Action, Reason: m.Reason, Operator: m.Operator,
+		Action: m.Action, Reason: m.Reason, Source: m.Source, Operator: m.Operator,
 	}
 	return r.db.WithContext(ctx).Save(&po).Error
 }

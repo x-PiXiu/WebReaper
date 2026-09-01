@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { submitGenerationTaskCompat, submitUnified } from './generationSubmit'
-import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, AdminWorkItem, GenerationVoice, SubjectAsset, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding, TaskTimeline } from '../types/api'
+import type { AgentConfig, LLMConfig, EngineOption, HealthReportView, IndustryOverviewView, AIRankItemView, Conversation, ChatMessageRecord, ToolView, StatsView, Brand, Keyword, MonitoringResult, BrandOverview, OptimizedContent, UserView, Account, PublishJob, IndexingSubmitLog, GenerationType, GenerationTask, GenerationSpec, GenerationTemplate, MediaAsset, PromptRef, ProviderConfig, Plan, Subscription, Order, RevenueSummary, MyUsageSummary, StoreLocation, NearbyRanking, Advice, CostAnalysis, LocationTip, AutoMonitorConfig, CompetitorSuggestion, KnowledgeEmbeddingConfig, IndustryCrawlConfig, KnowledgeMaterialView, KnowledgeStats, KnowledgeCrawlInterval, PublishChannelView, GenerationModeView, AnalyticsSummary, WorkItem, AdminWorkItem, AdminWorkFlagged, GenerationVoice, SubjectAsset, IntegrationEntry, IntegrationGroup, IntegrationMeta, IntegrationVendor, IntegrationCapability, CrawlerAccount, CrawlerConfig, CrawlerTaskLog, CrawlResult, InspirationVideo, BrandPublishConfig, AccountBrandBinding, TaskTimeline } from '../types/api'
 
 // 通用平台 API 封装。
 
@@ -349,6 +349,9 @@ export const businessApi = {
 
   adminHideWork: (workKey: string, data: { kind?: string; tenant_id?: string; action?: 'hidden' | 'deleted'; reason: string }) =>
     apiClient.post<unknown, { work_key: string; action: string }>(`/api/v1/admin/works/${encodeURIComponent(workKey)}/hide`, data),
+
+  adminListFlaggedWorks: (limit = 100) =>
+    apiClient.get<unknown, { items: AdminWorkFlagged[]; total: number }>(`/api/v1/admin/works/flagged?limit=${limit}`),
 
   adminRestoreWork: (workKey: string) =>
     apiClient.post<unknown, { work_key: string; restored: boolean }>(`/api/v1/admin/works/${encodeURIComponent(workKey)}/restore`),

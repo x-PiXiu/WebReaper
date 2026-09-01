@@ -10,6 +10,7 @@ import (
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/moderation"
 	"webreaper/internal/usecase/port"
 )
 
@@ -33,6 +34,7 @@ type ContentUseCase struct {
 	urlSubmitter  port.URLSubmitter           // 收录通知（可选）
 	publicBaseURL string                      // 公开站根地址（拼收录 URL 用）
 	logger        port.Logger                 // 日志（标题兜底等告警用）
+	moderator   *moderation.Moderator // 可选（32号 P2：生成后文本机审标记）
 	ragRetriever  port.ContentRAGRetriever    // RAG 检索（可选；nil=纯 LLM 推断）
 	knowledgeRetriever port.KnowledgeRetriever // 知识库检索（可选；优先于 ragRetriever——本地素材带来源）
 	templateRepo  port.PromptTemplateRepository // 提示词模板（可选；nil=内置默认）
@@ -44,6 +46,11 @@ type ContentUseCase struct {
 }
 
 // SetCache 注入缓存（R2 写后失效：内容生成/发布/删除 → 清健康报告缓存——内容资产指数变化）。
+// SetModerator 注入内容机审（可选；32号 P2——生成后异步标记 flagged）。
+func (uc *ContentUseCase) SetModerator(m *moderation.Moderator) {
+	uc.moderator = m
+}
+
 func (uc *ContentUseCase) SetCache(c port.CacheStore) {
 	if c != nil {
 		uc.cache = c
@@ -582,6 +589,11 @@ func (uc *ContentUseCase) Optimize(ctx context.Context, in OptimizeInput) (Optim
 	}
 	if err := uc.contentRepo.Save(ctx, oc); err != nil {
 		return OptimizeResult{}, fmt.Errorf("save content: %w", err)
+	}
+
+	// 32号 P2：生成后文本机审（异步标记 flagged，不阻断——管理员待复核）
+	if uc.moderator != nil {
+		uc.moderator.ModerateTextAsync(oc.TenantID, "c-"+oc.ID, "article", optimized)
 	}
 	return OptimizeResult{
 		Content:         oc,

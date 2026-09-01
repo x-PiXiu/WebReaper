@@ -3,7 +3,7 @@ import { StopOutlined, UndoOutlined, VideoCameraOutlined } from '@ant-design/ico
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { businessApi } from '../../api/business'
-import type { AdminWorkItem } from '../../types/api'
+import type { AdminWorkItem, AdminWorkFlagged } from '../../types/api'
 import { toast } from '../../utils/feedback'
 
 const { Text } = Typography
@@ -17,6 +17,7 @@ const kindMeta: Record<string, { color: string; label: string }> = {
 const actionMeta: Record<string, { color: string; label: string }> = {
   hidden: { color: 'warning', label: '已下架' },
   deleted: { color: 'error', label: '已删除' },
+  flagged: { color: 'orange', label: '待复核' },
 }
 
 /**
@@ -37,7 +38,17 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
   })
   const items = data?.items ?? []
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin-works'] })
+  // 32号 P2：机审待复核队列（flagged——机器标记，处置权在管理员）
+  const { data: flaggedData } = useQuery({
+    queryKey: ['admin-works-flagged'],
+    queryFn: () => businessApi.adminListFlaggedWorks(200),
+  })
+  const flagged = flaggedData?.items ?? []
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['admin-works'] })
+    queryClient.invalidateQueries({ queryKey: ['admin-works-flagged'] })
+  }
 
   const submitHide = async () => {
     if (!hideTarget) return
@@ -70,8 +81,58 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
     } catch { /* 拦截器已提示 */ }
   }
 
+  const disposeFlagged = (f: AdminWorkFlagged) => {
+    setHideTarget({
+      id: f.work_key, kind: f.work_kind, title: `(机审标记) ${f.reason}`, tenant_id: f.tenant_id,
+    } as AdminWorkItem)
+    setAction('hidden')
+    setReason(f.reason)
+  }
+
+  const releaseFlagged = async (f: AdminWorkFlagged) => {
+    try {
+      await businessApi.adminRestoreWork(f.work_key)
+      toast.ok('已放行（清除标记，复审不再提示）')
+      refresh()
+    } catch { /* 拦截器已提示 */ }
+  }
+
   return (
     <div style={embedded ? undefined : { padding: 24 }}>
+      {flagged.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Space style={{ marginBottom: 8 }}>
+            <Tag color="orange">机审待复核</Tag>
+            <Text type="secondary">
+              {flagged.length} 条被机器标记（不拦截、用户无感）——请人工判定：处置或放行（放行后复审不再提示）
+            </Text>
+          </Space>
+          <Table
+            rowKey="work_key"
+            dataSource={flagged}
+            size="small"
+            pagination={false}
+            columns={[
+              { title: '作品键', dataIndex: 'work_key', width: 220, ellipsis: true },
+              { title: '类型', dataIndex: 'work_kind', width: 70, render: (k: string) => <Tag>{kindMeta[k]?.label || k}</Tag> },
+              { title: '租户', dataIndex: 'tenant_id', width: 130, ellipsis: true },
+              { title: '机审理由', dataIndex: 'reason', ellipsis: true },
+              { title: '标记时间', dataIndex: 'updated_at', width: 150, render: (t: string) => new Date(t).toLocaleString('zh-CN', { hour12: false }) },
+              {
+                title: '操作', key: 'ops', width: 160,
+                render: (_, f: AdminWorkFlagged) => (
+                  <Space>
+                    <Button size="small" danger onClick={() => disposeFlagged(f)}>处置</Button>
+                    <Popconfirm title="确认放行？（清除标记，复审不再提示）" onConfirm={() => releaseFlagged(f)}>
+                      <Button size="small" type="primary" ghost>放行</Button>
+                    </Popconfirm>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </div>
+      )}
       <Space style={{ marginBottom: 12 }}>
         <Text type="secondary">
           最新成片巡查流（{items.length} 条）——下架后用户端作品库即刻不可见且无法发布；处置记录含操作者与原因（审计）
@@ -80,7 +141,7 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
       <Table
         rowKey="id"
         loading={isLoading}
-        dataSource={items}
+        dataSource={[...items].sort((a, b) => (a.moderation_action === 'flagged' ? -1 : 0) - (b.moderation_action === 'flagged' ? -1 : 0))}
         size="middle"
         pagination={{ pageSize: 10, showSizeChanger: false }}
         locale={{ emptyText: '暂无成片作品' }}
@@ -124,9 +185,14 @@ export default function AdminWorks({ embedded = false }: { embedded?: boolean })
                   </Button>
                 )}
                 {w.moderation_action && (
-                  <Popconfirm title="恢复该作品的用户端可见性与发布权限？" onConfirm={() => restore(w)}>
-                    <Button size="small" icon={<UndoOutlined />}>恢复</Button>
+                  <Popconfirm title={w.moderation_action === 'flagged' ? '确认放行？（清除机审标记）' : '恢复该作品的用户端可见性与发布权限？'} onConfirm={() => restore(w)}>
+                    <Button size="small" icon={<UndoOutlined />}>{w.moderation_action === 'flagged' ? '放行' : '恢复'}</Button>
                   </Popconfirm>
+                )}
+                {w.moderation_action === 'flagged' && (
+                  <Button size="small" danger icon={<StopOutlined />} onClick={() => { setHideTarget(w); setAction('hidden'); setReason(w.moderation_reason || '') }}>
+                    处置
+                  </Button>
                 )}
               </Space>
             ),

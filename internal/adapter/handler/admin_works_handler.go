@@ -83,3 +83,18 @@ func (r *Router) HandleAdminWorkRestore(c *gin.Context) {
 	}
 	success(c, gin.H{"work_key": key, "restored": true})
 }
+
+// HandleAdminWorksFlagged GET /admin/works/flagged —— 机审待复核队列（32号 P2）。
+func (r *Router) HandleAdminWorksFlagged(c *gin.Context) {
+	if r.worksUC == nil || !r.worksUC.ModerationEnabled() {
+		fail(c, pkg.ErrTaskNotExecutable)
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	items, err := r.worksUC.ListFlaggedForAdmin(c.Request.Context(), limit)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	success(c, gin.H{"items": items, "total": len(items)})
+}

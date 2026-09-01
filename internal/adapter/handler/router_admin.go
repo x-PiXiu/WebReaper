@@ -227,6 +227,7 @@ func (r *Router) registerAdminRoutes(api *gin.RouterGroup, geoHandler *GEOHandle
 		// 32号：作品管理与内容安全——跨租户巡查流 + 下架/恢复（处置动作与业务表解耦）。
 		if r.worksUC != nil {
 			adminGroup.GET("/works", r.HandleAdminWorksList)
+			adminGroup.GET("/works/flagged", r.HandleAdminWorksFlagged) // 32号 P2：机审待复核队列
 			adminGroup.POST("/works/:key/hide", r.HandleAdminWorkHide)
 			adminGroup.POST("/works/:key/restore", r.HandleAdminWorkRestore)
 		}

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"webreaper/internal/domain/entity"
+	"webreaper/internal/usecase/moderation"
 	"webreaper/internal/usecase/port"
 )
 
@@ -88,6 +89,7 @@ type GenerationUseCase struct {
 	subjectAssetRepo port.SubjectAssetRepository
 	// voiceRepo 音色仓储（可选；26 号计划——voice_clone 终态物化写入）。
 	voiceRepo port.VoiceLibrary
+	moderator    *moderation.Moderator // 可选（32号 P2：文本机审异步标记）
 	// placeholderTranslator 占位符翻译器（28号计划——统一处理 @素材/@主体 引用）。
 	placeholderTranslator *PlaceholderTranslator
 }
@@ -691,6 +693,11 @@ func (uc *GenerationUseCase) SetVoiceRepo(r port.VoiceLibrary) {
 	uc.voiceRepo = r
 }
 
+// SetModerator 注入内容机审（可选；32号 P2——文本异步标记，不阻断）。
+func (uc *GenerationUseCase) SetModerator(m *moderation.Moderator) {
+	uc.moderator = m
+}
+
 // maybeRewriteSampleSynthesis 缺口C + 31号 L3：tts 改走"已存样本合成"（厂商隔离 + 厂商感知）。
 //
 // 触发条件：
@@ -815,6 +822,20 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	if uc.quotaGate != nil {
 		if err := uc.quotaGate.Check(ctx, in.TenantID, "generation"); err != nil {
 			return entity.GenerationTask{}, err
+		}
+	}
+
+	// 32号 P2 二批——高危阻断档（gen_moderation_block，默认关）：
+	// politics/porn/violence 类文案在提交时同步判定并直接拒绝（任务不创建）。
+	// 代价：提交时延 +1~3s（同步 LLM）；营销夸大类仍走异步标记。
+	if uc.moderator != nil {
+		switch in.SubType {
+		case "lip_sync", "tts", "voice_clone":
+			if t, _ := in.Params["text"].(string); strings.TrimSpace(t) != "" && uc.moderator.BlockEnabled(ctx) {
+				if v, vErr := uc.moderator.CheckTextSync(ctx, t); vErr == nil && moderation.IsHighRisk(v) {
+					return entity.GenerationTask{}, fmt.Errorf("内容未通过安全审核（%s），无法提交", v.Category)
+				}
+			}
 		}
 	}
 
@@ -982,6 +1003,23 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	_ = uc.repo.Save(ctx, task)
 	// 计量（F3：generation 场景按次计费的数据地基——失败仅忽略，不影响主流程）
 	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, task.Credits)
+
+	// 32号 P2：文本机审（异步标记不阻断；flagged 进管理员待复核队列——
+	// 口播文案 lip_sync / 克隆试听文案 voice_clone / 配音文案 tts）
+	// 二批新增：克隆样本音频 ASR 回审（声音滥用/违规口播内容防线）
+	if uc.moderator != nil {
+		switch in.SubType {
+		case "lip_sync", "tts", "voice_clone":
+			if t, _ := in.Params["text"].(string); strings.TrimSpace(t) != "" {
+				uc.moderator.ModerateTextAsync(in.TenantID, "g-"+task.ID, "video", t)
+			}
+		}
+		if in.SubType == "voice_clone" {
+			if au, _ := in.Params["audio_url"].(string); strings.HasPrefix(au, "http://") || strings.HasPrefix(au, "https://") {
+				uc.moderator.ModerateAudioAsync(in.TenantID, "g-"+task.ID, au)
+			}
+		}
+	}
 	return task, nil
 }
 
@@ -1409,6 +1447,16 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 			}
 			creationsJSON, _ = json.Marshal(st.Creations)
 			task.CreationsJSON = string(creationsJSON)
+		}
+		// 32号 P2 二批：图片产物机审（异步标记——产物终态才有图，审核挂终态钩子）
+		if uc.moderator != nil && task.SubType == "text2image" && len(st.Creations) > 0 {
+			imgURL := st.Creations[0].StoredURL
+			if imgURL == "" {
+				imgURL = st.Creations[0].URL
+			}
+			if strings.HasPrefix(imgURL, "http://") || strings.HasPrefix(imgURL, "https://") {
+				uc.moderator.ModerateImageAsync(task.TenantID, "g-"+task.ID, imgURL)
+			}
 		}
 	case entity.TaskStateFailed:
 		task.State = entity.TaskStateFailed

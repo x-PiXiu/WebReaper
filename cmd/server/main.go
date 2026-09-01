@@ -40,6 +40,7 @@ import (
 	"webreaper/internal/adapter/media"
 	"webreaper/internal/adapter/mediaav"
 	"webreaper/internal/adapter/metrics"
+	"webreaper/internal/adapter/mimovision"
 	"webreaper/internal/adapter/mock"
 	"webreaper/internal/adapter/payment"
 	"webreaper/internal/adapter/provider"
@@ -79,7 +80,8 @@ import (
 	"webreaper/internal/usecase/systemsettings"
 	"webreaper/internal/usecase/videocompose"
 	"webreaper/internal/usecase/videotranscript"
-	"webreaper/internal/usecase/works"
+	"webreaper/internal/usecase/moderation"
+		"webreaper/internal/usecase/works"
 )
 
 func main() {
@@ -598,6 +600,12 @@ func main() {
 			worksUC := works.NewWorksUseCase(geoRepos.content, repository.NewGormGenerationTaskRepository(geoRepos.db), accountRepos.job, accountRepos.metric)
 			// 32号：作品处置（管理端巡查/下架/恢复 + 用户端过滤）
 			worksUC.SetModerationRepo(repository.NewGormWorkModerationRepository(geoRepos.db))
+			// 32号 P2：内容机审（文本第一批——三触发点：生成提交/GEO内容/发布前）
+			workModerationRepo := repository.NewGormWorkModerationRepository(geoRepos.db)
+			contentModerator := moderation.NewModerator(aiGenerator, workModerationRepo, settingRepo)
+			worksUC.SetModerationRepo(workModerationRepo)
+			geoContentUCRef.SetModerator(contentModerator) // ② GEO 内容生成后（内层作用域经 ref 注入）
+			geoPublishUC.SetModerator(contentModerator) // ③ 发布前文本复检
 			router.SetWorks(worksUC)
 
 			// 商户主 Agent 工具集（Agent-as-Tool：获客管家对话编排；二期+增长子Agent/硬确认）
@@ -968,6 +976,14 @@ func main() {
 		}
 
 		genUC := generation.NewGenerationUseCase(providers, genRegistry, repository.NewGormGenerationTaskRepository(geoRepos.db))
+		// ① 生成域机审（32号 P2；跨作用域就地装配）：
+		// 文案标记/高危阻断 + 图片产物审核（MiMo 多模态）+ 克隆样本 ASR 回审
+		genModerator := moderation.NewModerator(aiGenerator, repository.NewGormWorkModerationRepository(geoRepos.db), settingRepo)
+		if mimoKey != "" {
+			genModerator.SetVision(mimovision.New(mimoKey, "")) // 二批：图片机审（2026-09-01 实测 MiMo vision 可用）
+		}
+		genModerator.SetTranscriber(asrClient) // 二批：克隆样本音频 → ASR → 文本审
+		genUC.SetModerator(genModerator)
 		// 注入能力路由解析器
 		if capResolver != nil {
 			genUC.SetCapabilityResolver(capResolver)

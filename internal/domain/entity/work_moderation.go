@@ -13,6 +13,7 @@ type WorkModeration struct {
 	Action    string    `json:"action"`     // hidden（下架）/ deleted（逻辑删除：不可见+不可发布）
 	Reason    string    `json:"reason"`     // 处置原因（审计必填）
 	Operator  string    `json:"operator"`   // admin 操作者（审计）
+	Source    string    `json:"source"`    // admin（人工处置）/ machine（机审标记）
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -21,6 +22,7 @@ type WorkModeration struct {
 const (
 	WorkActionHidden  = "hidden"  // 下架：用户端不可见
 	WorkActionDeleted = "deleted" // 逻辑删除：不可见 + 发布拦截（最高处置）
+	WorkActionFlagged = "flagged" // 机审标记：待人工复核（不不可见、不拦发布——处置权在管理员）
 )
 
 // Active 处置是否生效（deleted 恢复语义走 Restore 清记录）。

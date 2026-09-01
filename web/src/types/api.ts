@@ -133,6 +133,16 @@ export interface StatsView {
 }
 
 // ---- GEO：品牌资产 ----
+/** 机审待复核记录（32号 P2：flagged——处置权在管理员） */
+export interface AdminWorkFlagged {
+  work_key: string
+  work_kind: string
+  tenant_id: string
+  reason: string
+  source: string
+  updated_at: string
+}
+
 /** 管理端作品巡查条目（32号：作品管理与内容安全） */
 export interface AdminWorkItem {
   id: string

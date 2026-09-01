@@ -105,8 +105,33 @@ func (uc *WorksUseCase) HideWork(ctx context.Context, workKey, kind, tenantID, a
 	return uc.modRepo.Upsert(ctx, entity.WorkModeration{
 		ID: "wm-" + fmt.Sprintf("%d", time.Now().UnixNano()),
 		WorkKey: workKey, WorkKind: kind, TenantID: tenantID,
-		Action: action, Reason: reason, Operator: operator,
+		Action: action, Reason: reason, Source: "admin", Operator: operator,
 	})
+}
+
+// ListFlaggedForAdmin 机审待复核队列（32号 P2：flagged 记录倒序——含非成片 key
+// 如克隆文案/配音文案等，管理员统一在此放行或处置）。
+func (uc *WorksUseCase) ListFlaggedForAdmin(ctx context.Context, limit int) ([]entity.WorkModeration, error) {
+	if uc.modRepo == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	ms, err := uc.modRepo.ListRecent(ctx, 400)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.WorkModeration, 0, limit)
+	for _, m := range ms {
+		if m.Action == entity.WorkActionFlagged {
+			out = append(out, m)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 // RestoreWork 恢复作品（清除处置记录）。
@@ -175,8 +200,8 @@ func (uc *WorksUseCase) ListRecentForAdmin(ctx context.Context, limit int) ([]Ad
 			},
 			TenantID: t.TenantID,
 		}
-		if m, ok := modByWork["g-"+t.ID]; ok && m.Active() {
-			it.ModerationAction = m.Action
+		if m, ok := modByWork["g-"+t.ID]; ok {
+			it.ModerationAction = m.Action // 含 flagged（机审待复核——不 Active：不隐藏不拦发布）
 			it.ModerationReason = m.Reason
 		}
 		out = append(out, it)

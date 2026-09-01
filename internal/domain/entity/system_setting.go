@@ -34,4 +34,6 @@ const (
 	SettingKeyGenVoiceMaterializer  = "gen_voice_materializer_enabled" // 音色物化层总开关（false=回退旧行为直传 ID；灰度用）
 	SettingKeyGenVoiceAuditionText  = "gen_voice_audition_text"   // 注册/续期时的固定试听文案（Vidu audio-clone text 必填 ≤1000）
 	SettingKeyGenLipsyncTwoStep     = "gen_lipsync_two_step"      // 备胎道开关（lip_sync 注册失败自动降级：tts样本合成→音频驱动；零厂商ID依赖）
+	SettingKeyGenModerationEnabled  = "gen_moderation_enabled"    // 内容机审总开关（32号P2：文本审核；默认关——灰度）
+	SettingKeyGenModerationBlock    = "gen_moderation_block"      // 高危阻断档（32号P2二批：politics/porn/violence 提交时同步拒绝；默认关——开启增加提交时延1~3s）
 )

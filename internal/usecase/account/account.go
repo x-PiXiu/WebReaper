@@ -21,6 +21,7 @@ import (
 
 	"webreaper/internal/domain/entity"
 	"webreaper/internal/pkg"
+	"webreaper/internal/usecase/moderation"
 	"webreaper/internal/usecase/port"
 )
 
@@ -404,6 +405,7 @@ type PublishUseCase struct {
 	usageRepo      port.PublishUsageRepository // 可选：发布用量记账（限流读写两侧——缺此发布不限速且配额恒 0）
 	configRepo     port.BrandPublishConfigRepository // 可选：品牌限流配置（服务端强制限流用）
 	modRepo        port.WorkModerationRepository // 可选（32号 P1：作品处置发布拦截；缺此不拦截）
+	moderator     *moderation.Moderator // 可选（32号 P2：发布文本机审）
 	taskRepo       port.GenerationTaskRepository // 可选（32号 P1：媒体 URL 反查成片任务→work_key）
 }
 
@@ -420,6 +422,41 @@ func (uc *PublishUseCase) SetPublishUsage(ur port.PublishUsageRepository, cr por
 // 不允许发布；媒体 URL 反查需要任务仓储）。可选依赖，缺省不拦截。
 func (uc *PublishUseCase) SetWorkModeration(mr port.WorkModerationRepository, tr port.GenerationTaskRepository) {
 	uc.modRepo, uc.taskRepo = mr, tr
+}
+
+// SetModerator 注入内容机审（可选；32号 P2——发布前文本复检异步标记）。
+func (uc *PublishUseCase) SetModerator(m *moderation.Moderator) {
+	uc.moderator = m
+}
+
+// moderatePublishText 32号 P2：发布文本机审（异步；key 解析复用处置桥接）。
+// 文章 → c-{contentID}；多媒体 → media_urls 反查成片 g-{taskID}；无关联则跳过。
+func (uc *PublishUseCase) moderatePublishText(ctx context.Context, in PublishInput) {
+	if uc.moderator == nil {
+		return
+	}
+	key, kind := "", "article"
+	if in.ContentID != "" {
+		key = "c-" + in.ContentID
+	} else if uc.taskRepo != nil {
+		for _, u := range in.MediaURLs {
+			if u == "" {
+				continue
+			}
+			if t, err := uc.taskRepo.FindSuccessTaskByMediaURL(ctx, u); err == nil && t.ID != "" {
+				key, kind = "g-"+t.ID, "video"
+				break
+			}
+		}
+	}
+	if key == "" {
+		return
+	}
+	text := in.Title
+	if in.Content != "" {
+		text += "\n" + in.Content
+	}
+	uc.moderator.ModerateTextAsync(in.TenantID, key, kind, text)
 }
 
 // checkWorkModeration 发布前作品处置校验（32号 P1）。
@@ -679,6 +716,9 @@ func (uc *PublishUseCase) Publish(ctx context.Context, in PublishInput) (entity.
 	if mErr := uc.checkWorkModeration(ctx, in); mErr != nil {
 		return entity.PublishJob{}, mErr
 	}
+
+	// 32号 P2：发布文本机审（异步标记，不阻断发布——flagged 进管理员待复核）
+	uc.moderatePublishText(ctx, in)
 
 	// 发布前处理：Markdown 转纯文本（社媒平台不渲染 Markdown）。
 	// 先过滤 think 标签（兜底：历史内容可能在生成期未被过滤，防止思考过程泄漏到平台）。
