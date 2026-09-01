@@ -5,6 +5,7 @@ import {
 } from '@ant-design/icons'
 import { useComposeDraft } from '../../../store/composeDraft'
 import { useComposeTaskPoll } from '../../../hooks/useComposeTaskPoll'
+import { NoBrandGuide } from '../../../components/NoBrandGuide'
 import { composeProgressLabel, composeResumeHint, hasComposeDraft, composeResumePath, composeResumeLabel } from '../../../utils/composeProgress'
 import MerchantOnboardingTour from '../../../components/onboarding/MerchantOnboardingTour'
 import { useMerchantOnboarding } from '../../../hooks/useMerchantOnboarding'
@@ -191,6 +192,7 @@ export default function ComposeHub() {
 
   return (
     <div className="wr-page-content ch-hub ch-creative ch-creative--pro ch-studio ip-page">
+      <NoBrandGuide style={{ marginBottom: 16 }} />
       <div className="ch-atmosphere" aria-hidden />
       <MerchantOnboardingTour open={tourOpen} onClose={skipTour} onFinish={finishTour} />
 

@@ -43,10 +43,20 @@ function toMenuItems(items: NavItem[]) {
 }
 
 // 在菜单（含分组）中查找当前路由对应的菜单项（完整匹配优先；其次最长前缀）。
-function findSelectedKey(items: NavItem[], pathname: string): string | undefined {
+// key 可携带查询串（如 /m/analytics?tab=report）：带 ? 的 key 按 pathname+search
+// 全量匹配，不带 ? 的按 pathname 匹配——同一页面的深链入口不与常规入口互相误选。
+function findSelectedKey(items: NavItem[], pathname: string, search = ''): string | undefined {
+  const full = pathname + search
   let best: string | undefined
   let bestLen = -1
   const consider = (key: string) => {
+    if (key.includes('?')) {
+      if (key === full && key.length > bestLen) {
+        best = key
+        bestLen = key.length
+      }
+      return
+    }
     if (key === pathname) {
       best = key
       bestLen = key.length
@@ -119,7 +129,7 @@ export function AppShell({
   }
 
   // selectedKey 优先完整路径匹配，其次末段路径匹配（含分组子项）；兜底第一个非分组项
-  const selectedKey = findSelectedKey(menuItems, location.pathname)
+  const selectedKey = findSelectedKey(menuItems, location.pathname, location.search)
     || menuItems.find(m => !m.children)?.key
     || '/'
 
@@ -194,7 +204,7 @@ export function AppShell({
       { value: '快捷 · 分镜素材', label: '快捷 · 分镜素材', target: '/m/assets' },
       { value: '快捷 · 作品数据', label: '快捷 · 作品数据', target: '/m/analytics' },
       { value: '快捷 · 获客管家', label: '快捷 · 获客管家', target: '/m/chat' },
-      { value: '快捷 · 账号人设', label: '快捷 · 账号人设', target: '/m/brands' },
+      { value: '快捷 · 人设档案', label: '快捷 · 人设档案', target: '/m/brands' },
     ] : []),
   ]
 
@@ -346,16 +356,18 @@ export function AppShell({
 
           <Space size={6} className="wr-header-right" style={{ marginLeft: 16, flexShrink: 0 }}>
             {!inAdmin && (
-              <Button
-                type="primary"
-                size="middle"
-                className="wr-cta-btn"
-                icon={<VideoCameraOutlined />}
-                onClick={() => navigate('/m/compose/lipsync')}
-              >
-                立即创作
-                <RightOutlined style={{ fontSize: 10 }} />
-              </Button>
+              <div data-tour="merchant-cta">
+                <Button
+                  type="primary"
+                  size="middle"
+                  className="wr-cta-btn"
+                  icon={<VideoCameraOutlined />}
+                  onClick={() => navigate('/m/compose/lipsync')}
+                >
+                  立即创作
+                  <RightOutlined style={{ fontSize: 10 }} />
+                </Button>
+              </div>
             )}
             <NotificationBell />
             <Tooltip title={themeMode === 'dark' ? '切换到亮色模式' : '切换到暗色模式'} mouseEnterDelay={0.4}>

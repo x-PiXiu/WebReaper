@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Button, Empty, Input, Space } from 'antd'
+import { Link, useNavigate } from 'react-router-dom'
+import { Alert, Button, Empty, Input, Space } from 'antd'
 import {
   EditOutlined,
   FileTextOutlined,
@@ -11,7 +11,6 @@ import { useComposeDraft } from '../../../../store/composeDraft'
 import { useBrandContext } from '../../../../hooks/useBrands'
 import { businessApi } from '../../../../api/business'
 import { toast } from '../../../../utils/feedback'
-import { PageBackLink } from '../../../../components/PageBackLink'
 
 const { TextArea } = Input
 
@@ -132,7 +131,6 @@ export default function CopyModule() {
     <div className="cp-lib">
       <header className="cp-lib-head">
         <div className="cp-lib-titles">
-          <PageBackLink to="/m/compose" label="工作台" />
           <h1 className="cp-lib-title" style={{ marginTop: 10 }}>文案工作室</h1>
           <p className="cp-lib-lead">模板起稿 · AI 差异化改写 · 口播与种草一站完成</p>
         </div>
@@ -187,6 +185,22 @@ export default function CopyModule() {
           </div>
         </div>
       </header>
+
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="写文案推荐走创作向导"
+        description={
+          <>
+            模板起稿与 AI 改写已并入向导第一步：前往{' '}
+            <Link to="/m/compose/lipsync">视频创作</Link>
+            {' '}或{' '}
+            <Link to="/m/compose/graphic">图文创作</Link>
+            {' '}，点「从模板起稿」即可使用。本页仍可编辑，写好的内容两条链路互通。
+          </>
+        }
+      />
 
       <div className="cp-lib-layout">
         <section className="cp-lib-templates">

@@ -378,9 +378,9 @@ body::before {
 .ant-menu-dark, .ant-menu { background: transparent !important; }
 .ant-menu-dark .ant-menu-item, .ant-menu-item {
   color: var(--wr-text-muted) !important;
-  font-size: 13.5px !important;
-  height: 36px !important;
-  line-height: 36px !important;
+  font-size: 15px !important;
+  height: 42px !important;
+  line-height: 42px !important;
   border-radius: 8px !important;
   margin: 2px 8px !important;
   transition: all 150ms ease !important;
@@ -395,16 +395,16 @@ body::before {
   font-weight: 600;
 }
 .ant-menu-dark .ant-menu-item-selected { color: #fff !important; }
-/* 分组标题（Linear 小字号）*/
+/* 分组标题（小字号，弱于菜单项一级）*/
 .ant-menu-item-group-title {
   color: var(--wr-text-muted) !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 600;
   letter-spacing: 0.08em;
   padding: 16px 16px 6px !important;
   opacity: 0.8;
 }
-.ant-menu-item .anticon { font-size: 15px !important; }
+.ant-menu-item .anticon { font-size: 16px !important; }
 
 /* Collapse */
 .ant-collapse { background: transparent !important; color: var(--wr-text-primary) !important; }
@@ -1234,20 +1234,20 @@ pre code.hljs {
 }
 .wr-app-sider .ant-menu-item {
   position: relative;
-  height: 38px !important;
-  line-height: 38px !important;
+  height: 42px !important;
+  line-height: 42px !important;
   margin-block: 2px !important;
   border-radius: 10px !important;
   margin-inline: 0 !important;
   width: 100% !important;
-  font-size: 13.5px !important;
-  font-weight: 500;
+  font-size: 15px !important;
+  font-weight: 550;
   color: var(--wr-text-secondary) !important;
   transition: background 180ms ease, color 180ms ease !important;
 }
 .wr-app-sider .ant-menu-item .anticon {
   color: inherit !important;
-  font-size: 15px !important;
+  font-size: 16px !important;
   transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .wr-app-sider .ant-menu-item:hover {
@@ -1278,7 +1278,7 @@ pre code.hljs {
 }
 .wr-app-sider .ant-menu-item-group-title {
   color: var(--wr-text-muted) !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 600;
   letter-spacing: 0.1em;
   padding-left: 12px !important;

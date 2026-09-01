@@ -21,7 +21,6 @@ import { GenerateAssetModal } from '../../../../components/assets/GenerateAssetM
 import { GENERATION_TASKS_KEY, useGenerationTasks } from '../../../../hooks/useGenerationTasks'
 import type { GenerationVoice } from '../../../../types/api'
 import { toast } from '../../../../utils/feedback'
-import { PageBackLink } from '../../../../components/PageBackLink'
 import { parseGenerationTaskParams } from '../../../../utils/subjectTask'
 
 type Scope = 'all' | 'mine' | 'recommend'
@@ -225,7 +224,6 @@ export default function VoiceModule() {
     <div className="vc-lib">
       <header className="vc-lib-head">
         <div className="vc-lib-titles">
-          <PageBackLink to="/m/compose" label="工作台" />
           <h1 className="vc-lib-title" style={{ marginTop: 10 }}>音色库</h1>
           <p className="vc-lib-lead">AI 情感音色，真人般自然流畅</p>
         </div>

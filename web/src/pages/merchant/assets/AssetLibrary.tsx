@@ -31,7 +31,6 @@ import { GENERATION_TASKS_KEY, useGenerationTasks } from '../../../hooks/useGene
 import { MEDIA_ASSETS_QUERY_KEY, useMediaAssets } from '../../../hooks/useMediaAssets'
 import type { MediaAsset } from '../../../types/api'
 import { toast } from '../../../utils/feedback'
-import { PageBackLink } from '../../../components/PageBackLink'
 import {
   inferMediaKind,
   isImageMedia,
@@ -236,7 +235,6 @@ export default function AssetLibrary() {
     <div className="sb-lib">
       <header className="sb-lib-head">
         <div className="sb-lib-titles">
-          <PageBackLink to="/m/compose" label="工作台" />
           <h1 className="sb-lib-title" style={{ marginTop: 10 }}>分镜素材</h1>
           <p className="sb-lib-lead">上传并管理图片 / 视频素材，口播插入画面时可选用</p>
         </div>

@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons'
 import AssetPicker from '../../../components/AssetPicker'
 import { PlatformBadge } from '../../../components/PlatformBadge'
+import { NoBrandGuide } from '../../../components/NoBrandGuide'
 import { businessApi } from '../../../api/business'
 import { scoreColor } from '../../../utils/geo'
 import type { Account, Brand, OptimizedContent, PublishChannelView, PublishJob } from '../../../types/api'
@@ -464,6 +465,7 @@ export default function PublishWizard(props: {
         />
       )}
       {/* 人设 */}
+      <NoBrandGuide style={{ marginBottom: 12 }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--wr-border)' }}>
         <Text strong>人设</Text>
         <Select

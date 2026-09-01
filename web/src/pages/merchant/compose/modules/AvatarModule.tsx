@@ -299,10 +299,8 @@ export default function AvatarModule() {
     <div className="dh-lib">
       <header className="dh-lib-head">
         <div className="dh-lib-titles">
-          {searchParams.get('from') === 'wizard' ? (
+          {searchParams.get('from') === 'wizard' && (
             <PageBackLink to="/m/compose/lipsync" label="口播向导" />
-          ) : (
-            <PageBackLink to="/m/compose" label="工作台" />
           )}
           <h1 className="dh-lib-title" style={{ marginTop: 10 }}>数字资产管理</h1>
           <p className="dh-lib-lead">数字分身即选即用；注册自己的店内环境，组合出镜——分身在你的店里口播</p>
