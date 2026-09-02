@@ -1287,6 +1287,20 @@ func (uc *GenerationUseCase) DeleteTask(ctx context.Context, tenantID, taskID st
 	if err != nil {
 		return err
 	}
+	// 32号 F1-7 角色边界（用户反馈）：官方主体（scope=official）只能走管理后台
+	// 处置——商户端删除端点即使带着 admin JWT 也必须拒绝（管理权在 admin 路由
+	// + RequireRole 处行使，商户业务端点不因"你是管理员"而放行平台资产管理）。
+	if task.SubType == "subject" && uc.subjectAssetRepo != nil {
+		serverID := task.ProviderTaskID
+		if serverID == "" {
+			serverID = firstCreationID(task.CreationsJSON)
+		}
+		if serverID != "" {
+			if a, aErr := uc.subjectAssetRepo.FindByServerID(ctx, serverID); aErr == nil && a.Scope == "official" {
+				return fmt.Errorf("官方主体不可在客户端删除——请到管理后台「平台资产」处理")
+			}
+		}
+	}
 	if !entity.IsTerminal(task.State) && task.ProviderTaskID != "" {
 		// 动态选择 provider
 		provider, pErr := uc.getProvider(ctx, task.SubType)
