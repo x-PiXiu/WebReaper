@@ -95,7 +95,9 @@ export default function VoiceModule() {
       const name = (typeof p.name === 'string' && p.name)
         || (typeof p.voice_name === 'string' && p.voice_name)
         || `克隆音色 ${voiceId.slice(0, 8)}`
-      const sample = t.creations?.[0]?.url || ''
+      // 试听源优先 stored_url（永久）；url 可能是 data:URI 大内联被剥离后的占位符
+      const c0 = t.creations?.[0] || ({} as Record<string, string>)
+      const sample = c0.stored_url || (c0.url && !String(c0.url).startsWith('(') ? c0.url : '')
       let tag = '我的'
       if (t.state === 'failed') tag = '失败'
       else if (t.state !== 'success') tag = '克隆中'
