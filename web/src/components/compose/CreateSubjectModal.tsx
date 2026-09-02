@@ -111,8 +111,8 @@ export function CreateSubjectModal({
       <Space direction="vertical" style={{ width: '100%' }} size={12}>
         <Text type="secondary" style={{ fontSize: 12 }}>
           {isScene
-            ? '拍 2-3 张自己店内/产品/门头的照片注册为环境——口播时与数字分身组合出镜（分身在你的店里讲解），跨视频环境一致'
-            : '上传 1-3 张形象照或 1 个 5 秒内的主体视频——创建后即可用于口播成片，跨视频人物形象一致；形象视频自动生成供预览'}
+            ? '拍 2-3 张自己店内/产品/门头的照片注册为环境——与数字分身组合出镜（分身在你的店里讲解），跨视频环境一致'
+            : '上传 1-3 张形象照——创建后自动生成 10 秒形象视频（供预览和口播复用），跨视频人物形象一致'}
         </Text>
         <Input
           placeholder={isScene ? '环境名称（如：店内大堂、后厨、产品展台）' : '数字人名称（如：张师傅、李老板）'}
@@ -151,9 +151,8 @@ export function CreateSubjectModal({
         </div>
         {!isScene && (
         <div>
-          <Text strong style={{ fontSize: 13 }}>场景图（可选，1 张）</Text>
-          <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-            让分身出现在期望的环境中（如厨房切菜）；不上传则默认纯色棚拍
+          <Text strong style={{ fontSize: 13 }}>
+            场景图（推荐上传）<Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>让分身出现在你的真实场景中（如店内/后厨）；不上传则默认纯色棚拍</Text>
           </Text>
           {sceneImage ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
