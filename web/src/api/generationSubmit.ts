@@ -200,9 +200,6 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
       imageUrls: Array.isArray(params.images)
         ? params.images.filter((u): u is string => typeof u === 'string' && !!u.trim())
         : materials.filter((m) => /^https?:\/\//i.test(m)),
-      videoUrl: Array.isArray(params.videos) && typeof params.videos[0] === 'string'
-        ? params.videos[0]
-        : undefined,
       voice_id: typeof adv.voice_id === 'string' ? adv.voice_id : undefined,
     })
   }
@@ -242,40 +239,37 @@ export async function mapLegacyToUnified(data: LegacyGenerationSubmit): Promise<
 /**
  * 数字分身主体注册（POST /generation/submit + sub_type=subject）。
  * materials 优先传素材库 ID；params.images/videos 作 URL 直传兜底（需 BE-SUBJ-02）。
+ * 注：31号定案——主体视频入口已下线（仅 viduq2-pro 支持视频主体，与画面复用架构冲突）。
  */
 export function buildSubjectRegisterPayload(input: {
   brand_id: string
   name: string
   imageMaterialIds?: string[]
   imageUrls?: string[]
-  videoUrl?: string
   voice_id?: string
-  /** 23 号计划 §2.1③：可选场景图（形象视频生成的环境参考；服务端接入前忽略） */
+  /** 25 号 §6.5：资产分类——person=人物分身（默认）/ scene=环境主体 */
+  kind?: 'person' | 'scene'
+  /** 23 号计划 §2.1③：可选场景图（形象视频生成的环境参考） */
   sceneImageUrl?: string
   /** 23 号计划 §2.1③：可选场景描述（一句话：主角在哪个场景做什么） */
   sceneDescription?: string
-  /** 25 号 §6.5：资产分类——person=人物分身（默认）/ scene=环境主体 */
-  kind?: 'person' | 'scene'
 }): UnifiedSubmitPayload {
   const name = (input.name || '').trim()
   if (!name) throw new Error('请输入主体名称')
   const ids = (input.imageMaterialIds || []).filter(Boolean).slice(0, 3)
   const urls = (input.imageUrls || []).filter(Boolean).slice(0, 3)
-  const video = (input.videoUrl || '').trim()
-  if (ids.length === 0 && urls.length === 0 && !video) {
-    throw new Error('请上传至少 1 张形象照或 1 个主体视频')
+  if (ids.length === 0 && urls.length === 0) {
+    throw new Error('请上传至少 1 张形象照')
   }
   const params: Record<string, unknown> = { name }
   if (input.voice_id) params.voice_id = input.voice_id
   if (urls.length) params.images = urls
-  if (video) params.videos = [video]
   const sceneDesc = (input.sceneDescription || '').trim()
   if (input.sceneImageUrl) params.scene_image = input.sceneImageUrl
   if (sceneDesc) params.scene_description = sceneDesc
   if (input.kind) params.kind = input.kind
   const materials = [...ids]
   if (!materials.length && urls.length) materials.push(...urls)
-  if (!materials.length && video) materials.push(video)
   return {
     brand_id: input.brand_id,
     text: name,

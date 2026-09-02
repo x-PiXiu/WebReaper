@@ -20,13 +20,11 @@ describe('buildSubjectRegisterPayload', () => {
     })
   })
 
-  it('supports video-only payload', () => {
-    const p = buildSubjectRegisterPayload({
+  it('rejects payload without images (video subject removed)', () => {
+    // 31号定案：主体视频入口下线——无形象照的 payload 直接抛错
+    expect(() => buildSubjectRegisterPayload({
       brand_id: 'b1',
       name: '场景A',
-      videoUrl: 'http://host/media/v.mp4',
-    })
-    expect(p.params?.videos).toEqual(['http://host/media/v.mp4'])
-    expect(p.materials).toEqual(['http://host/media/v.mp4'])
+    })).toThrow('请上传至少 1 张形象照')
   })
 })

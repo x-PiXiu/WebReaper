@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Input, Modal, Space, Typography, Upload } from 'antd'
-import { PlusOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { PlusOutlined } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import { buildSubjectRegisterPayload } from '../../api/generationSubmit'
 import { subjectServerId } from '../../utils/subjectTask'
@@ -13,26 +13,6 @@ import VoicePicker from '../VoicePicker'
 
 const { Text } = Typography
 const { TextArea } = Input
-
-/** 客户端预检主体视频时长（≤5s；元数据读不出的容器放行，由上游兜底校验） */
-function checkVideoDuration(file: File): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file)
-    const v = document.createElement('video')
-    v.preload = 'metadata'
-    v.onloadedmetadata = () => {
-      URL.revokeObjectURL(url)
-      if (v.duration > 5.5) {
-        toast.fail('主体视频请控制在 5 秒以内', 'subject-dur')
-        reject(new Error('视频超过 5 秒'))
-      } else {
-        resolve()
-      }
-    }
-    v.onerror = () => { URL.revokeObjectURL(url); resolve() }
-    v.src = url
-  })
-}
 
 type Props = {
   open: boolean
@@ -59,7 +39,6 @@ export function CreateSubjectModal({
   const modalTitle = title || (isScene ? '添加出镜环境' : '定制数字人')
   const [name, setName] = useState('')
   const [imageAssets, setImageAssets] = useState<Array<{ id: string; url: string }>>([])
-  const [videoAsset, setVideoAsset] = useState<{ id: string; url: string } | null>(null)
   const [sceneImage, setSceneImage] = useState<{ id: string; url: string } | null>(null)
   const [sceneDesc, setSceneDesc] = useState('')
   const [voiceId, setVoiceId] = useState('')
@@ -70,7 +49,6 @@ export function CreateSubjectModal({
   const resetForm = () => {
     setName('')
     setImageAssets([])
-    setVideoAsset(null)
     setSceneImage(null)
     setSceneDesc('')
     setVoiceId('')
@@ -85,7 +63,7 @@ export function CreateSubjectModal({
       toast.warn('请先选择人设', 'subject-create')
       return
     }
-    if (imageAssets.length === 0 && !videoAsset) {
+    if (imageAssets.length === 0) {
       toast.warn(
         isScene ? '请上传 2-3 张环境照片（店内/产品/门头）' : '请至少上传 1 张形象照或 1 段主体视频',
         'subject-create',
@@ -99,7 +77,6 @@ export function CreateSubjectModal({
         name: name.trim(),
         imageMaterialIds: imageAssets.map((a) => a.id),
         imageUrls: imageAssets.map((a) => a.url),
-        videoUrl: isScene ? undefined : videoAsset?.url,
         voice_id: isScene ? undefined : (voiceId || undefined),
         sceneImageUrl: isScene ? undefined : sceneImage?.url,
         sceneDescription: isScene ? undefined : (sceneDesc || undefined),
@@ -172,26 +149,6 @@ export function CreateSubjectModal({
             )}
           </Upload>
         </div>
-        {!isScene && (
-        <div>
-          <Text strong style={{ fontSize: 13 }}>主体视频（可选，1 个 ≤5 秒）</Text>
-          <Upload
-            maxCount={1}
-            accept="video/mp4,video/x-msvideo,video/quicktime"
-            beforeUpload={checkVideoDuration}
-            customRequest={async ({ file, onSuccess, onError }) => {
-              try {
-                const r = await businessApi.uploadAsset(file as File)
-                setVideoAsset({ id: r.id, url: r.url })
-                onSuccess?.(r)
-              } catch (e) { onError?.(e as Error) }
-            }}
-            onRemove={() => setVideoAsset(null)}
-          >
-            <Button icon={<VideoCameraOutlined />}>{videoAsset ? '重新上传' : '上传视频（mp4/avi/mov）'}</Button>
-          </Upload>
-        </div>
-        )}
         {!isScene && (
         <div>
           <Text strong style={{ fontSize: 13 }}>场景图（可选，1 张）</Text>
