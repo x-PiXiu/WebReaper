@@ -1462,14 +1462,9 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 		if len(st.Creations) == 0 {
 			return fmt.Errorf("任务成功但无生成物")
 		}
-		creationsJSON, _ := json.Marshal(st.Creations)
-		task.CreationsJSON = string(creationsJSON)
-		task.State = entity.TaskStateSuccess
-		task.ErrCode = ""
-		task.ErrMsg = ""
-		task.FinishedAt = nowPtr(time.Now())
 		// 转存（24h URL 永久化；失败不阻断终态——前端标记"产物待转存"）
 		// BE-ASSET-01：转存失败记录日志，便于排查"任务 success 但无文件"问题
+		// 顺序关键：先用完整 data:URI 转存落盘，再序列化落库（剥离大内联）
 		if uc.asset != nil {
 			for i := range st.Creations {
 				if stored, sErr := uc.asset.DownloadAndStore(ctx, task.TenantID, st.Creations[i].URL, nil); sErr == nil {
@@ -1478,9 +1473,14 @@ func (uc *GenerationUseCase) applyStatus(ctx context.Context, task *entity.Gener
 					log.Printf("[ApplyStatus][WARN] 转存失败 task=%s url=%s err=%v", task.ID, truncateURL(st.Creations[i].URL), sErr)
 				}
 			}
-			creationsJSON, _ = json.Marshal(st.Creations)
-			task.CreationsJSON = string(creationsJSON)
 		}
+		stripInlineCreationData(st.Creations)
+		creationsJSON, _ := json.Marshal(st.Creations)
+		task.CreationsJSON = string(creationsJSON)
+		task.State = entity.TaskStateSuccess
+		task.ErrCode = ""
+		task.ErrMsg = ""
+		task.FinishedAt = nowPtr(time.Now())
 		// 32号 P2 二批：图片产物机审（异步标记——产物终态才有图，审核挂终态钩子）
 		if uc.moderator != nil && task.SubType == "text2image" && len(st.Creations) > 0 {
 			imgURL := st.Creations[0].StoredURL
@@ -1894,6 +1894,23 @@ func truncateURL(u string) string {
 		return u[:80] + "…"
 	}
 	return u
+}
+
+// stripInlineCreationData 落库序列化前剥离产物里的 data:URI 大内联（32号真机 Bug）。
+// MiMo 同步端点的 url=data:audio/mp3;base64,<2.5MB>——creations_json 是 TEXT(64KB)，
+// 不剥离则 Save 必 Error 1406（success 滞留内存→前端刷新即"克隆中"）。
+// 必须在转存之后调用（转存需要完整 data:URI）；有 stored_url 的替换为占位符，
+// 无 stored_url（转存失败）的保留截断标记——不做静默丢内容。
+func stripInlineCreationData(creations []entity.CreationItem) {
+	for i := range creations {
+		if strings.HasPrefix(creations[i].URL, "data:") {
+			if creations[i].StoredURL != "" {
+				creations[i].URL = "(inlined—see stored_url)"
+			} else {
+				creations[i].URL = truncateURL(creations[i].URL) + "[transfer-failed]"
+			}
+		}
+	}
 }
 
 // SetSettingRepo 注入系统设置仓储（可选；傻瓜式默认值通道）。
