@@ -71,8 +71,16 @@ export default function VoiceModule() {
   const { data: official = [], isLoading: voicesLoading } = useQuery({
     queryKey: ['generation-voices'],
     queryFn: () => businessApi.listGenerationVoices().then((r) => r.voices),
-    staleTime: 24 * 60 * 60 * 1000,
+    // 音色列表包含"我的克隆"（物化后出现）——不能缓存 24h；
+    // 克隆成功后此处必须 refetch，否则新音色不可见（32号真机问题）
+    refetchInterval: 10_000,
   })
+  // 克隆任务全部终态后刷新一次音色列表（新克隆音色即时可见）
+  useEffect(() => {
+    if (tasks.length && tasks.every((t) => ['success', 'failed', 'cancelled'].includes(t.state))) {
+      queryClient.invalidateQueries({ queryKey: ['generation-voices'] })
+    }
+  }, [tasks, queryClient])
 
   useEffect(() => () => { stopPreview() }, [])
 
