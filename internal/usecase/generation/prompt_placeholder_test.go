@@ -33,6 +33,9 @@ func (m *mockSubjectAssetRepo) UpdateStatus(ctx context.Context, id, status stri
 func (m *mockSubjectAssetRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
+func (m *mockSubjectAssetRepo) DeleteByServerID(ctx context.Context, tenantID, serverID string) error {
+	return nil
+}
 
 func TestPlaceholderTranslator_NoPlaceholders(t *testing.T) {
 	repo := &mockSubjectAssetRepo{}
