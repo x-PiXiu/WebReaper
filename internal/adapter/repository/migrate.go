@@ -59,41 +59,32 @@ func RunMigrations(db *gorm.DB) error {
 	}
 
 	// 4. 逐个执行未应用的迁移
-	// 32号云端部署修复：迁移文件存在同版本多文件（如 083_a.sql/083_b.sql——
-	// 本地开发并行加迁移的常见形态）。首个 083 执行后 INSERT 记录，
-	// 第二个 083 因 appliedSet 已含该版本被跳过——但它的**SQL 永远不会执行**，
-	// 且记录表 INSERT 用普通 INSERT，两个同版本文件并发部署（多实例）时
-	// 会报 Duplicate entry 使启动失败。
-	// 修复：a) 同版本文件全部顺序执行，只在最后一个执行后记录；
-	//       b) 记录 INSERT 改 INSERT IGNORE（幂等——多实例竞态无害）。
-	// 000 基线模式：000_baseline.sql 是从完整库导出的**最终形态**（含 001~089
-	// 的全部 ALTER 产物）。全新库执行 000 后，001~089 再跑 ALTER 必报
-	// "Duplicate column"——因此检测到 000 是本次新执行时，后续所有迁移
-	// 的版本号直接标记为已应用（跳过执行，产物已在基线里）。
-	baselineApplied := false
+	// 2026-09-02 迁移整合：83 个增量迁移（001~089）已合并为 000_baseline.sql
+	//（从完整库导出的最终形态——含全部 ALTER 产物 + 种子数据），旧文件备份在
+	// Docs/archive/migrations-2026-09-02/。今后新迁移从 001 开始编号。
+	//
+	// 已有库兼容（webreaper_schema_migrations 里已有 001~089 记录）：
+	//   → 000 未标记 → 先执行 000（幂等——表已存在时 DROP+CREATE 重建，
+	//     数据会丢！）——不能让已有库跑 000。
+	//   → 因此：库中已有任何旧迁移记录时，000 视为已应用（跳过）。
+	if len(applied) > 0 && !appliedSet["000"] {
+		appliedSet["000"] = true
+		_ = db.Exec(fmt.Sprintf("INSERT IGNORE INTO %s (version) VALUES ('000')", migrationsTableName)).Error
+	}
+
 	for i := 0; i < len(migrations); i++ {
 		m := migrations[i]
 		if appliedSet[m.version] {
 			continue
 		}
-		// 000 基线刚执行 → 后续全部标记跳过
-		if baselineApplied && m.version != "000" {
-			if err := db.Exec(fmt.Sprintf("INSERT IGNORE INTO %s (version) VALUES (?)", migrationsTableName), m.version).Error; err != nil {
-				return fmt.Errorf("mark migration %s: %w", m.name, err)
-			}
-			continue
-		}
 		if err := executeMigration(db, m); err != nil {
 			return fmt.Errorf("apply migration %s: %w", m.name, err)
 		}
-		// 同版本的后续文件继续执行（跳过中间记录），最后一个才写记录
+		// 同版本多文件全部顺序执行，只在最后一个执行后写记录（INSERT IGNORE 幂等）
 		isLastOfVersion := i+1 >= len(migrations) || migrations[i+1].version != m.version
 		if isLastOfVersion {
 			if err := db.Exec(fmt.Sprintf("INSERT IGNORE INTO %s (version) VALUES (?)", migrationsTableName), m.version).Error; err != nil {
 				return fmt.Errorf("record migration %s: %w", m.name, err)
-			}
-			if m.version == "000" {
-				baselineApplied = true
 			}
 		}
 	}

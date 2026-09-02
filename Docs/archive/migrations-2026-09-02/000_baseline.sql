@@ -17,7 +17,7 @@
 -- §1 表结构（53 张表，含索引/外键）
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `account_brand_bindings` (
+CREATE TABLE `account_brand_bindings` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '租户ID',
   `account_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '账号ID',
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS `account_brand_bindings` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `agent_configs` (
+CREATE TABLE `agent_configs` (
   `name` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `system_prompt` text COLLATE utf8mb4_unicode_ci,
   `tools` json DEFAULT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS `agent_configs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `brand_inspirations` (
+CREATE TABLE `brand_inspirations` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `video_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS `brand_inspirations` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `brand_publish_configs` (
+CREATE TABLE `brand_publish_configs` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '租户ID',
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '品牌ID',
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS `brand_publish_configs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `collections` (
+CREATE TABLE `collections` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `agent_name` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS `collections` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `conversations` (
+CREATE TABLE `conversations` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `agent_name` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS `conversations` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `crawl_results` (
+CREATE TABLE `crawl_results` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `source_url` varchar(512) COLLATE utf8mb4_unicode_ci NOT NULL,
   `crawler_type` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS `crawl_results` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `crawler_accounts` (
+CREATE TABLE `crawler_accounts` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `platform` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
   `account_name` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS `crawler_accounts` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `crawler_configs` (
+CREATE TABLE `crawler_configs` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `platform` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS `crawler_configs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `crawler_task_logs` (
+CREATE TABLE `crawler_task_logs` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `task_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `platform` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS `crawler_task_logs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `data_items` (
+CREATE TABLE `data_items` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `collection_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `title` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -225,7 +225,7 @@ CREATE TABLE IF NOT EXISTS `data_items` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `external_systems` (
+CREATE TABLE `external_systems` (
   `name` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` varchar(256) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `endpoint` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS `external_systems` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `generation_specs` (
+CREATE TABLE `generation_specs` (
   `sub_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `provider` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT 'vidu',
   `model` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -261,7 +261,7 @@ CREATE TABLE IF NOT EXISTS `generation_specs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `generation_tasks` (
+CREATE TABLE `generation_tasks` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -296,7 +296,7 @@ CREATE TABLE IF NOT EXISTS `generation_tasks` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `generation_templates` (
+CREATE TABLE `generation_templates` (
   `id` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '租户ID（空=全局模板）',
   `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '模板名称',
@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS `generation_templates` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `generation_voices` (
+CREATE TABLE `generation_voices` (
   `voice_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
   `language` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `name` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -338,7 +338,7 @@ CREATE TABLE IF NOT EXISTS `generation_voices` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_accounts` (
+CREATE TABLE `geo_accounts` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `platform` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -368,7 +368,7 @@ CREATE TABLE IF NOT EXISTS `geo_accounts` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_ai_rank_probes` (
+CREATE TABLE `geo_ai_rank_probes` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -382,7 +382,7 @@ CREATE TABLE IF NOT EXISTS `geo_ai_rank_probes` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_brands` (
+CREATE TABLE `geo_brands` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -399,7 +399,7 @@ CREATE TABLE IF NOT EXISTS `geo_brands` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_keywords` (
+CREATE TABLE `geo_keywords` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -413,7 +413,7 @@ CREATE TABLE IF NOT EXISTS `geo_keywords` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_monitoring_results` (
+CREATE TABLE `geo_monitoring_results` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -443,7 +443,7 @@ CREATE TABLE IF NOT EXISTS `geo_monitoring_results` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_optimized_contents` (
+CREATE TABLE `geo_optimized_contents` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(256) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -468,7 +468,7 @@ CREATE TABLE IF NOT EXISTS `geo_optimized_contents` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_publish_jobs` (
+CREATE TABLE `geo_publish_jobs` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `account_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -501,7 +501,7 @@ CREATE TABLE IF NOT EXISTS `geo_publish_jobs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `geo_store_locations` (
+CREATE TABLE `geo_store_locations` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -527,7 +527,7 @@ CREATE TABLE IF NOT EXISTS `geo_store_locations` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `hot_videos` (
+CREATE TABLE `hot_videos` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -553,7 +553,7 @@ CREATE TABLE IF NOT EXISTS `hot_videos` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `indexing_submit_logs` (
+CREATE TABLE `indexing_submit_logs` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `channel` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `url` varchar(512) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -568,7 +568,7 @@ CREATE TABLE IF NOT EXISTS `indexing_submit_logs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `inspiration_videos` (
+CREATE TABLE `inspiration_videos` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `platform` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'douyin',
   `platform_video_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -606,7 +606,7 @@ CREATE TABLE IF NOT EXISTS `inspiration_videos` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `integration_capabilities` (
+CREATE TABLE `integration_capabilities` (
   `id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
   `cap_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `vendor_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -623,7 +623,7 @@ CREATE TABLE IF NOT EXISTS `integration_capabilities` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `integration_vendors` (
+CREATE TABLE `integration_vendors` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `base_url` varchar(512) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -636,7 +636,7 @@ CREATE TABLE IF NOT EXISTS `integration_vendors` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `interview_questions` (
+CREATE TABLE `interview_questions` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `job_post_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `title` varchar(256) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -651,7 +651,7 @@ CREATE TABLE IF NOT EXISTS `interview_questions` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `job_posts` (
+CREATE TABLE `job_posts` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `source` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `company` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -671,7 +671,7 @@ CREATE TABLE IF NOT EXISTS `job_posts` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `kb_materials` (
+CREATE TABLE `kb_materials` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `industry` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `source_url` varchar(1024) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -695,7 +695,7 @@ CREATE TABLE IF NOT EXISTS `kb_materials` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `knowledge` (
+CREATE TABLE `knowledge` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `title` varchar(256) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `content` longtext COLLATE utf8mb4_unicode_ci,
@@ -710,7 +710,7 @@ CREATE TABLE IF NOT EXISTS `knowledge` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `llm_configs` (
+CREATE TABLE `llm_configs` (
   `name` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `provider` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `api_key` varchar(256) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -727,7 +727,7 @@ CREATE TABLE IF NOT EXISTS `llm_configs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `messages` (
+CREATE TABLE `messages` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `conversation_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `role` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -740,7 +740,7 @@ CREATE TABLE IF NOT EXISTS `messages` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `notifications` (
+CREATE TABLE `notifications` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system',
@@ -756,7 +756,7 @@ CREATE TABLE IF NOT EXISTS `notifications` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `orders` (
+CREATE TABLE `orders` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `plan_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -774,7 +774,7 @@ CREATE TABLE IF NOT EXISTS `orders` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `plans` (
+CREATE TABLE `plans` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `level` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -792,7 +792,7 @@ CREATE TABLE IF NOT EXISTS `plans` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `platform_content_configs` (
+CREATE TABLE `platform_content_configs` (
   `platform` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
   `config_json` json NOT NULL,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -801,7 +801,7 @@ CREATE TABLE IF NOT EXISTS `platform_content_configs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `prompt_templates` (
+CREATE TABLE `prompt_templates` (
   `key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `version` int NOT NULL DEFAULT '1',
   `content` longtext COLLATE utf8mb4_unicode_ci,
@@ -811,7 +811,7 @@ CREATE TABLE IF NOT EXISTS `prompt_templates` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `provider_configs` (
+CREATE TABLE `provider_configs` (
   `provider` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
   `api_key` varchar(512) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `base_url` varchar(256) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -823,7 +823,7 @@ CREATE TABLE IF NOT EXISTS `provider_configs` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `publish_records` (
+CREATE TABLE `publish_records` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `content_id` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `content_type` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -841,7 +841,7 @@ CREATE TABLE IF NOT EXISTS `publish_records` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `publish_usage_stats` (
+CREATE TABLE `publish_usage_stats` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '租户ID',
   `brand_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '品牌ID',
@@ -856,7 +856,7 @@ CREATE TABLE IF NOT EXISTS `publish_usage_stats` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `subject_assets` (
+CREATE TABLE `subject_assets` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `scope` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'personal',
@@ -879,7 +879,7 @@ CREATE TABLE IF NOT EXISTS `subject_assets` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `subscriptions` (
+CREATE TABLE `subscriptions` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `plan_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -896,7 +896,7 @@ CREATE TABLE IF NOT EXISTS `subscriptions` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `system_settings` (
+CREATE TABLE `system_settings` (
   `setting_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `value` longtext COLLATE utf8mb4_unicode_ci,
   `updated_at` datetime(3) DEFAULT NULL,
@@ -905,7 +905,7 @@ CREATE TABLE IF NOT EXISTS `system_settings` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `tasks` (
+CREATE TABLE `tasks` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `type` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `input` text COLLATE utf8mb4_unicode_ci,
@@ -921,7 +921,7 @@ CREATE TABLE IF NOT EXISTS `tasks` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `tenant_settings` (
+CREATE TABLE `tenant_settings` (
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `setting_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `value` varchar(512) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -931,7 +931,7 @@ CREATE TABLE IF NOT EXISTS `tenant_settings` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `usages` (
+CREATE TABLE `usages` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `user_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
@@ -951,7 +951,7 @@ CREATE TABLE IF NOT EXISTS `usages` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `video_metrics` (
+CREATE TABLE `video_metrics` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'vm-{nano}',
   `tenant_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `job_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '发布任务 ID',
@@ -969,7 +969,7 @@ CREATE TABLE IF NOT EXISTS `video_metrics` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `webreaper_schema_migrations` (
+CREATE TABLE `webreaper_schema_migrations` (
   `version` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
   `applied_at` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`version`)
@@ -977,7 +977,7 @@ CREATE TABLE IF NOT EXISTS `webreaper_schema_migrations` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `webreaper_users` (
+CREATE TABLE `webreaper_users` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `username` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password_hash` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -993,7 +993,7 @@ CREATE TABLE IF NOT EXISTS `webreaper_users` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE IF NOT EXISTS `work_moderations` (
+CREATE TABLE `work_moderations` (
   `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `work_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `work_kind` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'video',
