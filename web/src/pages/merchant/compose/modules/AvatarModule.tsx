@@ -27,7 +27,6 @@ import { parseGenerationTaskParams, listSceneSubjects } from '../../../../utils/
 import type { ViduSubject } from '../../../../utils/subjectTask'
 import { toast } from '../../../../utils/feedback'
 import { CREATIVE_CDN } from '../../../../config/creativeCdn'
-import type { GenerationTask } from '../../../../types/api'
 
 type LibCard = {
   id: string
@@ -52,25 +51,22 @@ function formatUploadTime(iso: string) {
 }
 
 /** 分身三态徽标（25 号阶段二：创建中 → 形象视频生成中 → 可用；D4 失败可重试） */
-function subjectTag(s: ViduSubject, avatarTask?: GenerationTask) {
+function subjectTag(s: ViduSubject, hasVideo: boolean) {
   if (s.state !== 'success') {
     return { label: s.state === 'failed' ? '失败' : '创建中', tone: s.state === 'failed' ? 'danger' : 'processing' }
   }
-  if (s.avatarTaskId && avatarTask) {
-    if (avatarTask.state === 'success') return { label: '可用', tone: 'success' }
-    if (avatarTask.state === 'failed' || avatarTask.state === 'cancelled') return { label: '形象视频失败', tone: 'warning' }
-    return { label: '形象视频生成中', tone: 'processing' }
-  }
-  return { label: '可用 · 无形象视频', tone: 'success' }
+  // 形象视频状态直接来自 subject_assets.avatar_video_url（32号 F2——不再 join 任务）
+  if (hasVideo) return { label: '可用', tone: 'success' }
+  return { label: '形象视频生成中', tone: 'processing' }
 }
 
-function subjectToCard(s: ViduSubject, avatarTask?: GenerationTask): LibCard {
+function subjectToCard(s: ViduSubject, hasVideo: boolean): LibCard {
   return {
     id: s.taskId,
     name: s.name,
     portraitUrl: s.portraitUrl,
     timeLabel: formatUploadTime(s.createdAt),
-    tag: subjectTag(s, avatarTask).label,
+    tag: subjectTag(s, hasVideo).label,
     duration: s.hasVideo ? '≤5s' : undefined,
     selectable: true,
     ready: s.state === 'success' && !!s.serverId,
@@ -100,7 +96,7 @@ export default function AvatarModule() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const { subjects, tasks, refetch, isLoading } = useSubjectList({ refetchInterval: 8_000 })
+  const { subjects, withVideo, tasks, refetch, isLoading } = useSubjectList({ refetchInterval: 8_000 })
   const { subjects: officialSubjects, isLoading: officialLoading } = useOfficialSubjects({ limit: 50 })
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<string[]>([])
@@ -130,16 +126,17 @@ export default function AvatarModule() {
     return Array.from(ids)
   }, [tasks])
 
-  // 链式形象视频任务 join（params.avatar_video=true 的 reference2video 任务）
-  const avatarTaskById = useMemo(() => {
-    const m = new Map<string, GenerationTask>()
-    for (const t of tasks || []) {
-      if (t.sub_type !== 'reference2video') continue
-      if (parseGenerationTaskParams(t).avatar_video !== true) continue
-      m.set(t.id, t)
-    }
+  // 有形象视频的分身（32号 F2：直接读 subject_assets 行——avatar_video_url 是权威数据源；
+  // 此前 join generation_tasks 找 avatar_task_id，但 subjects/mine 不返回该字段 → 恒空）
+  const videoReadyIds = useMemo(
+    () => new Set(withVideo.map((a) => a.server_id)),
+    [withVideo],
+  )
+  const videoUrlByServer = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const a of withVideo) m.set(a.server_id, a.avatar_video_url)
     return m
-  }, [tasks])
+  }, [withVideo])
 
   const sceneSubjects = useMemo(() => listSceneSubjects(subjects), [subjects])
   const personSubjects = useMemo(
@@ -150,17 +147,14 @@ export default function AvatarModule() {
   const needle = q.trim().toLowerCase()
   const personCards = useMemo(
     () => personSubjects
-      .map((s) => subjectToCard(s, avatarTaskById.get(s.avatarTaskId)))
+      .map((s) => subjectToCard(s, videoReadyIds.has(s.serverId)))
       .filter((c) => !needle || c.name.toLowerCase().includes(needle)),
-    [personSubjects, avatarTaskById, needle],
+    [personSubjects, videoReadyIds, needle],
   )
   const sceneCards = useMemo(
     () => sceneSubjects.map(sceneToCard).filter((c) => !needle || c.name.toLowerCase().includes(needle)),
     [sceneSubjects, needle],
   )
-
-  const avatarVideoUrl = (t?: GenerationTask) =>
-    t?.state === 'success' ? (t.creations?.[0]?.stored_url || t.creations?.[0]?.url || '') : ''
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelected((prev) => {
@@ -203,8 +197,8 @@ export default function AvatarModule() {
       toast.info(s.state === 'failed' ? '该数字人创建失败，可删除后重试' : '数字人仍在创建中', 'avatar-wait')
       return
     }
-    const avatarTask = avatarTaskById.get(s.avatarTaskId)
-    const url = avatarVideoUrl(avatarTask)
+    // 32号 F2：视频地址直接取 subject_assets 行（hasVideo/videoUrl 已回填）
+    const url = videoUrlByServer.get(s.serverId) || s.videoUrl
     if (url) {
       setPreview({ subject: s, url })
       return
@@ -215,12 +209,11 @@ export default function AvatarModule() {
   const renderCard = (card: LibCard, opts: { official?: boolean; scene?: boolean }) => {
     const checked = selected.includes(card.id)
     // 32号 F2：状态化操作标签——让用户知道卡片当前能做什么/正在发生什么
-    const avatarTask = avatarTaskById.get(card.subject!.avatarTaskId)
-    const st = subjectTag(card.subject!, avatarTask)
-    const hasVideo = !!avatarVideoUrl(avatarTask)
+    const s = card.subject!
+    const st = subjectTag(s, videoReadyIds.has(s.serverId))
     const actionLabel = opts.official ? '敬请期待'
       : opts.scene ? (card.ready ? '向导中选择' : '查看状态')
-        : card.ready ? (hasVideo ? '预览形象视频' : '拍口播') : st.label
+        : card.ready ? (videoReadyIds.has(s.serverId) ? '预览形象视频' : '拍口播') : st.label
     const tagTone = opts.scene || opts.official ? undefined
       : st.tone
     const publicTag = opts.official
@@ -285,9 +278,7 @@ export default function AvatarModule() {
           </span>
           {!opts.official && !opts.scene && card.ready && (() => {
             const s = card.subject!
-            const avatarTask = avatarTaskById.get(s.avatarTaskId)
-            const hasVideo = !!avatarVideoUrl(avatarTask)
-            const failed = !!s.avatarTaskId && (avatarTask?.state === 'failed' || avatarTask?.state === 'cancelled')
+            const hasVideo = videoReadyIds.has(s.serverId)
             if (hasVideo) return null
             return (
               <a
@@ -295,7 +286,7 @@ export default function AvatarModule() {
                 style={{ fontSize: 12, display: 'inline-block', marginTop: 4 }}
                 onClick={(e) => { e.stopPropagation(); retryAvatarVideo(s) }}
               >
-                {retrying === s.taskId ? '提交中…' : failed ? '重试形象视频' : '生成形象视频'}
+                {retrying === s.taskId ? '提交中…' : '生成形象视频'}
               </a>
             )
           })()}
