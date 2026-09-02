@@ -214,11 +214,15 @@ export default function AvatarModule() {
 
   const renderCard = (card: LibCard, opts: { official?: boolean; scene?: boolean }) => {
     const checked = selected.includes(card.id)
+    // 32号 F2：状态化操作标签——让用户知道卡片当前能做什么/正在发生什么
+    const avatarTask = avatarTaskById.get(card.subject!.avatarTaskId)
+    const st = subjectTag(card.subject!, avatarTask)
+    const hasVideo = !!avatarVideoUrl(avatarTask)
     const actionLabel = opts.official ? '敬请期待'
       : opts.scene ? (card.ready ? '向导中选择' : '查看状态')
-        : card.ready ? (avatarVideoUrl(avatarTaskById.get(card.subject!.avatarTaskId)) ? '预览形象' : '拍口播') : '查看状态'
+        : card.ready ? (hasVideo ? '预览形象视频' : '拍口播') : st.label
     const tagTone = opts.scene || opts.official ? undefined
-      : subjectTag(card.subject!, avatarTaskById.get(card.subject!.avatarTaskId)).tone
+      : st.tone
     const publicTag = opts.official
     return (
       <li key={card.id} className="dh-lib-card">
@@ -258,7 +262,7 @@ export default function AvatarModule() {
           {opts.official && <span className="dh-lib-card-badge">官方</span>}
 
           <span className={`dh-lib-card-tag${publicTag ? ' is-public' : ''}`} data-tone={tagTone}>
-            {card.tag}
+            {st.label}
           </span>
 
           <span className="dh-lib-card-overlay" aria-hidden>
