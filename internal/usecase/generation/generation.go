@@ -1000,7 +1000,11 @@ func (uc *GenerationUseCase) Submit(ctx context.Context, in SubmitInput) (entity
 	task.ProviderTaskID = res.TaskID
 	task.Credits = uc.resolveCredits(ctx, task.SubType, task.Model, res.Credits)
 	uc.applySubmitResult(ctx, &task, adapter, res)
-	_ = uc.repo.Save(ctx, task)
+	if err := uc.repo.Save(ctx, task); err != nil {
+		// 32号真机发现：Save 失败（rows:0 等）会让终态任务滞留内存/DB 脏状态
+		//（用户看到 success 响应但刷新即"克隆中"）——显式报错而非静默。
+		return task, fmt.Errorf("任务状态保存失败: %w", err)
+	}
 	// 计量（F3：generation 场景按次计费的数据地基——失败仅忽略，不影响主流程）
 	uc.recordUsage(ctx, task.TenantID, task.Provider, task.Model, task.Credits)
 
