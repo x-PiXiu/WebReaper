@@ -48,6 +48,7 @@ func (r *chainSubjectRepo) ListByTenant(context.Context, string, string, string,
 }
 func (r *chainSubjectRepo) UpdateAvatarVideoURL(context.Context, string, string) error { return nil }
 func (r *chainSubjectRepo) UpdateStatus(context.Context, string, string) error        { return nil }
+func (r *chainSubjectRepo) DeleteByServerID(context.Context, string, string) error    { return nil }
 func (r *chainSubjectRepo) Delete(context.Context, string) error                      { return nil }
 
 func TestExtractLipsyncChain(t *testing.T) {

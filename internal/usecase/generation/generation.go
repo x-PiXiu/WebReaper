@@ -1303,6 +1303,21 @@ func (uc *GenerationUseCase) DeleteTask(ctx context.Context, tenantID, taskID st
 			}
 		}
 	}
+	// 32号 P2 真机反馈：主体任务删除联动清理物化分身行——此前仅删任务行，
+	// subject_assets 行残留导致"删除了分身但列表还在"（用户端读路径是
+	// subjects/mine → subject_assets，不走 generation_tasks）。
+	// Vidu 侧主体无注销 API（残留无害——删除后无引用）。
+	if task.SubType == "subject" && uc.subjectAssetRepo != nil {
+		serverID := task.ProviderTaskID
+		if serverID == "" {
+			serverID = firstCreationID(task.CreationsJSON)
+		}
+		if serverID != "" {
+			if dErr := uc.subjectAssetRepo.DeleteByServerID(ctx, tenantID, serverID); dErr != nil {
+				log.Printf("[deleteTask] 主体物化行清理失败（不影响任务删除）task=%s server=%s err=%v", taskID, serverID, dErr)
+			}
+		}
+	}
 	return uc.repo.Delete(ctx, tenantID, taskID)
 }
 

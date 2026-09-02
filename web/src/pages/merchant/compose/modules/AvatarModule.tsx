@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Checkbox,
@@ -98,6 +99,7 @@ type PreviewState = { subject: ViduSubject; url?: string } | null
 export default function AvatarModule() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const queryClient = useQueryClient()
   const { subjects, tasks, refetch, isLoading } = useSubjectList({ refetchInterval: 8_000 })
   const { subjects: officialSubjects, isLoading: officialLoading } = useOfficialSubjects({ limit: 50 })
   const [q, setQ] = useState('')
@@ -175,6 +177,9 @@ export default function AvatarModule() {
       toast.ok(`已删除 ${selected.length} 项`, 'avatar-del')
       setSelected([])
       refetch()
+      // 分身卡片数据源是 subject_assets（subjects/mine）——删除已联动清理该表，
+      // 失效其缓存确保立即消失（refetch 只刷任务列表，不刷资产读路径）
+      queryClient.invalidateQueries({ queryKey: ['subject-assets'] })
     } catch { /* 拦截器 */ } finally {
       setDeleting(false)
     }

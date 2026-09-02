@@ -26,4 +26,7 @@ type SubjectAssetRepository interface {
 	UpdateStatus(ctx context.Context, id, status string) error
 	// Delete 删除资产（仅管理后台——谨慎使用）。
 	Delete(ctx context.Context, id string) error
+	// DeleteByServerID 按 Vidu 主体 ID+租户删除（32号 P2 真机反馈：subject 任务
+	// 删除联动清理物化行——仅 scope=personal 语义由调用方保证；双条件防误删官方行）。
+	DeleteByServerID(ctx context.Context, tenantID, serverID string) error
 }

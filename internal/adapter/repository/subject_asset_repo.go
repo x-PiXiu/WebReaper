@@ -133,3 +133,11 @@ func (r *GormSubjectAssetRepository) UpdateStatus(ctx context.Context, id, statu
 func (r *GormSubjectAssetRepository) Delete(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&SubjectAssetPO{}).Error
 }
+
+// DeleteByServerID 按 server_id+租户删除物化行（32号 P2 真机反馈：subject 任务
+// 删除联动清理；仅 personal 语义——official 行 tenant 归 admin 域不会被商户任务命中）。
+func (r *GormSubjectAssetRepository) DeleteByServerID(ctx context.Context, tenantID, serverID string) error {
+	return r.db.WithContext(ctx).
+		Where("server_id = ? AND tenant_id = ?", serverID, tenantID).
+		Delete(&SubjectAssetPO{}).Error
+}
