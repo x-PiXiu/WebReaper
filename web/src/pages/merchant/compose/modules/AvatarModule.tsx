@@ -468,6 +468,7 @@ export default function AvatarModule() {
         open={createOpen}
         kind={createKind}
         voices={myVoices}
+        sceneSubjects={sceneSubjects.map((s) => ({ serverId: s.serverId, name: s.name }))}
         onClose={() => setCreateOpen(false)}
         onCreated={(serverId) => {
           refetch()

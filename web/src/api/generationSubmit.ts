@@ -253,6 +253,8 @@ export function buildSubjectRegisterPayload(input: {
   sceneImageUrl?: string
   /** 23 号计划 §2.1③：可选场景描述（一句话：主角在哪个场景做什么） */
   sceneDescription?: string
+  /** 32号 F2：复用已有场景主体（server_id——场景主体库中直选，免重复上传） */
+  sceneSubjectId?: string
 }): UnifiedSubmitPayload {
   const name = (input.name || '').trim()
   if (!name) throw new Error('请输入主体名称')
@@ -267,6 +269,7 @@ export function buildSubjectRegisterPayload(input: {
   const sceneDesc = (input.sceneDescription || '').trim()
   if (input.sceneImageUrl) params.scene_image = input.sceneImageUrl
   if (sceneDesc) params.scene_description = sceneDesc
+  if (input.sceneSubjectId) params.scene_subject_id = input.sceneSubjectId
   if (input.kind) params.kind = input.kind
   const materials = [...ids]
   if (!materials.length && urls.length) materials.push(...urls)

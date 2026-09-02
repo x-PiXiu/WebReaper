@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Input, Modal, Space, Typography, Upload } from 'antd'
+import { Alert, Button, Input, Modal, Select, Space, Typography, Upload } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { businessApi } from '../../api/business'
 import { buildSubjectRegisterPayload } from '../../api/generationSubmit'
@@ -30,17 +30,21 @@ type Props = {
 export function CreateSubjectModal({
   open,
   voices,
+  /** 32号 F2：场景主体库（可复用的环境资产——直选免重复上传场景图） */
+  sceneSubjects = [],
   onClose,
   onCreated,
   title,
   kind = 'person',
-}: Props) {
+}: Props & { sceneSubjects?: Array<{ serverId: string; name: string }> }) {
   const isScene = kind === 'scene'
   const modalTitle = title || (isScene ? '添加出镜环境' : '定制数字人')
   const [name, setName] = useState('')
   const [imageAssets, setImageAssets] = useState<Array<{ id: string; url: string }>>([])
   const [sceneImage, setSceneImage] = useState<{ id: string; url: string } | null>(null)
   const [sceneDesc, setSceneDesc] = useState('')
+  /** 32号 F2：选择已有场景主体（复用——创建一次多处使用，免重复上传场景图） */
+  const [sceneSubjectId, setSceneSubjectId] = useState('')
   const [voiceId, setVoiceId] = useState('')
   const [creating, setCreating] = useState(false)
   const { brandId } = useBrandContext()
@@ -51,6 +55,7 @@ export function CreateSubjectModal({
     setImageAssets([])
     setSceneImage(null)
     setSceneDesc('')
+    setSceneSubjectId('')
     setVoiceId('')
   }
 
@@ -80,6 +85,8 @@ export function CreateSubjectModal({
         voice_id: isScene ? undefined : (voiceId || undefined),
         sceneImageUrl: isScene ? undefined : sceneImage?.url,
         sceneDescription: isScene ? undefined : (sceneDesc || undefined),
+        /** 32号 F2：复用已有场景主体（server_id 直传——免重复上传场景图） */
+        sceneSubjectId: isScene ? undefined : (sceneSubjectId || undefined),
         kind,
       }))
       toast.ok(
@@ -149,6 +156,19 @@ export function CreateSubjectModal({
             )}
           </Upload>
         </div>
+        {!isScene && sceneSubjects.length > 0 && (
+        <div>
+          <Text strong style={{ fontSize: 13 }}>复用已有场景主体（推荐——免重复上传场景图）</Text>
+          <Select
+            allowClear
+            placeholder="选择已创建的场景主体"
+            style={{ width: '100%', marginTop: 4 }}
+            value={sceneSubjectId || undefined}
+            onChange={(v) => { setSceneSubjectId(v || ''); if (v) setSceneImage(null) }}
+            options={sceneSubjects.map((s) => ({ value: s.serverId, label: s.name }))}
+          />
+        </div>
+        )}
         {!isScene && (
         <div>
           <Text strong style={{ fontSize: 13 }}>

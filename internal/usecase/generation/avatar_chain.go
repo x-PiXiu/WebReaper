@@ -64,6 +64,25 @@ func (uc *GenerationUseCase) chainAvatarVideo(ctx context.Context, subject entit
 	}
 	sceneDesc, _ := p["scene_description"].(string)
 	sceneImg, _ := p["scene_image"].(string)
+	sceneSubjectID, _ := p["scene_subject_id"].(string)
+
+	// 32号 F2：场景主体复用——选择已有环境主体时，取其 server_id 作为第二主体，
+	// 并回查其注册任务的场景描述作为画面语义。免重复上传场景图。
+	var sceneServerID string
+	if sceneSubjectID != "" && uc.subjectAssetRepo != nil {
+		if a, err := uc.subjectAssetRepo.FindByID(ctx, sceneSubjectID); err == nil && a.Status == "active" {
+			sceneServerID = a.ServerID
+			if sceneDesc == "" && a.SourceTaskID != "" && uc.repo != nil {
+				if srcTask, sErr := uc.repo.FindByID(ctx, a.TenantID, a.SourceTaskID); sErr == nil {
+					var sp map[string]any
+					_ = json.Unmarshal([]byte(srcTask.ParamsJSON), &sp)
+					if sd, _ := sp["scene_description"].(string); strings.TrimSpace(sd) != "" {
+						sceneDesc = sd
+					}
+				}
+			}
+		}
+	}
 
 	// 28号改进：prompt 支持用户自定义 + settings 默认值
 	prompt := strings.TrimSpace(sceneDesc)
@@ -79,6 +98,10 @@ func (uc *GenerationUseCase) chainAvatarVideo(ctx context.Context, subject entit
 	if sceneImg != "" {
 		// D1：场景图作为附加图片主体（非主体模式降级——保持主体一致性）
 		subjects = append(subjects, map[string]any{"name": "场景", "images": []string{sceneImg}})
+	}
+	if sceneServerID != "" {
+		// 32号 F2：场景主体作为第二主体（组合出镜——分身 × 复用环境）
+		subjects = append(subjects, map[string]any{"name": "场景", "server_id": sceneServerID})
 	}
 
 	chain, err := uc.Submit(ctx, SubmitInput{
