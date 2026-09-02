@@ -59,15 +59,27 @@ func RunMigrations(db *gorm.DB) error {
 	}
 
 	// 4. 逐个执行未应用的迁移
-	for _, m := range migrations {
+	// 32号云端部署修复：迁移文件存在同版本多文件（如 083_a.sql/083_b.sql——
+	// 本地开发并行加迁移的常见形态）。首个 083 执行后 INSERT 记录，
+	// 第二个 083 因 appliedSet 已含该版本被跳过——但它的**SQL 永远不会执行**，
+	// 且记录表 INSERT 用普通 INSERT，两个同版本文件并发部署（多实例）时
+	// 会报 Duplicate entry 使启动失败。
+	// 修复：a) 同版本文件全部顺序执行，只在最后一个执行后记录；
+	//       b) 记录 INSERT 改 INSERT IGNORE（幂等——多实例竞态无害）。
+	for i := 0; i < len(migrations); i++ {
+		m := migrations[i]
 		if appliedSet[m.version] {
 			continue
 		}
 		if err := executeMigration(db, m); err != nil {
 			return fmt.Errorf("apply migration %s: %w", m.name, err)
 		}
-		if err := db.Exec(fmt.Sprintf("INSERT INTO %s (version) VALUES (?)", migrationsTableName), m.version).Error; err != nil {
-			return fmt.Errorf("record migration %s: %w", m.version, err)
+		// 同版本的后续文件继续执行（跳过中间记录），最后一个才写记录
+		isLastOfVersion := i+1 >= len(migrations) || migrations[i+1].version != m.version
+		if isLastOfVersion {
+			if err := db.Exec(fmt.Sprintf("INSERT IGNORE INTO %s (version) VALUES (?)", migrationsTableName), m.version).Error; err != nil {
+				return fmt.Errorf("record migration %s: %w", m.name, err)
+			}
 		}
 	}
 
