@@ -32,7 +32,9 @@ export default function VoicePicker({
   const { data: voices = [] } = useQuery({
     queryKey: ['generation-voices'],
     queryFn: () => businessApi.listGenerationVoices().then(r => r.voices),
-    staleTime: 24 * 60 * 60 * 1000, // 静态参考数据——当天内不重拉
+    // 与音色库共享同一 queryKey——克隆成功后此处必须同步可见，
+    // 不设长缓存（白牌化后列表含"我的克隆"，是动态数据而非静态参考）。
+    staleTime: 30_000,
   })
 
   // 分组（白牌化 2026-09-01）：平台音色 → 我的克隆 → 按 recommend 标记精选

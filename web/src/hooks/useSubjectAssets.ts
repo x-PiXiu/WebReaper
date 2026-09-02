@@ -48,7 +48,8 @@ export function useOfficialSubjects(opts?: {
       limit: opts?.limit ?? 50,
     }),
     enabled: opts?.enabled !== false,
-    staleTime: 5 * 60 * 1000, // 官方主体变化不频繁，5分钟缓存
+    // 官方主体由管理后台增删/上下架——过长缓存会让商户端看到已下架内容
+    staleTime: 30_000,
   })
 
   return { subjects: data?.subjects ?? [], total: data?.total ?? 0, ...rest }
