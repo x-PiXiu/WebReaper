@@ -66,9 +66,21 @@ func RunMigrations(db *gorm.DB) error {
 	// 会报 Duplicate entry 使启动失败。
 	// 修复：a) 同版本文件全部顺序执行，只在最后一个执行后记录；
 	//       b) 记录 INSERT 改 INSERT IGNORE（幂等——多实例竞态无害）。
+	// 000 基线模式：000_baseline.sql 是从完整库导出的**最终形态**（含 001~089
+	// 的全部 ALTER 产物）。全新库执行 000 后，001~089 再跑 ALTER 必报
+	// "Duplicate column"——因此检测到 000 是本次新执行时，后续所有迁移
+	// 的版本号直接标记为已应用（跳过执行，产物已在基线里）。
+	baselineApplied := false
 	for i := 0; i < len(migrations); i++ {
 		m := migrations[i]
 		if appliedSet[m.version] {
+			continue
+		}
+		// 000 基线刚执行 → 后续全部标记跳过
+		if baselineApplied && m.version != "000" {
+			if err := db.Exec(fmt.Sprintf("INSERT IGNORE INTO %s (version) VALUES (?)", migrationsTableName), m.version).Error; err != nil {
+				return fmt.Errorf("mark migration %s: %w", m.name, err)
+			}
 			continue
 		}
 		if err := executeMigration(db, m); err != nil {
@@ -79,6 +91,9 @@ func RunMigrations(db *gorm.DB) error {
 		if isLastOfVersion {
 			if err := db.Exec(fmt.Sprintf("INSERT IGNORE INTO %s (version) VALUES (?)", migrationsTableName), m.version).Error; err != nil {
 				return fmt.Errorf("record migration %s: %w", m.name, err)
+			}
+			if m.version == "000" {
+				baselineApplied = true
 			}
 		}
 	}
